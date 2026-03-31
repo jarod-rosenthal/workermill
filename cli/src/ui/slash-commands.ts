@@ -16,6 +16,7 @@ import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { getRetryableRun } from "../ship-state.js";
 import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
 import { cleanupStaleWorktrees } from "../../../packages/engine/src/tools/sub-agent.js";
 import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
@@ -121,6 +122,20 @@ export function getGitStatus(cwd: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Built-in command names — custom commands with these names will be shadowed
+// ---------------------------------------------------------------------------
+
+export const BUILTIN_COMMANDS = new Set([
+  "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
+  "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
+  "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
+  "memories", "memory", "model", "permissions", "personas", "q", "quit",
+  "release-notes", "releasenotes", "remember", "reset", "retry", "review",
+  "route", "sandbox", "schedule", "sessions", "settings", "setup", "ship",
+  "skills", "status", "trust", "undo", "update", "voice",
+]);
+
+// ---------------------------------------------------------------------------
 // Help text
 // ---------------------------------------------------------------------------
 
@@ -143,34 +158,41 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
-| \`/review [task]\` | Code review using the tech lead agent (defaults to reviewing recent changes) |
+| \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
+| \`/review [task]\` | Code review using the tech lead (defaults to recent changes) |
 | \`/retry\` | Re-plan and re-run the last task |
-| \`/settings\` | View/change settings (review, ollama, etc.) |
-| \`/undo\` | Revert last build's changes (git stash or reset) |
-| \`/diff\` | Preview uncommitted changes |
-| \`/trust\` | Auto-approve all tool calls for this session |
-| \`/init\` | Generate \`WORKERMILL.md\` for this project |
+| \`/model [provider/model] [ctx]\` | Switch model mid-session (\`/model ollama/qwen3-coder:30b 256k\`) |
+| \`/init\` | Generate or validate \`WORKERMILL.md\` |
+| \`/compact [focus]\` | Compress conversation (\`/compact focus on the API changes\`) |
+| \`/settings\` | View/change settings (review, ollama, routing, keys) |
+| \`/settings key <provider> <key>\` | Add an API key inline |
 | \`/permissions\` | Manage tool permissions (trust/ask/allow/deny) |
-| \`/model\` | Show or switch model (\`/model provider/model\`) |
+| \`/trust\` | Auto-approve all tools for this session |
+| \`/undo\` | Revert last build's changes |
+| \`/diff\` | Preview uncommitted changes |
+| \`/git\` | Git branch and status |
+| \`/personas\` | List, show, or create personas |
+| \`/remember <text>\` | Save a project memory |
+| \`/forget <id>\` | Remove a memory |
+| \`/memories\` | View saved memories |
+| \`/sessions\` | List/switch sessions |
 | \`/cost\` | Session cost and token usage |
 | \`/status\` | Session info |
-| \`/git\` | Git branch and status |
-| \`/compact [focus]\` | Compress conversation history (optional focus: "the API changes") |
-| \`/sessions\` | List/switch sessions |
-| \`/log\` | Show recent CLI log entries |
-| \`/skills\` | List custom commands |
-| \`/personas\` | List, show, or create personas |
-| \`/mcp\` | Show MCP server status |
-| \`/chrome\` | Open/close headless Chrome *(experimental)* |
+| \`/setup\` | Re-run provider setup wizard |
+| \`/clear\` | Reset conversation |
+| \`/skills\` | Custom commands from \`.workermill/commands/\` |
+| \`/hooks\` | View pre/post tool hooks |
+| \`/mcp\` | MCP server status |
+| \`/log\` | Recent CLI log entries |
+| \`/editor\` | Open \\$EDITOR for longer input |
+| \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
 | \`/schedule\` | Scheduled tasks *(experimental)* |
-| \`/update\` | Update to latest version |
+| \`/update\` | Check for updates |
 | \`/release-notes\` | Show changelog |
-| \`/hooks\` | Show configured pre/post tool hooks |
-| \`/editor\` | Open \\$EDITOR for longer input |
 | \`/quit\` | Exit |
 
-**Shortcuts:** \`!command\` runs shell directly, \`ESC\` cancels, \`Ctrl+C Ctrl+C\` exits.`;
+**Shortcuts:** \`!command\` runs shell, \`ESC\` cancels, \`ESC ESC\` rolls back, \`Shift+Tab\` cycles permissions, \`Ctrl+C Ctrl+C\` exits, \`←/→\` cursor, \`Tab\` autocomplete.`;
 
 // ---------------------------------------------------------------------------
 // Context interface
@@ -203,6 +225,7 @@ export interface SlashCommandContext {
   denyTool: (name: string) => void;
   orchestratorRunning: boolean;
   startOrchestrator: (task: string, trustAll: boolean, sandboxed: boolean) => void;
+  retryOrchestrator: (trustAll: boolean, sandboxed: boolean) => boolean;
   lastBuildTask: string | null;
   setLastBuildTask: (task: string) => void;
   sandboxed?: boolean;
@@ -437,12 +460,21 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "**Usage:** `/ship <task description>` or `/ship spec.md`\n\n" +
           "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
           "executes with tool calls, reviews, and ships.\n\n" +
-          "**Note:** Creates a feature branch (`workermill/<task>`) for all changes. " +
-          "Your current branch is restored when the session completes or is cancelled."
+          "**Note:** Plans on your current branch, then creates a feature branch after you approve. " +
+          "On success, returns to your original branch. On failure/cancel, stays on the feature branch — use `/retry` to continue."
         );
       } else if (ctx.orchestratorRunning) {
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
       } else {
+        // Warn if there's an incomplete run (informational — doesn't block)
+        const existing = getRetryableRun(process.cwd());
+        if (existing) {
+          ctx.addSystemMessage(
+            `Note: you have an incomplete run on branch \`${existing.featureBranch}\` ` +
+            `(${existing.completedStoryIds.length}/${existing.stories.length} stories done). ` +
+            `Use \`/retry\` to continue it instead.`
+          );
+        }
         ctx.setLastBuildTask(arg);
         ctx.addUserMessage(`/ship ${arg}`);
         ctx.startOrchestrator(arg, ctx.permissionMode === "trust all", ctx.sandboxed ?? false);
@@ -454,12 +486,12 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "retry": {
       if (ctx.orchestratorRunning) {
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
-      } else if (!ctx.lastBuildTask) {
-        ctx.addSystemMessage("No previous task to retry. Use `/ship <task>` first.");
       } else {
-        const task = ctx.lastBuildTask;
-        ctx.addUserMessage(`/retry ${task.slice(0, 60)}...`);
-        ctx.startOrchestrator(task, ctx.permissionMode === "trust all", ctx.sandboxed ?? false);
+        ctx.addUserMessage("/retry");
+        const started = ctx.retryOrchestrator(ctx.permissionMode === "trust all", ctx.sandboxed ?? false);
+        if (!started) {
+          ctx.addSystemMessage("Nothing to retry. No incomplete `/ship` runs found for this project.");
+        }
       }
       break;
     }
@@ -681,6 +713,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
+          `| API keys | — | \`/settings key <provider> <api-key>\` |\n` +
           `| Permission allow rules | ${allowRules.length} rule(s) | Edit \`cli.json\` |\n` +
           `| Permission deny rules | ${denyRules.length} rule(s) | Edit \`cli.json\` |`
         );
@@ -917,15 +950,48 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /setup ----
     case "setup": {
-      // Can't run readline-based setup after Ink has taken over stdin.
-      // Clear config so next run triggers fresh setup automatically.
+      const setupConfig = loadConfig();
+      if (!setupConfig) {
+        ctx.addSystemMessage("No config found. Type `/exit` and run `workermill` to start setup.");
+        break;
+      }
+
+      // Show current config and how to change each part inline
+      const providers = Object.entries(setupConfig.providers).map(
+        ([name, p]) => `  - **${name}**: ${p.model}${p.apiKey ? " (key set)" : ""}${p.host ? ` (${p.host})` : ""}`
+      );
+      const routing = setupConfig.routing || {};
+      const plannerRoute = routing.planner || routing.critic || setupConfig.default;
+      const reviewerRoute = routing.tech_lead || setupConfig.default;
+
+      ctx.addSystemMessage(
+        `**Current config** (\`~/.workermill/cli.json\`)\n\n` +
+        `**Workers:** ${setupConfig.default}\n` +
+        `**Planner:** ${plannerRoute}\n` +
+        `**Reviewer:** ${reviewerRoute}\n\n` +
+        `**Providers:**\n${providers.join("\n")}\n\n` +
+        `---\n\n` +
+        `**To change things:**\n\n` +
+        `| What | Command |\n` +
+        `|---|---|\n` +
+        `| Add/update API key | \`/settings key <provider> <key>\` |\n` +
+        `| Switch worker model | \`/model <provider>/<model>\` |\n` +
+        `| Route planner to a provider | \`/settings route planner <provider>\` |\n` +
+        `| Route reviewer to a provider | \`/settings route tech_lead <provider>\` |\n` +
+        `| Add a new provider | \`/settings key <provider> <key>\` then \`/model <provider>/<model>\` |\n` +
+        `| Start over from scratch | \`/setup reset\` |`
+      );
+      break;
+    }
+    case "setup reset": {
+      // Only this explicitly wipes the config
       try {
         const configPath = path.join(os.homedir(), ".workermill", "cli.json");
         if (fs.existsSync(configPath)) {
           fs.unlinkSync(configPath);
-          ctx.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` again to re-run setup.");
+          ctx.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` to re-run setup.");
         } else {
-          ctx.addSystemMessage("No config found. Type `/exit` and run `workermill` to start setup.");
+          ctx.addSystemMessage("No config to clear.");
         }
       } catch (err) {
         ctx.addSystemMessage(`Failed to clear config: ${err instanceof Error ? err.message : String(err)}`);
@@ -1205,8 +1271,17 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
         lines.push("**Custom Commands** (`.workermill/commands/` or `~/.workermill/commands/`):\n");
         lines.push("| Command | Description |");
         lines.push("|---|---|");
+        const shadowed: string[] = [];
         for (const c of customCmds) {
-          lines.push(`| \`/${c.name}\` | ${c.description} |`);
+          if (BUILTIN_COMMANDS.has(c.name)) {
+            lines.push(`| \`/${c.name}\` | ${c.description} ⚠️ **shadowed by built-in** |`);
+            shadowed.push(c.name);
+          } else {
+            lines.push(`| \`/${c.name}\` | ${c.description} |`);
+          }
+        }
+        if (shadowed.length > 0) {
+          lines.push(`\n⚠️ **${shadowed.length} command(s) shadowed:** \`${shadowed.join("`, `")}\` — these match built-in commands and will never run. Rename them to avoid the conflict.`);
         }
       } else {
         lines.push("No custom commands found.\n");

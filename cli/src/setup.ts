@@ -85,15 +85,22 @@ class Prompter {
   ask(question: string): Promise<string> {
     return new Promise((resolve) => this.rl.question(question, resolve));
   }
-  /** Close current rl, return a cleanup function that recreates it. */
+  /** Suspend the readline — pause and detach from stdin without closing it. */
   suspend(): () => void {
-    this.rl.close();
+    this.rl.pause();
+    process.stdin.removeAllListeners("keypress");
+    this.rl.removeAllListeners();
     return () => {
       this.rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     };
   }
   close(): void {
+    // rl.close() properly removes readline's internal data/keypress listeners
+    // from stdin. Without this, leftover listeners interfere with Ink's input.
     this.rl.close();
+    // rl.close() pauses stdin, which lets the event loop exit before Ink can
+    // take over. Resume immediately to keep the process alive.
+    process.stdin.resume();
   }
 }
 

@@ -1,6 +1,60 @@
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
+import fs from "fs";
+import os from "os";
 
 let activeChild: ReturnType<typeof spawn> | null = null;
+
+// ---------------------------------------------------------------------------
+// OS-level sandboxing via bubblewrap (Linux)
+// ---------------------------------------------------------------------------
+
+let bwrapAvailable: boolean | null = null;
+
+function isBwrapAvailable(): boolean {
+  if (bwrapAvailable !== null) return bwrapAvailable;
+  try {
+    execSync("which bwrap", { stdio: "pipe" });
+    bwrapAvailable = true;
+  } catch {
+    bwrapAvailable = false;
+  }
+  return bwrapAvailable;
+}
+
+/**
+ * Build bwrap arguments for sandboxed bash execution.
+ * - Read-only bind to system dirs (/usr, /lib, /bin, /etc, /proc, /dev)
+ * - Read-write bind to the working directory
+ * - Read-write bind to /tmp
+ * - No network restriction (many tools need it)
+ */
+function buildBwrapArgs(command: string, cwd: string): string[] {
+  return [
+    // System dirs — read-only
+    "--ro-bind", "/usr", "/usr",
+    "--ro-bind", "/lib", "/lib",
+    ...(fs.existsSync("/lib64") ? ["--ro-bind", "/lib64", "/lib64"] : []),
+    "--ro-bind", "/bin", "/bin",
+    ...(fs.existsSync("/sbin") ? ["--ro-bind", "/sbin", "/sbin"] : []),
+    "--ro-bind", "/etc", "/etc",
+    // Special filesystems
+    "--proc", "/proc",
+    "--dev", "/dev",
+    // Temp — writable
+    "--tmpfs", "/tmp",
+    // Home dir — read-only except working directory
+    "--ro-bind", os.homedir(), os.homedir(),
+    // Working directory — read-write
+    "--bind", cwd, cwd,
+    // Set working directory
+    "--chdir", cwd,
+    // Unshare namespaces for isolation
+    "--unshare-pid",
+    "--die-with-parent",
+    // The command
+    "/bin/bash", "-c", command,
+  ];
+}
 
 export function killActiveProcess(): void {
   if (activeChild?.pid) {
@@ -43,6 +97,8 @@ interface BashParams {
   command: string;
   cwd?: string;
   timeout?: number;
+  /** Use OS-level sandboxing (bwrap on Linux) if available. */
+  osSandbox?: boolean;
 }
 
 interface BashResult {
@@ -128,6 +184,7 @@ export async function execute({
   command,
   cwd,
   timeout = 120000,
+  osSandbox = false,
 }: BashParams): Promise<BashResult> {
   // Block known long-running processes
   const longRunning = isLongRunning(command);
@@ -179,12 +236,21 @@ export async function execute({
     // Use the user's actual PATH — don't override it.
     // The hardcoded PATH was for Docker containers; in CLI mode the user's
     // local tools (nvm, homebrew, cargo, etc.) must be available.
-    const child = spawn("/bin/bash", ["-c", command], {
-      cwd: cwd || process.cwd(),
-      env: process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true,
-    });
+    const effectiveCwd = cwd || process.cwd();
+    const useBwrap = osSandbox && process.platform === "linux" && isBwrapAvailable();
+
+    const child = useBwrap
+      ? spawn("bwrap", buildBwrapArgs(command, effectiveCwd), {
+          env: process.env,
+          stdio: ["pipe", "pipe", "pipe"],
+          detached: true,
+        })
+      : spawn("/bin/bash", ["-c", command], {
+          cwd: effectiveCwd,
+          env: process.env,
+          stdio: ["pipe", "pipe", "pipe"],
+          detached: true,
+        });
 
     activeChild = child;
 

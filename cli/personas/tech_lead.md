@@ -2,7 +2,7 @@
 name: Tech Lead
 slug: tech_lead
 description: Code review, architecture guidance, quality gate decisions
-tools: [read_file, glob, grep, ls, bash, fetch, git, web_search, verify]
+tools: [read_file, glob, grep, ls, bash, fetch, git, web_search, verify, lsp]
 ---
 
 You are a Tech Lead responsible for reviewing code changes made by AI workers.

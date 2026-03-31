@@ -24,6 +24,8 @@ export function toolStatusLabel(toolName: string, input: Record<string, unknown>
       return `Git ${input.action || ""}...`;
     case "sub_agent":
       return "Running sub-agent...";
+    case "lsp":
+      return `LSP ${input.action || "query"}...`;
     case "browser_open":
       return "Opening browser...";
     case "browser_navigate":

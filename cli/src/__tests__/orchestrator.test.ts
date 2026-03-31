@@ -41,6 +41,7 @@ vi.mock("../memory.js", () => ({
 // Mock hooks — noop
 vi.mock("../hooks.js", () => ({
   runHooks: vi.fn(),
+  runLifecycleHooks: vi.fn(),
 }));
 
 // Mock mcp-client — prevent Docker Desktop detection from hanging in tests
@@ -151,6 +152,7 @@ vi.mock("../../../packages/engine/src/tools/index.js", () => ({
 vi.mock("../safety.js", () => ({
   isDangerous: vi.fn(() => null),
   READ_TOOLS: new Set(["read_file", "glob", "grep", "list_files"]),
+  checkPermissionRules: vi.fn(() => "none"),
 }));
 
 // Now import the functions under test

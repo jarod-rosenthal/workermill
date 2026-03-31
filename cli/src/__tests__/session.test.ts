@@ -166,4 +166,64 @@ describe("session", () => {
       expect(session.messages[1].role).toBe("assistant");
     });
   });
+
+  describe("forkSession()", () => {
+    it("creates a new session with a different ID", async () => {
+      const { createSession, addMessage, forkSession } = await importSession();
+      const original = createSession("ollama", "test-model");
+      addMessage(original, "user", "hello");
+      addMessage(original, "assistant", "hi");
+      original.name = "my session";
+      original.totalTokens = 500;
+
+      const forked = forkSession(original);
+
+      expect(forked.id).not.toBe(original.id);
+      expect(forked.id.length).toBeGreaterThan(10);
+    });
+
+    it("copies messages without sharing references", async () => {
+      const { createSession, addMessage, forkSession } = await importSession();
+      const original = createSession("ollama", "test-model");
+      addMessage(original, "user", "hello");
+      addMessage(original, "assistant", "hi");
+
+      const forked = forkSession(original);
+
+      expect(forked.messages).toHaveLength(2);
+      expect(forked.messages[0].content).toBe("hello");
+
+      // Mutating fork should not affect original
+      forked.messages.push({ role: "user", content: "new", timestamp: new Date().toISOString() });
+      expect(original.messages).toHaveLength(2);
+      expect(forked.messages).toHaveLength(3);
+    });
+
+    it("appends (fork) to the name", async () => {
+      const { createSession, forkSession } = await importSession();
+      const original = createSession("ollama", "test-model");
+      original.name = "debug session";
+
+      const forked = forkSession(original);
+      expect(forked.name).toBe("debug session (fork)");
+    });
+
+    it("preserves provider and model", async () => {
+      const { createSession, forkSession } = await importSession();
+      const original = createSession("anthropic", "claude-sonnet-4-6");
+
+      const forked = forkSession(original);
+      expect(forked.provider).toBe("anthropic");
+      expect(forked.model).toBe("claude-sonnet-4-6");
+    });
+
+    it("gets a fresh startedAt timestamp", async () => {
+      const { createSession, forkSession } = await importSession();
+      const original = createSession("ollama", "test-model");
+      original.startedAt = "2026-01-01T00:00:00.000Z";
+
+      const forked = forkSession(original);
+      expect(forked.startedAt).not.toBe(original.startedAt);
+    });
+  });
 });

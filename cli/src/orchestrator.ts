@@ -12,7 +12,7 @@ import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
-import { runHooks } from "./hooks.js";
+import { runHooks, runLifecycleHooks } from "./hooks.js";
 import {
   isGitRepo, getCurrentBranch, createFeatureBranch,
   commitStoryChanges, commitRevisionChanges,
@@ -20,7 +20,8 @@ import {
   getHeadHash, returnToOriginalBranch,
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
-import { isDangerous, READ_TOOLS } from "./safety.js";
+import { isDangerous, READ_TOOLS, checkPermissionRules } from "./safety.js";
+import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 
 /**
@@ -254,12 +255,13 @@ interface SharedContext {
  * Check tool permission using output.confirm() instead of readline.
  * Mirrors the logic from PermissionManager but uses the callback-based output interface.
  */
-async function checkToolPermission(
+export async function checkToolPermission(
   toolName: string,
   toolInput: Record<string, unknown>,
   trustAll: boolean,
   sessionAllow: Set<string>,
   output: OrchestrationOutput,
+  permissionRules?: { allow?: string[]; deny?: string[] },
 ): Promise<boolean> {
   // Dangerous command check
   if (toolName === "bash") {
@@ -274,9 +276,14 @@ async function checkToolPermission(
     }
   }
 
+  // Granular permission rules — deny always wins, allow skips prompt.
+  const ruleResult = checkPermissionRules(toolName, toolInput, permissionRules);
+  if (ruleResult === "deny") return false;
+  if (ruleResult === "allow") return true;
+
   if (trustAll) return true;
   if (READ_TOOLS.has(toolName)) return true;
-  if (sessionAllow.has(toolName)) return true;
+  if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
 
   // Prompt user — supports y/a/t/n like the single-agent permission prompt
   const display = formatToolCallDisplay(toolName, toolInput);
@@ -284,10 +291,8 @@ async function checkToolPermission(
 
   if (typeof result === "object") {
     if (result.mode === "trust") {
-      // Trust all — add all common tools to session allow
-      for (const t of ["bash", "write_file", "edit_file", "patch", "git", "fetch", "web_search"]) {
-        sessionAllow.add(t);
-      }
+      // Trust all — wildcard marker so no tool is ever prompted again
+      sessionAllow.add("*");
       return result.allowed;
     }
     if (result.mode === "always") {
@@ -414,7 +419,7 @@ async function planStories(
   config: CliConfig,
   userTask: string,
   workingDir: string,
-  sandboxed: boolean,
+  sandboxed: boolean | "os",
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
@@ -863,14 +868,31 @@ function parseAffectedStories(text: string): { stories: number[]; reasons: Recor
   return { stories, reasons };
 }
 
+/** Result from a completed (or failed) orchestration — used by /retry. */
+export interface OrchestrationResult {
+  stories: Story[];
+  completedStoryIds: string[];
+  featureBranch: string | null;
+  userTask: string;
+}
+
+/** Retry plan — skips planning, resumes from first incomplete story. */
+export interface RetryPlan {
+  stories: Story[];
+  completedStoryIds: string[];
+  featureBranch: string;
+  mainBranch: string;
+}
+
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
   trustAll: boolean,
-  sandboxed: boolean,
+  sandboxed: boolean | "os",
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
-): Promise<void> {
+  retryPlan?: RetryPlan,
+): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
 
@@ -903,130 +925,203 @@ export async function runOrchestration(
   const sessionAllow = new Set<string>();
   const workingDir = process.cwd();
 
-  // Create feature branch for isolation — matches worker/epic/git-ops.ts pattern.
-  // All story commits go on this branch. If cancelled, user can git checkout back.
-  const originalBranch = getCurrentBranch(workingDir);
-  // Use the spec filename for the branch name if one was referenced, otherwise the task text
-  const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
-  const branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
-  const featureBranch = createFeatureBranch(workingDir, branchLabel, config.git?.branchPrefix);
-  if (featureBranch) {
-    output.coordinatorLog(`Working on branch: ${featureBranch}`);
+  runLifecycleHooks("ship_start", config.hooks, workingDir, { WORKERMILL_TASK: userTask.slice(0, 200) });
+
+  // Track completed story IDs for the result (used by /retry)
+  const completedStoryIds: string[] = [];
+
+  let featureBranch: string | null;
+  let mainBranch: string;
+  let sorted: Story[];
+
+  if (retryPlan) {
+    // ── Retry mode: skip planning, resume on the existing feature branch ──
+    featureBranch = retryPlan.featureBranch;
+    mainBranch = retryPlan.mainBranch;
+    const currentBranch = getCurrentBranch(workingDir);
+
+    // Checkout the feature branch if we're not already on it
+    if (currentBranch !== featureBranch) {
+      // Verify branch exists
+      try {
+        execSync(`git rev-parse --verify "${featureBranch}"`, { cwd: workingDir, stdio: "pipe" });
+      } catch {
+        output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
+        return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+      }
+
+      output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
+      try {
+        execSync(`git checkout "${featureBranch}"`, { cwd: workingDir, stdio: "pipe" });
+      } catch {
+        output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
+        return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+      }
+    }
     output.updateBranch?.(featureBranch);
-  }
-  const mainBranch = originalBranch || "main";
+    await new Promise(r => setTimeout(r, 0));
 
-  // Planner explores codebase and produces stories
-  const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
+    sorted = retryPlan.stories;
+    completedStoryIds.push(...retryPlan.completedStoryIds);
+    const remaining = sorted.filter(s => !retryPlan.completedStoryIds.includes(s.id));
+    const actionable = remaining.filter(s => !s.dependsOn?.some(dep => remaining.some(r => r.id === dep)));
+    const blocked = remaining.length - actionable.length;
+    const summary = blocked > 0
+      ? `${retryPlan.completedStoryIds.length} done, ${actionable.length} to run, ${blocked} blocked by dependencies`
+      : `${retryPlan.completedStoryIds.length} done, ${remaining.length} remaining`;
+    output.coordinatorLog(`Retrying on branch: ${featureBranch} — ${summary}`);
+    remaining.forEach((s, i) => {
+      output.log("coordinator", `Story ${i + 1}/${remaining.length}: [${s.persona}] ${s.title}`);
+    });
+  } else {
+    // ── Normal mode: plan on current branch, create feature branch after acceptance ──
+    const originalBranch = getCurrentBranch(workingDir);
+    mainBranch = originalBranch || "main";
 
-  // Track planner cost
-  costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
-  output.updateCost?.(costTracker.getTotalCost());
+    // Planner runs on the current branch — no branch created yet
+    const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
 
-  // Handle planner rejection — task is too vague, contradictory, or infeasible
-  if (planResult.rejected) {
-    output.log("system", `The planner determined this task should not proceed: ${planResult.rejectionReason || "unspecified reason"}`);
-    output.log("system", "Refine your spec and try again.");
-    return;
-  }
+    // Track planner cost
+    costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
+    output.updateCost?.(costTracker.getTotalCost());
 
-  const plannerStories = planResult.stories;
+    // Handle planner rejection — still on original branch, nothing to clean up
+    if (planResult.rejected) {
+      output.log("system", `The planner determined this task should not proceed: ${planResult.rejectionReason || "unspecified reason"}`);
+      output.log("system", "Refine your spec and try again.");
+      return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+    }
 
-  // Show the plan — WorkerMill format
-  output.log("planner", `Plan generated: ${plannerStories.length} stories`);
-  plannerStories.forEach((s, i) => {
-    output.log("planner", `Story ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
-    if (s.targetFiles?.length) output.log("planner", `  files: ${s.targetFiles.join(", ")}`);
-    if (s.referenceFiles?.length) output.log("planner", `  patterns: ${s.referenceFiles.join(", ")}`);
-    if (s.implementationNotes) output.log("planner", `  guidance: ${s.implementationNotes.split("\n")[0].slice(0, 120)}...`);
-  });
-  output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
+    const plannerStories = planResult.stories;
 
-  // Optional critic pass (--critic or config.review.useCritic)
-  if (config.review?.useCritic) {
-    const critic = loadPersona("critic");
-    if (critic) {
-      const { provider: cProvider, model: cModel, host: cHost, contextLength: cCtx } = getProviderForPersona(config, "critic");
-      const criticModel = createModel(cProvider as AIProvider, cModel, cHost, cCtx);
-      const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
-      const criticReadOnly: Record<string, AnyToolDef> = {};
-      for (const name of critic.tools) {
-        const toolDef = criticTools[name as keyof typeof criticTools] as AnyToolDef;
-        if (toolDef) {
-          criticReadOnly[name] = {
-            ...toolDef,
-            execute: async (input: Record<string, unknown>) => {
-              output.log("critic", formatToolCallDisplay(name, input));
-              const result = await toolDef.execute(input);
-              return result;
-            },
-          };
+    // Show the plan — WorkerMill format
+    output.log("planner", `Plan generated: ${plannerStories.length} stories`);
+    plannerStories.forEach((s, i) => {
+      output.log("planner", `Story ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
+      if (s.targetFiles?.length) output.log("planner", `  files: ${s.targetFiles.join(", ")}`);
+      if (s.referenceFiles?.length) output.log("planner", `  patterns: ${s.referenceFiles.join(", ")}`);
+      if (s.implementationNotes) output.log("planner", `  guidance: ${s.implementationNotes.split("\n")[0].slice(0, 120)}...`);
+    });
+    output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
+
+    // Optional critic pass (--critic or config.review.useCritic)
+    if (config.review?.useCritic) {
+      const critic = loadPersona("critic");
+      if (critic) {
+        const { provider: cProvider, model: cModel, host: cHost, contextLength: cCtx } = getProviderForPersona(config, "critic");
+        const criticModel = createModel(cProvider as AIProvider, cModel, cHost, cCtx);
+        const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
+        const criticReadOnly: Record<string, AnyToolDef> = {};
+        for (const name of critic.tools) {
+          const toolDef = criticTools[name as keyof typeof criticTools] as AnyToolDef;
+          if (toolDef) {
+            criticReadOnly[name] = {
+              ...toolDef,
+              execute: async (input: Record<string, unknown>) => {
+                output.log("critic", formatToolCallDisplay(name, input));
+                const result = await toolDef.execute(input);
+                return result;
+              },
+            };
+          }
         }
-      }
 
-      output.status("Critic reviewing plan...");
-      const criticStream = streamText({
-        model: criticModel,
-        abortSignal,
-        system: critic.systemPrompt,
-        prompt: `Review this implementation plan. Score it 1-10 using CODE_QUALITY_SCORE: N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
-        tools: criticReadOnly as ToolSet,
-        stopWhen: stepCountIs(100),
-        timeout: { chunkMs: 120_000 },
-        ...buildOllamaOptions(cProvider as AIProvider, cCtx),
-      });
-      const criticStartMs = Date.now();
-      for await (const _chunk of criticStream.textStream) { /* drive */ }
-      const criticText = await criticStream.text;
-      output.statusDone();
+        output.status("Critic reviewing plan...");
+        const criticStream = streamText({
+          model: criticModel,
+          abortSignal,
+          system: critic.systemPrompt,
+          prompt: `Review this implementation plan. Score it 1-10 using CODE_QUALITY_SCORE: N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
+          tools: criticReadOnly as ToolSet,
+          stopWhen: stepCountIs(100),
+          timeout: { chunkMs: 120_000 },
+          ...buildOllamaOptions(cProvider as AIProvider, cCtx),
+        });
+        const criticStartMs = Date.now();
+        for await (const _chunk of criticStream.textStream) { /* drive */ }
+        const criticText = await criticStream.text;
+        output.statusDone();
 
-      const criticUsage = await criticStream.totalUsage;
-      costTracker.addUsage("Critic", cProvider, cModel, criticUsage?.inputTokens || 0, criticUsage?.outputTokens || 0);
-      output.updateCost?.(costTracker.getTotalCost());
+        const criticUsage = await criticStream.totalUsage;
+        costTracker.addUsage("Critic", cProvider, cModel, criticUsage?.inputTokens || 0, criticUsage?.outputTokens || 0);
+        output.updateCost?.(costTracker.getTotalCost());
 
-      // Track tok/s for critic model
-      const criticElapsed = (Date.now() - criticStartMs) / 1000;
-      const criticOutTokens = criticUsage?.outputTokens || 0;
-      if (criticOutTokens > 0 && criticElapsed > 0) {
-        const criticTokPerSec = Math.round(criticOutTokens / criticElapsed);
-        output.updateTokPerSec?.(`${cProvider}/${cModel}`, criticTokPerSec);
-        logger.info("Model performance", { provider: cProvider, model: cModel, tokPerSec: criticTokPerSec });
-      }
-
-      const score = extractScore(criticText);
-      output.log("critic", `::review_score::${score}`);
-      const criticThreshold = config.review?.criticThreshold ?? 8;
-      output.log("critic", score >= criticThreshold ? "Plan approved" : "Plan needs revision");
+        // Track tok/s for critic model
+        const criticElapsed = (Date.now() - criticStartMs) / 1000;
+        const criticOutTokens = criticUsage?.outputTokens || 0;
+        if (criticOutTokens > 0 && criticElapsed > 0) {
+          const criticTokPerSec = Math.round(criticOutTokens / criticElapsed);
+          output.updateTokPerSec?.(`${cProvider}/${cModel}`, criticTokPerSec);
+          logger.info("Model performance", { provider: cProvider, model: cModel, tokPerSec: criticTokPerSec });
         }
+
+        const score = extractScore(criticText);
+        output.log("critic", `::review_score::${score}`);
+        const criticThreshold = config.review?.criticThreshold ?? 8;
+        output.log("critic", score >= criticThreshold ? "Plan approved" : "Plan needs revision");
+          }
+    }
+
+    // Ensure every story has a unique ID (some planners output stories without IDs)
+    const seenIds = new Set<string>();
+    for (let i = 0; i < plannerStories.length; i++) {
+      if (!plannerStories[i].id || seenIds.has(plannerStories[i].id)) {
+        plannerStories[i].id = `${i + 1}-${(plannerStories[i].title || "story").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+      }
+      seenIds.add(plannerStories[i].id);
+    }
+
+    // Sort by dependencies
+    sorted = topologicalSort(plannerStories);
+    logger.info("Topological sort result", { input: plannerStories.length, output: sorted.length, ids: sorted.map(s => s.id) });
+
+    // Prompt user to proceed (unless --trust mode)
+    // Still on original branch — declining costs nothing
+    if (!trustAll) {
+      let proceed = false;
+      try {
+        const r = await output.confirm("Execute this plan?");
+        proceed = typeof r === "object" ? r.allowed : r;
+      } catch (err) {
+        logger.debug("Plan confirmation failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+      if (!proceed) {
+        output.log("system", "Plan cancelled.");
+        return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+      }
+    }
+
+    // ── Plan accepted — NOW create the feature branch ──
+    const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
+    const branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
+    featureBranch = createFeatureBranch(workingDir, branchLabel, config.git?.branchPrefix);
+    if (featureBranch) {
+      output.coordinatorLog(`Working on branch: ${featureBranch}`);
+      output.updateBranch?.(featureBranch);
+      // Yield to let Ink render the branch update
+      await new Promise(r => setTimeout(r, 0));
+    } else if (isGitRepo(workingDir)) {
+      output.error("Could not create feature branch. You may have uncommitted changes — commit or stash them first.");
+      return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+    }
+    // If not a git repo, featureBranch stays null — commits and state persistence are skipped
   }
 
-  // Ensure every story has a unique ID (some planners output stories without IDs)
-  const seenIds = new Set<string>();
-  for (let i = 0; i < plannerStories.length; i++) {
-    if (!plannerStories[i].id || seenIds.has(plannerStories[i].id)) {
-      plannerStories[i].id = `${i + 1}-${(plannerStories[i].title || "story").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+  // Helper: consistent exit message when stories are incomplete
+  let retryable = true; // set to false when run made no progress
+  function logRetryHint(): void {
+    if (!featureBranch || !retryable) return;
+    const done = completedStoryIds.length;
+    const total = sorted.length;
+    if (done < total) {
+      output.coordinatorLog(`Staying on branch \`${featureBranch}\` — ${done}/${total} stories completed. Run \`/retry\` to continue.`);
     }
-    seenIds.add(plannerStories[i].id);
   }
 
-  // Sort by dependencies
-  const sorted = topologicalSort(plannerStories);
-  logger.info("Topological sort result", { input: plannerStories.length, output: sorted.length, ids: sorted.map(s => s.id) });
-
-  // Prompt user to proceed (unless --trust mode)
-  if (!trustAll) {
-    let proceed = false;
-    try {
-      const r = await output.confirm("Execute this plan?");
-      proceed = typeof r === "object" ? r.allowed : r;
-    } catch (err) {
-      logger.debug("Plan confirmation failed", { error: err instanceof Error ? err.message : String(err) });
-    }
-    if (!proceed) {
-      output.log("system", "Plan cancelled.");
-      return;
-    }
-    }
+  // Persist the plan so /retry works even if the first story fails
+  if (featureBranch) {
+    saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
+  }
 
   // Track failed and blocked stories — matches worker/epic/coordinator-stories.ts pattern
   const failedStories = new Set<string>();
@@ -1035,12 +1130,19 @@ export async function runOrchestration(
   for (let i = 0; i < sorted.length; i++) {
     // Check if user cancelled (ESC) before starting next story
     if (abortSignal?.aborted) {
-      output.coordinatorLog("Build cancelled by user.");
+      output.coordinatorLog("Build cancelled.");
       logger.info("Build cancelled by user before story start", { storyIndex: i });
-      return;
+      logRetryHint();
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
     }
 
     const story = sorted[i];
+
+    // Skip already-completed stories (retry mode)
+    if (completedStoryIds.includes(story.id)) {
+      output.log("system", `Skipping story ${i + 1}/${sorted.length}: "${story.title}" — already completed`);
+      continue;
+    }
 
     // Check if any dependency failed — block this story (cascade failure)
     if (story.dependsOn?.some(dep => failedStories.has(dep) || skippedStories.has(dep))) {
@@ -1084,17 +1186,18 @@ export async function runOrchestration(
     const storyHealth: { testResults?: string; buildErrors?: string; servicesRunning?: string[] } = {};
     const personaTools: Record<string, AnyToolDef> = {};
     // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
+    // Reset per revision so a tool loop on revision 0 doesn't permanently abort retries
     const LOOP_WINDOW = 6;
     const LOOP_THRESHOLD = 4;
-    const recentToolSignatures: string[] = [];
-    const loopAbort = new AbortController();
+    let recentToolSignatures: string[] = [];
+    let loopAbort = new AbortController();
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
       if (toolDef) {
         personaTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
+            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
             if (!allowed) return "Tool execution denied by user.";
 
             // Track for loop detection
@@ -1181,6 +1284,10 @@ export async function runOrchestration(
 
     let revisionFeedback = "";
     for (let revision = 0; revision <= 2; revision++) {
+
+    // Reset loop detection for each revision attempt
+    recentToolSignatures = [];
+    loopAbort = new AbortController();
 
     // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts
     const contextParts: string[] = [];
@@ -1346,8 +1453,9 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
 
       // Check abort immediately after stream ends — user may have pressed ESC
       if (abortSignal?.aborted) {
-        output.coordinatorLog("Build cancelled by user.");
-        return;
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { stories: sorted, completedStoryIds, featureBranch, userTask };
       }
 
       const text = await stream.text;
@@ -1431,12 +1539,19 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
 
       // Check abort before completing
       if (abortSignal?.aborted) {
-        output.coordinatorLog("Build cancelled by user.");
-        return;
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { stories: sorted, completedStoryIds, featureBranch, userTask };
       }
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
+      completedStoryIds.push(story.id);
+
+      // Persist progress so /retry works across terminal restarts
+      if (featureBranch) {
+        saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
+      }
 
       // Commit story changes — creates a checkpoint on the feature branch
       // From worker/epic/executor.ts post-execution commit pattern
@@ -1451,9 +1566,10 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
 
       // If user cancelled (ESC), exit immediately — don't retry or classify
       if (abortSignal?.aborted) {
-        output.coordinatorLog("Build cancelled by user.");
+        output.coordinatorLog("Build cancelled.");
         logger.info("Build cancelled by user during story execution", { story: i + 1, persona: story.persona });
-        return;
+        logRetryHint();
+        return { stories: sorted, completedStoryIds, featureBranch, userTask };
       }
 
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1509,6 +1625,15 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
     if (failedNames.length > 0) output.coordinatorLog(`Failed stories: ${failedNames.join(", ")}`);
     if (skippedNames.length > 0) output.coordinatorLog(`Skipped (blocked by dependency): ${skippedNames.join(", ")}`);
     logger.info("Story execution summary", { failed: [...failedStories], skipped: [...skippedStories], completed: sorted.length - failedStories.size - skippedStories.size });
+
+    // If no new stories completed in this run, the plan can't make progress.
+    // Clear state so /retry doesn't repeat the same failures.
+    const newCompletions = completedStoryIds.filter(id => !retryPlan?.completedStoryIds.includes(id));
+    if (newCompletions.length === 0 && failedStories.size > 0) {
+      output.coordinatorLog("No stories completed — this run made no progress. Edit your spec and `/ship` again.");
+      if (featureBranch) clearShipRun(featureBranch);
+      retryable = false;
+    }
   }
 
   // Review config
@@ -1555,8 +1680,9 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
     let previousReviewFeedback = "";
     // Check if user cancelled before starting review
     if (abortSignal?.aborted) {
-      output.coordinatorLog("Build cancelled by user.");
-      return;
+      output.coordinatorLog("Build cancelled.");
+      logRetryHint();
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
@@ -1790,6 +1916,10 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // If approved or out of revision attempts, done
         if (approved) {
           finalReviewText = reviewText;
+          runLifecycleHooks("review_complete", config.hooks, workingDir, {
+            WORKERMILL_REVIEW_SCORE: String(score),
+            WORKERMILL_REVIEW_DECISION: "approved",
+          });
           break;
         }
         const revisionsLeft = maxRevisions - (reviewRound - 1);
@@ -1916,7 +2046,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
               storyTools[toolName] = {
                 ...toolDef,
                 execute: async (input: Record<string, unknown>) => {
-                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
+                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
                   if (!allowed) return "Tool execution denied by user.";
                   output.toolCall(story.persona, toolName, input);
                   output.status(`${story.persona}: working...`);
@@ -2118,6 +2248,28 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   // Final cost update
   output.updateCost?.(costTracker.getTotalCost());
 
-  // Stop MCP servers
+  // On full success: clear retry state and return to main branch
+  if (featureBranch && completedStoryIds.length === sorted.length) {
+    clearShipRun(featureBranch);
+    // Return to the original branch — work is committed on the feature branch
+    try {
+      execSync(`git checkout "${mainBranch}"`, { cwd: workingDir, stdio: "pipe" });
+      output.updateBranch?.(mainBranch);
+      output.coordinatorLog(`Returned to ${mainBranch}`);
+    } catch {
+      // Non-fatal — user stays on feature branch
+      output.coordinatorLog(`Stay on ${featureBranch} (could not checkout ${mainBranch})`);
+    }
+  }
+
+  runLifecycleHooks("ship_complete", config.hooks, workingDir, {
+    WORKERMILL_COST: costTracker.getTotalCost().toFixed(4),
+  });
+
+  // Stop MCP servers and language server
   stopAllMCPServers();
+  const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
+  shutdownLSP();
+
+  return { stories: sorted, completedStoryIds, featureBranch, userTask };
 }

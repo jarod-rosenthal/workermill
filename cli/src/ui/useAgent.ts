@@ -15,6 +15,7 @@ import {
   saveSession,
   addMessage,
   loadLatestSession,
+  forkSession,
   type Session,
 } from "../session.js";
 import { shouldCompact, compactMessages } from "../compaction.js";
@@ -25,11 +26,13 @@ import { parseImageReferences, toMessageContent, resolveFileReferences, resolveF
 import * as logger from "../logger.js";
 import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { resolveConfig, type HooksConfig } from "../config.js";
+import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
 import { toolStatusLabel } from "./tool-status.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
-import { isDangerous, READ_TOOLS, AUTO_EDIT_TOOLS } from "../safety.js";
+import path from "path";
+import { isDangerous, READ_TOOLS, AUTO_EDIT_TOOLS, checkPermissionRules } from "../safety.js";
+import { checkpoint } from "../checkpoints.js";
 import type {
   Message,
   ToolCallInfo,
@@ -57,6 +60,7 @@ export interface UseAgentOptions {
   planMode: boolean;
   sandboxed: boolean;
   resume: boolean;
+  fork: boolean;
   maxTokens?: number;
 }
 
@@ -164,6 +168,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "trust all" : "ask");
   const workingDirRef = useRef(process.cwd());
   const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
+  const permissionRulesRef = useRef<PermissionRuleConfig | undefined>(undefined);
   const initDoneRef = useRef(false);
 
   // Keep refs in sync with state so callbacks see fresh values.
@@ -213,6 +218,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const mcpConfig = autoDetectMCPServers(cliConfig?.mcp || {});
       registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
+      permissionRulesRef.current = cliConfig?.permissions;
     } catch (err) {
       logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
     }
@@ -221,8 +227,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     if (options.resume) {
       const loaded = loadLatestSession();
       if (loaded) {
-        logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
-        sessionRef.current = loaded;
+        // Fork: copy session with new ID, leaving original untouched
+        const session = options.fork ? forkSession(loaded) : loaded;
+        if (options.fork) {
+          saveSession(session);
+          logger.info("Forked session", { originalId: loaded.id, forkId: session.id });
+        } else {
+          logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
+        }
+        sessionRef.current = session;
         // Hydrate committed messages from the restored session.
         const restored: Message[] = loaded.messages.map((m) => ({
           id: crypto.randomUUID(),
@@ -300,6 +313,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             },
           });
         });
+      }
+
+      // Granular permission rules — deny always wins, allow skips prompt.
+      const ruleResult = checkPermissionRules(toolName, toolInput, permissionRulesRef.current);
+      if (ruleResult === "deny") {
+        return Promise.resolve({ allowed: false });
+      }
+      if (ruleResult === "allow") {
+        return Promise.resolve({ allowed: true });
       }
 
       // Trust-all bypasses all prompts for non-dangerous tools.
@@ -461,6 +483,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           try {
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
+            // Checkpoint file before write/edit operations
+            if ((name === "write_file" || name === "edit_file") && input.path) {
+              const filePath = String(input.path);
+              const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
+              checkpoint(resolved);
+            }
             setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
             runHooks("pre", name, hooksConfigRef.current, workingDirRef.current);
             const result = await td.execute(input);

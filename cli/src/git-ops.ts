@@ -102,12 +102,18 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
     const prefix = branchPrefix || "workermill";
     const branchName = `${prefix}/${slug}`;
 
-    // Create and checkout the feature branch from current HEAD
-    execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
-    logger.info("Created feature branch", { branch: branchName });
+    // Create and checkout the feature branch — reuse if it already exists
+    try {
+      execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+      logger.info("Created feature branch", { branch: branchName });
+    } catch {
+      // Branch already exists — checkout it
+      execSync(`git checkout "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+      logger.info("Checked out existing feature branch", { branch: branchName });
+    }
     return branchName;
   } catch (err) {
-    logger.debug("Could not create feature branch", { error: err instanceof Error ? err.message : String(err) });
+    logger.debug("Could not create or checkout feature branch", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

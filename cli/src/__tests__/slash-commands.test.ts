@@ -1095,18 +1095,16 @@ describe("handleSlashCommand", () => {
   // ---- /setup ----
 
   describe("/setup", () => {
-    it("clears config when it exists", () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
+    it("shows current config when config exists", () => {
       const ctx = createContext();
       handleSlashCommand("/setup", ctx);
-      expect(fs.unlinkSync).toHaveBeenCalled();
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Config cleared")
+        expect.stringContaining("Current config")
       );
     });
 
     it("reports no config when not found", () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(loadConfig).mockReturnValueOnce(null);
       const ctx = createContext();
       handleSlashCommand("/setup", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(

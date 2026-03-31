@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "ink";
 import { execSync } from "child_process";
 import fs from "fs";
@@ -123,15 +123,14 @@ export function Root(props: RootProps): React.ReactElement {
   const lastBuildTask = useRef<string | null>(null);
 
   const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory());
-  const lastBranchCheck = useRef(Date.now());
-
-  // Refresh git branch periodically (every 10 seconds, on submit).
-  const refreshGitBranch = useCallback(() => {
-    const now = Date.now();
-    if (now - lastBranchCheck.current > 10_000) {
-      lastBranchCheck.current = now;
-      setGitBranch(getGitBranch());
-    }
+  // Poll git branch every 5 seconds so the status bar stays current
+  // regardless of how the branch changed (shell escape, orchestrator, external terminal).
+  useEffect(() => {
+    const id = setInterval(() => {
+      const current = getGitBranch();
+      setGitBranch(prev => prev === current ? prev : current);
+    }, 5_000);
+    return () => clearInterval(id);
   }, []);
 
   // Push an entry to the in-memory and on-disk history.
@@ -166,6 +165,7 @@ export function Root(props: RootProps): React.ReactElement {
         denyTool: agent.denyTool,
         orchestratorRunning: orchestrator.running,
         startOrchestrator: orchestrator.start,
+        retryOrchestrator: orchestrator.retry,
         lastBuildTask: lastBuildTask.current,
         setLastBuildTask: (task: string) => { lastBuildTask.current = task; },
         sandboxed: props.sandboxed,
@@ -212,6 +212,10 @@ export function Root(props: RootProps): React.ReactElement {
       } else {
         agent.addSystemMessage(`${header}\n\n(no output)`);
       }
+
+      // Update branch immediately — user just ran a shell command
+      setGitBranch(getGitBranch());
+
       return true;
     },
     [agent, props.workingDir],
@@ -237,11 +241,10 @@ export function Root(props: RootProps): React.ReactElement {
         return;
       }
 
-      // Regular prompt -- refresh git branch, send to agent.
-      refreshGitBranch();
+      // Regular prompt — send to agent. Git branch polled by interval.
       agent.submit(trimmed);
     },
-    [agent, pushHistory, handleSlashCommand, handleShellEscape, refreshGitBranch],
+    [agent, pushHistory, handleSlashCommand, handleShellEscape],
   );
 
   return (

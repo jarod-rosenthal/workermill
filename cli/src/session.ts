@@ -132,6 +132,16 @@ export function loadSessionById(id: string): Session | null {
   return null;
 }
 
+export function forkSession(session: Session): Session {
+  return {
+    ...session,
+    id: crypto.randomUUID(),
+    name: session.name ? `${session.name} (fork)` : "fork",
+    messages: session.messages.map(m => ({ ...m })),
+    startedAt: new Date().toISOString(),
+  };
+}
+
 export function deleteSession(id: string): boolean {
   ensureSessionsDir();
   try {

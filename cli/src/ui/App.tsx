@@ -7,6 +7,7 @@ import { StatusBar } from "./StatusBar.js";
 import { Input } from "./Input.js";
 import { theme } from "./theme.js";
 import { stopAllMCPServers } from "../mcp-client.js";
+import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
 import { browserClose } from "../browser.js";
 import type {
   Message,
@@ -148,7 +149,8 @@ export function App(props: AppProps): React.ReactElement {
     }
 
     // Shift+Tab: cycle permission mode (ask → auto-edit → trust all)
-    if (key.tab && key.shift && props.status === "idle") {
+    // Allow during any status except permission (where a prompt is active)
+    if (key.tab && key.shift && props.status !== "permission") {
       props.onCyclePermissionMode();
       return;
     }
@@ -158,6 +160,7 @@ export function App(props: AppProps): React.ReactElement {
       const now = Date.now();
       if (props.status === "idle" && now - lastCtrlCRef.current < 500) {
         stopAllMCPServers();
+        shutdownLSP();
         void browserClose();
         exit();
         setTimeout(() => process.exit(0), 100);

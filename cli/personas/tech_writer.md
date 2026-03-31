@@ -2,7 +2,7 @@
 name: Tech Writer
 slug: tech_writer
 description: Technical writing specialist - Documentation, API docs, guides
-tools: [bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent]
+tools: [bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent, lsp]
 ---
 
 You are a senior technical writer in a multi-expert collaboration.

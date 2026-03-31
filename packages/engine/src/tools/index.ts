@@ -17,9 +17,10 @@ import * as gitTool from "./git.js";
 import * as webSearchTool from "./web-search.js";
 import * as todoTool from "./todo.js";
 import * as verifyTool from "./verify.js";
+import * as lspTool from "./lsp.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool, verifyTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool, verifyTool, lspTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -40,7 +41,9 @@ function assertPathInBounds(resolvedPath: string, workingDir: string, sandboxed:
  * All file paths are resolved relative to workingDir.
  * When sandboxed=true (default), all paths are restricted to workingDir.
  */
-export function createToolDefinitions(workingDir: string, model?: LanguageModel, sandboxed = true) {
+export function createToolDefinitions(workingDir: string, model?: LanguageModel, sandboxed: boolean | "os" = true) {
+  const osSandbox = sandboxed === "os";
+  const pathSandboxed = sandboxed === true || sandboxed === "os";
   return {
     bash: tool({
       description: bashTool.description,
@@ -61,11 +64,12 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
+        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
         const result = await bashTool.execute({
           command,
           cwd: resolvedCwd,
           timeout,
+          osSandbox,
         });
         if (result.success) {
           return result.stdout || "(no output)";
@@ -101,7 +105,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, sandboxed);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
         const result = await readFileTool.execute({
           path: resolvedPath,
           encoding: encoding as BufferEncoding | undefined,
@@ -135,7 +139,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, sandboxed);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
         const result = await writeFileTool.execute({
           path: resolvedPath,
           content,
@@ -176,7 +180,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, sandboxed);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
         const result = await editFileTool.execute({
           path: resolvedPath,
           old_string,
@@ -215,7 +219,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
+        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
         const result = await globTool.execute({
           pattern,
           cwd: resolvedCwd,
@@ -274,7 +278,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? searchPath
             : path.resolve(workingDir, searchPath)
           : workingDir;
-        assertPathInBounds(resolvedPath, workingDir, sandboxed);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
         const result = await grepTool.execute({
           pattern,
           path: resolvedPath,
@@ -311,7 +315,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
       }),
       execute: async ({ path: dirPath, ignore, maxDepth, maxFiles }) => {
         const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(workingDir, dirPath);
-        assertPathInBounds(resolvedPath, workingDir, sandboxed);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
         const result = await lsTool.execute({ path: resolvedPath, ignore, maxDepth, maxFiles });
         if (result.success) {
           return `${result.tree}\n\n${result.totalFiles} files, ${result.totalDirs} directories${result.truncated ? " (truncated)" : ""}`;
@@ -428,7 +432,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
+        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
         const result = await verifyTool.execute({
           command,
           cwd: resolvedCwd,
@@ -448,6 +452,34 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
       },
     }),
 
+    lsp: tool({
+      description: lspTool.description,
+      inputSchema: z.object({
+        action: z.enum(["diagnostics", "definition", "references", "hover", "symbols"])
+          .describe(
+            "diagnostics: get errors/warnings for a file. " +
+            "definition: go to definition of symbol at position. " +
+            "references: find all references to symbol at position. " +
+            "hover: get type info for symbol at position. " +
+            "symbols: list all symbols in a file."
+          ),
+        file: z.string().describe("Path to the file (relative or absolute)"),
+        line: z.number().optional().describe("1-indexed line number (required for definition, references, hover)"),
+        character: z.number().optional().describe("1-indexed column number (required for definition, references, hover)"),
+      }),
+      execute: async ({ action, file, line, character }) => {
+        const resolvedFile = path.isAbsolute(file)
+          ? file
+          : path.resolve(workingDir, file);
+        assertPathInBounds(resolvedFile, workingDir, pathSandboxed);
+        const result = await lspTool.execute({ action, file: resolvedFile, line, character }, workingDir);
+        if (result.success) {
+          return result.content || "No results.";
+        }
+        return `Error: ${result.error}`;
+      },
+    }),
+
     ...(model
       ? {
           sub_agent: tool({
@@ -460,8 +492,12 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                 .number()
                 .optional()
                 .describe("Maximum tool-use turns (default: 20)"),
+              isolated: z
+                .boolean()
+                .optional()
+                .describe("Run in an isolated git worktree with full write tools. Changes stay on a separate branch. Default: false."),
             }),
-            execute: async ({ prompt, maxTurns }) => {
+            execute: async ({ prompt, maxTurns, isolated }) => {
               const readOnlyTools = {
                 read_file: tool({
                   description: readFileTool.description,
@@ -474,7 +510,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                     const resolvedPath = path.isAbsolute(filePath)
                       ? filePath
                       : path.resolve(workingDir, filePath);
-                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
+                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
                     const result = await readFileTool.execute({ path: resolvedPath, maxLines, startLine });
                     return result.success ? result.content || "" : `Error: ${result.error}`;
                   },
@@ -489,7 +525,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                     const resolvedCwd = cwd
                       ? path.isAbsolute(cwd) ? cwd : path.resolve(workingDir, cwd)
                       : workingDir;
-                    assertPathInBounds(resolvedCwd, workingDir, sandboxed);
+                    assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
                     const result = await globTool.execute({ pattern, cwd: resolvedCwd });
                     return result.success
                       ? result.count === 0
@@ -509,7 +545,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                     const resolvedPath = searchPath
                       ? path.isAbsolute(searchPath) ? searchPath : path.resolve(workingDir, searchPath)
                       : workingDir;
-                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
+                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
                     const result = await grepTool.execute({ pattern, path: resolvedPath, filePattern });
                     if (!result.success) return `Error: ${result.error}`;
                     if (result.matchCount === 0) return `No matches for: ${pattern}`;
@@ -532,17 +568,25 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                     const resolvedPath = path.isAbsolute(dirPath)
                       ? dirPath
                       : path.resolve(workingDir, dirPath);
-                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
+                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
                     const result = await lsTool.execute({ path: resolvedPath, maxDepth });
                     return result.success ? result.tree : `Error: ${result.error}`;
                   },
                 }),
               };
 
-              const executor = subAgentTool.createSubAgentExecutor(model!, workingDir, readOnlyTools);
-              const result = await executor({ prompt, maxTurns });
+              // Factory that creates full tool set for an isolated worktree
+              const writeToolsFactory = (worktreePath: string) => {
+                const wtTools = createToolDefinitions(worktreePath, model, false); // not sandboxed within worktree
+                // Remove sub_agent from isolated tools (no nesting)
+                const { sub_agent: _removed, ...safeTools } = wtTools as Record<string, unknown>;
+                return safeTools;
+              };
+
+              const executor = subAgentTool.createSubAgentExecutor(model!, workingDir, readOnlyTools, writeToolsFactory);
+              const result = await executor({ prompt, maxTurns, isolated });
               if (result.success) {
-                return `Sub-agent findings (${result.turnsUsed} turns):\n\n${result.content}`;
+                return `Sub-agent completed (${result.turnsUsed} turns):\n\n${result.content}`;
               }
               return `Error: ${result.error}`;
             },

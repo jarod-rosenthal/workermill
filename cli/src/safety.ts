@@ -42,7 +42,68 @@ export const READ_TOOLS = new Set<string>([
   "grep",
   "ls",
   "sub_agent",
+  "lsp",
 ]);
+
+/**
+ * Check a tool call against granular permission rules.
+ * Pattern format: "toolname" or "toolname(glob)" — e.g. "bash(npm run *)", "write_file(.env)".
+ * Returns "allow", "deny", or "none" (no matching rule — fall through to normal permission logic).
+ * Deny rules are checked first and always win.
+ */
+export function checkPermissionRules(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  rules?: { allow?: string[]; deny?: string[] },
+): "allow" | "deny" | "none" {
+  if (!rules) return "none";
+
+  // Extract the value to match against the glob portion
+  const matchValue = toolName === "bash"
+    ? String(toolInput.command || "")
+    : String(toolInput.file_path || toolInput.path || toolInput.file || toolInput.url || "");
+
+  // Deny wins — check first
+  if (rules.deny) {
+    for (const rule of rules.deny) {
+      if (matchesRule(rule, toolName, matchValue)) return "deny";
+    }
+  }
+
+  if (rules.allow) {
+    for (const rule of rules.allow) {
+      if (matchesRule(rule, toolName, matchValue)) return "allow";
+    }
+  }
+
+  return "none";
+}
+
+/** Match a rule like "bash(npm run *)" against a tool name and value. */
+function matchesRule(rule: string, toolName: string, value: string): boolean {
+  const parenIdx = rule.indexOf("(");
+  if (parenIdx === -1) {
+    // Simple tool name match: "bash", "write_file"
+    return rule === toolName;
+  }
+
+  // Pattern match: "bash(npm run *)"
+  const ruleTool = rule.slice(0, parenIdx);
+  if (ruleTool !== toolName) return false;
+
+  const pattern = rule.slice(parenIdx + 1, rule.endsWith(")") ? -1 : undefined);
+  return globMatch(pattern, value);
+}
+
+/** Simple glob matching — supports * (any chars) and ? (single char). */
+function globMatch(pattern: string, text: string): boolean {
+  // Convert glob to regex: escape special chars, replace * and ?
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`, "i").test(text);
+}
 
 /** Tools auto-approved in "auto-edit" mode (everything except bash and destructive ops). */
 export const AUTO_EDIT_TOOLS = new Set<string>([

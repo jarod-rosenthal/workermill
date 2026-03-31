@@ -152,6 +152,16 @@ describe("toolStatusLabel", () => {
     });
   });
 
+  describe("lsp tool", () => {
+    it("shows action in label", () => {
+      expect(toolStatusLabel("lsp", { action: "diagnostics" })).toBe("LSP diagnostics...");
+    });
+
+    it("shows 'query' when no action", () => {
+      expect(toolStatusLabel("lsp", {})).toBe("LSP query...");
+    });
+  });
+
   describe("unknown tools", () => {
     it("unknown tool name uses generic fallback", () => {
       expect(toolStatusLabel("some_unknown_tool", {})).toBe("Running some_unknown_tool...");

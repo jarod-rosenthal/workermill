@@ -78,7 +78,8 @@ function addSharedOptions(cmd: Command): Command {
     .option("--auto-revise", "Auto-approve revisions during /ship reviews")
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
-    .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit");
+    .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
+    .option("--fork", "Fork the resumed session (use with --resume)");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -176,6 +177,8 @@ const defaultCmd = program
       }
       console.log(); // newline at end
       stopAllMCPServers();
+      const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
+      shutdownLSP();
       process.exit(0);
     }
 
@@ -211,6 +214,7 @@ const defaultCmd = program
         planMode: options.plan || false,
         sandboxed: options.fullDisk ? false : config.sandbox !== false,
         resume: options.resume || false,
+        fork: options.fork || false,
         maxTokens: options.maxTokens,
         workingDir,
         roleModels,

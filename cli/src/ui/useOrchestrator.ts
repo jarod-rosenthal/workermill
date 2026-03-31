@@ -10,8 +10,9 @@
  */
 
 import { useState, useCallback, useRef } from "react";
-import type { OrchestrationOutput } from "../orchestrator.js";
+import type { OrchestrationOutput, RetryPlan } from "../orchestrator.js";
 import { resolveConfig, type CliConfig } from "../config.js";
+import { getRetryableRun } from "../ship-state.js";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -59,6 +60,8 @@ export interface UseOrchestratorReturn {
   running: boolean;
   /** Start orchestration for a task. */
   start: (task: string, trustAll: boolean, sandboxed: boolean) => void;
+  /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
+  retry: (trustAll: boolean, sandboxed: boolean) => boolean;
   /** Cancel the running orchestration. */
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
@@ -99,6 +102,7 @@ export function useOrchestrator(
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const retryPlanRef = useRef<RetryPlan | null>(null);
 
   // ------------------------------------------------------------------
   // cancel()
@@ -266,10 +270,12 @@ export function useOrchestrator(
           // straight to multi-expert orchestration.
 
           // ---- Run full orchestration --------------------------------
-          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal);
+          const retryPlan = retryPlanRef.current;
+          retryPlanRef.current = null;
+          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined);
 
           flushLine();
-          addMessage("**Orchestration complete.**");
+          addMessage(retryPlan ? "**Retry complete.**" : "**Orchestration complete.**");
         } catch (err: unknown) {
           flushLine();
           if (controller.signal.aborted) {
@@ -294,8 +300,33 @@ export function useOrchestrator(
   );
 
   // ------------------------------------------------------------------
+  // retry() — read persisted state, resume from first incomplete story
+  // ------------------------------------------------------------------
+
+  const retry = useCallback(
+    (trustAll: boolean, sandboxed: boolean): boolean => {
+      const run = getRetryableRun(process.cwd());
+      if (!run) return false;
+
+      const retryPlan: RetryPlan = {
+        stories: run.stories,
+        completedStoryIds: [...run.completedStoryIds],
+        featureBranch: run.featureBranch,
+        mainBranch: run.mainBranch,
+      };
+
+      // Reuse start() — pass retryPlan via the task string (parsed in the async body)
+      // Actually, we need to thread retryPlan through. Store it in a ref for the start callback.
+      retryPlanRef.current = retryPlan;
+      start(run.userTask, trustAll, sandboxed);
+      return true;
+    },
+    [start],
+  );
+
+  // ------------------------------------------------------------------
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, cancel, statusMessage, previewLine, confirmRequest };
+  return { running, start, retry, cancel, statusMessage, previewLine, confirmRequest };
 }

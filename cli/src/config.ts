@@ -33,9 +33,13 @@ export interface ReviewConfig {
 }
 
 export interface HookConfig {
-  /** Shell command to run */
-  command: string;
-  /** Which tool(s) this hook applies to. "*" for all. */
+  /** Shell command to run (for "command" type, default) */
+  command?: string;
+  /** URL to POST to (for "http" type) */
+  url?: string;
+  /** Hook type: "command" (default) or "http" */
+  type?: "command" | "http";
+  /** Which tool(s) this hook applies to. "*" for all. Only for pre/post hooks. */
   tools?: string[];
 }
 
@@ -44,11 +48,20 @@ export interface HooksConfig {
   pre?: HookConfig[];
   /** Run after tool execution */
   post?: HookConfig[];
+  /** Run on lifecycle events */
+  on?: Record<string, HookConfig[]>;
 }
 
 export interface GitConfig {
   /** Branch name prefix for /ship sessions (default: "workermill") */
   branchPrefix?: string;
+}
+
+export interface PermissionRuleConfig {
+  /** Patterns to auto-allow, e.g. "bash(npm run *)", "bash(git status)" */
+  allow?: string[];
+  /** Patterns to always deny, e.g. "bash(rm *)", "write_file(.env)" — deny wins over allow */
+  deny?: string[];
 }
 
 export interface CliConfig {
@@ -59,10 +72,12 @@ export interface CliConfig {
   review?: ReviewConfig;
   hooks?: HooksConfig;
   git?: GitConfig;
-  /** Restrict file/bash tools to the working directory (default: true) */
-  sandbox?: boolean;
+  /** Restrict file/bash tools to the working directory (default: true). Set to "os" for OS-level sandboxing via bwrap (Linux). */
+  sandbox?: boolean | "os";
   /** Play a beep sound when builds complete (default: false) */
   bell?: boolean;
+  /** Granular permission rules — pattern-based allow/deny per tool */
+  permissions?: PermissionRuleConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -120,6 +135,10 @@ export function resolveConfig(): CliConfig {
     git: { ...global.git, ...(project?.git || {}) },
     sandbox: project?.sandbox ?? global.sandbox,
     bell: project?.bell ?? global.bell,
+    permissions: {
+      allow: [...(global.permissions?.allow || []), ...(project?.permissions?.allow || [])],
+      deny: [...(global.permissions?.deny || []), ...(project?.permissions?.deny || [])],
+    },
   };
 }
 

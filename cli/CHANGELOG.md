@@ -4,6 +4,33 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.88] - 2026-03-31
+
+### Added
+- **LSP tool** *(experimental)* — code intelligence via language servers. Diagnostics, go-to-definition, find-references, hover, and symbols. Auto-detects TypeScript, Python, Go, Rust. Falls back to grep/bash when no language server is available.
+- **Granular permission rules** — three-tier permission rules: `deny` > `ask` > `allow` with glob patterns. Example: `"allow": ["bash(npm run *)"]`, `"deny": ["bash(rm *)"]`, `"ask": ["bash(npm publish *)"]`. "Yes, don't ask again" saves permanent `bash(<command>)` rules to config (session-only for file edits). Compound commands (`&&`, `;`) split into separate rules.
+- **Isolated sub-agents** — `sub_agent({ isolated: true })` runs in a git worktree with full write tools. Changes stay on a separate branch for the parent agent to review. Worktrees auto-cleaned on exit.
+- **OS-level sandboxing** — `"sandbox": "os"` in config wraps bash commands in bubblewrap (`bwrap`) on Linux. Read-only system dirs, read-write working directory. Falls back to JS-level sandboxing if bwrap unavailable.
+- **File-level checkpoints** — every write/edit is snapshotted before execution. `/undo` reverts the last edit, `/undo N` reverts last N, `/undo <file>` reverts a specific file, `/undo list` shows all checkpoints. Old git-based undo moved to `/undo git`.
+- **Session fork** — `--resume --fork` continues from the last session with a new ID, leaving the original untouched.
+- **Lifecycle hooks** — `hooks.on` config for events: `session_start`, `session_end`, `ship_start`, `ship_complete`, `review_complete`, `compact`. Supports `"type": "http"` for webhook POSTs.
+- **Bell setting** — `/settings bell true` plays a beep when `/ship` finishes. Off by default.
+- **`/setup` inline config** — shows current providers, roles, and routing with commands to change each part. No longer deletes the config. `/setup reset` for full wipe.
+
+### Changed
+- **Permission modes renamed** — `ask` → `default`, `auto-edit` → `acceptEdits`, `trust all` → `bypassPermissions`. `plan` added to shift+tab cycle. New `dontAsk` mode (CLI flag only) auto-denies everything not in allow rules.
+- **Permission prompt simplified** — "Yes" / "Yes, don't ask again" / "Deny". Removed "Always allow this tool" and "Trust all tools" options. Trust-all is now a mode (shift+tab), not a prompt choice.
+- **`/permissions` shows saved rules** — displays persistent allow/ask/deny rules from config alongside the current mode.
+- **`/setup` no longer destructive** — shows current config and how to change it inline. Only `/setup reset` deletes the config file.
+- **`/undo` default is file-level** — reverts individual file edits from checkpoints. `/undo git` for the old git stash/reset behavior.
+- **`/compact [focus]` documented** — added to `/help` command list. Focus instructions were already supported but not discoverable.
+- **`lsp` added to all personas** — available to all developer, architect, tech lead, and writer personas.
+
+### Fixed
+- **Trust-all permission bug** — selecting "trust all" in `/ship` mode only added 7 hardcoded tool names to the allow set. Tools like `verify`, `todo`, `lsp`, and MCP tools would prompt again. Now uses a `*` wildcard — one trust-all click covers everything.
+- **Setup stdin handoff** — `rl.close()` destroyed stdin, preventing Ink from setting raw mode after first-run setup. Fixed with `rl.close()` + `process.stdin.resume()`.
+- **`/setup reset` routing** — `case "setup reset"` was a dead branch that never matched. Now handled as `arg === "reset"` inside the setup case.
+
 ## [0.15.87] - 2026-03-30
 
 ### Added

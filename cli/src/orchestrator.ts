@@ -276,35 +276,53 @@ export async function checkToolPermission(
     }
   }
 
-  // Granular permission rules — deny always wins, allow skips prompt.
+  // Granular permission rules — deny > ask > allow.
   const ruleResult = checkPermissionRules(toolName, toolInput, permissionRules);
   if (ruleResult === "deny") return false;
+  // "ask" falls through to prompt below
   if (ruleResult === "allow") return true;
 
-  if (trustAll) return true;
-  if (READ_TOOLS.has(toolName)) return true;
-  if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
+  if (ruleResult !== "ask") {
+    // Normal mode checks (skip if "ask" rule forced a prompt)
+    if (trustAll) return true;
+    if (READ_TOOLS.has(toolName)) return true;
+    if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
+  }
 
-  // Prompt user — supports y/a/t/n like the single-agent permission prompt
+  // Prompt user — Yes / Yes don't ask again / Deny
   const display = formatToolCallDisplay(toolName, toolInput);
   const result = await output.confirm(`Allow ${toolName}? ${display}`);
 
   if (typeof result === "object") {
-    if (result.mode === "trust") {
-      // Trust all — wildcard marker so no tool is ever prompted again
-      sessionAllow.add("*");
-      return result.allowed;
-    }
-    if (result.mode === "always") {
+    if (result.mode === "always" && result.allowed) {
+      // "Yes, don't ask again" — for bash save permanent rule, otherwise session-only
+      if (toolName === "bash" && toolInput.command) {
+        const { splitCompoundCommand, commandToRule } = await import("./safety.js");
+        const { loadConfig, saveConfig } = await import("./config.js");
+        try {
+          const cfg = loadConfig();
+          if (cfg) {
+            cfg.permissions = cfg.permissions || {};
+            cfg.permissions.allow = cfg.permissions.allow || [];
+            const subcommands = splitCompoundCommand(String(toolInput.command));
+            for (const sub of subcommands) {
+              const rule = commandToRule(sub);
+              if (!cfg.permissions.allow.includes(rule)) {
+                cfg.permissions.allow.push(rule);
+              }
+            }
+            saveConfig(cfg);
+          }
+        } catch {
+          // Fall back to session-only
+        }
+      }
       sessionAllow.add(toolName);
     }
     return result.allowed;
   }
 
-  // Simple boolean response
-  if (result) {
-    sessionAllow.add(toolName);
-  }
+  // Simple boolean — allow once, no persistence
   return result;
 }
 
@@ -2248,18 +2266,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   // Final cost update
   output.updateCost?.(costTracker.getTotalCost());
 
-  // On full success: clear retry state and return to main branch
+  // On full success: clear retry state. Stay on the feature branch so the
+  // developer can review, test, and push when ready.
   if (featureBranch && completedStoryIds.length === sorted.length) {
     clearShipRun(featureBranch);
-    // Return to the original branch — work is committed on the feature branch
-    try {
-      execSync(`git checkout "${mainBranch}"`, { cwd: workingDir, stdio: "pipe" });
-      output.updateBranch?.(mainBranch);
-      output.coordinatorLog(`Returned to ${mainBranch}`);
-    } catch {
-      // Non-fatal — user stays on feature branch
-      output.coordinatorLog(`Stay on ${featureBranch} (could not checkout ${mainBranch})`);
-    }
   }
 
   runLifecycleHooks("ship_complete", config.hooks, workingDir, {

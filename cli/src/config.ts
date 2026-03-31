@@ -60,7 +60,9 @@ export interface GitConfig {
 export interface PermissionRuleConfig {
   /** Patterns to auto-allow, e.g. "bash(npm run *)", "bash(git status)" */
   allow?: string[];
-  /** Patterns to always deny, e.g. "bash(rm *)", "write_file(.env)" — deny wins over allow */
+  /** Patterns that force a prompt even in acceptEdits mode */
+  ask?: string[];
+  /** Patterns to always deny, e.g. "bash(rm *)", "write_file(.env)" — deny wins over all */
   deny?: string[];
 }
 
@@ -137,6 +139,7 @@ export function resolveConfig(): CliConfig {
     bell: project?.bell ?? global.bell,
     permissions: {
       allow: [...(global.permissions?.allow || []), ...(project?.permissions?.allow || [])],
+      ask: [...(global.permissions?.ask || []), ...(project?.permissions?.ask || [])],
       deny: [...(global.permissions?.deny || []), ...(project?.permissions?.deny || [])],
     },
   };

@@ -48,14 +48,14 @@ export const READ_TOOLS = new Set<string>([
 /**
  * Check a tool call against granular permission rules.
  * Pattern format: "toolname" or "toolname(glob)" — e.g. "bash(npm run *)", "write_file(.env)".
- * Returns "allow", "deny", or "none" (no matching rule — fall through to normal permission logic).
- * Deny rules are checked first and always win.
+ * Returns "allow", "ask", "deny", or "none" (no matching rule — fall through to normal permission logic).
+ * Evaluation order: deny > ask > allow. Deny always wins.
  */
 export function checkPermissionRules(
   toolName: string,
   toolInput: Record<string, unknown>,
-  rules?: { allow?: string[]; deny?: string[] },
-): "allow" | "deny" | "none" {
+  rules?: { allow?: string[]; ask?: string[]; deny?: string[] },
+): "allow" | "ask" | "deny" | "none" {
   if (!rules) return "none";
 
   // Extract the value to match against the glob portion
@@ -70,6 +70,13 @@ export function checkPermissionRules(
     }
   }
 
+  // Ask forces a prompt even in acceptEdits mode
+  if (rules.ask) {
+    for (const rule of rules.ask) {
+      if (matchesRule(rule, toolName, matchValue)) return "ask";
+    }
+  }
+
   if (rules.allow) {
     for (const rule of rules.allow) {
       if (matchesRule(rule, toolName, matchValue)) return "allow";
@@ -77,6 +84,51 @@ export function checkPermissionRules(
   }
 
   return "none";
+}
+
+/**
+ * Split a compound bash command (&&, ||, ;) into individual subcommands.
+ * Used when saving "don't ask again" rules — each subcommand gets its own rule.
+ */
+export function splitCompoundCommand(command: string): string[] {
+  // Split on &&, ||, ; but not inside quotes
+  const parts: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; current += ch; continue; }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; current += ch; continue; }
+    if (inSingle || inDouble) { current += ch; continue; }
+
+    if (ch === ";" || (ch === "&" && command[i + 1] === "&") || (ch === "|" && command[i + 1] === "|")) {
+      if (current.trim()) parts.push(current.trim());
+      current = "";
+      if (ch !== ";") i++; // skip second & or |
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+/**
+ * Generate a permission rule pattern from a bash command.
+ * Keeps the command name and first few args, adds * for flexibility.
+ * e.g. "npm run test --verbose" → "bash(npm run test *)"
+ * e.g. "git status" → "bash(git status)"
+ */
+export function commandToRule(command: string): string {
+  const trimmed = command.trim();
+  // Take up to first 3 tokens for the pattern, append * if there are more
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length <= 3) {
+    return `bash(${trimmed})`;
+  }
+  return `bash(${tokens.slice(0, 3).join(" ")} *)`;
 }
 
 /** Match a rule like "bash(npm run *)" against a tool name and value. */
@@ -105,8 +157,11 @@ function globMatch(pattern: string, text: string): boolean {
   return new RegExp(`^${escaped}$`, "i").test(text);
 }
 
-/** Tools auto-approved in "auto-edit" mode (everything except bash and destructive ops). */
-export const AUTO_EDIT_TOOLS = new Set<string>([
+/** Tools auto-approved in "acceptEdits" mode (everything except bash). Matches Claude Code's acceptEdits. */
+export const ACCEPT_EDITS_TOOLS = new Set<string>([
   "read_file", "write_file", "edit_file", "patch",
   "glob", "grep", "ls", "fetch", "git", "web_search", "todo", "sub_agent",
 ]);
+
+/** @deprecated Use ACCEPT_EDITS_TOOLS */
+export const AUTO_EDIT_TOOLS = ACCEPT_EDITS_TOOLS;

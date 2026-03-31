@@ -38,10 +38,9 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
         { key: "n", label: "No, deny" },
       ]
     : [
-        { key: "y", label: "Allow" },
+        { key: "y", label: "Yes" },
+        { key: "a", label: "Yes, don't ask again" },
         { key: "n", label: "Deny" },
-        { key: "a", label: "Always allow this tool" },
-        { key: "t", label: "Trust all tools" },
       ];
 
   const [selected, setSelected] = useState(0);
@@ -89,9 +88,6 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
       } else if (!request.isDangerous && (input === "a" || input === "A")) {
         setResolved(true);
         request.resolve(true, "always");
-      } else if (!request.isDangerous && (input === "t" || input === "T")) {
-        setResolved(true);
-        request.resolve(true, "trust");
       }
     },
     { isActive: !resolved },

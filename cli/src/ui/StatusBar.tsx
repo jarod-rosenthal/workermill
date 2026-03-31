@@ -62,19 +62,24 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   let modeColor: string;
   let modeIcon: string;
   switch (props.mode) {
+    case "plan":
     case "PLAN":
       modeColor = theme.bashBorder;
       modeIcon = "\u25B8"; // ▸
       break;
-    case "trust all":
+    case "bypassPermissions":
       modeColor = theme.error;
       modeIcon = "\u25C8"; // ◈
       break;
-    case "auto-edit":
+    case "acceptEdits":
       modeColor = theme.warning;
       modeIcon = "\u25C6"; // ◆
       break;
-    default:
+    case "dontAsk":
+      modeColor = theme.error;
+      modeIcon = "\u25CB"; // ○
+      break;
+    default: // "default" mode
       modeColor = theme.success;
       modeIcon = "\u25B8"; // ▸
       break;

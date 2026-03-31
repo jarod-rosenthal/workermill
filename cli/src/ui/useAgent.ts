@@ -31,7 +31,7 @@ import { toolStatusLabel } from "./tool-status.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import path from "path";
-import { isDangerous, READ_TOOLS, AUTO_EDIT_TOOLS, checkPermissionRules } from "../safety.js";
+import { isDangerous, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
 import { checkpoint } from "../checkpoints.js";
 import type {
   Message,
@@ -40,8 +40,10 @@ import type {
   AgentStatus,
 } from "./types.js";
 
-const PERMISSION_MODES = ["ask", "auto-edit", "trust all"] as const;
-type PermissionMode = typeof PERMISSION_MODES[number];
+/** Modes in the shift+tab cycle. */
+const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
+/** All valid permission modes including CLI-only modes not in the cycle. */
+type PermissionMode = typeof PERMISSION_MODES[number] | "dontAsk";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
@@ -155,7 +157,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const sessionStartRef = useRef(Date.now());
   const [trustAll, setTrustAllState] = useState(options.trustAll);
   const [planMode, setPlanModeState] = useState(options.planMode);
-  const [permMode, setPermMode] = useState<PermissionMode>(options.trustAll ? "trust all" : "ask");
+  const [permMode, setPermMode] = useState<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
 
   // ------- Refs for mutable state -------- //
   const abortRef = useRef<AbortController | null>(null);
@@ -165,7 +167,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const deniedToolsRef = useRef(new Set<string>());
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
-  const permModeRef = useRef<PermissionMode>(options.trustAll ? "trust all" : "ask");
+  const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
   const workingDirRef = useRef(process.cwd());
   const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
   const permissionRulesRef = useRef<PermissionRuleConfig | undefined>(undefined);
@@ -315,22 +317,41 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         });
       }
 
-      // Granular permission rules — deny always wins, allow skips prompt.
+      // Granular permission rules — deny > ask > allow.
       const ruleResult = checkPermissionRules(toolName, toolInput, permissionRulesRef.current);
       if (ruleResult === "deny") {
         return Promise.resolve({ allowed: false });
+      }
+      if (ruleResult === "ask") {
+        // Force prompt even in acceptEdits/bypassPermissions mode
+        return new Promise((resolve) => {
+          setPermissionRequest({
+            toolName,
+            toolInput,
+            isDangerous: false,
+            resolve: (allowed: boolean, mode?: "always" | "trust") => {
+              setPermissionRequest(null);
+              resolve({ allowed, mode });
+            },
+          });
+        });
       }
       if (ruleResult === "allow") {
         return Promise.resolve({ allowed: true });
       }
 
-      // Trust-all bypasses all prompts for non-dangerous tools.
-      if (trustAllRef.current) {
+      // bypassPermissions mode — auto-approve everything.
+      if (trustAllRef.current || permModeRef.current === "bypassPermissions") {
         return Promise.resolve({ allowed: true });
       }
 
-      // Auto-edit mode: auto-approve everything except bash.
-      if (permModeRef.current === "auto-edit" && AUTO_EDIT_TOOLS.has(toolName)) {
+      // dontAsk mode — deny everything not explicitly allowed.
+      if (permModeRef.current === "dontAsk") {
+        return Promise.resolve({ allowed: false });
+      }
+
+      // acceptEdits mode: auto-approve everything except bash.
+      if (permModeRef.current === "acceptEdits" && ACCEPT_EDITS_TOOLS.has(toolName)) {
         return Promise.resolve({ allowed: true });
       }
 
@@ -339,9 +360,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         return Promise.resolve({ allowed: true });
       }
 
-      // Session-level "always allow" for this tool.
-      if (sessionAllowRef.current.has(toolName)) {
+      // Session-level allow for this tool.
+      if (sessionAllowRef.current.has(toolName) || sessionAllowRef.current.has("*")) {
         return Promise.resolve({ allowed: true });
+      }
+
+      // plan mode — deny write tools (they shouldn't be in the schema, but safety net).
+      if (permModeRef.current === "plan" && !READ_TOOLS.has(toolName)) {
+        return Promise.resolve({ allowed: false });
       }
 
       // Interactive permission prompt via React state.
@@ -446,19 +472,35 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           const { allowed, mode } = await checkPermission(name, input);
 
-          // Handle mode escalation from the permission prompt.
-          // Both update refs for behavior, and update displayed mode for consistency.
-          if (mode === "trust") {
-            trustAllRef.current = true;
-            setTrustAllState(true);
-            permModeRef.current = "trust all";
-            setPermMode("trust all");
-          } else if (mode === "always") {
-            sessionAllowRef.current.add(name);
-            // Reflect in status bar — show auto-edit since user is granting standing permissions
-            if (permModeRef.current === "ask") {
-              permModeRef.current = "auto-edit";
-              setPermMode("auto-edit");
+          // Handle "Yes, don't ask again" — save permanent rule for bash, session-only for edits.
+          if (mode === "always" && allowed) {
+            if (name === "bash" && input.command) {
+              // Save permanent rules for each subcommand
+              const cmd = String(input.command);
+              const subcommands = splitCompoundCommand(cmd);
+              const rules = subcommands.map(commandToRule);
+              // Persist to config
+              try {
+                const cfg = (await import("../config.js")).loadConfig();
+                if (cfg) {
+                  cfg.permissions = cfg.permissions || {};
+                  cfg.permissions.allow = cfg.permissions.allow || [];
+                  for (const rule of rules) {
+                    if (!cfg.permissions.allow.includes(rule)) {
+                      cfg.permissions.allow.push(rule);
+                    }
+                  }
+                  (await import("../config.js")).saveConfig(cfg);
+                  // Update the live rules ref
+                  permissionRulesRef.current = cfg.permissions;
+                }
+              } catch {
+                // If config save fails, fall back to session-only
+                sessionAllowRef.current.add(name);
+              }
+            } else {
+              // File edits: session-only (matches Claude Code behavior)
+              sessionAllowRef.current.add(name);
             }
           }
 
@@ -857,14 +899,20 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   }, []);
 
   const cyclePermissionMode = useCallback(() => {
-    const idx = PERMISSION_MODES.indexOf(permModeRef.current);
-    const next = PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
+    // dontAsk is not in the cycle — skip it
+    const cycleModes = PERMISSION_MODES;
+    const idx = cycleModes.indexOf(permModeRef.current as typeof cycleModes[number]);
+    const next = cycleModes[(idx + 1) % cycleModes.length];
     setPermMode(next);
     permModeRef.current = next;
     // Sync trustAll state
-    const isTrust = next === "trust all";
+    const isTrust = next === "bypassPermissions";
     setTrustAllState(isTrust);
     trustAllRef.current = isTrust;
+    // Sync planMode state
+    const isPlan = next === "plan";
+    setPlanModeState(isPlan);
+    planModeRef.current = isPlan;
   }, []);
 
   // ------- Per-tool permission helpers -------- //

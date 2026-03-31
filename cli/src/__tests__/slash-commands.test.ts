@@ -643,11 +643,11 @@ describe("handleSlashCommand", () => {
       );
     });
 
-    it("shows trust all mode", () => {
-      const ctx = createContext({ trustAll: true });
+    it("shows bypassPermissions mode", () => {
+      const ctx = createContext({ trustAll: true, permissionMode: "bypassPermissions" });
       handleSlashCommand("/permissions", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("trust all")
+        expect.stringContaining("bypassPermissions")
       );
     });
 

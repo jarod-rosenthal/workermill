@@ -5,14 +5,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock dependencies
-vi.mock("../safety.js", () => ({
-  isDangerous: vi.fn(() => null),
-  READ_TOOLS: new Set(["read_file", "glob", "grep", "ls", "sub_agent", "lsp"]),
-  checkPermissionRules: vi.fn(() => "none"),
-}));
+vi.mock("../safety.js", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    isDangerous: vi.fn(() => null),
+    checkPermissionRules: vi.fn(() => "none"),
+  };
+});
+
+vi.mock("../config.js", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    loadConfig: vi.fn(() => ({ providers: {}, default: "ollama", permissions: { allow: [] } })),
+    saveConfig: vi.fn(),
+  };
+});
 
 import { checkToolPermission } from "../orchestrator.js";
 import { isDangerous, checkPermissionRules } from "../safety.js";
+import { loadConfig, saveConfig } from "../config.js";
 import type { OrchestrationOutput } from "../orchestrator.js";
 
 function createMockOutput(): OrchestrationOutput {
@@ -32,6 +45,7 @@ describe("checkToolPermission — exhaustive", () => {
     vi.clearAllMocks();
     vi.mocked(isDangerous).mockReturnValue(null);
     vi.mocked(checkPermissionRules).mockReturnValue("none");
+    vi.mocked(loadConfig).mockReturnValue({ providers: {}, default: "ollama", permissions: { allow: [] } });
   });
 
   // -----------------------------------------------------------------------
@@ -85,7 +99,7 @@ describe("checkToolPermission — exhaustive", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 2. Granular permission rules
+  // 2. Granular permission rules (deny > ask > allow)
   // -----------------------------------------------------------------------
 
   describe("granular permission rules", () => {
@@ -121,6 +135,18 @@ describe("checkToolPermission — exhaustive", () => {
       expect(allowed).toBe(false);
     });
 
+    it("ask rule forces prompt even with trustAll", async () => {
+      vi.mocked(checkPermissionRules).mockReturnValue("ask");
+      const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue(true);
+
+      const allowed = await checkToolPermission(
+        "bash", { command: "npm publish" }, true, new Set(["*"]), output,
+      );
+      expect(output.confirm).toHaveBeenCalled();
+      expect(allowed).toBe(true);
+    });
+
     it("falls through to normal logic when rule returns none", async () => {
       vi.mocked(checkPermissionRules).mockReturnValue("none");
       const output = createMockOutput();
@@ -128,7 +154,6 @@ describe("checkToolPermission — exhaustive", () => {
       const allowed = await checkToolPermission(
         "bash", { command: "echo hi" }, true, new Set(), output,
       );
-      // trustAll=true, so allowed
       expect(allowed).toBe(true);
       expect(output.confirm).not.toHaveBeenCalled();
     });
@@ -215,85 +240,73 @@ describe("checkToolPermission — exhaustive", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 6. User prompt responses
+  // 6. User prompt responses — "Yes, don't ask again"
   // -----------------------------------------------------------------------
 
   describe("user prompt responses", () => {
-    it("mode=trust adds '*' wildcard to sessionAllow", async () => {
-      const output = createMockOutput();
-      vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "trust" });
-      const sessionAllow = new Set<string>();
-
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
-
-      expect(sessionAllow.has("*")).toBe(true);
-    });
-
-    it("after mode=trust, ALL subsequent tools are auto-allowed without prompting", async () => {
-      const output = createMockOutput();
-      const sessionAllow = new Set<string>();
-
-      // First call — user selects trust
-      vi.mocked(output.confirm).mockResolvedValueOnce({ allowed: true, mode: "trust" });
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
-
-      // Every subsequent tool — no prompt
-      for (const tool of ["verify", "todo", "web_search", "write_file", "edit_file", "git", "patch", "fetch", "mcp__something__tool"]) {
-        const allowed = await checkToolPermission(tool, {}, false, sessionAllow, output);
-        expect(allowed).toBe(true);
-      }
-      // confirm called exactly once (the first bash call)
-      expect(output.confirm).toHaveBeenCalledTimes(1);
-    });
-
-    it("mode=always adds only that specific tool to sessionAllow", async () => {
+    it("mode=always for bash saves permanent rule to config", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
 
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
+      await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
 
-      expect(sessionAllow.has("bash")).toBe(true);
-      expect(sessionAllow.has("*")).toBe(false);
-      expect(sessionAllow.has("write_file")).toBe(false);
+      expect(saveConfig).toHaveBeenCalled();
+      const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
+      expect(savedConfig.permissions?.allow).toContain("bash(npm test)");
     });
 
-    it("mode=always — second call to same tool is auto-allowed", async () => {
+    it("mode=always for bash with compound command saves separate rules", async () => {
+      const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
+      const sessionAllow = new Set<string>();
+
+      await checkToolPermission("bash", { command: "git status && npm test" }, false, sessionAllow, output);
+
+      const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
+      expect(savedConfig.permissions?.allow).toContain("bash(git status)");
+      expect(savedConfig.permissions?.allow).toContain("bash(npm test)");
+    });
+
+    it("mode=always for non-bash adds to sessionAllow (session-only)", async () => {
+      const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
+      const sessionAllow = new Set<string>();
+
+      await checkToolPermission("write_file", { path: "foo.ts" }, false, sessionAllow, output);
+
+      expect(sessionAllow.has("write_file")).toBe(true);
+      // No persistent config save for non-bash
+      expect(saveConfig).not.toHaveBeenCalled();
+    });
+
+    it("mode=always — second call to same bash pattern is auto-allowed via saved rule", async () => {
+      // Simulate: first call saves rule, second call matches it
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValueOnce({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
 
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
-      const allowed = await checkToolPermission("bash", { command: "ls" }, false, sessionAllow, output);
+      await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
+
+      // Now the rule is saved — simulate checkPermissionRules matching it
+      vi.mocked(checkPermissionRules).mockReturnValue("allow");
+      const allowed = await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
 
       expect(allowed).toBe(true);
       expect(output.confirm).toHaveBeenCalledTimes(1);
     });
 
-    it("mode=always — different tool still prompts", async () => {
-      const output = createMockOutput();
-      vi.mocked(output.confirm)
-        .mockResolvedValueOnce({ allowed: true, mode: "always" })
-        .mockResolvedValueOnce({ allowed: true, mode: "always" });
-      const sessionAllow = new Set<string>();
-
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
-      await checkToolPermission("write_file", { path: "foo.ts" }, false, sessionAllow, output);
-
-      expect(output.confirm).toHaveBeenCalledTimes(2);
-    });
-
-    it("simple boolean true adds tool to sessionAllow", async () => {
+    it("simple boolean true allows once — does NOT add to sessionAllow", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue(true);
       const sessionAllow = new Set<string>();
 
       await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
 
-      expect(sessionAllow.has("bash")).toBe(true);
+      expect(sessionAllow.has("bash")).toBe(false);
     });
 
-    it("simple boolean false does NOT add tool to sessionAllow", async () => {
+    it("simple boolean false denies — does NOT add to sessionAllow", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue(false);
       const sessionAllow = new Set<string>();
@@ -306,51 +319,7 @@ describe("checkToolPermission — exhaustive", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 7. The exact bug that was reported: verify tool after trust-all
-  // -----------------------------------------------------------------------
-
-  describe("the verify-after-trust-all bug (regression)", () => {
-    it("verify tool is auto-allowed after selecting trust-all on a different tool", async () => {
-      const output = createMockOutput();
-      const sessionAllow = new Set<string>();
-
-      // User selects trust on a bash prompt
-      vi.mocked(output.confirm).mockResolvedValueOnce({ allowed: true, mode: "trust" });
-      await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
-
-      // verify should now be auto-allowed — NO prompt
-      const allowed = await checkToolPermission("verify", { command: "go build" }, false, sessionAllow, output);
-      expect(allowed).toBe(true);
-      expect(output.confirm).toHaveBeenCalledTimes(1); // only the first bash call
-    });
-
-    it("MCP tools are auto-allowed after selecting trust-all", async () => {
-      const output = createMockOutput();
-      const sessionAllow = new Set<string>();
-
-      vi.mocked(output.confirm).mockResolvedValueOnce({ allowed: true, mode: "trust" });
-      await checkToolPermission("bash", { command: "echo" }, false, sessionAllow, output);
-
-      const allowed = await checkToolPermission("mcp__docker__container_list", {}, false, sessionAllow, output);
-      expect(allowed).toBe(true);
-      expect(output.confirm).toHaveBeenCalledTimes(1);
-    });
-
-    it("todo tool is auto-allowed after selecting trust-all", async () => {
-      const output = createMockOutput();
-      const sessionAllow = new Set<string>();
-
-      vi.mocked(output.confirm).mockResolvedValueOnce({ allowed: true, mode: "trust" });
-      await checkToolPermission("write_file", { path: "foo" }, false, sessionAllow, output);
-
-      const allowed = await checkToolPermission("todo", { text: "fix tests" }, false, sessionAllow, output);
-      expect(allowed).toBe(true);
-      expect(output.confirm).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 8. Priority order: dangerous > deny rule > allow rule > trustAll > read > session > prompt
+  // 7. Priority order: dangerous > deny > ask > allow > trustAll > read > session > prompt
   // -----------------------------------------------------------------------
 
   describe("priority order", () => {
@@ -363,7 +332,6 @@ describe("checkToolPermission — exhaustive", () => {
       const allowed = await checkToolPermission(
         "bash", { command: "rm -rf /" }, true, new Set(["*"]), output, { allow: ["bash(*)"] },
       );
-      // Dangerous still prompts even though everything else says allow
       expect(output.error).toHaveBeenCalledWith(expect.stringContaining("DANGEROUS"));
       expect(allowed).toBe(false);
     });
@@ -377,6 +345,17 @@ describe("checkToolPermission — exhaustive", () => {
       );
       expect(allowed).toBe(false);
       expect(output.confirm).not.toHaveBeenCalled();
+    });
+
+    it("ask rule forces prompt even with sessionAllow *", async () => {
+      vi.mocked(checkPermissionRules).mockReturnValue("ask");
+      const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue(true);
+
+      const allowed = await checkToolPermission(
+        "bash", { command: "npm publish" }, true, new Set(["*"]), output,
+      );
+      expect(output.confirm).toHaveBeenCalled();
     });
   });
 });

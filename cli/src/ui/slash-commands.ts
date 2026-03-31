@@ -461,7 +461,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
           "executes with tool calls, reviews, and ships.\n\n" +
           "**Note:** Plans on your current branch, then creates a feature branch after you approve. " +
-          "On success, returns to your original branch. On failure/cancel, stays on the feature branch — use `/retry` to continue."
+          "Stays on the feature branch when done so you can review, test, and push."
         );
       } else if (ctx.orchestratorRunning) {
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
@@ -895,17 +895,26 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     // ---- /permissions ----
     case "permissions": {
       if (!arg) {
-        // Show current permissions
-        const mode = ctx.trustAll ? "**trust all** — all tools auto-approved" : "**ask** — prompts for each tool";
+        const modeLabel = ctx.permissionMode || "default";
+        const cfg = loadConfig();
+        const allowRules = cfg?.permissions?.allow || [];
+        const askRules = cfg?.permissions?.ask || [];
+        const denyRules = cfg?.permissions?.deny || [];
+        const rulesInfo = (allowRules.length + askRules.length + denyRules.length) > 0
+          ? `\n\n**Saved rules:**\n` +
+            (denyRules.length ? `Deny: ${denyRules.map(r => `\`${r}\``).join(", ")}\n` : "") +
+            (askRules.length ? `Ask: ${askRules.map(r => `\`${r}\``).join(", ")}\n` : "") +
+            (allowRules.length ? `Allow: ${allowRules.map(r => `\`${r}\``).join(", ")}` : "")
+          : "";
         ctx.addSystemMessage(
-          `**Permission mode:** ${mode}\n\n` +
+          `**Permission mode:** ${modeLabel} *(shift+tab to cycle)*\n\n` +
+          "**Modes:** default → acceptEdits → plan → bypassPermissions\n\n" +
           "Commands:\n" +
-          "- `/permissions trust` — auto-approve all tools\n" +
-          "- `/permissions ask` — prompt for each tool\n" +
-          "- `/permissions allow <tool>` — always allow a specific tool\n" +
-          "- `/permissions deny <tool>` — always deny a specific tool\n" +
-          "- `/permissions reset` — reset to default (ask mode)\n\n" +
-          "**Tools:** bash, read_file, write_file, edit_file, glob, grep, ls, fetch, git, patch, web_search, sub_agent, todo"
+          "- `/permissions allow <tool>` — allow a tool for this session\n" +
+          "- `/permissions deny <tool>` — deny a tool for this session\n" +
+          "- `/permissions reset` — reset to default mode\n\n" +
+          "Approving a bash command with **Yes, don't ask again** saves a permanent rule." +
+          rulesInfo
         );
       } else {
         const parts = arg.split(/\s+/);
@@ -914,12 +923,14 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         switch (action) {
           case "trust":
+          case "bypass":
             ctx.setTrustAll(true);
-            ctx.addSystemMessage("**Trust mode ON.** All tools auto-approved.");
+            ctx.addSystemMessage("**bypassPermissions mode ON.** All tools auto-approved.");
             break;
           case "ask":
+          case "default":
             ctx.setTrustAll(false);
-            ctx.addSystemMessage("**Ask mode ON.** Tools require approval.");
+            ctx.addSystemMessage("**default mode ON.** Tools require approval.");
             break;
           case "allow":
             if (!toolName) {
@@ -950,13 +961,29 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /setup ----
     case "setup": {
+      // /setup reset — wipe config and restart
+      if (arg === "reset") {
+        try {
+          const configPath = path.join(os.homedir(), ".workermill", "cli.json");
+          if (fs.existsSync(configPath)) {
+            fs.unlinkSync(configPath);
+            ctx.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` to re-run setup.");
+          } else {
+            ctx.addSystemMessage("No config to clear.");
+          }
+        } catch (err) {
+          ctx.addSystemMessage(`Failed to clear config: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        break;
+      }
+
+      // /setup — show current config and how to change each part
       const setupConfig = loadConfig();
       if (!setupConfig) {
         ctx.addSystemMessage("No config found. Type `/exit` and run `workermill` to start setup.");
         break;
       }
 
-      // Show current config and how to change each part inline
       const providers = Object.entries(setupConfig.providers).map(
         ([name, p]) => `  - **${name}**: ${p.model}${p.apiKey ? " (key set)" : ""}${p.host ? ` (${p.host})` : ""}`
       );
@@ -981,21 +1008,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         `| Add a new provider | \`/settings key <provider> <key>\` then \`/model <provider>/<model>\` |\n` +
         `| Start over from scratch | \`/setup reset\` |`
       );
-      break;
-    }
-    case "setup reset": {
-      // Only this explicitly wipes the config
-      try {
-        const configPath = path.join(os.homedir(), ".workermill", "cli.json");
-        if (fs.existsSync(configPath)) {
-          fs.unlinkSync(configPath);
-          ctx.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` to re-run setup.");
-        } else {
-          ctx.addSystemMessage("No config to clear.");
-        }
-      } catch (err) {
-        ctx.addSystemMessage(`Failed to clear config: ${err instanceof Error ? err.message : String(err)}`);
-      }
       break;
     }
 

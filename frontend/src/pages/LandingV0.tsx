@@ -22,8 +22,9 @@ function SocialProof() {
   const [stars, setStars] = useState<number | null>(null);
 
   useEffect(() => {
-    // Fetch weekly downloads from npm
-    fetch("https://api.npmjs.org/downloads/point/last-week/workermill")
+    // Fetch total downloads from npm (all time — from first publish to today)
+    const today = new Date().toISOString().split("T")[0];
+    fetch(`https://api.npmjs.org/downloads/point/2026-01-01:${today}/workermill`)
       .then((r) => r.json())
       .then((d) => { if (d.downloads) setDownloads(d.downloads); })
       .catch(() => {});

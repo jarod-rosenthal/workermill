@@ -1,6 +1,7 @@
 import { loadMemories, formatMemoriesForPrompt, migrateOldLearnings } from "../memory.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { getMCPTools } from "../mcp-client.js";
+import { loadCustomCommands } from "../custom-commands.js";
 
 export function buildSystemPrompt(workingDir: string): string {
   const base = `You are a senior coding assistant running in the user's terminal.
@@ -70,6 +71,16 @@ You have persistent memory across conversations for this project. Save memories 
     prompt += `\n\n## MCP Tools\n\nYou have additional tools from ${serverNames.length} MCP server(s): ${serverNames.join(", ")}. `;
     prompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools provided by external MCP servers. `;
     prompt += `Use them confidently — when they return results, trust those results. Do NOT say you "cannot" use them or claim they don't work after a successful call.\n`;
+  }
+
+  // Add invocable skills with whenToUse hints
+  const skills = loadCustomCommands().filter(s => s.whenToUse);
+  if (skills.length > 0) {
+    prompt += `\n\n## Available Skills\n\nYou can invoke these skills by telling the user to run the slash command, or by recommending them when the situation matches:\n\n`;
+    for (const skill of skills) {
+      prompt += `- **/${skill.name}**${skill.args ? ` ${skill.args}` : ""}: ${skill.description}`;
+      prompt += `\n  _When to use:_ ${skill.whenToUse}\n`;
+    }
   }
 
   return prompt;

@@ -5,7 +5,14 @@ vi.mock("ai", () => ({
   generateText: vi.fn(),
 }));
 
-import { getContextLimit, shouldCompact, compactMessages } from "../compaction.js";
+import {
+  getContextLimit,
+  shouldCompact,
+  compactMessages,
+  microCompact,
+  extractMemoriesBeforeCompact,
+  resetCompactionState,
+} from "../compaction.js";
 import { generateText } from "ai";
 
 const mockGenerateText = vi.mocked(generateText);
@@ -38,34 +45,49 @@ describe("compaction", () => {
   });
 
   describe("shouldCompact()", () => {
-    it("returns 'none' when tokens are below 80% of limit", () => {
-      // 200000 * 0.79 = 158000
-      expect(shouldCompact(158000, "claude-sonnet-4-6")).toBe("none");
+    it("returns 'none' when tokens are below 60% of limit", () => {
+      // 200000 * 0.59 = 118000
+      expect(shouldCompact(118000, "claude-sonnet-4-6").level).toBe("none");
+    });
+
+    it("returns 'micro' when tokens are between 60% and 80%", () => {
+      // 200000 * 0.65 = 130000
+      const result = shouldCompact(130000, "claude-sonnet-4-6");
+      expect(result.level).toBe("micro");
+      expect(result.limit).toBe(200000);
+      expect(result.usage).toBe(130000);
     });
 
     it("returns 'soft' when tokens are between 80% and 95%", () => {
       // 200000 * 0.85 = 170000
-      expect(shouldCompact(170000, "claude-sonnet-4-6")).toBe("soft");
+      expect(shouldCompact(170000, "claude-sonnet-4-6").level).toBe("soft");
     });
 
     it("returns 'hard' when tokens are at or above 95%", () => {
       // 200000 * 0.95 = 190000
-      expect(shouldCompact(190000, "claude-sonnet-4-6")).toBe("hard");
+      expect(shouldCompact(190000, "claude-sonnet-4-6").level).toBe("hard");
     });
 
     it("returns 'hard' when tokens exceed the limit", () => {
-      expect(shouldCompact(250000, "claude-sonnet-4-6")).toBe("hard");
+      expect(shouldCompact(250000, "claude-sonnet-4-6").level).toBe("hard");
     });
 
     it("uses configuredContextLength when provided", () => {
-      // Custom limit of 10000, 80% = 8000
-      expect(shouldCompact(7000, "anything", 10000)).toBe("none");
-      expect(shouldCompact(8500, "anything", 10000)).toBe("soft");
-      expect(shouldCompact(9600, "anything", 10000)).toBe("hard");
+      // Custom limit of 10000
+      expect(shouldCompact(5000, "anything", 10000).level).toBe("none");
+      expect(shouldCompact(6500, "anything", 10000).level).toBe("micro");
+      expect(shouldCompact(8500, "anything", 10000).level).toBe("soft");
+      expect(shouldCompact(9600, "anything", 10000).level).toBe("hard");
     });
 
     it("returns 'none' for zero tokens", () => {
-      expect(shouldCompact(0, "claude-sonnet-4-6")).toBe("none");
+      expect(shouldCompact(0, "claude-sonnet-4-6").level).toBe("none");
+    });
+
+    it("includes limit and usage in result", () => {
+      const result = shouldCompact(170000, "claude-sonnet-4-6");
+      expect(result.limit).toBe(200000);
+      expect(result.usage).toBe(170000);
     });
   });
 
@@ -182,6 +204,173 @@ describe("compaction", () => {
           prompt: expect.stringContaining("user: a"),
         }),
       );
+    });
+
+    it("circuit breaker: returns toKeep after MAX_CONSECUTIVE_FAILURES", async () => {
+      resetCompactionState();
+      mockGenerateText.mockRejectedValue(new Error("fail"));
+
+      const msgs = [
+        { role: "user" as const, content: "a" },
+        { role: "assistant" as const, content: "b" },
+        { role: "user" as const, content: "c" },
+        { role: "assistant" as const, content: "d" },
+        { role: "user" as const, content: "e" },
+        { role: "assistant" as const, content: "f" },
+      ];
+
+      // Fail 3 times to trip the circuit breaker
+      await compactMessages(fakeModel, msgs, "soft");
+      await compactMessages(fakeModel, msgs, "soft");
+      await compactMessages(fakeModel, msgs, "soft");
+
+      // 4th call should skip the API call entirely
+      mockGenerateText.mockClear();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = await compactMessages(fakeModel, msgs, "soft");
+      warnSpy.mockRestore();
+
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      // Returns only kept messages (last 4 for soft)
+      expect(result.length).toBe(4);
+
+      resetCompactionState();
+    });
+
+    it("circuit breaker resets on success", async () => {
+      resetCompactionState();
+      mockGenerateText.mockRejectedValueOnce(new Error("fail"));
+      mockGenerateText.mockRejectedValueOnce(new Error("fail"));
+      mockGenerateText.mockResolvedValueOnce({ text: "recovered" } as any);
+
+      const msgs = [
+        { role: "user" as const, content: "a" },
+        { role: "assistant" as const, content: "b" },
+        { role: "user" as const, content: "c" },
+        { role: "assistant" as const, content: "d" },
+        { role: "user" as const, content: "e" },
+        { role: "assistant" as const, content: "f" },
+      ];
+
+      await compactMessages(fakeModel, msgs, "soft"); // fail 1
+      await compactMessages(fakeModel, msgs, "soft"); // fail 2
+      const result = await compactMessages(fakeModel, msgs, "soft"); // success
+
+      // Should have summary + kept messages
+      expect(result[1].content).toContain("recovered");
+
+      // Circuit breaker should be reset — next failure doesn't trip it
+      mockGenerateText.mockRejectedValueOnce(new Error("fail again"));
+      await compactMessages(fakeModel, msgs, "soft");
+      // Still works (only 1 failure after reset)
+      mockGenerateText.mockResolvedValueOnce({ text: "still working" } as any);
+      const result2 = await compactMessages(fakeModel, msgs, "soft");
+      expect(result2[1].content).toContain("still working");
+
+      resetCompactionState();
+    });
+  });
+
+  describe("microCompact()", () => {
+    it("returns messages unchanged when fewer than preserveRecent", () => {
+      const msgs = [
+        { role: "user" as const, content: "short" },
+        { role: "assistant" as const, content: "also short" },
+      ];
+      const { messages, charsSaved } = microCompact(msgs);
+      expect(messages).toBe(msgs); // Same reference
+      expect(charsSaved).toBe(0);
+    });
+
+    it("truncates long content in older messages", () => {
+      const longContent = "x".repeat(5000);
+      const msgs = [
+        { role: "user" as const, content: longContent },
+        { role: "assistant" as const, content: longContent },
+        { role: "user" as const, content: "recent 1" },
+        { role: "assistant" as const, content: "recent 2" },
+        { role: "user" as const, content: "recent 3" },
+        { role: "assistant" as const, content: "recent 4" },
+        { role: "user" as const, content: "recent 5" },
+        { role: "assistant" as const, content: "recent 6" },
+      ];
+      const { messages, charsSaved } = microCompact(msgs);
+
+      // First two messages should be truncated
+      expect(messages[0].content.length).toBeLessThan(500);
+      expect(messages[0].content).toContain("[... truncated 5000 chars");
+      expect(messages[1].content).toContain("[... truncated 5000 chars");
+
+      // Last 6 untouched
+      expect(messages[6].content).toBe("recent 5");
+      expect(messages[7].content).toBe("recent 6");
+
+      expect(charsSaved).toBeGreaterThan(8000);
+    });
+
+    it("does not truncate short older messages", () => {
+      const msgs = [
+        { role: "user" as const, content: "short old message" },
+        { role: "assistant" as const, content: "short old reply" },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+          content: `recent ${i}`,
+        })),
+      ];
+      const { messages, charsSaved } = microCompact(msgs);
+      expect(charsSaved).toBe(0);
+      expect(messages[0].content).toBe("short old message");
+    });
+
+    it("respects custom preserveRecent and maxChars", () => {
+      const msgs = [
+        { role: "user" as const, content: "a".repeat(3000) },
+        { role: "assistant" as const, content: "b".repeat(3000) },
+        { role: "user" as const, content: "recent" },
+        { role: "assistant" as const, content: "recent" },
+      ];
+      const { messages, charsSaved } = microCompact(msgs, 2, 50);
+      expect(messages[0].content).toContain("[... truncated 3000 chars");
+      expect(messages[1].content).toContain("[... truncated 3000 chars");
+      expect(charsSaved).toBeGreaterThan(0);
+    });
+  });
+
+  describe("extractMemoriesBeforeCompact()", () => {
+    it("extracts ::learning:: markers", () => {
+      const msgs = [
+        { role: "user" as const, content: "some text" },
+        { role: "assistant" as const, content: "::learning:: Always run tests before commit" },
+        { role: "user" as const, content: "ok" },
+      ];
+      const result = extractMemoriesBeforeCompact(msgs);
+      expect(result).toEqual(["Always run tests before commit"]);
+    });
+
+    it("extracts ::remember:: markers", () => {
+      const msgs = [
+        { role: "assistant" as const, content: "::remember:: User prefers tabs over spaces" },
+      ];
+      const result = extractMemoriesBeforeCompact(msgs);
+      expect(result).toEqual(["User prefers tabs over spaces"]);
+    });
+
+    it("extracts multiple markers from multiple messages", () => {
+      const msgs = [
+        { role: "assistant" as const, content: "::learning:: fact one\nsome other text\n::remember:: fact two" },
+        { role: "user" as const, content: "no markers here" },
+        { role: "assistant" as const, content: "::learning:: fact three" },
+      ];
+      const result = extractMemoriesBeforeCompact(msgs);
+      expect(result).toEqual(["fact one", "fact two", "fact three"]);
+    });
+
+    it("returns empty array when no markers present", () => {
+      const msgs = [
+        { role: "user" as const, content: "hello" },
+        { role: "assistant" as const, content: "hi there" },
+      ];
+      expect(extractMemoriesBeforeCompact(msgs)).toEqual([]);
     });
   });
 });

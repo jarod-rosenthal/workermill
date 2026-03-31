@@ -5,6 +5,9 @@
  * READ_TOOLS, or AUTO_EDIT_TOOLS anywhere else in the codebase.
  */
 
+import { getReadOnlyTools, getAcceptEditsTools } from "../../packages/engine/src/tools/tool-metadata.js";
+export { getToolMeta } from "../../packages/engine/src/tools/tool-metadata.js";
+
 /** Command patterns that require explicit confirmation even under trust-all mode. */
 export const DANGEROUS_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
   // Destructive file operations
@@ -35,15 +38,44 @@ export function isDangerous(command: string): string | null {
   return null;
 }
 
+/** File paths that should always prompt for confirmation before writing. */
+export const DANGEROUS_FILE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  // Environment/secrets
+  { pattern: /\.env($|\.)/, label: ".env file (may contain secrets)" },
+  { pattern: /\.secret/, label: "secrets file" },
+  { pattern: /credentials/i, label: "credentials file" },
+  // Shell config
+  { pattern: /\.(bashrc|bash_profile|zshrc|zprofile|profile)$/, label: "shell config" },
+  // SSH
+  { pattern: /\.ssh\//, label: "SSH directory" },
+  // Git internals
+  { pattern: /\.git\/config$/, label: "git config" },
+  { pattern: /\.git\/hooks\//, label: "git hooks" },
+  { pattern: /\.gitignore$/, label: ".gitignore" },
+  // Package manager configs that run scripts
+  { pattern: /\.npmrc$/, label: "npm config" },
+  // CI/CD
+  { pattern: /\.github\/workflows\//, label: "GitHub Actions workflow" },
+  { pattern: /\.gitlab-ci\.yml$/, label: "GitLab CI config" },
+  { pattern: /Dockerfile$/i, label: "Dockerfile" },
+  // Lock files
+  { pattern: /package-lock\.json$/, label: "package lock file" },
+  { pattern: /yarn\.lock$/, label: "yarn lock file" },
+  { pattern: /pnpm-lock\.yaml$/, label: "pnpm lock file" },
+];
+
+/** Check if a file path matches any dangerous pattern. Returns the label if dangerous, null otherwise. */
+export function isDangerousFile(filePath: string): string | null {
+  // Normalize: resolve . and .., use forward slashes
+  const normalized = filePath.replace(/\\/g, "/");
+  for (const { pattern, label } of DANGEROUS_FILE_PATTERNS) {
+    if (pattern.test(normalized)) return label;
+  }
+  return null;
+}
+
 /** Tools that are read-only and always allowed without prompting. */
-export const READ_TOOLS = new Set<string>([
-  "read_file",
-  "glob",
-  "grep",
-  "ls",
-  "sub_agent",
-  "lsp",
-]);
+export const READ_TOOLS = getReadOnlyTools();
 
 /**
  * Check a tool call against granular permission rules.
@@ -158,10 +190,7 @@ function globMatch(pattern: string, text: string): boolean {
 }
 
 /** Tools auto-approved in "acceptEdits" mode (everything except bash). Matches Claude Code's acceptEdits. */
-export const ACCEPT_EDITS_TOOLS = new Set<string>([
-  "read_file", "write_file", "edit_file", "patch",
-  "glob", "grep", "ls", "fetch", "git", "web_search", "todo", "sub_agent",
-]);
+export const ACCEPT_EDITS_TOOLS = getAcceptEditsTools();
 
 /** @deprecated Use ACCEPT_EDITS_TOOLS */
 export const AUTO_EDIT_TOOLS = ACCEPT_EDITS_TOOLS;

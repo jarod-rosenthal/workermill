@@ -8,6 +8,33 @@ Component releases are tracked via git tags:
 
 ---
 
+## 2026-03-31 — CLI v0.15.88
+
+### Added
+- CLI: Custom skills system — `.workermill/skills/*.md` with YAML frontmatter supporting `allowedTools`, `model` override, `whenToUse` (model-invocable), and `args`. Project skills override user skills override legacy commands.
+- CLI: Micro-compaction — free pre-pass that truncates verbose tool output from older messages without an API call. Triggers at 60% context usage, reclaims context before LLM summarization kicks in.
+- CLI: Memory extraction before compaction — scans messages for `::learning::` and `::remember::` markers before they're compacted away, so learnings aren't lost.
+- CLI: Compaction circuit breaker — after 3 consecutive LLM summarization failures, skips the API call instead of retrying endlessly.
+- CLI: Hook lifecycle expansion — `runHooks` now passes `WORKERMILL_TOOL_INPUT`, `WORKERMILL_TOOL_OUTPUT`, `WORKERMILL_TOOL_SUCCESS` as env vars. New events: `tool_error`, `permission_denied`, `story_complete`, `memory_saved`.
+- CLI: Blocking pre-hooks — `runPreHooksWithBlocking()` lets hooks abort tool execution by exiting non-zero. HTTP hooks remain fire-and-forget.
+- CLI: Async hooks — `async: true` in hook config spawns detached instead of blocking.
+- CLI: Tool metadata system — `ToolMeta` interface with `isReadOnly`, `isDestructive`, `acceptEditsApproved`, `concurrencySafe`. `READ_TOOLS` and `ACCEPT_EDITS_TOOLS` now derived from metadata instead of hardcoded sets.
+- CLI: Tool call loop detection in single-agent mode — tracks last 6 tool call signatures, aborts if 4+ are identical (matches existing orchestrator pattern).
+- CLI: Dangerous file protection — 16 regex patterns for `.env`, `.bashrc`, `.ssh/`, `.git/config`, CI/CD workflows, Dockerfiles, lock files. `isDangerousFile()` exported from safety module.
+- CLI: Desktop notifications — macOS (osascript), Linux (notify-send), Windows (PowerShell toast) with terminal bell fallback. Fires on `/ship` complete/failed and auto-compaction. Controlled by `config.bell`.
+- CLI: Rate limit retry with backoff — detects 429s from any provider, extracts `retry-after` header, retries up to 3 times with status bar countdown.
+- CLI: Dangerous file protection wired into permissions — `write_file`/`edit_file`/`patch` to `.env`, `.bashrc`, `.ssh/`, `.git/config`, CI/CD workflows, lock files now triggers confirmation prompt.
+- CLI: Skills `whenToUse` in system prompt — custom skills with `whenToUse` frontmatter are listed in the system prompt so the model recommends them when relevant.
+- CLI: Memory extraction before compaction — `::learning::`/`::remember::` markers are saved via `addMemory()` before LLM compaction discards older messages.
+- CLI: Deferred tool loading — MCP tools load as one-liner descriptions in the system prompt. `tool_search` meta-tool promotes matching tools to full schema on demand. Promoted tools persist for the session.
+- CLI: Tool concurrency — tools marked `concurrencySafe` (read_file, glob, grep, ls, lsp, todo, fetch, web_search) run in parallel when the model requests multiple in one turn. Non-safe tools serialize through an async mutex.
+- CLI: Mode parity — all new features (isDangerousFile, blocking pre-hooks, tool concurrency, rate limit retry) now work in BOTH single-agent chat AND /ship orchestrator. No feature is single-mode only.
+- CLI: Blocking pre-hooks wired in — both useAgent.ts and orchestrator.ts use `runPreHooksWithBlocking()`. Pre-hooks that exit non-zero abort the tool call. Post-hooks receive tool output.
+- CLI: Rate limit retry in orchestrator — story and revision execution retry on 429 with exponential backoff, matching the single-agent behavior.
+- CLI: Test suite expanded — 52 new unit tests (maturity features + loop detection), 81 total for new features.
+
+---
+
 ## 2026-03-31 — CLI v0.15.87 + Platform Updates
 
 ### Added

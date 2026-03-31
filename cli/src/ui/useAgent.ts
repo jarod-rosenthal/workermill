@@ -18,7 +18,7 @@ import {
   forkSession,
   type Session,
 } from "../session.js";
-import { shouldCompact, compactMessages } from "../compaction.js";
+import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
@@ -26,19 +26,66 @@ import { parseImageReferences, toMessageContent, resolveFileReferences, resolveF
 import * as logger from "../logger.js";
 import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
 import { toolStatusLabel } from "./tool-status.js";
-import { runHooks } from "../hooks.js";
+import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import path from "path";
-import { isDangerous, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
+import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
+import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
+import { withConcurrencyControl } from "../tool-concurrency.js";
 import type {
   Message,
   ToolCallInfo,
   PermissionRequest,
   AgentStatus,
 } from "./types.js";
+
+// Tool call loop detection — matches orchestrator pattern
+const LOOP_WINDOW = 6;
+const LOOP_THRESHOLD = 4;
+
+// Rate limit retry config
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+/** Detect rate limit errors from any provider */
+function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
+  if (!(err instanceof Error)) return null;
+  const msg = err.message.toLowerCase();
+
+  // Check for 429 status or rate limit keywords
+  if (
+    !msg.includes("429") &&
+    !msg.includes("rate limit") &&
+    !msg.includes("too many requests") &&
+    !msg.includes("quota exceeded")
+  ) {
+    return null;
+  }
+
+  // Try to extract retry-after from error message
+  const retryMatch = msg.match(/retry.?after[:\s]*(\d+)/i);
+  if (retryMatch) {
+    const seconds = parseInt(retryMatch[1], 10);
+    return { retryAfterMs: seconds * 1000 };
+  }
+
+  // Check for Retry-After header in error details
+  const errAny = err as any;
+  if (errAny.status === 429 || errAny.statusCode === 429) {
+    const retryHeader =
+      errAny.headers?.["retry-after"] || errAny.responseHeaders?.["retry-after"];
+    if (retryHeader) {
+      const seconds = parseInt(retryHeader, 10);
+      if (!isNaN(seconds)) return { retryAfterMs: seconds * 1000 };
+    }
+  }
+
+  // Default backoff: 30 seconds
+  return { retryAfterMs: 30_000 };
+}
 
 /** Modes in the shift+tab cycle. */
 const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
@@ -170,8 +217,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
   const workingDirRef = useRef(process.cwd());
   const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
+  const bellEnabledRef = useRef<boolean | undefined>(undefined);
   const permissionRulesRef = useRef<PermissionRuleConfig | undefined>(undefined);
+  const recentToolSignaturesRef = useRef<string[]>([]);
   const initDoneRef = useRef(false);
+
+  // Deferred tool loading — MCP tools start deferred, promoted on tool_search
+  const deferredToolsRef = useRef<DeferredToolEntry[]>([]);
+  const promotedToolsRef = useRef<Set<string>>(new Set());
 
   // Keep refs in sync with state so callbacks see fresh values.
   trustAllRef.current = trustAll;
@@ -220,6 +273,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const mcpConfig = autoDetectMCPServers(cliConfig?.mcp || {});
       registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
+      bellEnabledRef.current = cliConfig?.bell;
       permissionRulesRef.current = cliConfig?.permissions;
     } catch (err) {
       logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
@@ -277,8 +331,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     toolName: string,
     toolInput: Record<string, unknown>,
   ): string | null {
-    if (toolName !== "bash") return null;
-    return isDangerous(String(toolInput.command ?? ""));
+    // Dangerous bash commands
+    if (toolName === "bash") {
+      return isDangerous(String(toolInput.command ?? ""));
+    }
+    // Dangerous file paths for write operations
+    if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
+      const filePath = String(toolInput.path || toolInput.file_path || "");
+      if (filePath) return isDangerousFile(filePath);
+    }
+    return null;
   }
 
   // ------- Permission system -------- //
@@ -401,7 +463,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
     // Merge MCP tools (dynamically resolved each call so tools from
     // servers that finish starting after init are picked up).
-    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...getMCPToolDefinitions() };
+    const allMcpTools = getMCPToolDefinitions();
+    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...allMcpTools };
 
     // Browser tools — use Zod inputSchema for cross-provider compatibility.
     allRawTools.browser_open = {
@@ -451,8 +514,70 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       execute: async () => browserClose(),
     };
 
+    // Wrap tool execute functions with concurrency control —
+    // concurrency-safe tools (read_file, glob, grep, etc.) can run in
+    // parallel while non-safe tools (bash, write_file, etc.) serialize.
+    for (const [name, td] of Object.entries(allRawTools)) {
+      if (td && typeof td.execute === "function") {
+        const original = td.execute;
+        (td as any).execute = withConcurrencyControl(name, original as any);
+      }
+    }
+
+    // Partition tools: core tools get full schemas, MCP tools are deferred
+    // to save context window space. Promoted tools (via tool_search) are
+    // treated as eager on subsequent calls.
+    const { eager: eagerTools, deferred } = partitionTools(allRawTools);
+
+    // Re-promote any tools the model previously loaded via tool_search
+    for (const name of promotedToolsRef.current) {
+      if (allRawTools[name] && !eagerTools[name]) {
+        eagerTools[name] = allRawTools[name];
+      }
+    }
+
+    // Store deferred list for tool_search and system prompt
+    deferredToolsRef.current = deferred.filter(
+      (t) => !promotedToolsRef.current.has(t.name),
+    );
+
+    // Add tool_search — lets the model load deferred tool schemas on demand
+    eagerTools.tool_search = {
+      description:
+        "Search for and load additional tools by name or keyword. Returns full tool schemas so you can call them. Use this when you need a tool from the 'Additional Tools' list.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .describe("Tool name or keyword to search for"),
+      }),
+      execute: async ({ query }: { query: string }) => {
+        const q = query.toLowerCase();
+        const currentDeferred = deferredToolsRef.current;
+        const matches = currentDeferred.filter(
+          (t) =>
+            t.name.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q),
+        );
+        if (matches.length === 0) {
+          return `No deferred tools found matching "${query}". Available deferred tools: ${currentDeferred.map((t) => t.name).join(", ") || "none"}`;
+        }
+
+        // Promote matched tools so they appear in the active tool set
+        // on the next streamText step
+        for (const m of matches) {
+          promotedToolsRef.current.add(m.name);
+        }
+
+        const results = matches.map(
+          (t) =>
+            `- ${t.name}: ${t.description}`,
+        );
+        return `Loaded ${matches.length} tool(s):\n${results.join("\n")}\n\nThese tools are now available. Call them directly in your next step.`;
+      },
+    };
+
     const wrapped: Record<string, AnyToolDef> = {};
-    for (const [name, toolDef] of Object.entries(allRawTools)) {
+    for (const [name, toolDef] of Object.entries(eagerTools)) {
       const td = toolDef as AnyToolDef;
       wrapped[name] = {
         ...td,
@@ -532,12 +657,37 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               checkpoint(resolved);
             }
             setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-            runHooks("pre", name, hooksConfigRef.current, workingDirRef.current);
+            const hookResult = runPreHooksWithBlocking(name, hooksConfigRef.current, workingDirRef.current, { input: JSON.stringify(input).substring(0, 10000) });
+            if (hookResult.blocked) {
+              return `Tool blocked by pre-hook: ${hookResult.reason}`;
+            }
             const result = await td.execute(input);
-            runHooks("post", name, hooksConfigRef.current, workingDirRef.current);
+            runHooks("post", name, hooksConfigRef.current, workingDirRef.current, { output: (typeof result === "string" ? result : JSON.stringify(result)).substring(0, 10000), success: true });
             const resultStr =
               typeof result === "string" ? result : JSON.stringify(result);
             logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
+
+            // Track for loop detection
+            const sig = `${name}:${JSON.stringify(input).substring(0, 200)}`;
+            recentToolSignaturesRef.current.push(sig);
+            if (recentToolSignaturesRef.current.length > LOOP_WINDOW) recentToolSignaturesRef.current.shift();
+            if (recentToolSignaturesRef.current.length >= LOOP_THRESHOLD) {
+              const counts: Record<string, number> = {};
+              for (const s of recentToolSignaturesRef.current) counts[s] = (counts[s] || 0) + 1;
+              const maxCount = Math.max(...Object.values(counts));
+              if (maxCount >= LOOP_THRESHOLD) {
+                logger.error("Tool call loop detected in single-agent", { tool: name, maxCount });
+                setStreamingToolCalls((prev) =>
+                  prev.map((tc) =>
+                    tc.id === callId
+                      ? { ...tc, status: "done" as const, result: "ABORTED: loop detected" }
+                      : tc,
+                  ),
+                );
+                setStatus("streaming");
+                return "ABORTED: Tool call loop detected — the same tool call was repeated " + maxCount + " times. Stop and summarize what you've accomplished.";
+              }
+            }
 
             // Mark as done with result.
             setStreamingToolCalls((prev) =>
@@ -586,7 +736,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
-      if (READ_TOOLS.has(name)) {
+      // tool_search is read-only — always available even in plan mode
+      if (READ_TOOLS.has(name) || name === "tool_search") {
         filtered[name] = def;
       }
     }
@@ -628,17 +779,23 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         setStreamingToolCalls([]);
         setStatus("thinking");
         setStatusDetail("");
+        recentToolSignaturesRef.current = [];
 
         const controller = new AbortController();
         abortRef.current = controller;
 
         // No artificial timeout — the user controls cancellation via ESC/Ctrl+C.
 
+        let rateLimitRetries = 0;
+
+        while (true) {
         try {
           const model = modelRef.current!;
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
           const activeTools = (await getActiveTools()) as ToolSet;
-          const systemPrompt = buildSystemPrompt(workingDirRef.current);
+          // Build system prompt with deferred tool listings appended
+          const systemPrompt = buildSystemPrompt(workingDirRef.current)
+            + formatDeferredToolsForPrompt(deferredToolsRef.current);
           logger.info("Starting streamText", {
             provider: aiProviderRef.current,
             model: options.model,
@@ -759,22 +916,42 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           saveSession(session);
 
           // ---- Auto-compaction ---- //
-          const compactionLevel = shouldCompact(
+          const compactionResult = shouldCompact(
             inputTokens,
             options.model,
             options.contextLength,
           );
-          if (compactionLevel !== "none") {
+          if (compactionResult.level === "micro") {
+            // Free pre-pass: trim verbose tool output, no LLM call
+            const plainMessages = session.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            }));
+            const { messages: trimmed, charsSaved } = microCompact(plainMessages);
+            if (charsSaved > 0) {
+              session.messages = trimmed.map((m) => ({
+                role: m.role,
+                content: m.content,
+                timestamp: new Date().toISOString(),
+              }));
+              saveSession(session);
+            }
+          } else if (compactionResult.level === "soft" || compactionResult.level === "hard") {
             setStatus("thinking");
         setStatusDetail("");
             const plainMessages = session.messages.map((m) => ({
               role: m.role,
               content: m.content,
             }));
+            // Extract memories before they're compacted away
+            const extractedMemories = extractMemoriesBeforeCompact(plainMessages);
+            for (const mem of extractedMemories) {
+              addMemory(mem, "learning");
+            }
             const compacted = await compactMessages(
               model,
               plainMessages,
-              compactionLevel,
+              compactionResult.level,
             );
             session.messages = compacted.map((m) => ({
               role: m.role,
@@ -782,12 +959,27 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               timestamp: new Date().toISOString(),
             }));
             saveSession(session);
+            notifyIfEnabled(bellEnabledRef.current, "WorkerMill", "Auto-compaction complete");
           }
 
           setStatus("idle");
           abortRef.current = null;
+          break; // success — exit retry loop
 
         } catch (err) {
+          // --- Rate limit retry ---
+          const rateLimit = isRateLimitError(err);
+          if (rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+            rateLimitRetries++;
+            const waitSec = Math.ceil(rateLimit.retryAfterMs / 1000);
+            logger.info("Rate limited, retrying", { attempt: rateLimitRetries, waitSec });
+            setStatusDetail(`Rate limited — retrying in ${waitSec}s (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
+            setStreamingText("");
+            setStreamingToolCalls([]);
+            await new Promise(resolve => setTimeout(resolve, rateLimit.retryAfterMs));
+            continue; // retry the streamText call
+          }
+
           abortRef.current = null;
 
           if (err instanceof Error && err.name === "AbortError") {
@@ -824,7 +1016,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStreamingText("");
           setStreamingToolCalls([]);
           setStatus("idle");
+          break; // error handled — exit retry loop
         }
+        } // end while
       })();
     },
     [getActiveTools, options.provider, options.model, options.contextLength],

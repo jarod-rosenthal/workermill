@@ -12,7 +12,7 @@ import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
-import { runHooks, runLifecycleHooks } from "./hooks.js";
+import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
 import {
   isGitRepo, getCurrentBranch, createFeatureBranch,
   commitStoryChanges, commitRevisionChanges,
@@ -20,9 +20,37 @@ import {
   getHeadHash, returnToOriginalBranch,
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
-import { isDangerous, READ_TOOLS, checkPermissionRules } from "./safety.js";
+import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "./safety.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
+import { withConcurrencyControl } from "./tool-concurrency.js";
+
+/** Detect rate limit errors from any provider */
+function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
+  if (!(err instanceof Error)) return null;
+  const msg = err.message.toLowerCase();
+  if (!msg.includes("429") && !msg.includes("rate limit") && !msg.includes("too many requests") && !msg.includes("quota exceeded")) {
+    return null;
+  }
+  const retryMatch = msg.match(/retry.?after[:\s]*(\d+)/i);
+  if (retryMatch) return { retryAfterMs: parseInt(retryMatch[1], 10) * 1000 };
+  const errAny = err as any;
+  if (errAny.status === 429 || errAny.statusCode === 429) {
+    const retryHeader = errAny.headers?.["retry-after"] || errAny.responseHeaders?.["retry-after"];
+    if (retryHeader) {
+      const seconds = parseInt(retryHeader, 10);
+      if (!isNaN(seconds)) return { retryAfterMs: seconds * 1000 };
+    }
+  }
+  return { retryAfterMs: 30_000 };
+}
+
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+/** Sleep helper for rate limit backoff */
+function rateLimitSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
@@ -272,6 +300,18 @@ export async function checkToolPermission(
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
       const result = await output.confirm("This is a dangerous operation. Are you sure?");
+      return typeof result === "object" ? result.allowed : result;
+    }
+  }
+
+  // Dangerous file path check for write operations
+  if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
+    const filePath = String(toolInput.path || toolInput.file_path || "");
+    const fileDanger = isDangerousFile(filePath);
+    if (fileDanger) {
+      output.error(`SENSITIVE FILE: ${fileDanger}`);
+      output.error(`Path: ${filePath}`);
+      const result = await output.confirm("This file may be sensitive. Are you sure?");
       return typeof result === "object" ? result.allowed : result;
     }
   }
@@ -633,6 +673,8 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
       output.coordinatorLog("Build cancelled by user.");
       return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
     }
+    // TODO: Rate limit retry for planner — requires extracting planner into a separate function
+    // to enable clean retry. For now, the error message surfaces the rate limit to the user.
     const msg = planErr instanceof Error ? planErr.message : String(planErr);
     logger.error("Planner failed", { error: msg });
     output.error(`Planner failed: ${msg}`);
@@ -1039,6 +1081,7 @@ export async function runOrchestration(
         }
 
         output.status("Critic reviewing plan...");
+        // TODO: Rate limit retry for critic streamText — add isRateLimitError check in catch block
         const criticStream = streamText({
           model: criticModel,
           abortSignal,
@@ -1229,7 +1272,10 @@ export async function runOrchestration(
             }
 
             output.toolCall(story.persona, toolName, input);
-            runHooks("pre", toolName, config.hooks, workingDir);
+            const hookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
+            if (hookResult.blocked) {
+              return `Tool blocked by pre-hook: ${hookResult.reason}`;
+            }
             const result = await toolDef.execute(input);
             runHooks("post", toolName, config.hooks, workingDir);
 
@@ -1292,9 +1338,22 @@ export async function runOrchestration(
       personaTools[key] = def;
     }
 
+    // TODO: Deferred tool loading — skipped in orchestrator because persona-based filtering
+    // already limits tools per story. MCP tools are the only unbounded set. If MCP tool counts
+    // become large, add partitionTools() here (see useAgent.ts for the pattern).
+
+    // Apply concurrency control — safe tools (read_file, list_dir, etc.) run in parallel
+    for (const [name, td] of Object.entries(personaTools)) {
+      if (td && typeof td.execute === "function") {
+        const original = td.execute;
+        (personaTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
+      }
+    }
+
     const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
 
     let revisionFeedback = "";
+    let storyRateLimitRetries = 0;
     for (let revision = 0; revision <= 2; revision++) {
 
     // Reset loop detection for each revision attempt
@@ -1587,6 +1646,17 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
 
+      // Rate limit retry with backoff — retry in-place before falling through to error classification
+      const rl = isRateLimitError(err);
+      if (rl && storyRateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+        storyRateLimitRetries++;
+        const waitSec = Math.ceil(rl.retryAfterMs / 1000);
+        output.log("system", `Rate limited — retrying in ${waitSec}s (${storyRateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
+        logger.info("Rate limit retry", { story: i + 1, attempt: storyRateLimitRetries, waitSec });
+        await rateLimitSleep(rl.retryAfterMs);
+        continue; // retry same revision
+      }
+
       // Classify error — from worker/epic/types.ts + worker-decision-engine.ts
       const errorClass = classifyError(errMsg);
       logger.info(`Error classified`, { category: errorClass.category, fixable: errorClass.fixable, persona: story.persona });
@@ -1860,6 +1930,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 - Be specific in AFFECTED_REASONS so developers know exactly what to fix`;
 
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
+        // TODO: Rate limit retry for reviewer streamText — add isRateLimitError check in catch block
         // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
         let reviewerOutput = "";
         const reviewStartMs = Date.now();
@@ -2061,12 +2132,25 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
                   const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
                   if (!allowed) return "Tool execution denied by user.";
                   output.toolCall(story.persona, toolName, input);
+                  const revHookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
+                  if (revHookResult.blocked) {
+                    return `Tool blocked by pre-hook: ${revHookResult.reason}`;
+                  }
                   output.status(`${story.persona}: working...`);
                   const result = await toolDef.execute(input);
+                  runHooks("post", toolName, config.hooks, workingDir);
                   output.status("");
                   return result;
                 },
               };
+            }
+          }
+
+          // Apply concurrency control to revision tools — same as story execution
+          for (const [name, td] of Object.entries(storyTools)) {
+            if (td && typeof td.execute === "function") {
+              const original = td.execute;
+              (storyTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
             }
           }
 
@@ -2084,6 +2168,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 Working directory: ${workingDir}`;
 
           try {
+            // TODO: Rate limit retry for revision streamText — add isRateLimitError check in catch block
             const revisionStartMs = Date.now();
             const revStream = streamText({
               model: storyModel,
@@ -2152,9 +2237,18 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             }
           } catch (err) {
             output.statusDone();
-            const errMsg = err instanceof Error ? err.message : String(err);
-            logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
-            output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
+            const revRl = isRateLimitError(err);
+            if (revRl) {
+              const waitSec = Math.ceil(revRl.retryAfterMs / 1000);
+              output.log("system", `Revision rate limited — retrying in ${waitSec}s`);
+              logger.info("Revision rate limit retry", { story: i + 1, waitSec });
+              await rateLimitSleep(revRl.retryAfterMs);
+              // Fall through to next review loop iteration which will re-attempt
+            } else {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
+              output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
+            }
           }
         }
               // Loop back to review again

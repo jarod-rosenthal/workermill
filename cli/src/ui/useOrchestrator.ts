@@ -13,6 +13,7 @@ import { useState, useCallback, useRef } from "react";
 import type { OrchestrationOutput, RetryPlan } from "../orchestrator.js";
 import { resolveConfig, type CliConfig } from "../config.js";
 import { getRetryableRun } from "../ship-state.js";
+import { notifyIfEnabled } from "../notify.js";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -276,6 +277,7 @@ export function useOrchestrator(
 
           flushLine();
           addMessage(retryPlan ? "**Retry complete.**" : "**Orchestration complete.**");
+          notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
           flushLine();
           if (controller.signal.aborted) {
@@ -283,16 +285,13 @@ export function useOrchestrator(
           } else {
             const msg = err instanceof Error ? err.message : String(err);
             addMessage(`**Orchestration failed:** ${msg}`);
+            notifyIfEnabled(config.bell, "WorkerMill", "Ship failed");
           }
         } finally {
           setRunning(false);
           setStatusMessage("");
           setPreviewLine("");
           setConfirmRequest(null);
-          // Beep on build completion (not on cancel) if sound notifications enabled
-          if (config.bell && !controller.signal.aborted) {
-            process.stdout.write("\x07");
-          }
         }
       })();
     },

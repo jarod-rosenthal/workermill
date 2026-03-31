@@ -891,6 +891,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const setTrustAll = useCallback((v: boolean) => {
     setTrustAllState(v);
     trustAllRef.current = v;
+    // Sync permission mode display
+    if (v) {
+      permModeRef.current = "bypassPermissions";
+      setPermMode("bypassPermissions");
+    } else if (permModeRef.current === "bypassPermissions") {
+      permModeRef.current = "default";
+      setPermMode("default");
+    }
   }, []);
 
   const setPlanMode = useCallback((v: boolean) => {

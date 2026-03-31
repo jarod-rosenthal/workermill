@@ -296,11 +296,11 @@ describe("handleSlashCommand", () => {
       expect(msg).toContain("default");
     });
 
-    it("shows TRUST ALL when permission mode is trust all", () => {
+    it("shows bypassPermissions when permission mode is bypassPermissions", () => {
       const ctx = createContext({ permissionMode: "bypassPermissions" });
       handleSlashCommand("/status", ctx);
       const msg = vi.mocked(ctx.addSystemMessage).mock.calls[0][0];
-      expect(msg).toContain("TRUST ALL");
+      expect(msg).toContain("bypassPermissions");
     });
   });
 

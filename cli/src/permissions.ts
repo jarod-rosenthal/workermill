@@ -69,15 +69,10 @@ export class PermissionManager {
     console.log(chalk.cyan(`  └${"─".repeat(43)}┘`));
 
     const answer = await this.askUser(
-      chalk.dim("  Allow? ") + chalk.white("(y)es / (n)o / (a)lways this tool / (t)rust all: ")
+      chalk.dim("  Allow? ") + chalk.white("(y)es / (a) yes, don't ask again / (n)o: ")
     );
 
     const choice = answer.trim().toLowerCase();
-
-    if (choice === "t" || choice === "trust") {
-      this.trustAll = true;
-      return true;
-    }
 
     if (choice === "a" || choice === "always") {
       this.sessionAllow.add(toolName);

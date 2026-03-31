@@ -249,7 +249,7 @@ interface SharedContext {
   learnings: string[];
 }
 
-// DANGEROUS_PATTERNS, READ_TOOLS, AUTO_EDIT_TOOLS imported from ./safety.js
+// DANGEROUS_PATTERNS, READ_TOOLS, ACCEPT_EDITS_TOOLS imported from ./safety.js
 
 /**
  * Check tool permission using output.confirm() instead of readline.

@@ -172,33 +172,7 @@ describe("PermissionManager", () => {
       expect(mockRl.question).not.toHaveBeenCalled();
     });
 
-    it("'t' (trust) enables trust-all for all subsequent tools", async () => {
-      pm = new PermissionManager(false);
-      mockRl = createMockRl("t");
-      pm.setReadline(mockRl as any);
-
-      const first = await pm.checkPermission("write_file", { path: "/test.ts", content: "x" });
-      expect(first).toBe(true);
-
-      // Any other tool should now be auto-allowed
-      mockRl.question.mockClear();
-      const second = await pm.checkPermission("bash", { command: "npm install" });
-      expect(second).toBe(true);
-      expect(mockRl.question).not.toHaveBeenCalled();
-    });
-
-    it("'trust' enables trust-all for all subsequent tools", async () => {
-      pm = new PermissionManager(false);
-      mockRl = createMockRl("trust");
-      pm.setReadline(mockRl as any);
-
-      await pm.checkPermission("write_file", { path: "/test.ts", content: "x" });
-
-      mockRl.question.mockClear();
-      const allowed = await pm.checkPermission("edit_file", { path: "/test.ts" });
-      expect(allowed).toBe(true);
-      expect(mockRl.question).not.toHaveBeenCalled();
-    });
+    // "trust all" option removed from prompt — trust is now a mode (shift+tab), not a prompt choice.
   });
 
   describe("dangerous bash commands", () => {

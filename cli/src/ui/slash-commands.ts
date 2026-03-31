@@ -409,7 +409,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "status": {
       const session = ctx.session;
       const msgCount = session.messages.length;
-      const mode = ctx.permissionMode === "bypassPermissions" ? "TRUST ALL" : ctx.permissionMode;
+      const mode = ctx.permissionMode || "default";
       ctx.addSystemMessage(
         `**Session Status**\n\n` +
         `| Field | Value |\n` +

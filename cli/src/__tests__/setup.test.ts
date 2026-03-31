@@ -13,6 +13,7 @@ vi.mock("../logger.js", () => ({
 const saveConfigMock = vi.fn();
 vi.mock("../config.js", () => ({
   saveConfig: (...args: unknown[]) => saveConfigMock(...args),
+  loadConfig: () => null,
 }));
 
 // Silence chalk's color codes so assertions are readable

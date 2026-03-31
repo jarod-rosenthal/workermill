@@ -131,7 +131,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     },
     cost: 0.05,
     tokens: 1200,
-    permissionMode: "ask",
+    permissionMode: "default",
     trustAll: false,
     planMode: false,
     setPlanMode: vi.fn(),
@@ -293,11 +293,11 @@ describe("handleSlashCommand", () => {
       expect(msg).toContain("abcd1234");
       expect(msg).toContain("ollama/qwen3-coder:30b");
       expect(msg).toContain("/tmp/test-project");
-      expect(msg).toContain("ask");
+      expect(msg).toContain("default");
     });
 
     it("shows TRUST ALL when permission mode is trust all", () => {
-      const ctx = createContext({ permissionMode: "trust all" });
+      const ctx = createContext({ permissionMode: "bypassPermissions" });
       handleSlashCommand("/status", ctx);
       const msg = vi.mocked(ctx.addSystemMessage).mock.calls[0][0];
       expect(msg).toContain("TRUST ALL");
@@ -338,7 +338,7 @@ describe("handleSlashCommand", () => {
     });
 
     it("starts orchestrator in trust mode when permissionMode is trust all", () => {
-      const ctx = createContext({ permissionMode: "trust all" });
+      const ctx = createContext({ permissionMode: "bypassPermissions" });
       handleSlashCommand("/ship add auth", ctx);
       expect(ctx.startOrchestrator).toHaveBeenCalledWith("add auth", true, false);
     });
@@ -639,7 +639,7 @@ describe("handleSlashCommand", () => {
       const ctx = createContext({ trustAll: false });
       handleSlashCommand("/permissions", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("ask")
+        expect.stringContaining("default")
       );
     });
 

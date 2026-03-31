@@ -49,11 +49,11 @@ function getModeInfo(mode: string): { color: string; icon: string } {
   switch (mode) {
     case "PLAN":
       return { color: theme.bashBorder, icon: "\u25B8" };
-    case "trust all":
+    case "bypassPermissions":
       return { color: theme.error, icon: "\u25C8" };
-    case "auto-edit":
+    case "acceptEdits":
       return { color: theme.warning, icon: "\u25C6" };
-    default: // "ask"
+    default: // "default"
       return { color: theme.success, icon: "\u25B8" };
   }
 }
@@ -193,19 +193,19 @@ describe("StatusBar: tool counts display", () => {
 
 describe("StatusBar: permission mode colors and icons", () => {
   it("ask mode: green success color, triangle icon", () => {
-    const info = getModeInfo("ask");
+    const info = getModeInfo("default");
     expect(info.color).toBe("#4EBA65");
     expect(info.icon).toBe("\u25B8"); // ▸
   });
 
   it("auto-edit mode: yellow warning color, diamond icon", () => {
-    const info = getModeInfo("auto-edit");
+    const info = getModeInfo("acceptEdits");
     expect(info.color).toBe("#FFCC00");
     expect(info.icon).toBe("\u25C6"); // ◆
   });
 
   it("trust all mode: red error color, filled diamond icon", () => {
-    const info = getModeInfo("trust all");
+    const info = getModeInfo("bypassPermissions");
     expect(info.color).toBe("#FF6B80");
     expect(info.icon).toBe("\u25C8"); // ◈
   });

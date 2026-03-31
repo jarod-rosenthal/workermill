@@ -97,7 +97,7 @@ function buildMockContext(
     },
     cost: 0,
     tokens: 0,
-    permissionMode: "trust all",
+    permissionMode: "bypassPermissions",
     trustAll: true,
     planMode: false,
     setPlanMode: () => {},

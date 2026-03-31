@@ -409,7 +409,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "status": {
       const session = ctx.session;
       const msgCount = session.messages.length;
-      const mode = ctx.permissionMode === "trust all" ? "TRUST ALL" : ctx.permissionMode;
+      const mode = ctx.permissionMode === "bypassPermissions" ? "TRUST ALL" : ctx.permissionMode;
       ctx.addSystemMessage(
         `**Session Status**\n\n` +
         `| Field | Value |\n` +
@@ -477,7 +477,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         }
         ctx.setLastBuildTask(arg);
         ctx.addUserMessage(`/ship ${arg}`);
-        ctx.startOrchestrator(arg, ctx.permissionMode === "trust all", ctx.sandboxed ?? false);
+        ctx.startOrchestrator(arg, ctx.permissionMode === "bypassPermissions", ctx.sandboxed ?? false);
       }
       break;
     }
@@ -488,7 +488,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
       } else {
         ctx.addUserMessage("/retry");
-        const started = ctx.retryOrchestrator(ctx.permissionMode === "trust all", ctx.sandboxed ?? false);
+        const started = ctx.retryOrchestrator(ctx.permissionMode === "bypassPermissions", ctx.sandboxed ?? false);
         if (!started) {
           ctx.addSystemMessage("Nothing to retry. No incomplete `/ship` runs found for this project.");
         }

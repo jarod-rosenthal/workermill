@@ -34,14 +34,14 @@ function resolvePermission(
   opts: {
     deniedTools?: Set<string>;
     trustAll?: boolean;
-    permMode?: "trust all" | "auto-edit" | "ask";
+    permMode?: "bypassPermissions" | "acceptEdits" | "default";
     sessionAllow?: Set<string>;
   } = {},
 ): PermissionResult {
   const {
     deniedTools = new Set<string>(),
     trustAll = false,
-    permMode = "ask",
+    permMode = "default",
     sessionAllow = new Set<string>(),
   } = opts;
 
@@ -63,7 +63,7 @@ function resolvePermission(
   }
 
   // Step 4: auto-edit mode auto-approves tools in AUTO_EDIT_TOOLS (excludes bash).
-  if (permMode === "auto-edit" && AUTO_EDIT_TOOLS.has(toolName)) {
+  if (permMode === "acceptEdits" && AUTO_EDIT_TOOLS.has(toolName)) {
     return "allowed";
   }
 
@@ -103,7 +103,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
       expect(
         resolvePermission("write_file", { path: "foo.ts", content: "x" }, {
           deniedTools: new Set(["write_file"]),
-          permMode: "auto-edit",
+          permMode: "acceptEdits",
         }),
       ).toBe("denied");
     });
@@ -238,45 +238,45 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
   describe("auto-edit mode", () => {
     it("allows write_file in auto-edit mode", () => {
       expect(
-        resolvePermission("write_file", {}, { permMode: "auto-edit" }),
+        resolvePermission("write_file", {}, { permMode: "acceptEdits" }),
       ).toBe("allowed");
     });
 
     it("allows edit_file in auto-edit mode", () => {
       expect(
-        resolvePermission("edit_file", {}, { permMode: "auto-edit" }),
+        resolvePermission("edit_file", {}, { permMode: "acceptEdits" }),
       ).toBe("allowed");
     });
 
     it("allows patch in auto-edit mode", () => {
       expect(
-        resolvePermission("patch", {}, { permMode: "auto-edit" }),
+        resolvePermission("patch", {}, { permMode: "acceptEdits" }),
       ).toBe("allowed");
     });
 
     it("allows git in auto-edit mode", () => {
       expect(
-        resolvePermission("git", {}, { permMode: "auto-edit" }),
+        resolvePermission("git", {}, { permMode: "acceptEdits" }),
       ).toBe("allowed");
     });
 
     it("allows fetch in auto-edit mode", () => {
       expect(
-        resolvePermission("fetch", {}, { permMode: "auto-edit" }),
+        resolvePermission("fetch", {}, { permMode: "acceptEdits" }),
       ).toBe("allowed");
     });
 
     it("prompts for bash in auto-edit mode (bash is NOT in AUTO_EDIT_TOOLS)", () => {
       expect(
         resolvePermission("bash", { command: "npm test" }, {
-          permMode: "auto-edit",
+          permMode: "acceptEdits",
         }),
       ).toBe("prompt");
     });
 
     it("prompts for unknown tool in auto-edit mode", () => {
       expect(
-        resolvePermission("custom_tool", {}, { permMode: "auto-edit" }),
+        resolvePermission("custom_tool", {}, { permMode: "acceptEdits" }),
       ).toBe("prompt");
     });
   });
@@ -295,7 +295,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
 
     it("allows read tools even in ask mode with no session permissions", () => {
       expect(
-        resolvePermission("read_file", { path: "foo.ts" }, { permMode: "ask" }),
+        resolvePermission("read_file", { path: "foo.ts" }, { permMode: "default" }),
       ).toBe("allowed");
     });
   });
@@ -385,7 +385,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
       expect(
         resolvePermission("write_file", {}, {
           deniedTools: new Set(["write_file"]),
-          permMode: "auto-edit",
+          permMode: "acceptEdits",
         }),
       ).toBe("denied");
     });
@@ -417,7 +417,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
     it("auto-edit does not help bash — it still prompts", () => {
       expect(
         resolvePermission("bash", { command: "npm install" }, {
-          permMode: "auto-edit",
+          permMode: "acceptEdits",
           sessionAllow: new Set(), // no session grant
         }),
       ).toBe("prompt");
@@ -426,7 +426,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
     it("session-allow takes priority over ask-mode prompt for bash", () => {
       expect(
         resolvePermission("bash", { command: "npm test" }, {
-          permMode: "ask",
+          permMode: "default",
           sessionAllow: new Set(["bash"]),
         }),
       ).toBe("allowed");

@@ -322,15 +322,15 @@ describe("permission escalation logic", () => {
   /**
    * When the user selects "always" on a permission prompt, the hook:
    *   - Adds the tool name to sessionAllowRef
-   *   - Escalates permMode from "ask" to "auto-edit"
+   *   - Escalates permMode from "default" to "acceptEdits"
    * When the user selects "trust", the hook:
    *   - Sets trustAll to true
-   *   - Sets permMode to "trust all"
+   *   - Sets permMode to "bypassPermissions"
    */
 
   it("\"always\" mode adds tool to sessionAllow and escalates ask -> auto-edit", () => {
     const sessionAllow = new Set<string>();
-    let permMode: string = "ask";
+    let permMode: string = "default";
     let trustAll = false;
 
     // Simulate mode === "always"
@@ -339,65 +339,65 @@ describe("permission escalation logic", () => {
 
     if (mode === "trust") {
       trustAll = true;
-      permMode = "trust all";
+      permMode = "bypassPermissions";
     } else if (mode === "always") {
       sessionAllow.add(toolName);
-      if (permMode === "ask") {
-        permMode = "auto-edit";
+      if (permMode === "default") {
+        permMode = "acceptEdits";
       }
     }
 
     expect(sessionAllow.has("bash")).toBe(true);
-    expect(permMode).toBe("auto-edit");
+    expect(permMode).toBe("acceptEdits");
     expect(trustAll).toBe(false);
   });
 
   it("\"always\" mode does NOT change permMode if already auto-edit", () => {
     const sessionAllow = new Set<string>();
-    let permMode: string = "auto-edit";
+    let permMode: string = "acceptEdits";
 
     const mode: "always" | "trust" = "always";
     const toolName = "write_file";
 
     if (mode === "always") {
       sessionAllow.add(toolName);
-      if (permMode === "ask") {
-        permMode = "auto-edit";
+      if (permMode === "default") {
+        permMode = "acceptEdits";
       }
     }
 
     expect(sessionAllow.has("write_file")).toBe(true);
-    expect(permMode).toBe("auto-edit"); // unchanged
+    expect(permMode).toBe("acceptEdits"); // unchanged
   });
 
   it("\"trust\" mode sets trustAll and permMode to trust all", () => {
-    let permMode: string = "ask";
+    let permMode: string = "default";
     let trustAll = false;
 
     const mode: "always" | "trust" = "trust";
 
     if (mode === "trust") {
       trustAll = true;
-      permMode = "trust all";
+      permMode = "bypassPermissions";
     }
 
     expect(trustAll).toBe(true);
-    expect(permMode).toBe("trust all");
+    expect(permMode).toBe("bypassPermissions");
   });
 
   it("\"trust\" mode overrides any existing permMode", () => {
-    let permMode: string = "auto-edit";
+    let permMode: string = "acceptEdits";
     let trustAll = false;
 
     const mode: "always" | "trust" = "trust";
 
     if (mode === "trust") {
       trustAll = true;
-      permMode = "trust all";
+      permMode = "bypassPermissions";
     }
 
     expect(trustAll).toBe(true);
-    expect(permMode).toBe("trust all");
+    expect(permMode).toBe("bypassPermissions");
   });
 });
 
@@ -579,54 +579,64 @@ describe("allowTool / denyTool", () => {
 // ---------------------------------------------------------------------------
 
 describe("cyclePermissionMode", () => {
-  const PERMISSION_MODES = ["ask", "auto-edit", "trust all"] as const;
+  const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
   type PermissionMode = typeof PERMISSION_MODES[number];
 
   function cyclePermissionMode(
     currentMode: PermissionMode,
-  ): { permMode: PermissionMode; trustAll: boolean } {
+  ): { permMode: PermissionMode; trustAll: boolean; planMode: boolean } {
     const idx = PERMISSION_MODES.indexOf(currentMode);
     const next = PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
-    const isTrust = next === "trust all";
-    return { permMode: next, trustAll: isTrust };
+    const isTrust = next === "bypassPermissions";
+    const isPlan = next === "plan";
+    return { permMode: next, trustAll: isTrust, planMode: isPlan };
   }
 
-  it("cycles ask -> auto-edit", () => {
-    const result = cyclePermissionMode("ask");
-    expect(result.permMode).toBe("auto-edit");
+  it("cycles default -> acceptEdits", () => {
+    const result = cyclePermissionMode("default");
+    expect(result.permMode).toBe("acceptEdits");
     expect(result.trustAll).toBe(false);
+    expect(result.planMode).toBe(false);
   });
 
-  it("cycles auto-edit -> trust all", () => {
-    const result = cyclePermissionMode("auto-edit");
-    expect(result.permMode).toBe("trust all");
+  it("cycles acceptEdits -> plan", () => {
+    const result = cyclePermissionMode("acceptEdits");
+    expect(result.permMode).toBe("plan");
+    expect(result.trustAll).toBe(false);
+    expect(result.planMode).toBe(true);
+  });
+
+  it("cycles plan -> bypassPermissions", () => {
+    const result = cyclePermissionMode("plan");
+    expect(result.permMode).toBe("bypassPermissions");
     expect(result.trustAll).toBe(true);
+    expect(result.planMode).toBe(false);
   });
 
-  it("cycles trust all -> ask", () => {
-    const result = cyclePermissionMode("trust all");
-    expect(result.permMode).toBe("ask");
+  it("cycles bypassPermissions -> default", () => {
+    const result = cyclePermissionMode("bypassPermissions");
+    expect(result.permMode).toBe("default");
     expect(result.trustAll).toBe(false);
+    expect(result.planMode).toBe(false);
   });
 
   it("full cycle returns to original mode", () => {
-    let mode: PermissionMode = "ask";
-    for (let i = 0; i < 3; i++) {
+    let mode: PermissionMode = "default";
+    for (let i = 0; i < 4; i++) {
       const r = cyclePermissionMode(mode);
       mode = r.permMode;
     }
-    expect(mode).toBe("ask");
+    expect(mode).toBe("default");
   });
 
-  it("trust all syncs trustAll state to true", () => {
-    // Starting from auto-edit
-    const result = cyclePermissionMode("auto-edit");
-    expect(result.permMode).toBe("trust all");
+  it("bypassPermissions syncs trustAll state to true", () => {
+    const result = cyclePermissionMode("plan");
+    expect(result.permMode).toBe("bypassPermissions");
     expect(result.trustAll).toBe(true);
   });
 
-  it("leaving trust all syncs trustAll state to false", () => {
-    const result = cyclePermissionMode("trust all");
+  it("leaving bypassPermissions syncs trustAll state to false", () => {
+    const result = cyclePermissionMode("bypassPermissions");
     expect(result.trustAll).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import readline from "readline";
 import { execSync } from "child_process";
 import chalk from "chalk";
-import { saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
+import { loadConfig, saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
 import * as logger from "./logger.js";
 
 interface ProviderOption {
@@ -217,10 +217,12 @@ async function getApiKey(
 ): Promise<string | undefined> {
   if (!provider.needsKey) return undefined;
 
-  // Reuse key if we already have one for this provider
+  // Reuse key if we already have one (from existing config or earlier in this setup)
   if (existingKeys.has(provider.name)) {
-    console.log(chalk.green(`  ✓ Reusing ${provider.display} API key from earlier`));
-    return existingKeys.get(provider.name);
+    const existing = existingKeys.get(provider.name)!;
+    const masked = existing.startsWith("{env:") ? existing : `${existing.slice(0, 6)}${"•".repeat(20)}${existing.slice(-4)}`;
+    console.log(chalk.green(`  ✓ Using saved ${provider.display} API key (${masked})`));
+    return existing;
   }
 
   // Check env var
@@ -567,6 +569,16 @@ async function configureLmStudio(providerConfig: ProviderConfig, lmStudioProvide
 export async function runSetup(): Promise<CliConfig> {
   const p = new Prompter();
   const apiKeys = new Map<string, string>();
+
+  // Pre-populate API keys from existing config so users don't re-enter them
+  const existingConfig = loadConfig();
+  if (existingConfig) {
+    for (const [name, cfg] of Object.entries(existingConfig.providers)) {
+      if ((cfg as ProviderConfig).apiKey) {
+        apiKeys.set(name, (cfg as ProviderConfig).apiKey!);
+      }
+    }
+  }
 
   console.log();
   console.log(chalk.bold("  WorkerMill CLI") + chalk.dim(" — AI coding team"));

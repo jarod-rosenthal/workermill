@@ -53,8 +53,7 @@ export interface HooksConfig {
 }
 
 export interface GitConfig {
-  /** Branch name prefix for /ship sessions (default: "workermill") */
-  branchPrefix?: string;
+  // Branch prefix is derived from the repo name automatically — no config needed.
 }
 
 export interface PermissionRuleConfig {
@@ -86,7 +85,7 @@ export interface CliConfig {
   review?: ReviewConfig;
   hooks?: HooksConfig;
   git?: GitConfig;
-  /** Restrict file/bash tools to the working directory (default: true). Set to "os" for OS-level sandboxing via bwrap (Linux). */
+  /** Restrict file/bash tools to the working directory (default: true). Set to "os" for OS-level sandboxing via @anthropic-ai/sandbox-runtime. */
   sandbox?: boolean | "os";
   /** Play a beep sound when builds complete (default: false) */
   bell?: boolean;
@@ -160,6 +159,9 @@ export function resolveConfig(): CliConfig {
       ask: [...(global.permissions?.ask || []), ...(project?.permissions?.ask || [])],
       deny: [...(global.permissions?.deny || []), ...(project?.permissions?.deny || [])],
     },
+    ticketSystem: project?.ticketSystem || global.ticketSystem,
+    jira: project?.jira || global.jira,
+    linear: project?.linear || global.linear,
   };
 }
 

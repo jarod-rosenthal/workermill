@@ -26,6 +26,22 @@ import { findModelInfo } from "../../../api/src/providers/index.js";
 import crypto from "crypto";
 
 // ---------------------------------------------------------------------------
+// Ticket reference detection
+// ---------------------------------------------------------------------------
+
+/** Detect if input is a ticket reference. Returns { system, key } or null. */
+function detectTicketRef(input: string): { system: "github" | "external"; key: string } | null {
+  const trimmed = input.trim();
+  if (/^#\d+$/.test(trimmed) || /^GH-\d+$/i.test(trimmed)) {
+    return { system: "github", key: trimmed };
+  }
+  if (/^[A-Z][A-Z0-9]+-\d+$/.test(trimmed)) {
+    return { system: "external", key: trimmed };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Session goodbye — prints a brief summary on exit
 // ---------------------------------------------------------------------------
 
@@ -459,7 +475,12 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "build": {
       if (!arg) {
         ctx.addSystemMessage(
-          "**Usage:** `/ship <task description>` or `/ship spec.md`\n\n" +
+          "**Usage:** `/ship <task>` — accepts inline text, a .md file, or a ticket reference\n\n" +
+          "**Examples:**\n" +
+          "- `/ship add dark mode to settings` — inline task\n" +
+          "- `/ship ./specs/auth-redesign.md` — from spec file\n" +
+          "- `/ship #42` — from GitHub Issue\n" +
+          "- `/ship PROJ-123` — from Jira/Linear ticket\n\n" +
           "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
           "executes with tool calls, reviews, and ships.\n\n" +
           "**Note:** Plans on your current branch, then creates a feature branch after you approve. " +
@@ -477,9 +498,51 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             `Use \`/retry\` to continue it instead.`
           );
         }
-        ctx.setLastBuildTask(arg);
-        ctx.addUserMessage(`/ship ${arg}`);
-        ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? false);
+        // Detect ticket references — fetch before orchestrating
+        const ticketRef = detectTicketRef(arg);
+        if (ticketRef) {
+          void (async () => {
+            const { TicketOps } = await import("../ticket-ops.js");
+            const cfg = loadConfig();
+            const ticketSystem = ticketRef.system === "github"
+              ? "github"
+              : (cfg?.ticketSystem || "github");
+
+            // Set env vars for TicketOps credential detection
+            if (ticketSystem === "jira" && cfg?.jira) {
+              process.env.JIRA_BASE_URL = cfg.jira.baseUrl;
+              process.env.JIRA_EMAIL = cfg.jira.email;
+              process.env.JIRA_API_TOKEN = cfg.jira.apiToken;
+            } else if (ticketSystem === "linear" && cfg?.linear) {
+              process.env.LINEAR_API_KEY = cfg.linear.apiKey;
+            }
+            if (ticketSystem === "github" && !process.env.GITHUB_REPO) {
+              try {
+                const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
+                const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+                if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
+              } catch { /* not a git repo */ }
+            }
+
+            const ops = new TicketOps(ticketRef.key, ticketSystem);
+            const ticket = await ops.fetchTicket();
+
+            if (!ticket) {
+              ctx.addSystemMessage(`Could not fetch ticket ${ticketRef.key}. Check your credentials with \`/setup\`.`);
+              return;
+            }
+
+            const taskPrompt = `# ${ticket.title}\n\n${ticket.body}${ticket.labels?.length ? `\n\nLabels: ${ticket.labels.join(", ")}` : ""}`;
+            ctx.addSystemMessage(`Fetched **${ticketRef.key}**: ${ticket.title}`);
+            ctx.setLastBuildTask(taskPrompt);
+            ctx.addUserMessage(`/ship ${ticketRef.key}`);
+            ctx.startOrchestrator(taskPrompt, ctx.isTrustAll, ctx.sandboxed ?? false);
+          })();
+        } else {
+          ctx.setLastBuildTask(arg);
+          ctx.addUserMessage(`/ship ${arg}`);
+          ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? false);
+        }
       }
       break;
     }

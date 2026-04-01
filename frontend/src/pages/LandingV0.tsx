@@ -4,7 +4,9 @@ import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";
-import ExecutionShowcase from "../components/ExecutionShowcase";
+import CliShowcase from "../components/CliShowcase";
+// ExecutionShowcase preserved for PLATFORM.md / VS Code extension page
+// import ExecutionShowcase from "../components/ExecutionShowcase";
 import TrustCallout from "../components/TrustCallout";
 import { Demos } from "./Home/Demos";
 
@@ -485,8 +487,8 @@ export default function LandingV0() {
             </div>
           </section>
 
-          {/* Interactive execution showcase */}
-          <ExecutionShowcase />
+          {/* CLI terminal showcase — /ship GH-42 workflow animation */}
+          <CliShowcase />
 
           {/* Proof — live projects with real metrics */}
           <div id="showcase" ref={showcaseRef}>

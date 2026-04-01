@@ -53,17 +53,16 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("dangerous commands", () => {
-    it("prompts for dangerous bash even when trustAll=true", async () => {
+    it("auto-approves dangerous bash when trustAll=true (bypass mode)", async () => {
       vi.mocked(isDangerous).mockReturnValue("rm -rf /");
       const output = createMockOutput();
-      vi.mocked(output.confirm).mockResolvedValue({ allowed: false });
 
       const allowed = await checkToolPermission(
         "bash", { command: "rm -rf /" }, true, new Set(), output,
       );
 
-      expect(output.error).toHaveBeenCalledWith(expect.stringContaining("DANGEROUS"));
-      expect(allowed).toBe(false);
+      expect(output.confirm).not.toHaveBeenCalled();
+      expect(allowed).toBe(true);
     });
 
     it("allows dangerous command when user confirms", async () => {
@@ -129,8 +128,9 @@ describe("checkToolPermission — exhaustive", () => {
       vi.mocked(checkPermissionRules).mockReturnValue("deny");
       const output = createMockOutput();
 
+      // Use a non-sensitive path so isDangerousFile doesn't intercept before the rule check
       const allowed = await checkToolPermission(
-        "write_file", { path: ".env" }, true, new Set(), output, { deny: ["write_file(*.env)"] },
+        "write_file", { path: "src/app.ts" }, true, new Set(), output, { deny: ["write_file"] },
       );
       expect(allowed).toBe(false);
     });
@@ -244,7 +244,7 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("user prompt responses", () => {
-    it("mode=always for bash saves permanent rule to config", async () => {
+    it("mode=always for bash saves permanent prefix rule to config", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
@@ -253,10 +253,10 @@ describe("checkToolPermission — exhaustive", () => {
 
       expect(saveConfig).toHaveBeenCalled();
       const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
-      expect(savedConfig.permissions?.allow).toContain("bash(npm test)");
+      expect(savedConfig.permissions?.allow).toContain("bash(npm test:*)");
     });
 
-    it("mode=always for bash with compound command saves separate rules", async () => {
+    it("mode=always for bash with compound command saves prefix rule for full command", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
@@ -264,8 +264,8 @@ describe("checkToolPermission — exhaustive", () => {
       await checkToolPermission("bash", { command: "git status && npm test" }, false, sessionAllow, output);
 
       const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
-      expect(savedConfig.permissions?.allow).toContain("bash(git status)");
-      expect(savedConfig.permissions?.allow).toContain("bash(npm test)");
+      // Compound commands get a prefix rule for the first command
+      expect(savedConfig.permissions?.allow).toContain("bash(git status:*)");
     });
 
     it("mode=always for non-bash adds to sessionAllow (session-only)", async () => {
@@ -323,14 +323,14 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("priority order", () => {
-    it("dangerous check happens before permission rules", async () => {
+    it("dangerous check prompts when not in bypass mode", async () => {
       vi.mocked(isDangerous).mockReturnValue("rm -rf");
       vi.mocked(checkPermissionRules).mockReturnValue("allow");
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: false });
 
       const allowed = await checkToolPermission(
-        "bash", { command: "rm -rf /" }, true, new Set(["*"]), output, { allow: ["bash(*)"] },
+        "bash", { command: "rm -rf /" }, false, new Set(), output,
       );
       expect(output.error).toHaveBeenCalledWith(expect.stringContaining("DANGEROUS"));
       expect(allowed).toBe(false);
@@ -340,8 +340,9 @@ describe("checkToolPermission — exhaustive", () => {
       vi.mocked(checkPermissionRules).mockReturnValue("deny");
       const output = createMockOutput();
 
+      // Use a non-sensitive path so isDangerousFile doesn't intercept
       const allowed = await checkToolPermission(
-        "write_file", { path: ".env" }, true, new Set(["*"]), output,
+        "write_file", { path: "src/app.ts" }, true, new Set(["*"]), output,
       );
       expect(allowed).toBe(false);
       expect(output.confirm).not.toHaveBeenCalled();

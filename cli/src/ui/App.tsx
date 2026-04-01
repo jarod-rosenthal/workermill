@@ -80,16 +80,18 @@ function Spinner({ color }: { color: string }): React.ReactElement {
 function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean, mode?: "always" | "trust") => void } }): React.ReactElement {
   // Reuse PermissionPrompt for tool permission prompts — one component, consistent UX
   const isToolPrompt = request.prompt.startsWith("Allow ");
-  if (isToolPrompt) {
+  const isDangerousPrompt = request.prompt.includes("dangerous operation") || request.prompt.includes("may be sensitive");
+  if (isToolPrompt || isDangerousPrompt) {
     // Parse tool name from "Allow <toolname>? <detail>"
     const match = request.prompt.match(/^Allow (\w+)\??\s*(.*)/);
-    const toolName = match?.[1] || "tool";
-    const detail = match?.[2] || "";
+    const toolName = match?.[1] || (isDangerousPrompt ? "operation" : "tool");
+    const detail = match?.[2] || (isDangerousPrompt ? request.prompt : "");
     return (
       <PermissionPrompt request={{
         toolName,
         toolInput: detail ? { _display: detail } : {},
-        isDangerous: false,
+        isDangerous: isDangerousPrompt,
+        dangerLabel: isDangerousPrompt ? request.prompt : undefined,
         resolve: (allowed: boolean, mode?: "always" | "trust") => {
           request.resolve(allowed, mode);
         },

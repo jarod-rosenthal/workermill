@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { theme } from "./theme.js";
+import { findModelInfo } from "../../../api/src/providers/index.js";
 
 interface StatusBarProps {
   model: string;
@@ -22,6 +23,17 @@ interface StatusBarProps {
   hasInstructions?: boolean;
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec?: Record<string, number>;
+}
+
+/** Compact context display for a model: "200k" or "1M" */
+function modelCtx(providerModel: string): string {
+  const model = providerModel.split("/")[1] || providerModel;
+  const info = findModelInfo(model);
+  if (!info?.contextWindow) return "";
+  const ctx = info.contextWindow;
+  if (ctx >= 1_000_000) return `${Math.round(ctx / 1_000_000)}M`;
+  const isPow2 = (ctx & (ctx - 1)) === 0;
+  return `${Math.round(ctx / (isPow2 ? 1024 : 1000))}k`;
 }
 
 /** Format a dollar cost as a short string. Prefixed with ~ to indicate estimate. */
@@ -188,6 +200,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
                 <Text color="cyan" bold>{"plan"}</Text>
                 <Text color={theme.subtle}>:</Text>
                 <Text color="cyan">{rm.planner}</Text>
+                {modelCtx(rm.planner) ? (
+                  <Text color={theme.subtle} dimColor>{` (${modelCtx(rm.planner)})`}</Text>
+                ) : null}
                 {tps[rm.planner] ? (
                   <Text color={theme.subtle} dimColor>{` ${tps[rm.planner]}t/s`}</Text>
                 ) : null}
@@ -201,6 +216,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
                 <Text color="#C586C0" bold>{"review"}</Text>
                 <Text color={theme.subtle}>:</Text>
                 <Text color="#A066A0">{rm.reviewer}</Text>
+                {modelCtx(rm.reviewer) ? (
+                  <Text color={theme.subtle} dimColor>{` (${modelCtx(rm.reviewer)})`}</Text>
+                ) : null}
                 {tps[rm.reviewer] ? (
                   <Text color={theme.subtle} dimColor>{` ${tps[rm.reviewer]}t/s`}</Text>
                 ) : null}

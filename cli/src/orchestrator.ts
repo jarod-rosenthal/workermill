@@ -311,12 +311,15 @@ export async function checkToolPermission(
   output: OrchestrationOutput,
   permissionRules?: { allow?: string[]; deny?: string[] },
 ): Promise<boolean> {
+  // Check trust mode first — bypass skips all permission prompts including dangerous checks
+  const isTrustedEarly = typeof trustAll === "function" ? trustAll() : trustAll;
+  const isBypass = isTrustedEarly || sessionAllow.has("*");
+
   // Dangerous command check
   if (toolName === "bash") {
     const cmd = String(toolInput.command || "");
     const danger = isDangerous(cmd);
-    if (danger) {
-      // Always prompt for dangerous commands — even in trust mode
+    if (danger && !isBypass) {
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
       const result = await output.confirm("This is a dangerous operation. Are you sure?");
@@ -328,7 +331,7 @@ export async function checkToolPermission(
   if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
     const filePath = String(toolInput.path || toolInput.file_path || "");
     const fileDanger = isDangerousFile(filePath);
-    if (fileDanger) {
+    if (fileDanger && !isBypass) {
       output.error(`SENSITIVE FILE: ${fileDanger}`);
       output.error(`Path: ${filePath}`);
       const result = await output.confirm("This file may be sensitive. Are you sure?");
@@ -355,7 +358,10 @@ export async function checkToolPermission(
   const result = await output.confirm(`Allow ${toolName}? ${display}`);
 
   if (typeof result === "object") {
-    if (result.mode === "always" && result.allowed) {
+    if (result.mode === "trust" && result.allowed) {
+      // "Trust all" — add wildcard to session allow so all future tools auto-approve
+      sessionAllow.add("*");
+    } else if (result.mode === "always" && result.allowed) {
       // "Yes, don't ask again" — for bash save permanent rule, otherwise session-only
       if (toolName === "bash" && toolInput.command) {
         const { commandToRule } = await import("./safety.js");
@@ -1034,6 +1040,11 @@ export async function runOrchestration(
       const { TicketOps } = await import("./ticket-ops.js");
       const ticketSystem = config.ticketSystem || "github";
       const ops = new TicketOps(ticketKey, ticketSystem);
+      logger.info("TicketOps availability check", {
+        ticketKey, ticketSystem, isAvailable: ops.isAvailable(),
+        hasToken: !!process.env.GITHUB_TOKEN,
+        hasRepo: !!process.env.GITHUB_REPO,
+      });
       if (ops.isAvailable()) ticketOps = ops;
     } catch { /* non-critical */ }
   }
@@ -2183,16 +2194,20 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Post review result to ticket — matches worker/epic/coordinator-review.ts
         if (ticketOps) {
-          const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
-          const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+          // Extract the full review — everything before the decision markers is the detailed analysis
+          const markerIdx = reviewText.search(/REVIEW_DECISION:|CODE_QUALITY_SCORE:/i);
+          const detailedReview = markerIdx > 0 ? reviewText.slice(0, markerIdx).trim() : "";
+          const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|```|$)/i);
+          const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
+          const feedback = detailedReview || feedbackSummary;
           if (approved) {
             const roundLabel = reviewRound > 1 ? ` after ${reviewRound - 1} revision${reviewRound > 2 ? "s" : ""}` : "";
             ticketOps.postComment(
-              `✅ PR approved by Tech Lead${roundLabel} (score: ${score}/10)\n\n${feedback}`
+              `## ✅ Tech Lead Review — Approved${roundLabel} (${score}/10)\n\n${feedback}`
             ).catch(() => {});
           } else {
             ticketOps.postComment(
-              `🔄 Revision ${reviewRound}/${maxRevisions} requested by Tech Lead (score: ${score}/10):\n\n${feedback}`
+              `## 🔄 Tech Lead Review — Revision ${reviewRound}/${maxRevisions} (${score}/10)\n\n${feedback}`
             ).catch(() => {});
           }
         }

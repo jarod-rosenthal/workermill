@@ -23,14 +23,14 @@ Open an issue describing the feature and its use case.
 7. Open a PR against `main`
 
 ### Development Setup
-See the [Getting Started](README.md#getting-started) section in README.md and [docs/agent/local-dev.md](docs/agent/local-dev.md).
+See the [Install](README.md#install) section in README.md. Run `./bin/local-workermill start` for the full local stack (API + frontend + workers).
 
 ## Code Style
 - TypeScript throughout (API, frontend, agent, worker)
 - ESLint for linting and formatting (`npm run lint` in api/ and frontend/)
 
 ## Architecture Overview
-See [docs/agent/architecture.md](docs/agent/architecture.md) for the full architecture guide.
+See [PLATFORM.md](PLATFORM.md) for the platform architecture — execution modes, spawners, worker lifecycle, and deployment.
 
 ## Code of Conduct
 See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

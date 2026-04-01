@@ -20,7 +20,7 @@ WorkerMill orchestrates AI coding agents to build features, fix bugs, and comple
 | **RAM** | 16 GB | 32 GB+ |
 | **Docker** | Required | Docker Desktop |
 | **Git** | Required | Latest |
-| **Claude Code CLI** | Required | Prompted during setup |
+| **WorkerMill Agent** | Required | Auto-downloaded during setup |
 | **OS** | Windows, macOS, Linux | — |
 
 All AI workers run inside Docker containers for filesystem and network isolation. Docker must be installed and running.
@@ -38,7 +38,7 @@ Cloud registration at [workermill.com](https://workermill.com) is coming soon. I
 
 | Category | Providers |
 |----------|-----------|
-| **AI Models** | Anthropic (Claude), OpenAI (GPT-4o, o1, o3), Google (Gemini), Ollama (local models) |
+| **AI Models** | Anthropic (Claude 4.5/4.6), OpenAI (GPT-5.x), Google (Gemini 3.x), Ollama (local models) |
 | **Source Control** | GitHub, GitLab, Bitbucket |
 | **Issue Trackers** | Jira, Linear, GitHub Issues, or built-in internal tracker |
 

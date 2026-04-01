@@ -138,7 +138,7 @@ export default function CLI() {
           <div className="p-4 rounded-lg border border-border bg-card/50">
             <h3 className="font-semibold text-foreground mb-2">Use a flagship model</h3>
             <p className="text-sm text-muted-foreground">
-              The planner benefits most from a capable model. Use <code className="text-primary">/setup</code> to route the planner to a flagship model
+              The planner benefits most from a capable model. Use <code className="text-primary">/settings route planner &lt;provider&gt;</code> to route the planner to a flagship model
               (Claude Sonnet, GPT-5.4, Gemini Pro) while keeping workers on a local model like Ollama. The planner runs once per task — the investment pays for itself in better worker output.
             </p>
           </div>
@@ -213,7 +213,7 @@ export default function CLI() {
             </p>
           </div>
           <div className="p-4 rounded-lg border border-border bg-card/50">
-            <h3 className="font-semibold text-foreground mb-2">13 tools at their disposal</h3>
+            <h3 className="font-semibold text-foreground mb-2">15+ tools at their disposal</h3>
             <p className="text-sm text-muted-foreground">
               Workers have full access to your development environment: bash, read/write/edit files, glob, grep, git, web search, and more.
               They can install dependencies, run tests, check compilation, and verify their own work — just like a developer at a terminal.
@@ -365,7 +365,7 @@ export default function CLI() {
   "review": {
     "enabled": true,
     "maxRevisions": 3,
-    "approvalThreshold": 80
+    "approvalThreshold": 8
   },
   "hooks": {
     "post": [

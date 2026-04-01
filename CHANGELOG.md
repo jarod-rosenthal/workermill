@@ -51,6 +51,17 @@ Component releases are tracked via git tags:
 - CLI: Ticket detection with spaces — `GH #11`, `GH 11` now match (whitespace collapsed before regex).
 - CLI: Sandbox comment updated — `bwrap` replaced by `@anthropic-ai/sandbox-runtime`.
 - CLI: Dangling `clearInterval` reference in orchestrator confirm — would crash on user response.
+- Docs: `/retry` example showed fictional planner output — fixed to show actual coordinator resume behavior.
+- Docs: Persona count "12" → "11+", removed nonexistent "critic" persona, fixed "reviewer" → "tech lead".
+- Docs: Tool count "15" → "15+", added missing `todo` to tool list.
+- Docs: `/sessions` description said "switch or resume" — fixed to show `--resume` flag is needed.
+- Docs: Permission description updated to describe all four modes, not just default.
+- Docs: `/as` example removed fake "Running quality gates" output (quality gates are `/ship` only).
+- Docs: CLI.tsx `approvalThreshold: 80` → `8` (1-10 scale, not 0-100).
+- Docs: CLI.tsx "Use `/setup` to route planner" → "Use `/settings route planner <provider>`".
+- Docs: CLI.tsx "13 tools" → "15+ tools".
+- Docs: VS Code README "Claude Code CLI" → "WorkerMill Agent", "GPT-4o, o1, o3" → "GPT-5.x".
+- Docs: CONTRIBUTING.md dead links to nonexistent docs replaced with PLATFORM.md.
 
 ---
 

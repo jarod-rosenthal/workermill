@@ -151,7 +151,7 @@ You don't always need the full team. `/as` sends one specialist with full tool a
    2. No rate limiting on /api/login — brute force attacks possible
    3. Session cookie missing Secure and HttpOnly flags
  security_engineer  Fixing all three...
- security_engineer  Running quality gates... tsc ✓ vitest ✓
+ security_engineer  Running tsc --noEmit... ✓  Running vitest... 23 passed ✓
 ```
 
 Other examples:

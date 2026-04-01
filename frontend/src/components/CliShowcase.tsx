@@ -128,10 +128,12 @@ function StatusBar({ progress }: { progress: number }) {
         <span className="text-cyan-400 font-bold">plan</span>
         <span className="text-slate-500">:</span>
         <span className="text-cyan-400">google/gemini-3.1-pro</span>
+        <span className="text-slate-600 ml-1">142t/s</span>
         <span className="text-slate-700 mx-1">\u2502</span>
         <span className="text-purple-400 font-bold">review</span>
         <span className="text-slate-500">:</span>
         <span className="text-purple-300">anthropic/claude-opus-4-6</span>
+        <span className="text-slate-600 ml-1">83t/s</span>
       </div>
     </div>
   );

@@ -12,7 +12,7 @@ const SCRIPT: Line[] = [
   // Launch
   { text: "$ npx workermill", color: "text-slate-400", delay: 800 },
   { text: "", color: "", delay: 400 },
-  { text: "  \u25c6 WorkerMill v0.15.89", color: "text-white font-bold", delay: 600 },
+  { text: "  \u25c6 WorkerMill v0.15.92", color: "text-white font-bold", delay: 600 },
   { text: "", color: "", delay: 200 },
   { text: "  Use /model <provider>/<model> to switch models mid-session.", color: "text-slate-500", delay: 400 },
   { text: "  Type /help for all commands.", color: "text-slate-500", delay: 600 },
@@ -93,7 +93,7 @@ function StatusBar({ progress }: { progress: number }) {
         <span className="text-teal-400 font-semibold">ollama/qwen3-coder:30b</span>
         <span className="text-slate-500">(64k context)</span>
         <span className="text-white/80">]</span>
-        <span className="text-slate-600 ml-1">78t/s</span>
+        <span className="text-slate-600 ml-1">133t/s</span>
         <span className="ml-2">
           <span className={pct < 50 ? "text-emerald-500" : pct < 80 ? "text-yellow-500" : "text-red-500"}>
             {"\u2588".repeat(filled)}
@@ -127,13 +127,15 @@ function StatusBar({ progress }: { progress: number }) {
         <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-cyan-400 font-bold">plan</span>
         <span className="text-slate-500">:</span>
-        <span className="text-cyan-400">google/gemini-3.1-pro</span>
-        <span className="text-slate-600 ml-1">142t/s</span>
+        <span className="text-cyan-400">google/gemini-3.1-flash-lite-preview</span>
+        <span className="text-slate-500 ml-1">(1M)</span>
+        <span className="text-slate-600 ml-1">81t/s</span>
         <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-purple-400 font-bold">review</span>
         <span className="text-slate-500">:</span>
         <span className="text-purple-300">anthropic/claude-opus-4-6</span>
-        <span className="text-slate-600 ml-1">83t/s</span>
+        <span className="text-slate-500 ml-1">(1M)</span>
+        <span className="text-slate-600 ml-1">128t/s</span>
       </div>
     </div>
   );

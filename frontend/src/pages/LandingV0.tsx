@@ -1,16 +1,10 @@
 import { useRef, useEffect, useState } from "react";
-import { Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers, MessageSquare, GitBranch, Users, Zap } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Copy, CheckCircle, Terminal, Github, Star, ExternalLink, Download, MessageSquare, GitBranch, Users, Zap, Wrench } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import CliShowcase from "../components/CliShowcase";
-// ExecutionShowcase preserved for PLATFORM.md / VS Code extension page
-// import ExecutionShowcase from "../components/ExecutionShowcase";
 import TrustCallout from "../components/TrustCallout";
-import { Demos } from "./Home/Demos";
-
-import { getFeaturedPost } from "../content/blog/posts";
 
 // ─── Social Proof Stats ─────────────────────────────────────────────────────
 
@@ -76,94 +70,19 @@ function SocialProof() {
 
       <div className="flex flex-col items-center gap-1">
         <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-violet-400" />
-          <span className="text-2xl sm:text-3xl font-bold text-white">Any</span>
+          <Users className="w-4 h-4 text-violet-400" />
+          <span className="text-2xl sm:text-3xl font-bold text-white">11+</span>
         </div>
-        <span className="text-xs text-slate-500 uppercase tracking-widest">LLM provider</span>
+        <span className="text-xs text-slate-500 uppercase tracking-widest">personas</span>
       </div>
     </div>
-  );
-}
-
-// ─── Featured Article ────────────────────────────────────────────────────────
-
-function FeaturedArticle() {
-  const post = getFeaturedPost();
-  if (!post) return null;
-
-  return (
-    <section className="relative py-20">
-      <div className="container mx-auto px-6 lg:px-8 max-w-5xl">
-        <div className="text-center mb-10">
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-teal-400 mb-3">
-            <BookOpen className="w-3.5 h-3.5" />
-            From Our Blog
-          </span>
-          <h2 className="text-2xl md:text-3xl font-bold text-foreground">
-            Latest Thinking
-          </h2>
-        </div>
-
-        <Link
-          to={`/blog/${post.slug}`}
-          className="group block rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden hover:border-teal-500/30 transition-all duration-300"
-        >
-          <div className="grid md:grid-cols-[1fr,1.2fr] gap-0">
-            {/* Thumbnail */}
-            <div className="aspect-[16/9] md:aspect-auto overflow-hidden">
-              <img
-                src={post.thumbnail}
-                alt={post.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-            </div>
-
-            {/* Content */}
-            <div className="p-8 md:p-10 flex flex-col justify-center">
-              <div className="flex items-center gap-3 text-xs text-muted-foreground mb-4">
-                <span className="px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 font-medium uppercase tracking-wide">
-                  {post.category.replace("-", " ")}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {post.readingTime} min read
-                </span>
-              </div>
-
-              <h3 className="text-xl md:text-2xl font-bold text-foreground mb-3 group-hover:text-teal-400 transition-colors leading-tight">
-                {post.title}
-              </h3>
-
-              <p className="text-sm text-muted-foreground leading-relaxed mb-6 line-clamp-3">
-                {post.excerpt}
-              </p>
-
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground">
-                  <span className="text-foreground/80 font-medium">{post.author.name}</span>
-                  {" · "}
-                  {new Date(post.date).toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </div>
-                <span className="flex items-center gap-1 text-sm font-medium text-teal-400 group-hover:gap-2 transition-all">
-                  Read article
-                  <ArrowRight className="w-4 h-4" />
-                </span>
-              </div>
-            </div>
-          </div>
-        </Link>
-      </div>
-    </section>
   );
 }
 
 // ─── Open Source Banner ─────────────────────────────────────────────────────
 
 function OpenSourceBanner() {
+  const [copied, setCopied] = useState(false);
   return (
     <section className="relative py-20 px-6">
       <div className="relative max-w-3xl mx-auto text-center">
@@ -206,6 +125,28 @@ function OpenSourceBanner() {
           </a>
         </div>
 
+        {/* Install CTA */}
+        <div className="mt-8 flex justify-center">
+          <div className="bg-black/30 rounded-lg px-4 py-3 font-mono text-sm flex items-center gap-3 border border-white/[0.06]">
+            <Terminal className="w-4 h-4 text-teal-400 flex-shrink-0" />
+            <code className="text-teal-300">npx workermill</code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText("npx workermill");
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+            >
+              {copied ? (
+                <CheckCircle className="w-4 h-4 text-teal-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* License badge */}
         <p className="mt-6 text-xs text-slate-500">
           Licensed under{" "}
@@ -225,152 +166,10 @@ function OpenSourceBanner() {
   );
 }
 
-// ─── Install Section ─────────────────────────────────────────────────────────
-
-function InstallSection() {
-  const [copied, setCopied] = useState<string | null>(null);
-  const [_platform, _setPlatform] = useState<"unix" | "windows">("unix");
-
-  const copyToClipboard = (text: string, field: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(field);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const _installCommands = {
-    unix: "curl -fsSL https://workermill.com/install.sh | bash",
-    windows: "irm https://workermill.com/install.ps1 | iex",
-  };
-
-  return (
-    <section className="relative pb-20 pt-4">
-      <div className="container mx-auto px-6 lg:px-8 max-w-4xl">
-        {/* Two cards side by side */}
-        <div className="grid md:grid-cols-2 gap-6">
-
-          {/* CLI Install */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center">
-                <Terminal className="w-5 h-5 text-teal-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">WorkerMill CLI</h3>
-                <p className="text-xs text-slate-500">Multi-expert AI coding agent</p>
-              </div>
-            </div>
-
-            {/* Command */}
-            <div className="bg-black/40 rounded-lg p-3.5 font-mono text-sm flex items-center justify-between gap-3 border border-white/5">
-              <code className="text-teal-300 text-xs sm:text-sm truncate">
-                npx workermill
-              </code>
-              <button
-                onClick={() => copyToClipboard("npx workermill", "cli-install")}
-                className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
-              >
-                {copied === "cli-install" ? (
-                  <CheckCircle className="w-4 h-4 text-teal-400" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-
-            <div className="text-xs text-slate-500 space-y-1">
-              <p>Works with Ollama (local), Anthropic, OpenAI, and Google.</p>
-              <p>First run auto-detects Ollama and walks you through setup.</p>
-              <p>No account needed — just Node.js 20+.</p>
-            </div>
-
-            <Link
-              to="/docs/cli"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-400 hover:text-teal-300 transition-colors"
-            >
-              CLI documentation
-              <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-
-          {/* VS Code Extension */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                <Monitor className="w-5 h-5 text-blue-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">VS Code Extension</h3>
-                <p className="text-xs text-slate-500">Monitor and control from your editor</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-400">
-              Search the Extensions panel for <span className="text-white font-medium">WorkerMill</span> and
-              click Install. Or run from the command palette:
-            </p>
-
-            {/* Install command */}
-            <div className="bg-black/40 rounded-lg p-3.5 font-mono text-sm flex items-center justify-between gap-3 border border-white/5">
-              <code className="text-blue-300 text-xs sm:text-sm">
-                ext install workermill.workermill
-              </code>
-              <button
-                onClick={() => copyToClipboard("ext install workermill.workermill", "vscode-install")}
-                className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
-              >
-                {copied === "vscode-install" ? (
-                  <CheckCircle className="w-4 h-4 text-blue-400" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-
-            {/* What you get */}
-            <ul className="text-xs text-slate-500 space-y-1.5">
-              <li className="flex items-start gap-2">
-                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
-                <span>Live task sidebar with active, backlog, and recent</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
-                <span>Real-time log streaming in terminal tabs</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
-                <span>Run Jira issues, approve plans, respond to blockers</span>
-              </li>
-            </ul>
-
-            <Link
-              to="/docs/vscode-extension"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Extension documentation
-              <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-        </div>
-
-        {/* Platform note */}
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Runs on macOS, Linux, and Windows &mdash; works with{" "}
-          <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Ollama</a>{" (local), "}
-          <a href="https://www.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Anthropic</a>{", "}
-          <a href="https://openai.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">OpenAI</a>{", "}
-          <a href="https://ai.google.dev" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Google</a>{", "}
-          <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">LM Studio</a>
-          {", and any OpenAI-compatible provider — "}
-          Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
-        </p>
-      </div>
-    </section>
-  );
-}
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function LandingV0() {
+  const [copied, setCopied] = useState<string | null>(null);
   // Refs for scroll targets
   const topRef = useRef<HTMLDivElement>(null);
   const showcaseRef = useRef<HTMLDivElement>(null);
@@ -395,7 +194,7 @@ export default function LandingV0() {
 
         {/* Main content */}
         <div>
-          {/* Hero headline */}
+          {/* Hero */}
           <section ref={topRef} className="relative pt-10 lg:pt-16 pb-16">
             <div className="container mx-auto px-6 lg:px-8">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-[1.1] text-center">
@@ -404,9 +203,55 @@ export default function LandingV0() {
                   shipped overnight.
                 </span>
               </h1>
-              <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
-                Point at a GitHub Issue, Jira, or Linear ticket. Get a reviewed pull request. Works with any LLM.
+              <p className="mt-6 text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto text-center leading-relaxed">
+                Assign different models to different roles. Specialist personas — from backend developer to tech lead — plan, build, and review as a team.
               </p>
+
+              {/* Install CTA */}
+              <div className="mt-8 flex justify-center">
+                <div className="bg-black/40 rounded-xl px-5 py-3.5 font-mono text-sm sm:text-base flex items-center gap-4 border border-white/10">
+                  <Terminal className="w-4 h-4 text-teal-400 flex-shrink-0" />
+                  <code className="text-teal-300">npx workermill</code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("npx workermill");
+                      setCopied("hero");
+                      setTimeout(() => setCopied(null), 2000);
+                    }}
+                    className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+                  >
+                    {copied === "hero" ? (
+                      <CheckCircle className="w-4 h-4 text-teal-400" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              <p className="mt-3 text-center text-xs text-slate-600">
+                No account needed — just Node.js 20+
+              </p>
+
+              {/* Provider row */}
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                <span>Works with</span>
+                <span className="text-slate-400 font-medium">OpenAI</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">Google</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">Anthropic</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">Ollama</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">Groq</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">Mistral</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 font-medium">DeepSeek</span>
+                <span className="text-slate-600">·</span>
+                <span>any OpenAI-compatible</span>
+              </div>
+
               {/* Social proof stats */}
               <SocialProof />
             </div>
@@ -436,7 +281,7 @@ export default function LandingV0() {
                   <div className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-2">Step 2</div>
                   <h3 className="text-lg font-semibold text-white mb-2">Planner decomposes</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    Reads your codebase, scopes the work into subtasks, assigns the right specialists.
+                    A dedicated planner model reads your codebase, scopes subtasks, and assigns specialists.
                   </p>
                 </div>
 
@@ -447,7 +292,7 @@ export default function LandingV0() {
                   <div className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-2">Step 3</div>
                   <h3 className="text-lg font-semibold text-white mb-2">Specialists build</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    Backend, frontend, security, DevOps — each scoped to their own files with quality gates.
+                    Backend, frontend, security, DevOps — each powered by your chosen model, scoped to their own files.
                   </p>
                 </div>
 
@@ -470,29 +315,81 @@ export default function LandingV0() {
           {/* CLI terminal showcase — /ship GH-42 workflow animation */}
           <CliShowcase />
 
+          {/* Why multi-expert? */}
+          <section className="relative py-20">
+            <div className="container mx-auto px-6 lg:px-8 max-w-5xl">
+              <h2 className="text-2xl md:text-3xl font-bold text-white text-center mb-4">
+                Why a team, not a{" "}
+                <span className="bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">
+                  single agent?
+                </span>
+              </h2>
+              <p className="text-slate-400 text-center max-w-2xl mx-auto mb-12">
+                Single-agent tools use one model for everything. WorkerMill assigns the right model to each role — so you get better results at lower cost.
+              </p>
+
+              <div className="grid md:grid-cols-2 gap-8">
+                {/* Single agent */}
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+                  <div className="text-sm font-semibold text-slate-500 uppercase tracking-widest mb-4">Single agent</div>
+                  <div className="space-y-3 font-mono text-sm">
+                    <div className="flex items-center gap-3 text-slate-500">
+                      <span className="w-20 text-right text-xs">plan</span>
+                      <div className="flex-1 rounded bg-slate-800/50 px-3 py-1.5 text-slate-400">claude-opus-4-6</div>
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-500">
+                      <span className="w-20 text-right text-xs">code</span>
+                      <div className="flex-1 rounded bg-slate-800/50 px-3 py-1.5 text-slate-400">claude-opus-4-6</div>
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-500">
+                      <span className="w-20 text-right text-xs">review</span>
+                      <div className="flex-1 rounded bg-slate-800/50 px-3 py-1.5 text-slate-400">claude-opus-4-6</div>
+                    </div>
+                  </div>
+                  <div className="mt-5 text-xs text-slate-500 space-y-1.5">
+                    <p>Same model reviews its own code</p>
+                    <p>Paying top-tier rates for every step</p>
+                    <p>Blind spots stay blind</p>
+                  </div>
+                </div>
+
+                {/* Multi-expert */}
+                <div className="rounded-2xl border border-teal-500/20 bg-teal-500/[0.03] p-6">
+                  <div className="text-sm font-semibold text-teal-400 uppercase tracking-widest mb-4">WorkerMill</div>
+                  <div className="space-y-3 font-mono text-sm">
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <span className="w-20 text-right text-xs text-cyan-400">plan</span>
+                      <div className="flex-1 rounded bg-cyan-500/10 border border-cyan-500/20 px-3 py-1.5 text-cyan-300">gemini-3.1-flash-lite</div>
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <span className="w-20 text-right text-xs text-teal-400">code</span>
+                      <div className="flex-1 rounded bg-teal-500/10 border border-teal-500/20 px-3 py-1.5 text-teal-300">ollama/qwen3-coder:30b</div>
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <span className="w-20 text-right text-xs text-purple-400">review</span>
+                      <div className="flex-1 rounded bg-purple-500/10 border border-purple-500/20 px-3 py-1.5 text-purple-300">claude-opus-4-6</div>
+                    </div>
+                  </div>
+                  <div className="mt-5 text-xs text-slate-400 space-y-1.5">
+                    <p>A different model catches what the coder missed</p>
+                    <p>Fast, cheap models where speed matters — powerful models where quality matters</p>
+                    <p>Free local models for coding, paid models only for review</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* Proof — live projects with real metrics */}
           <div id="showcase" ref={showcaseRef}>
             <ShowcaseGallery />
           </div>
-
-          {/* Demo Videos */}
-          <div id="demos">
-            <Demos />
-          </div>
-
-          {/* Featured Article */}
-          <FeaturedArticle />
 
           {/* Trust & Security */}
           <TrustCallout />
 
           {/* Open Source */}
           <OpenSourceBanner />
-
-          {/* Now they're convinced — show how to get started */}
-          <div id="downloads">
-            <InstallSection />
-          </div>
 
           {/* Contact */}
           <section className="relative py-20 px-6">

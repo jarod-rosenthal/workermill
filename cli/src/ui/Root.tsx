@@ -10,7 +10,7 @@ import { App } from "./App.js";
 import { handleSlashCommand as dispatchSlashCommand, getGitBranch, type SlashCommandContext } from "./slash-commands.js";
 import type { UseAgentOptions } from "./useAgent.js";
 import { findModelInfo } from "../../../api/src/providers/index.js";
-import { resolveConfig } from "../config.js";
+import { resolveConfig, getProviderForPersona } from "../config.js";
 
 /**
  * Resolve context window for a model.
@@ -89,6 +89,8 @@ export function Root(props: RootProps): React.ReactElement {
   const [activeContext, setActiveContext] = useState(
     resolveContextWindow(props.provider, props.model, props.contextLength)
   );
+  // Role models — updates when planner/reviewer are switched via /model
+  const [roleModels, setRoleModels] = useState(props.roleModels);
 
   // Wrap switchModel to also update the display state
   const switchModelAndDisplay = useCallback((provider: string, model: string) => {
@@ -173,6 +175,19 @@ export function Root(props: RootProps): React.ReactElement {
         sandboxed: props.sandboxed,
         exit,
         switchModel: switchModelAndDisplay,
+        updateRoleModels: () => {
+          try {
+            const cfg = resolveConfig();
+            const w = getProviderForPersona(cfg);
+            const p = getProviderForPersona(cfg, "planner");
+            const r = getProviderForPersona(cfg, "tech_lead");
+            setRoleModels({
+              worker: `${w.provider}/${w.model}`,
+              planner: `${p.provider}/${p.model}`,
+              reviewer: `${r.provider}/${r.model}`,
+            });
+          } catch { /* config not ready */ }
+        },
         forceCompact: agent.forceCompact,
       };
       return dispatchSlashCommand(input, ctx);
@@ -280,7 +295,7 @@ export function Root(props: RootProps): React.ReactElement {
       cost={agent.cost}
       gitBranch={gitBranch}
       inputHistory={inputHistory}
-      roleModels={props.roleModels}
+      roleModels={roleModels}
       toolCounts={agent.toolCounts}
       sessionStart={agent.sessionStart}
       tokPerSec={{ ...agent.tokPerSec, ...tokPerSec }}

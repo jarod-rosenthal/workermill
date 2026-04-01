@@ -27,12 +27,16 @@ Component releases are tracked via git tags:
 - CLI: Status bar shows context window next to planner/reviewer models.
 
 ### Changed
+- CLI: `/model planner <provider>/<model>` and `/model reviewer <provider>/<model>` — switch planner or reviewer model mid-session with autocomplete, API key validation, and immediate status bar update. Replaces the old `/settings route` approach.
 - CLI: Reviewer prompt restructured — detailed feedback required before decision markers, feedback guidelines from worker/epic/inline-reviewer.ts.
 - CLI: Score threshold prompt aligned with code: "8+ means approved".
 - CLI: `formatContext` uses /1024 for power-of-2 values (64K), /1000 for round values (200K).
 - CLI: Tech lead ticket comments now include full detailed review text, not just the FEEDBACK one-liner. Uses proper headers (`## Tech Lead Review`).
 - CLI: Bypass mode now fully bypasses all prompts including dangerous commands and sensitive files — consistent behavior everywhere.
 - CLI: All permission prompts (including dangerous/sensitive) route through `PermissionPrompt` component with Trust All option.
+
+### Fixed (settings)
+- CLI: `/settings route` validation — no longer saves invalid config when provider doesn't exist.
 
 ### Fixed
 - CLI: Permission mode (Shift+Tab) now takes effect mid-run via ref-based `isBypassMode()`.

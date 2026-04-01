@@ -51,7 +51,7 @@ async function printWelcome(workingDir: string, isFirstRun = false): Promise<voi
     "/as backend_developer <task> gives you a single dedicated expert for focused work.",
     "/review runs a tech lead code review on your uncommitted changes.",
     "/init creates a WORKERMILL.md — project context that every expert reads before starting.",
-    "Route specific experts to different providers with /settings route <persona> <provider>.",
+    "Switch your planner or reviewer model: `/model planner google/gemini-3.1-pro`.",
     "Use /model <provider>/<model> to switch models mid-session without restarting.",
     "Next time, launch with `workermill --resume` to restore this session's messages and context.",
     "/ship GH-42 or /ship #42 fetches a GitHub issue and builds it. Set up with /setup.",

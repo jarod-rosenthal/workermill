@@ -47,8 +47,9 @@ When the user's question relates to any of these, guide them to the right comman
 - \`/settings tickets <github|jira|linear>\` — switch issue tracker.
 - \`/settings jira.url\`, \`/settings jira.email\`, \`/settings jira.token\` — Jira credentials.
 - \`/settings linear.key\` — Linear API key.
-- \`/settings route <persona> <provider>\` — route a specific expert to a different AI provider.
-- \`/model <provider>/<model>\` — switch models mid-session.
+- \`/model <provider>/<model>\` — switch the worker model mid-session.
+- \`/model planner <provider>/<model>\` — switch the planner model.
+- \`/model reviewer <provider>/<model>\` — switch the reviewer model.
 
 **Other:**
 - \`/review\` with no args shows usage help.

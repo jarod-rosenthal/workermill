@@ -88,6 +88,7 @@ function buildMockContext(
     setLastBuildTask: () => {},
     sandboxed: true,
     switchModel: undefined,
+    updateRoleModels: undefined,
     forceCompact: undefined,
     // Expose captured calls for assertions
     systemMessages,

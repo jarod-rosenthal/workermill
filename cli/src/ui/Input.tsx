@@ -16,7 +16,7 @@ const BUILTIN_COMMANDS = [
   { name: "/permissions", desc: "Tool permissions" },
   { name: "/undo", desc: "Revert changes" },
   { name: "/diff", desc: "Preview changes" },
-  { name: "/model", desc: "Show/switch model" },
+  { name: "/model", desc: "Switch worker, planner, or reviewer model" },
   { name: "/review", desc: "Code review with tech lead" },
   { name: "/trust", desc: "Auto-approve tools" },
   { name: "/hooks", desc: "View tool hooks" },
@@ -116,10 +116,35 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       } catch { return []; }
     }
     // /model completions — match against provider/model names
+    // Supports: /model <provider/model>, /model planner <provider/model>, /model reviewer <provider/model>
     const modelMatch = value.match(/^\/model\s+(.*)/);
     if (modelMatch) {
       const partial = modelMatch[1].toLowerCase();
-      if (!partial) return modelChoices.slice(0, 10); // show first 10 if no input yet
+      // Check for role prefix
+      const roleMatch = partial.match(/^(planner|reviewer)\s+(.*)/);
+      if (roleMatch) {
+        const role = roleMatch[1];
+        const modelPartial = roleMatch[2];
+        if (!modelPartial) return modelChoices.map(c => ({ ...c, name: `/model ${role} ${c.name.slice("/model ".length)}` })).slice(0, 10);
+        return modelChoices
+          .filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(modelPartial))
+          .map(c => ({ ...c, name: `/model ${role} ${c.name.slice("/model ".length)}` }))
+          .slice(0, 10);
+      }
+      if (!partial) {
+        // Show role options + first few models
+        return [
+          { name: "/model planner", desc: "Switch planner model" },
+          { name: "/model reviewer", desc: "Switch reviewer model" },
+          ...modelChoices.slice(0, 8),
+        ];
+      }
+      if ("planner".startsWith(partial)) {
+        return [{ name: "/model planner", desc: "Switch planner model" }, ...modelChoices.filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(partial)).slice(0, 8)];
+      }
+      if ("reviewer".startsWith(partial)) {
+        return [{ name: "/model reviewer", desc: "Switch reviewer model" }, ...modelChoices.filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(partial)).slice(0, 8)];
+      }
       return modelChoices
         .filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(partial))
         .slice(0, 10);

@@ -180,7 +180,9 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
 | \`/review [task]\` | Code review using the tech lead (defaults to recent changes) |
 | \`/retry\` | Re-plan and re-run the last task |
-| \`/model [provider/model] [ctx]\` | Switch model mid-session (\`/model ollama/qwen3-coder:30b 256k\`) |
+| \`/model [provider/model]\` | Switch worker model (\`/model ollama/qwen3-coder:30b 256k\`) |
+| \`/model planner [provider/model]\` | Switch planner model (\`/model planner google/gemini-3.1-pro\`) |
+| \`/model reviewer [provider/model]\` | Switch reviewer model (\`/model reviewer openai/gpt-5.3-codex\`) |
 | \`/init\` | Generate or validate \`WORKERMILL.md\` |
 | \`/compact [focus]\` | Compress conversation (\`/compact focus on the API changes\`) |
 | \`/settings\` | View/change settings (review, ollama, routing, keys) |
@@ -253,6 +255,7 @@ export interface SlashCommandContext {
   sandboxed?: boolean;
   exit?: () => void;
   switchModel?: (provider: string, model: string) => void;
+  updateRoleModels?: () => void;
   forceCompact?: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
 }
 
@@ -295,12 +298,26 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       if (!arg) {
         ctx.addSystemMessage(
           `**Current model:** ${ctx.provider}/${ctx.model}\n\n` +
-          "To switch: `/model <provider>/<model>` (e.g., `/model anthropic/claude-sonnet-4-6`)\n\n" +
+          "**Switch models:**\n" +
+          "| What | Command |\n" +
+          "|---|---|\n" +
+          "| Worker model | `/model <provider>/<model>` |\n" +
+          "| Planner model | `/model planner <provider>/<model>` |\n" +
+          "| Reviewer model | `/model reviewer <provider>/<model>` |\n\n" +
+          "Example: `/model reviewer openai/gpt-5.3-codex`\n\n" +
           "**Supported providers:** ollama, anthropic, openai, google"
         );
       } else {
-        // Parse provider/model — only the first token, ignore anything after a space
+        // Detect role prefix: /model planner|reviewer <provider>/<model>
+        const roleAliases: Record<string, string> = { planner: "planner", reviewer: "tech_lead", "tech_lead": "tech_lead" };
         const tokens = arg.split(/\s+/);
+        let targetRole: string | null = null;
+        let targetRoleDisplay: string | null = null;
+        if (tokens.length >= 2 && roleAliases[tokens[0].toLowerCase()]) {
+          targetRoleDisplay = tokens[0].toLowerCase();
+          targetRole = roleAliases[targetRoleDisplay];
+          tokens.shift(); // remove role prefix, rest is provider/model
+        }
         const modelArg = tokens[0];
         // Check for optional context size (e.g. "256k", "128k", "1m")
         let contextOverride: number | undefined;
@@ -353,28 +370,49 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           break;
         }
 
-        // Update config — only the provider's model entry, NOT config.default.
-        // /model is a session switch for the active (worker) model.
-        // Planner/reviewer routing is unchanged. Use /setup to change roles.
+        // Update config
         if (modelConfig) {
           if (!existingProviderConfig) {
             const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
             modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
-          } else {
+          } else if (!targetRole) {
+            // Worker switch — update the provider's default model
             existingProviderConfig.model = newModel;
             if (contextOverride) existingProviderConfig.contextLength = contextOverride;
+          }
+
+          if (targetRole) {
+            // Role switch — create a dedicated provider entry for this role
+            // e.g. "openai_reviewer" with the specific model, sharing the API key
+            const roleProviderKey = `${newProvider}_${targetRole}`;
+            const apiKey = existingProviderConfig?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
+            modelConfig.providers[roleProviderKey] = {
+              model: newModel,
+              ...(apiKey ? { apiKey } : {}),
+              ...(existingProviderConfig?.host ? { host: existingProviderConfig.host } : {}),
+              ...(contextOverride ? { contextLength: contextOverride } : {}),
+            };
+            modelConfig.routing = { ...modelConfig.routing, [targetRole]: roleProviderKey };
           }
           saveConfig(modelConfig);
         }
 
-        // Hot-swap the model in the current session
+        // Display
         const ctxLabel = contextOverride
           ? ` (${contextOverride >= 1_048_576 ? `${contextOverride / 1_048_576}M` : `${contextOverride / 1024}k`} context)`
           : "";
-        if (ctx.switchModel) {
+        const roleLabel = targetRoleDisplay ? `**${targetRoleDisplay}** ` : "";
+
+        if (targetRole) {
+          // Role switch — update status bar
+          ctx.addSystemMessage(
+            `\n${roleLabel}switched to \`${newProvider}/${newModel}\`${ctxLabel} — active now.`
+          );
+          ctx.updateRoleModels?.();
+        } else if (ctx.switchModel) {
+          // Worker switch — hot-swap
           ctx.switchModel(newProvider, newModel);
 
-          // Auto-compact if conversation exceeds new model's context
           const newCtxWindow = contextOverride
             || (newProvider === "ollama" ? modelConfig?.providers?.[newProvider]?.contextLength : undefined)
             || findModelInfo(newModel)?.contextWindow
@@ -1098,8 +1136,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         `|---|---|\n` +
         `| Add/update API key | \`/settings key <provider> <key>\` |\n` +
         `| Switch worker model | \`/model <provider>/<model>\` |\n` +
-        `| Route planner to a provider | \`/settings route planner <provider>\` |\n` +
-        `| Route reviewer to a provider | \`/settings route tech_lead <provider>\` |\n` +
+        `| Switch planner model | \`/model planner <provider>/<model>\` |\n` +
+        `| Switch reviewer model | \`/model reviewer <provider>/<model>\` |\n` +
         `| Add a new provider | \`/settings key <provider> <key>\` then \`/model <provider>/<model>\` |\n` +
         `| Issue tracker | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
         `| Start over from scratch | \`/setup reset\` |`

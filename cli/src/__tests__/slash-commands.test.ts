@@ -147,6 +147,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     setLastBuildTask: vi.fn(),
     sandboxed: false,
     exit: vi.fn(),
+    updateRoleModels: vi.fn(),
     ...overrides,
   };
 }
@@ -1511,6 +1512,67 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/model ollama/llama3.1", ctx);
       // Ollama doesn't need a key, so should succeed
       expect(saveConfig).toHaveBeenCalled();
+    });
+  });
+
+  // ---- /model planner|reviewer role switching ----
+
+  describe("/model planner|reviewer", () => {
+    it("switches planner model and updates routing", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: { ollama: { model: "qwen3-coder:30b" }, google: { model: "gemini-3.1-flash-lite-preview", apiKey: "key" } },
+        default: "ollama",
+      } as any);
+      const ctx = createContext();
+      handleSlashCommand("/model planner google/gemini-3.1-pro", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routing: expect.objectContaining({ planner: "google_planner" }),
+          providers: expect.objectContaining({
+            google_planner: expect.objectContaining({ model: "gemini-3.1-pro" }),
+          }),
+        }),
+      );
+      expect(ctx.updateRoleModels).toHaveBeenCalled();
+    });
+
+    it("switches reviewer model and updates routing", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: { ollama: { model: "qwen3-coder:30b" }, openai: { model: "gpt-5.4", apiKey: "sk-test" } },
+        default: "ollama",
+      } as any);
+      const ctx = createContext();
+      handleSlashCommand("/model reviewer openai/gpt-5.3-codex", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routing: expect.objectContaining({ tech_lead: "openai_tech_lead" }),
+          providers: expect.objectContaining({
+            openai_tech_lead: expect.objectContaining({ model: "gpt-5.3-codex" }),
+          }),
+        }),
+      );
+      expect(ctx.updateRoleModels).toHaveBeenCalled();
+    });
+
+    it("rejects role switch to provider without API key", () => {
+      delete process.env.OPENAI_API_KEY;
+      const ctx = createContext();
+      handleSlashCommand("/model reviewer openai/gpt-5.3-codex", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("no API key found"),
+      );
+    });
+
+    it("does not call switchModel for role switches (only worker)", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: { ollama: { model: "qwen3-coder:30b" }, google: { model: "gemini-flash", apiKey: "key" } },
+        default: "ollama",
+      } as any);
+      const switchModel = vi.fn();
+      const ctx = createContext({ switchModel } as any);
+      handleSlashCommand("/model planner google/gemini-3.1-pro", ctx);
+      expect(switchModel).not.toHaveBeenCalled();
     });
   });
 

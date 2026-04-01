@@ -403,7 +403,7 @@ export default function LandingV0() {
                 </span>
               </h1>
               <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
-                Open-source AI coding team with multi-expert orchestration. Works with any LLM.
+                Point at a GitHub Issue, Jira, or Linear ticket. Get a reviewed pull request. Works with any LLM.
               </p>
               {/* Social proof stats */}
               <SocialProof />
@@ -421,9 +421,9 @@ export default function LandingV0() {
                     <MessageSquare className="w-6 h-6 text-teal-400" />
                   </div>
                   <div className="text-xs font-bold text-teal-400 uppercase tracking-widest mb-2">Step 1</div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Describe the task</h3>
+                  <h3 className="text-lg font-semibold text-white mb-2">Pick a ticket</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    A bug fix, a new feature, or a full product. Plain English.
+                    <code className="text-slate-400">/ship GH-42</code> fetches from GitHub Issues, Jira, or Linear. Or just describe what you want.
                   </p>
                 </div>
 
@@ -432,9 +432,9 @@ export default function LandingV0() {
                     <GitBranch className="w-6 h-6 text-violet-400" />
                   </div>
                   <div className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-2">Step 2</div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Coordinator plans</h3>
+                  <h3 className="text-lg font-semibold text-white mb-2">Planner decomposes</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    Breaks the work into tasks and assigns the right expert agents.
+                    Reads your codebase, scopes the work into subtasks, assigns the right specialists.
                   </p>
                 </div>
 
@@ -443,9 +443,9 @@ export default function LandingV0() {
                     <Users className="w-6 h-6 text-blue-400" />
                   </div>
                   <div className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-2">Step 3</div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Experts execute</h3>
+                  <h3 className="text-lg font-semibold text-white mb-2">Specialists build</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    Backend, frontend, DevOps, QA, security — working in parallel on your codebase.
+                    Backend, frontend, security, DevOps — each scoped to their own files with quality gates.
                   </p>
                 </div>
 
@@ -454,9 +454,9 @@ export default function LandingV0() {
                     <Zap className="w-6 h-6 text-amber-400" />
                   </div>
                   <div className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-2">Step 4</div>
-                  <h3 className="text-lg font-semibold text-white mb-2">You review</h3>
+                  <h3 className="text-lg font-semibold text-white mb-2">Tech lead reviews</h3>
                   <p className="text-sm text-slate-500 leading-relaxed">
-                    Code is committed, tests pass, PR is ready. You approve and merge.
+                    A separate model reviews the diffs against your spec. You approve the PR and merge.
                   </p>
                 </div>
               </div>
@@ -476,9 +476,9 @@ export default function LandingV0() {
                   </p>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
-                  <h4 className="text-sm font-semibold text-white mb-1">Specialized expert personas</h4>
+                  <h4 className="text-sm font-semibold text-white mb-1">Issue tracker integration</h4>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Architect, backend, frontend, DevOps, QA, security, mobile, data/ML, tech lead, and more — each with role-specific directives.
+                    <code className="text-slate-400">/ship GH-42</code> fetches tickets from GitHub, Jira, or Linear. Posts completion comments back when done.
                   </p>
                 </div>
               </div>

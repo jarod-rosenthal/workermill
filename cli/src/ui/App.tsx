@@ -241,7 +241,7 @@ export function App(props: AppProps): React.ReactElement {
       {props.permissionRequest ? (
         <PermissionPrompt request={props.permissionRequest} />
       ) : props.orchestratorConfirm ? (
-        <OrchestratorConfirm request={props.orchestratorConfirm} />
+        <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
       ) : (
         <Input
           onSubmit={props.onSubmit}

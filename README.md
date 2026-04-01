@@ -113,6 +113,33 @@ The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the res
 
 `/retry` doesn't start over. The planner sees everything already built, reads the previous review feedback, and plans only what needs fixing. Workers see their own prior commits via git log. No wasted tokens rebuilding what already works.
 
+### Review your code. Fix what it finds.
+
+`/review` runs a standalone Tech Lead review on your current work — the same reviewer that checks code after `/ship`, but on demand. If it finds issues, WorkerMill offers to create a GitHub issue with the findings and immediately kicks off `/ship` to fix them.
+
+```
+> /review branch
+
+ tech_lead  Reading diff against main... 14 files changed
+ tech_lead  Score: 6/10
+ tech_lead  Issues:
+   1. API key passed as query parameter in src/services/stripe.ts — use headers
+   2. No input validation on POST /api/webhooks — accepts any payload
+   3. Error responses leak stack traces in production mode
+
+ Create a GitHub issue with these findings and fix them? (y/n) y
+
+ coordinator  Created issue #18: [Review] stripe integration: API key passed as query parameter
+ coordinator  https://github.com/you/your-repo/issues/18
+
+ planner  Reading codebase + issue #18...
+ planner  3 tasks:
+          [backend_developer] Move API key to headers, add webhook validation, sanitize errors
+ ...
+```
+
+One command: review the code, file the issue, fix the findings. Works with `branch` (full diff vs main), `diff` (uncommitted changes), or a PR number (`/review #42`).
+
 ### Target a single expert for focused work
 
 You don't always need the full team. `/as` sends one specialist with full tool access — no planning step, no review loop. Just an expert doing what they're best at.
@@ -260,7 +287,9 @@ No server, no Docker, no account. First run walks you through provider setup in 
 | `/ship GH-42` / `PROJ-123` / `TEAM-42` | Fetch a ticket from GitHub Issues, Jira, or Linear |
 | `/as <persona> <task>` | One expert, full tools, no planning overhead |
 | `/retry` | Resume last `/ship` — planner sees what's built, targets what's missing |
-| `/review` | Tech lead review of current changes |
+| `/review branch` | Tech lead review of feature branch diff vs main |
+| `/review diff` | Review uncommitted changes only |
+| `/review #42` | Review a GitHub PR by number |
 
 **Session**
 

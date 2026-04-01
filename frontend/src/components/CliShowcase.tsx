@@ -18,17 +18,15 @@ const SCRIPT: Line[] = [
   { text: "  Type /help for all commands.", color: "text-slate-500", delay: 600 },
   { text: "", color: "", delay: 600 },
 
-  // User chats first — natural interaction
-  { text: "> what does this project do?", color: "typing", delay: 0, typing: true },
+  // User asks about working tickets — natural lead-in to /ship
+  { text: "> I have open issues on GitHub. Can you work them?", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
-  { text: "  Reading package.json, src/routes/, src/controllers/...", color: "text-slate-500", delay: 800 },
-  { text: "", color: "", delay: 200 },
-  { text: "  This is a task management API built with Express and Prisma.", color: "text-slate-300", delay: 500 },
-  { text: "  It has user auth (JWT), CRUD for tasks and categories,", color: "text-slate-300", delay: 400 },
-  { text: "  a React frontend, and Docker/CI configuration.", color: "text-slate-300", delay: 400 },
+  { text: "  Yes \u2014 use /ship GH-42 to fetch any issue. I'll plan the work,", color: "text-slate-300", delay: 600 },
+  { text: "  assign the right specialists, run your tests, and open a PR.", color: "text-slate-300", delay: 500 },
+  { text: "  Also works with Jira (PROJ-123) and Linear (TEAM-42).", color: "text-slate-300", delay: 500 },
   { text: "", color: "", delay: 800 },
 
-  // Now the real work — /ship a ticket
+  // User follows the advice
   { text: "> /ship GH-42", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
   { text: " \ud83e\udd16 system   Fetched GH-42: Add rate limiting and input validation", color: "text-teal-400", delay: 600 },

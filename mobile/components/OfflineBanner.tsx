@@ -19,17 +19,13 @@ export function OfflineBanner({
     return null;
   }
 
-  const Container = onReconnect ? TouchableOpacity : View;
-  const containerProps = onReconnect ? { onPress: onReconnect, activeOpacity: 0.7 } : {};
+  const sharedProps = {
+    className: `bg-amber-500 px-4 py-3 flex-row items-center ${className || ''}`,
+    accessibilityLabel: onReconnect ? `${message}. Tap to reconnect.` : message,
+  };
 
-  return (
-    <Container
-      {...containerProps}
-      className={`bg-amber-500 px-4 py-3 flex-row items-center ${className || ''}`}
-      accessibilityRole={onReconnect ? 'button' : 'alert'}
-      accessibilityLabel={onReconnect ? `${message}. Tap to reconnect.` : message}
-      style={onReconnect ? { minHeight: 44 } : undefined}
-    >
+  const content = (
+    <>
       <MaterialIcons
         name="wifi-off"
         size={16}
@@ -45,6 +41,26 @@ export function OfflineBanner({
           Tap to retry
         </Text>
       )}
-    </Container>
+    </>
+  );
+
+  if (onReconnect) {
+    return (
+      <TouchableOpacity
+        {...sharedProps}
+        onPress={onReconnect}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        style={{ minHeight: 44 }}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View {...sharedProps} accessibilityRole="alert">
+      {content}
+    </View>
   );
 }

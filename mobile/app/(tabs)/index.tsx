@@ -53,6 +53,8 @@ export default function DashboardScreen() {
   // Load tasks when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      let pollInterval: ReturnType<typeof setInterval> | undefined;
+
       if (isAuthenticated) {
         const initializeDashboard = async () => {
           try {
@@ -68,7 +70,7 @@ export default function DashboardScreen() {
         initializeDashboard();
 
         // Poll for task updates every 10 seconds while screen is focused and app is active
-        const pollInterval = setInterval(async () => {
+        pollInterval = setInterval(async () => {
           if (AppState.currentState !== 'active') return;
           try {
             await loadTasks();

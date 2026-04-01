@@ -5,25 +5,25 @@ import { COGNITO_REGION, COGNITO_CLIENT_ID } from '@/constants/config';
 // Mock dependencies
 jest.mock('expo-secure-store');
 
-// Mock axios with proper instance structure
-const mockAxiosInstance = jest.fn() as any;
-Object.assign(mockAxiosInstance, {
-  interceptors: {
-    request: {
-      use: jest.fn(),
-    },
-    response: {
-      use: jest.fn(),
-    },
-  },
-  get: jest.fn(),
-  post: jest.fn(),
-  put: jest.fn(),
-  delete: jest.fn(),
-  request: jest.fn(),
-});
+// Build the mock axios instance inside the factory so it survives jest.mock hoisting.
+// The factory runs before any module-scope code, so we export the instance via a
+// shared reference that later code can import.
+let mockAxiosInstance: any;
 
 jest.mock('axios', () => {
+  mockAxiosInstance = jest.fn() as any;
+  Object.assign(mockAxiosInstance, {
+    interceptors: {
+      request: { use: jest.fn() },
+      response: { use: jest.fn() },
+    },
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+    request: jest.fn(),
+  });
+
   const mockAxios = {
     create: jest.fn(() => mockAxiosInstance),
   };

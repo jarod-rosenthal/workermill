@@ -55,10 +55,15 @@ function getModelContext(model: string, configuredCtx?: number): number {
   return info?.contextWindow || 128_000;
 }
 
-/** Format context limit for display: 200000 → "200K" */
+/** Format context limit for display: 200000 → "200K", 65536 → "64K" */
 function formatContext(tokens: number): string {
   if (tokens >= 1_000_000) return `${Math.round(tokens / 1000)}K`;
-  if (tokens >= 1000) return `${Math.round(tokens / 1024)}K`;
+  // Use /1024 for power-of-2 values (Ollama: 65536, 131072), /1000 for round values (200000)
+  if (tokens >= 1000) {
+    const k1024 = tokens / 1024;
+    if (Number.isInteger(k1024)) return `${k1024}K`;
+    return `${Math.round(tokens / 1000)}K`;
+  }
   return `${tokens}`;
 }
 
@@ -1561,6 +1566,10 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
       // Summary rambling detection — model finishes work and keeps talking
       let hadToolCalls = false;
       let consecutiveTextOnlySteps = 0;
+      let expertSummary = ""; // Captures the expert's post-work summary for ticket comments
+
+      // Track tool calls for structured ticket update
+      const storyActions: Array<{ tool: string; detail: string }> = [];
 
       const storyStartMs = Date.now();
       const stream = streamText({
@@ -1578,9 +1587,28 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
           if (toolCalls && toolCalls.length > 0) {
             hadToolCalls = true;
             consecutiveTextOnlySteps = 0;
+            // Track actions for ticket update
+            for (const tc of toolCalls) {
+              const name = tc.toolName;
+              const input = tc.args as Record<string, unknown>;
+              if (name === "write_file" && input.file_path) {
+                storyActions.push({ tool: "created", detail: String(input.file_path) });
+              } else if ((name === "edit_file" || name === "patch") && input.file_path) {
+                storyActions.push({ tool: "edited", detail: String(input.file_path) });
+              } else if (name === "bash" && input.command) {
+                const cmd = String(input.command);
+                // Only track meaningful commands, not reads
+                if (/npm (test|run|install)|npx|yarn|pnpm|docker|go (build|test)|pytest|cargo|make|mvn|gradle/i.test(cmd)) {
+                  storyActions.push({ tool: "ran", detail: cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd });
+                }
+              } else if (name === "verify" && input.command) {
+                storyActions.push({ tool: "verified", detail: String(input.command).slice(0, 80) });
+              }
+            }
           } else if (text && hadToolCalls) {
             consecutiveTextOnlySteps++;
-            // Log but don't display — summaries are noise in the CLI
+            // Capture first post-work summary for ticket comments (don't display — noise in CLI)
+            if (consecutiveTextOnlySteps === 1) expertSummary = text.slice(0, 2000);
             logger.debug("Story output (summary, not displayed)", { persona: story.persona, text });
             if (consecutiveTextOnlySteps >= 2) {
               logger.info("Post-work summary detected — stopping stream", { persona: story.persona });
@@ -1733,14 +1761,42 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       completedStoryIds.push(story.id);
 
-      // Post story completion to ticket — matches worker/epic/executor.ts pattern
+      // Post story completion to ticket — structured update like a real team member
       if (ticketOps) {
-        const changedFiles = [...new Set([...context.filesCreated, ...context.filesModified])];
-        const filesSummary = changedFiles.length > 0
-          ? `\n\nFiles: ${changedFiles.slice(0, 10).map(f => `\`${f}\``).join(", ")}${changedFiles.length > 10 ? ` +${changedFiles.length - 10} more` : ""}`
-          : "";
+        // Build structured summary from actual tool calls
+        const created = [...new Set(storyActions.filter(a => a.tool === "created").map(a => a.detail))];
+        const edited = [...new Set(storyActions.filter(a => a.tool === "edited").map(a => a.detail))];
+        const commands = storyActions.filter(a => a.tool === "ran" || a.tool === "verified");
+
+        const updateParts: string[] = [];
+
+        // Lead with the expert's own summary if available
+        if (expertSummary) {
+          updateParts.push(expertSummary);
+          updateParts.push("");
+        }
+
+        // Concrete actions taken
+        const actionLines: string[] = [];
+        if (created.length > 0) actionLines.push(`**Created:** ${created.map(f => `\`${f}\``).join(", ")}`);
+        if (edited.length > 0) actionLines.push(`**Modified:** ${edited.map(f => `\`${f}\``).join(", ")}`);
+        if (commands.length > 0) {
+          const cmdList = commands.slice(0, 5).map(c => `\`${c.detail}\``).join(", ");
+          actionLines.push(`**Ran:** ${cmdList}${commands.length > 5 ? ` +${commands.length - 5} more` : ""}`);
+        }
+        if (actionLines.length > 0) {
+          updateParts.push("**Actions:**");
+          updateParts.push(...actionLines);
+        }
+
+        // Fallback if no actions tracked
+        if (updateParts.length === 0) {
+          const changedFiles = [...new Set([...context.filesCreated, ...context.filesModified])];
+          updateParts.push(`Implemented ${story.title}. ${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`);
+        }
+
         ticketOps.postComment(
-          `**${story.title}** — completed by ${story.persona} (${i + 1}/${sorted.length})${filesSummary}`
+          `### ${story.persona} — ${story.title} (${i + 1}/${sorted.length})\n\n${updateParts.join("\n")}`
         ).catch(() => {});
       }
 
@@ -2008,12 +2064,18 @@ ${userTask}
 
 Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed.
 
+## Feedback Guidelines
+
+- **Be specific**: Point to exact files and issues when providing feedback
+- **Be constructive**: Suggest alternatives, not just problems
+- **Be balanced**: Acknowledge what's done well alongside improvements
+- **Be pragmatic**: Distinguish must-fix from nice-to-have issues
+
 ### APPROVE when:
 - Code correctly implements the requirements from the original spec
 - No obvious bugs or security issues
 - Code follows existing patterns in the codebase
-- Appropriate error handling is in place
-- Minor cosmetic issues (formatting, empty lines, comment style, variable naming) are NOT grounds for revision — mention them in feedback but still approve
+- Minor cosmetic issues are NOT grounds for revision — mention them in feedback but still approve
 
 ### REVISION_NEEDED when:
 - Code has functional bugs that affect correctness
@@ -2021,40 +2083,24 @@ Review the actual code above. You also have tools (read_file, glob, grep) to exa
 - Missing required functionality from the task spec
 - Broken imports, missing dependencies, or code that won't run
 
-### Do NOT request revision for:
-- Style preferences (extra/missing blank lines, comment formatting, quote style)
-- Minor naming differences that don't affect functionality
-- "Could be cleaner" refactoring suggestions
-- Missing tests for edge cases when core functionality is tested
-- Code that works correctly but isn't how you would have written it
-
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
-- Security vulnerability that requires different architecture
 
-**Be fair**: Approve code that correctly implements the plan and has no functional bugs or security issues. Request revision for real problems — missing functionality, broken code, security vulnerabilities. Cosmetic preferences and style differences belong in feedback comments, not revision requests. Score honestly — 8+ means ready to ship, below 8 means real issues remain.
+**Bias toward approval**: If the code works and implements the requirements, approve it. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue. A score of 8+ means approved.
 
 ## Output Format
 
-\`\`\`
-REVIEW_DECISION: approved
-\`\`\`
-OR
-\`\`\`
-REVIEW_DECISION: revision_needed
-\`\`\`
-OR
-\`\`\`
-REVIEW_DECISION: rejected
-\`\`\`
+You MUST write your detailed feedback FIRST, THEN add the decision markers at the end.
 
-Then add:
-\`\`\`
+**1. Write your full review** — analyze the code, list specific issues with file paths, explain what's good and what needs fixing. This is the most important part. Workers read this to know what to fix. Be thorough.
+
+**2. Then add these markers at the end:**
+
+REVIEW_DECISION: approved (or revision_needed or rejected)
 CODE_QUALITY_SCORE: 8
-FEEDBACK: Your detailed feedback
-\`\`\`
+FEEDBACK: One-line summary of your decision
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional. A score of 7+ should almost always accompany an "approved" decision.
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional.
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
@@ -2140,8 +2186,9 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
           const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
           if (approved) {
+            const roundLabel = reviewRound > 1 ? ` after ${reviewRound - 1} revision${reviewRound > 2 ? "s" : ""}` : "";
             ticketOps.postComment(
-              `✅ PR approved by Tech Lead (score: ${score}/10)\n\n${feedback}`
+              `✅ PR approved by Tech Lead${roundLabel} (score: ${score}/10)\n\n${feedback}`
             ).catch(() => {});
           } else {
             ticketOps.postComment(

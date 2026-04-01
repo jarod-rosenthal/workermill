@@ -204,27 +204,12 @@ export function useOrchestrator(
             },
 
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
-              // If already in bypassPermissions mode, auto-approve
-              const isTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
-              if (isTrusted) return Promise.resolve(true);
-
+              // Always show user decision prompts — bypass mode only applies
+              // to tool permissions, not orchestrator decisions like revisions.
               return new Promise((resolve) => {
-                // Poll for mode changes — if user switches to
-                // bypassPermissions while the prompt is showing,
-                // auto-approve and dismiss immediately.
-                const interval = setInterval(() => {
-                  const nowTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
-                  if (nowTrusted) {
-                    clearInterval(interval);
-                    setConfirmRequest(null);
-                    resolve(true);
-                  }
-                }, 200);
-
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
-                    clearInterval(interval);
                     setConfirmRequest(null);
                     if (mode) {
                       resolve({ allowed: yes, mode });

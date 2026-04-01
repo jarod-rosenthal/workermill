@@ -60,7 +60,7 @@ const SCRIPT: Line[] = [
   { text: " Shipped. 4 experts \u00b7 3 tasks \u00b7 2m 48s", color: "text-emerald-400", delay: 800 },
 ];
 
-const LOOP_PAUSE = 4000;
+const LOOP_PAUSE = 20000;
 const CHAR_SPEED = 40;
 const TERMINAL_HEIGHT = 620; // Fixed height — no growing
 

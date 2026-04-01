@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "0.15.89",
+  "version": "0.15.90",
   "description": "AI coding team in your terminal. Different models plan, build, and review — so bad code gets caught, not shipped.",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsup",
-    "prepublishOnly": "cp ../README.md ./README.md && npm run build",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

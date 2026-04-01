@@ -23,15 +23,20 @@ Component releases are tracked via git tags:
 - CLI: Tech lead review comments with revision count — "after 1 revision" on approval, "Revision 1/3" on each round.
 - CLI: Startup tips for issue tracker usage (`/ship GH-42`, `/ship PROJ-123`).
 - CLI: Cost tracking for standalone `/review` — reports to status bar.
+- CLI: System prompt teaches the agent about CLI features (`/ship`, `/review`, `/settings`) so it guides users to the right commands.
+- CLI: Status bar shows context window next to planner/reviewer models.
 
 ### Changed
 - CLI: Reviewer prompt restructured — detailed feedback required before decision markers, feedback guidelines from worker/epic/inline-reviewer.ts.
 - CLI: Score threshold prompt aligned with code: "8+ means approved".
 - CLI: `formatContext` uses /1024 for power-of-2 values (64K), /1000 for round values (200K).
+- CLI: Tech lead ticket comments now include full detailed review text, not just the FEEDBACK one-liner. Uses proper headers (`## Tech Lead Review`).
+- CLI: Bypass mode now fully bypasses all prompts including dangerous commands and sensitive files — consistent behavior everywhere.
+- CLI: All permission prompts (including dangerous/sensitive) route through `PermissionPrompt` component with Trust All option.
 
 ### Fixed
 - CLI: Permission mode (Shift+Tab) now takes effect mid-run via ref-based `isBypassMode()`.
-- CLI: Bypass mode no longer auto-approves orchestrator decisions (revision prompts, plan approval, push confirmation) — only affects tool permissions.
+- CLI: Consecutive confirm prompts (revision → push) locking up — React reused component state. Fixed with `key` prop to force fresh instance.
 - CLI: Reviewer inventing story numbers — prompt now lists valid stories explicitly, out-of-range numbers filtered.
 - CLI: PR creation failing on multi-line bodies — body passed via stdin (`--body-file -`).
 - CLI: Review diff truncation — caps diff to 50% of model context window, writes full diff to temp file for `read_file` access.

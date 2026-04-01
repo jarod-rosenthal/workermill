@@ -12,6 +12,16 @@ import * as logger from "./logger.js";
 
 type TicketSystem = "jira" | "linear" | "github" | "internal";
 
+/** Parse a Linear GraphQL response, throwing on GraphQL-level errors (which arrive with HTTP 200). */
+function parseLinearResponse<T>(json: unknown): T {
+  const res = json as { data?: T; errors?: Array<{ message: string; type?: string }> };
+  if (res.errors && res.errors.length > 0) {
+    const messages = res.errors.map((e) => e.message).join("; ");
+    throw new Error(`Linear GraphQL error: ${messages}`);
+  }
+  return res.data as T;
+}
+
 /** Extract numeric issue number from GH-42, #42, or bare 42 formats */
 export function extractGithubIssueNumber(key: string): string {
   return key.replace(/^(GH-|#)/i, "");
@@ -165,7 +175,10 @@ export class TicketOps {
     const repo = process.env.GITHUB_REPO!;
     const issueNumber = extractGithubIssueNumber(this.ticketKey);
     const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, { headers: this.githubHeaders() });
-    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    if (res.status === 401) throw new Error(`GitHub authentication failed — ensure GITHUB_TOKEN is set or run \`gh auth login\``);
+    if (res.status === 403) throw new Error(`GitHub permission denied — your token may not have access to ${repo}`);
+    if (res.status === 404) throw new Error(`GitHub issue ${repo}#${issueNumber} not found — verify the issue exists`);
+    if (!res.ok) throw new Error(`GitHub API returned ${res.status} ${res.statusText}`);
     const data = await res.json() as { title: string; body: string | null; labels?: { name: string }[] };
     return { title: data.title, body: data.body || "", labels: data.labels?.map((l) => l.name) };
   }
@@ -175,10 +188,13 @@ export class TicketOps {
     const key = this.getEffectiveTicketKey();
     const headers = { ...this.jiraAuth(), "Content-Type": "application/json" };
     const res = await fetch(`${base}/rest/api/3/issue/${key}?fields=summary,description,labels`, { headers });
-    if (!res.ok) throw new Error(`Jira API ${res.status}: ${res.statusText}`);
-    const data = await res.json() as { fields: { summary: string; description: unknown; labels?: { name: string }[] } };
+    if (res.status === 401) throw new Error(`Jira authentication failed — check your email and API token in /setup`);
+    if (res.status === 403) throw new Error(`Jira permission denied — your API token may not have access to ${key}`);
+    if (res.status === 404) throw new Error(`Jira issue ${key} not found — verify the key is correct and the project exists`);
+    if (!res.ok) throw new Error(`Jira API returned ${res.status} ${res.statusText}`);
+    const data = await res.json() as { fields: { summary: string; description: unknown; labels?: string[] } };
     const body = this.adfToPlainText(data.fields.description);
-    return { title: data.fields.summary, body, labels: data.fields.labels?.map((l) => l.name) };
+    return { title: data.fields.summary, body, labels: data.fields.labels };
   }
 
   private adfToPlainText(adf: unknown): string {
@@ -206,10 +222,11 @@ export class TicketOps {
         variables: { identifier },
       }),
     });
-    if (!res.ok) throw new Error(`Linear API ${res.status}: ${res.statusText}`);
-    const result = await res.json() as { data?: { issue?: { title: string; description: string | null; labels?: { nodes: { name: string }[] } } } };
-    const issue = result.data?.issue;
-    if (!issue) throw new Error(`Linear issue not found: ${identifier}`);
+    if (res.status === 401) throw new Error(`Linear authentication failed — check your API key in /setup`);
+    if (!res.ok) throw new Error(`Linear API returned ${res.status} ${res.statusText}`);
+    const result = parseLinearResponse<{ issue?: { title: string; description: string | null; labels?: { nodes: { name: string }[] } } }>(await res.json());
+    const issue = result?.issue;
+    if (!issue) throw new Error(`Linear issue ${identifier} not found — verify the identifier and that your API key has access to this team`);
     return { title: issue.title, body: issue.description || "", labels: issue.labels?.nodes?.map((l) => l.name) };
   }
 
@@ -245,8 +262,12 @@ export class TicketOps {
             body: JSON.stringify({ query: "{ viewer { id name } }" }),
           });
           if (!res.ok) return `Linear API returned ${res.status}: ${res.statusText}`;
-          const data = await res.json() as { data?: { viewer?: { id: string } } };
-          if (!data.data?.viewer?.id) return "Linear API key is invalid";
+          try {
+            const data = parseLinearResponse<{ viewer?: { id: string } }>(await res.json());
+            if (!data?.viewer?.id) return "Linear API key is invalid";
+          } catch (e) {
+            return e instanceof Error ? e.message : "Linear API key is invalid";
+          }
           return null;
         }
         default: return `Unknown ticket system: ${system}`;
@@ -276,7 +297,9 @@ export class TicketOps {
       `${base}/rest/api/3/issue/${key}/transitions`,
       { headers },
     );
-    if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+    if (res.status === 401) throw new Error(`Jira authentication failed when fetching transitions for ${key}`);
+    if (res.status === 404) throw new Error(`Jira issue ${key} not found when fetching transitions`);
+    if (!res.ok) throw new Error(`Jira transitions API returned ${res.status} for ${key}`);
     const data = await res.json() as { transitions?: Array<{ id: string; name: string; to: { name: string } }> };
     const transitions = data.transitions || [];
 
@@ -306,7 +329,7 @@ export class TicketOps {
       `${base}/rest/api/3/issue/${key}/transitions`,
       { method: "POST", headers, body: JSON.stringify({ transition: { id: target.id } }) },
     );
-    if (!transitionRes.ok) throw new Error(`${transitionRes.status}: ${transitionRes.statusText}`);
+    if (!transitionRes.ok) throw new Error(`Jira transition to "${statusName}" failed for ${key} — ${transitionRes.status} ${transitionRes.statusText}`);
   }
 
   private textToJiraAdf(text: string) {
@@ -341,7 +364,8 @@ export class TicketOps {
       `${base}/rest/api/3/issue/${ticketKey}/comment`,
       { method: "POST", headers, body: JSON.stringify({ body: this.textToJiraAdf(comment) }) },
     );
-    if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+    if (res.status === 401) throw new Error(`Jira authentication failed when posting comment to ${ticketKey}`);
+    if (!res.ok) throw new Error(`Jira comment failed for ${ticketKey} — ${res.status} ${res.statusText}`);
   }
 
   // --- GitHub ---
@@ -417,11 +441,12 @@ export class TicketOps {
         }),
       },
     );
-    if (!queryRes.ok) throw new Error(`${queryRes.status}: ${queryRes.statusText}`);
-    const queryData = await queryRes.json() as { data?: { issue?: { id: string; state?: { id: string; name: string }; team?: { states: { nodes: Array<{ id: string; name: string }> } } } } };
+    if (queryRes.status === 401) throw new Error(`Linear authentication failed when transitioning ${identifier}`);
+    if (!queryRes.ok) throw new Error(`Linear API returned ${queryRes.status} when fetching ${identifier} for transition`);
+    const queryData = parseLinearResponse<{ issue?: { id: string; state?: { id: string; name: string }; team?: { states: { nodes: Array<{ id: string; name: string }> } } } }>(await queryRes.json());
 
-    const issue = queryData.data?.issue;
-    if (!issue) throw new Error(`Linear issue not found: ${identifier}`);
+    const issue = queryData?.issue;
+    if (!issue) throw new Error(`Linear issue ${identifier} not found when attempting transition to "${statusName}"`);
 
     const teamStates: Array<{ id: string; name: string }> = issue.team?.states?.nodes || [];
     const targetState = teamStates.find(
@@ -449,7 +474,11 @@ export class TicketOps {
         }),
       },
     );
-    if (!updateRes.ok) throw new Error(`${updateRes.status}: ${updateRes.statusText}`);
+    if (!updateRes.ok) throw new Error(`Linear transition to "${statusName}" failed for ${identifier} — ${updateRes.status}`);
+    const updateData = parseLinearResponse<{ issueUpdate?: { success: boolean } }>(await updateRes.json());
+    if (updateData?.issueUpdate && !updateData.issueUpdate.success) {
+      logger.warn(`[TicketOps] Linear issueUpdate returned success: false for ${identifier}`);
+    }
   }
 
   private async commentLinear(issueIdentifier: string, comment: string): Promise<void> {
@@ -471,11 +500,12 @@ export class TicketOps {
         }),
       },
     );
-    if (!issueRes.ok) throw new Error(`${issueRes.status}: ${issueRes.statusText}`);
-    const issueData = await issueRes.json() as { data?: { issue?: { id: string } } };
-    const issueId = issueData.data?.issue?.id;
+    if (issueRes.status === 401) throw new Error(`Linear authentication failed when posting comment to ${issueIdentifier}`);
+    if (!issueRes.ok) throw new Error(`Linear API returned ${issueRes.status} when resolving ${issueIdentifier} for comment`);
+    const issueData = parseLinearResponse<{ issue?: { id: string } }>(await issueRes.json());
+    const issueId = issueData?.issue?.id;
     if (!issueId) {
-      throw new Error(`Linear issue not found: ${issueIdentifier}`);
+      throw new Error(`Linear issue ${issueIdentifier} not found — cannot post comment`);
     }
 
     // Create comment
@@ -490,7 +520,11 @@ export class TicketOps {
         }),
       },
     );
-    if (!commentRes.ok) throw new Error(`${commentRes.status}: ${commentRes.statusText}`);
+    if (!commentRes.ok) throw new Error(`Linear comment creation failed for ${issueIdentifier} — ${commentRes.status}`);
+    const commentData = parseLinearResponse<{ commentCreate?: { success: boolean } }>(await commentRes.json());
+    if (commentData?.commentCreate && !commentData.commentCreate.success) {
+      logger.warn(`[TicketOps] Linear comment creation returned success: false for ${issueIdentifier}`);
+    }
   }
 
   // --- Internal (WorkerMill API) ---

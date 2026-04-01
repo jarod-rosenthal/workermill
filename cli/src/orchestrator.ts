@@ -979,7 +979,12 @@ export async function runOrchestration(
 
       const ops = new TicketOps(ticketKey, ticketSystem);
       if (!ops.isAvailable()) {
-        output.error(`Missing credentials for ${ticketSystem}. Run \`/setup\` to configure your issue tracker.`);
+        const hints: Record<string, string> = {
+          github: "Ensure GITHUB_TOKEN is set or run `gh auth login`. Repo detected from git remote.",
+          jira: "Run `/setup` to add your Jira URL, email, and API token (generate at id.atlassian.com).",
+          linear: "Run `/setup` to add your Linear API key (generate at linear.app/settings/api).",
+        };
+        output.error(`Cannot connect to ${ticketSystem} — credentials not found.\n${hints[ticketSystem] || "Run `/setup` to configure your issue tracker."}`);
         return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
       const ticket = await ops.fetchTicket();
@@ -987,14 +992,30 @@ export async function runOrchestration(
         userTask = `# ${ticket.title}\n\n${ticket.body}${ticket.labels?.length ? `\n\nLabels: ${ticket.labels.join(", ")}` : ""}`;
         output.coordinatorLog(`Fetched ${ticketKey}: ${ticket.title}`);
       } else {
-        output.error(`Could not find ticket ${ticketKey}. Check that the issue exists and you have access.`);
+        const hints: Record<string, string> = {
+          github: `Verify the issue exists at github.com and your token has repo access.`,
+          jira: `Verify ${ticketKey} exists and your API token has read permissions.`,
+          linear: `Verify ${ticketKey} exists and your API key has access to this team.`,
+        };
+        output.error(`Could not fetch ${ticketKey} from ${ticketSystem}.\n${hints[ticketSystem] || ""}`);
         return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      output.error(`Ticket fetch failed: ${msg}`);
+      output.error(`Failed to fetch ${ticketKey} from ${ticketSystem}: ${msg}`);
       return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
+  }
+
+  // Create a reusable TicketOps instance for posting updates throughout the run
+  let ticketOps: InstanceType<typeof import("./ticket-ops.js").TicketOps> | null = null;
+  if (ticketKey) {
+    try {
+      const { TicketOps } = await import("./ticket-ops.js");
+      const ticketSystem = config.ticketSystem || "github";
+      const ops = new TicketOps(ticketKey, ticketSystem);
+      if (ops.isAvailable()) ticketOps = ops;
+    } catch { /* non-critical */ }
   }
 
   // Ensure Ollama models are loaded with the correct context length
@@ -1697,6 +1718,17 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       completedStoryIds.push(story.id);
 
+      // Post story completion to ticket — matches worker/epic/executor.ts pattern
+      if (ticketOps) {
+        const changedFiles = [...new Set([...context.filesCreated, ...context.filesModified])];
+        const filesSummary = changedFiles.length > 0
+          ? `\n\nFiles: ${changedFiles.slice(0, 10).map(f => `\`${f}\``).join(", ")}${changedFiles.length > 10 ? ` +${changedFiles.length - 10} more` : ""}`
+          : "";
+        ticketOps.postComment(
+          `**${story.title}** — completed by ${story.persona} (${i + 1}/${sorted.length})${filesSummary}`
+        ).catch(() => {});
+      }
+
       // Persist progress so /retry works across terminal restarts
       if (featureBranch) {
         saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
@@ -2071,6 +2103,22 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
         output.log("tech_lead", "\u2500".repeat(60));
         output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
+
+        // Post review result to ticket — matches worker/epic/coordinator-review.ts
+        if (ticketOps) {
+          const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
+          const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+          if (approved) {
+            ticketOps.postComment(
+              `✅ PR approved by Tech Lead (score: ${score}/10)\n\n${feedback}`
+            ).catch(() => {});
+          } else {
+            ticketOps.postComment(
+              `🔄 Revision ${reviewRound}/${maxRevisions} requested by Tech Lead (score: ${score}/10):\n\n${feedback}`
+            ).catch(() => {});
+          }
+        }
+
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
       
@@ -2408,8 +2456,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
               const prUrl = execSync(
-                `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}" --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
-                { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },
+                `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body-file - --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
+                { cwd: workingDir, encoding: "utf-8", input: prBody, stdio: ["pipe", "pipe", "pipe"] },
               ).trim();
               output.log("system", `Pull request created: ${prUrl}`);
             } catch (prErr) {
@@ -2455,18 +2503,18 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
     WORKERMILL_COST: costTracker.getTotalCost().toFixed(4),
   });
 
-  // Post back to ticket if this was a ticket-driven run
-  // Credentials are already set from the fetch at the top of this function.
-  if (ticketKey) {
+  // Post final completion to ticket — matches worker/epic/coordinator-review.ts
+  if (ticketOps) {
     try {
-      const { TicketOps, GitHubCommentFormat } = await import("./ticket-ops.js");
-      const ticketSystem = config.ticketSystem || "github";
-      const ops = new TicketOps(ticketKey, ticketSystem);
-      if (ops.isAvailable()) {
-        const completedCount = sorted.filter((s) => completedStoryIds.includes(s.id)).length;
-        const summary = `WorkerMill completed: ${completedCount}/${sorted.length} stories done.`;
-        await ops.postComment(GitHubCommentFormat.completed(summary));
-      }
+      const { GitHubCommentFormat } = await import("./ticket-ops.js");
+      const completedCount = sorted.filter((s) => completedStoryIds.includes(s.id)).length;
+      const storyList = sorted.map((s, i) => {
+        const done = completedStoryIds.includes(s.id);
+        return `${done ? "✅" : "❌"} **Story ${i + 1}** (${s.persona}): ${s.title}`;
+      }).join("\n");
+      const summary = `${completedCount}/${sorted.length} stories completed.\n\n${storyList}`;
+      // prUrl is captured earlier if PR was created
+      await ticketOps.postComment(GitHubCommentFormat.completed(summary));
     } catch {
       // Soft failure — don't crash on post-back errors
     }

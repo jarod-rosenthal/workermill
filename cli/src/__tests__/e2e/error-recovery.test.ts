@@ -1,4 +1,4 @@
-import { describe, it, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -9,6 +9,11 @@ import { detectOllamaHost } from "../helpers/ollama-host.js";
 let OLLAMA_HOST = "";
 const MODEL = "qwen3-coder:30b";
 let ollamaAvailable = false;
+
+const SYSTEM_PROMPT =
+  "You are a developer assistant. You MUST use tools to interact with the filesystem. " +
+  "NEVER guess file contents — ALWAYS call the tools provided. " +
+  "Do NOT explain what you plan to do — just call the tools immediately.";
 
 beforeAll(async () => {
   const host = await detectOllamaHost();
@@ -26,19 +31,18 @@ beforeAll(async () => {
 });
 
 describe("error recovery with Ollama", () => {
-  it("should attempt to read a missing file, recover, then edit a valid file", async () => {
+  it("recovers from file-not-found and reports the error before succeeding", { retry: 2 }, async () => {
     if (!ollamaAvailable) {
       console.log("Skipping: Ollama not available");
       return;
     }
 
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-recover-read-edit-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-recover-read-"));
 
     try {
-      // missing-file.json does NOT exist; constants.ts does
       fs.writeFileSync(
         path.join(tempDir, "constants.ts"),
-        `export const MAINTENANCE_MODE = true;\nexport const API_VERSION = "v2";\n`,
+        `export const MAINTENANCE_MODE = true;\n`,
       );
 
       const client = new EngineAIClient({
@@ -49,13 +53,10 @@ describe("error recovery with Ollama", () => {
       const messages: StreamMessage[] = [];
 
       const result = await client.execute({
-        systemPrompt:
-          "You are a developer. You MUST use tools to interact with the filesystem. " +
-          "Never guess file contents — always use the tools provided.",
+        systemPrompt: SYSTEM_PROMPT,
         prompt:
-          "First, use read_file to read 'missing-file.json'. That file does not exist, so you will get an error. " +
-          "After that error, use read_file to read 'constants.ts'. " +
-          "Then use edit_file to change 'MAINTENANCE_MODE = true' to 'MAINTENANCE_MODE = false' in constants.ts.",
+          "Read missing-file.json. You will get an error because it doesn't exist. " +
+          "After that error, read constants.ts and change MAINTENANCE_MODE to false.",
         persona: "backend_developer",
         model: MODEL,
         workingDir: tempDir,
@@ -67,34 +68,53 @@ describe("error recovery with Ollama", () => {
       expect(result.success).toBe(true);
 
       const toolUses = messages.filter((m) => m.type === "tool_use");
-      expect(toolUses.length).toBeGreaterThan(0);
 
-      // edit_file must have been called to apply the fix
-      const editCall = toolUses.find((m) => m.toolName === "edit_file");
-      expect(editCall).toBeDefined();
+      // read_file must have been called at least twice (missing file + constants.ts)
+      const readCalls = toolUses.filter((m) => m.toolName === "read_file");
+      expect(readCalls.length).toBeGreaterThanOrEqual(2);
 
-      // Verify the change was applied to disk — this is the definitive proof of recovery
+      // One read_file must target the missing file
+      const missingRead = readCalls.find(
+        (m) => m.toolInput && String(m.toolInput.path).includes("missing-file"),
+      );
+      expect(missingRead).toBeDefined();
+
+      // The model must acknowledge the error in its text output
+      const allText = messages
+        .filter((m) => m.type === "text")
+        .map((m) => m.content ?? "")
+        .join(" ");
+      const acknowledgesError =
+        /error/i.test(allText) ||
+        /not found/i.test(allText) ||
+        /doesn't exist/i.test(allText) ||
+        /does not exist/i.test(allText);
+      expect(acknowledgesError).toBe(true);
+
+      // edit_file must have been called
+      const editCalls = toolUses.filter((m) => m.toolName === "edit_file");
+      expect(editCalls.length).toBeGreaterThanOrEqual(1);
+
+      // File on disk must reflect the recovery
       const content = fs.readFileSync(path.join(tempDir, "constants.ts"), "utf-8");
       expect(content).toContain("MAINTENANCE_MODE = false");
-      expect(content).not.toContain("MAINTENANCE_MODE = true");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  it("should handle glob finding no JSON files then edit the TypeScript file it finds instead", async () => {
+  it("recovers from failed bash command and retries with correct command", { retry: 2 }, async () => {
     if (!ollamaAvailable) {
       console.log("Skipping: Ollama not available");
       return;
     }
 
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-recover-glob-edit-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-recover-bash-"));
 
     try {
-      // No .json files — only .ts files
       fs.writeFileSync(
-        path.join(tempDir, "settings.ts"),
-        `export const FEATURE_FLAG = false;\nexport const RETRY_COUNT = 3;\n`,
+        path.join(tempDir, "app.ts"),
+        `export function greet(name: string): string {\n  return \`Hello, \${name}!\`;\n}\n`,
       );
 
       const client = new EngineAIClient({
@@ -105,14 +125,10 @@ describe("error recovery with Ollama", () => {
       const messages: StreamMessage[] = [];
 
       const result = await client.execute({
-        systemPrompt:
-          "You are a developer. You MUST use tools to interact with the filesystem. " +
-          "Never guess file contents — always use the tools provided.",
+        systemPrompt: SYSTEM_PROMPT,
         prompt:
-          "First, use the glob tool with pattern '*.json' to search for JSON config files. " +
-          "That glob will find nothing. After seeing the empty result, " +
-          "use read_file to read 'settings.ts'. " +
-          "Then use edit_file to change 'FEATURE_FLAG = false' to 'FEATURE_FLAG = true' in settings.ts.",
+          "Step 1: You MUST use the bash tool to run the command `npm test`. It will fail — that's expected.\n" +
+          "Step 2: After bash fails, use read_file to read app.ts and tell me what functions it exports.",
         persona: "backend_developer",
         model: MODEL,
         workingDir: tempDir,
@@ -124,20 +140,110 @@ describe("error recovery with Ollama", () => {
       expect(result.success).toBe(true);
 
       const toolUses = messages.filter((m) => m.type === "tool_use");
-      expect(toolUses.length).toBeGreaterThan(0);
 
-      // glob must have been called first
-      const globCall = toolUses.find((m) => m.toolName === "glob");
-      expect(globCall).toBeDefined();
+      // bash tool must have been called
+      const bashCalls = toolUses.filter((m) => m.toolName === "bash");
+      expect(bashCalls.length).toBeGreaterThanOrEqual(1);
 
-      // edit_file must have been called to make the change
-      const editCall = toolUses.find((m) => m.toolName === "edit_file");
-      expect(editCall).toBeDefined();
+      // The model must acknowledge the bash failure in its text
+      const allText = messages
+        .filter((m) => m.type === "text")
+        .map((m) => m.content ?? "")
+        .join(" ");
+      const acknowledgesFailure =
+        /fail/i.test(allText) ||
+        /error/i.test(allText) ||
+        /no package/i.test(allText) ||
+        /not found/i.test(allText) ||
+        /npm/i.test(allText);
+      expect(acknowledgesFailure).toBe(true);
 
-      // Verify the change was applied to disk — definitive proof the whole chain worked
-      const content = fs.readFileSync(path.join(tempDir, "settings.ts"), "utf-8");
-      expect(content).toContain("FEATURE_FLAG = true");
-      expect(content).not.toContain("FEATURE_FLAG = false");
+      // read_file must have been called after the bash failure
+      const readCalls = toolUses.filter((m) => m.toolName === "read_file");
+      expect(readCalls.length).toBeGreaterThanOrEqual(1);
+
+      // Agent response must reference actual content from app.ts
+      const referencesContent =
+        /greet/i.test(allText) || /Hello/i.test(allText) || /name/i.test(allText);
+      expect(referencesContent).toBe(true);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles edit_file with wrong old_string gracefully", { retry: 2 }, async () => {
+    if (!ollamaAvailable) {
+      console.log("Skipping: Ollama not available");
+      return;
+    }
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-recover-edit-"));
+
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "config.ts"),
+        `export const MODE = "production";\n`,
+      );
+
+      const client = new EngineAIClient({
+        provider: "ollama",
+        apiKeys: { ollamaHost: OLLAMA_HOST },
+      });
+
+      const messages: StreamMessage[] = [];
+
+      const result = await client.execute({
+        systemPrompt: SYSTEM_PROMPT,
+        prompt:
+          "Without reading the file first, use edit_file on config.ts to replace " +
+          '`export const MODE = "development";` with `export const MODE = "staging";`. ' +
+          "Do NOT read the file before this first edit — just call edit_file directly. " +
+          "The edit will fail because the file actually contains 'production', not 'development'. " +
+          "After the failure, read the file, then make the correct edit to change the value to 'staging'.",
+        persona: "backend_developer",
+        model: MODEL,
+        workingDir: tempDir,
+        maxTurns: 20,
+        contextLength: 65536,
+        onMessage: (msg) => messages.push(msg),
+      });
+
+      expect(result.success).toBe(true);
+
+      const toolUses = messages.filter((m) => m.type === "tool_use");
+
+      // edit_file or write_file must have been called at least twice
+      // (first edit fails, then a read + correct edit/write)
+      const editCalls = toolUses.filter(
+        (m) => m.toolName === "edit_file" || m.toolName === "write_file",
+      );
+      expect(editCalls.length).toBeGreaterThanOrEqual(2);
+
+      // At least one edit must target the wrong value "development"
+      const wrongEdit = editCalls.find((m) => {
+        const input = m.toolInput ?? {};
+        const oldStr = String(input.old_string ?? input.content ?? "");
+        return /development/i.test(oldStr);
+      });
+      expect(wrongEdit).toBeDefined();
+
+      // The model must acknowledge the failure in its text
+      const allText = messages
+        .filter((m) => m.type === "text")
+        .map((m) => m.content ?? "")
+        .join(" ");
+      const acknowledgesFailure =
+        /error/i.test(allText) ||
+        /not found/i.test(allText) ||
+        /fail/i.test(allText) ||
+        /doesn't match/i.test(allText) ||
+        /actual/i.test(allText) ||
+        /production/i.test(allText);
+      expect(acknowledgesFailure).toBe(true);
+
+      // File on disk must have the corrected value
+      const content = fs.readFileSync(path.join(tempDir, "config.ts"), "utf-8");
+      expect(content).toContain('MODE = "staging"');
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

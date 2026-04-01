@@ -55,7 +55,7 @@ Setup takes 60 seconds. Works with **Ollama** (fully local, no API key), **Anthr
  Fixed: moved discount calculation before tax. Running tests... 14 passed, 0 failed.
 ```
 
-You talk, it reads your code, makes changes, runs your tests. Permission prompts before every write.
+You talk, it reads your code, makes changes, runs your tests. Permission prompts by default — four modes to match your trust level.
 
 ### Point at a ticket. Get a pull request.
 
@@ -99,10 +99,8 @@ The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the res
 ```
 > /retry
 
- planner  Reading existing branch... 6 commits found
- planner  Previous review feedback: "JWT should be HttpOnly cookie, not response body. Logout must invalidate."
- planner  1 revision task:
-          [backend_developer] Move JWT to HttpOnly cookie, add token blacklist on logout
+ coordinator  Retrying on branch: workermill/user-auth — 2 done, 1 remaining
+ coordinator  Story 1/1: [backend_developer] Auth service
 
  backend_developer  Modified src/routes/auth.ts — cookie-based token, blacklist on /logout
  backend_developer  Modified src/middleware/requireAuth.ts — read token from cookie
@@ -111,7 +109,7 @@ The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the res
  tech_lead  Score: 9/10 — approved
 ```
 
-`/retry` doesn't start over. The planner sees everything already built, reads the previous review feedback, and plans only what needs fixing. Workers see their own prior commits via git log. No wasted tokens rebuilding what already works.
+`/retry` doesn't start over. It loads the existing plan from disk, skips planning entirely, and resumes from the first incomplete story. Workers see their own prior commits via git log. No wasted tokens replanning or rebuilding what already works.
 
 ### Review your code. Fix what it finds.
 
@@ -210,9 +208,9 @@ A single model writes bad code and approves its own bad code. WorkerMill separat
 
 ## Features
 
-### 12 specialist personas
+### 11+ specialist personas
 
-Backend, frontend, architect, DevOps, security, QA, data/ML, mobile, tech writer — plus planner, reviewer, and critic. Create your own in `.workermill/personas/`.
+Backend, frontend, architect, DevOps, security, QA, data/ML, mobile, tech writer — plus planner and tech lead (reviewer). Create your own in `.workermill/personas/`.
 
 ### Mix models per role
 
@@ -222,9 +220,9 @@ Route your planner through Claude Opus while workers run on Ollama locally. Pay 
 
 `/ship GH-42`, `/ship PROJ-123`, `/ship TEAM-42` — fetch tickets from GitHub Issues, Jira, or Linear and use them as the task spec. Posts completion comments back to the ticket when done. Configure your tracker with `/setup`.
 
-### 15 built-in tools + MCP
+### 15+ built-in tools + MCP
 
-Bash (sandboxed), file read/write/edit/patch, glob, grep, ls, git, web search, fetch, verify, LSP, sub-agent with worktree isolation, and headless Chrome. Connect anything else via [MCP servers](https://modelcontextprotocol.io).
+Bash (sandboxed), file read/write/edit/patch, glob, grep, ls, git, web search, fetch, verify, LSP, todo, sub-agent with worktree isolation, and headless Chrome. Connect anything else via [MCP servers](https://modelcontextprotocol.io).
 
 ### Fits into your workflow
 
@@ -232,7 +230,7 @@ Reads `WORKERMILL.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instruction
 
 ### Safe by default
 
-Permission prompts before every write. Four modes (`Shift+Tab` to cycle). Granular allow/deny rules. Dangerous command and file detection. OS-level sandboxing. Blocking pre-hooks. `/undo` to revert instantly.
+Four permission modes (`Shift+Tab` to cycle): prompt before every write, auto-approve edits, read-only plan mode, or full trust. Granular allow/deny rules. Dangerous command and file detection. OS-level sandboxing. Blocking pre-hooks. `/undo` to revert instantly.
 
 ### Built for long sessions
 
@@ -286,7 +284,7 @@ No server, no Docker, no account. First run walks you through provider setup in 
 | `/ship spec.md` | Same, but read the task from a file |
 | `/ship GH-42` / `PROJ-123` / `TEAM-42` | Fetch a ticket from GitHub Issues, Jira, or Linear |
 | `/as <persona> <task>` | One expert, full tools, no planning overhead |
-| `/retry` | Resume last `/ship` — planner sees what's built, targets what's missing |
+| `/retry` | Resume last `/ship` — skips planning, picks up from the first incomplete story |
 | `/review branch` | Tech lead review of feature branch diff vs main |
 | `/review diff` | Review uncommitted changes only |
 | `/review #42` | Review a GitHub PR by number |
@@ -298,7 +296,7 @@ No server, no Docker, no account. First run walks you through provider setup in 
 | `/model provider/model [ctx]` | Hot-swap model mid-session (e.g. `/model google/gemini-3.1-pro`) |
 | `/compact [focus]` | Compress conversation — optionally preserve specific context |
 | `/cost` | Session cost estimate and token usage |
-| `/sessions` | List, switch, or resume past conversations |
+| `/sessions` | List past conversations (resume with `--resume <id>` on next launch) |
 | `/clear` | Reset the conversation |
 | `/editor` | Open `$EDITOR` for longer input |
 

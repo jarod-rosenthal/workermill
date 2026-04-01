@@ -391,6 +391,58 @@ describe("config", () => {
       expect(resolved.hooks?.post?.length).toBe(1);
     });
 
+    it("includes ticketSystem, jira, and linear from global config", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        ticketSystem: "jira",
+        jira: { baseUrl: "https://test.atlassian.net", email: "a@b.com", apiToken: "tok" },
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.ticketSystem).toBe("jira");
+      expect(resolved.jira?.baseUrl).toBe("https://test.atlassian.net");
+      expect(resolved.jira?.email).toBe("a@b.com");
+      expect(resolved.jira?.apiToken).toBe("tok");
+    });
+
+    it("project ticketSystem overrides global", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        ticketSystem: "jira",
+        jira: { baseUrl: "https://test.atlassian.net", email: "a@b.com", apiToken: "tok" },
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify({ ticketSystem: "github" }), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.ticketSystem).toBe("github");
+    });
+
+    it("defaults ticketSystem to undefined when not configured", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.ticketSystem).toBeUndefined();
+      expect(resolved.jira).toBeUndefined();
+      expect(resolved.linear).toBeUndefined();
+    });
+
     it("uses project sandbox setting over global", async () => {
       const globalConfig = {
         providers: { ollama: { model: "test", host: "http://localhost:11434" } },

@@ -106,7 +106,7 @@ export default function CLI() {
           <li><strong className="text-foreground">Commits</strong> — All work is on a feature branch with per-story commits. Ready for your review.</li>
         </ol>
         <p className="text-muted-foreground mt-2">
-          Use <code className="text-primary">/retry</code> to re-plan the same task — the planner sees existing code and fills in gaps.
+          Use <code className="text-primary">/retry</code> to resume an incomplete <code className="text-primary">/ship</code> — skips planning and picks up from the first incomplete story.
         </p>
       </section>
 

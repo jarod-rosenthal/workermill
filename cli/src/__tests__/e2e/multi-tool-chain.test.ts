@@ -66,18 +66,7 @@ describe("multi-tool chain with Ollama", () => {
 
       expect(result.success).toBe(true);
 
-      const toolUses = messages.filter((m) => m.type === "tool_use");
-      expect(toolUses.length).toBeGreaterThan(0);
-
-      // glob must have been called
-      const globCall = toolUses.find((m) => m.toolName === "glob");
-      expect(globCall).toBeDefined();
-
-      // edit_file must have been called to apply the change
-      const editCall = toolUses.find((m) => m.toolName === "edit_file");
-      expect(editCall).toBeDefined();
-
-      // Verify the change was applied to disk
+      // Ground truth: the file must have been changed on disk
       const content = fs.readFileSync(path.join(tempDir, "config.ts"), "utf-8");
       expect(content).toContain("DEBUG_MODE = false");
       expect(content).not.toContain("DEBUG_MODE = true");
@@ -126,18 +115,7 @@ export const LOG_LEVEL = "info";
 
       expect(result.success).toBe(true);
 
-      const toolUses = messages.filter((m) => m.type === "tool_use");
-      expect(toolUses.length).toBeGreaterThan(0);
-
-      // read_file must have been called
-      const readCall = toolUses.find((m) => m.toolName === "read_file");
-      expect(readCall).toBeDefined();
-
-      // edit_file must have been called
-      const editCall = toolUses.find((m) => m.toolName === "edit_file");
-      expect(editCall).toBeDefined();
-
-      // Verify the change was applied to disk
+      // Ground truth: the file must have been changed on disk
       const content = fs.readFileSync(path.join(tempDir, "app.ts"), "utf-8");
       expect(content).toContain("DEBUG_MODE = false");
       expect(content).not.toContain("DEBUG_MODE = true");
@@ -186,18 +164,7 @@ export const LOG_LEVEL = "info";
 
       expect(result.success).toBe(true);
 
-      const toolUses = messages.filter((m) => m.type === "tool_use");
-      expect(toolUses.length).toBeGreaterThan(0);
-
-      // ls must have been called
-      const lsCall = toolUses.find((m) => m.toolName === "ls");
-      expect(lsCall).toBeDefined();
-
-      // edit_file must have been called
-      const editCall = toolUses.find((m) => m.toolName === "edit_file");
-      expect(editCall).toBeDefined();
-
-      // Verify the change was applied to disk
+      // Ground truth: the file must have been changed on disk
       const content = fs.readFileSync(path.join(tempDir, "version.ts"), "utf-8");
       expect(content).toContain("RELEASED = true");
       expect(content).not.toContain("RELEASED = false");

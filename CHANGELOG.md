@@ -8,7 +8,7 @@ Component releases are tracked via git tags:
 
 ---
 
-## 2026-04-01 — CLI v0.15.89
+## 2026-04-01 — CLI v0.15.92
 
 ### Added
 - CLI: `/review branch|diff|#42` — standalone Tech Lead review using the configured reviewer model. Same prompt, scoring, and tools as the `/ship` review loop.

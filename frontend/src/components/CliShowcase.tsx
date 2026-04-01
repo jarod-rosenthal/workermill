@@ -62,7 +62,7 @@ const SCRIPT: Line[] = [
 
 const LOOP_PAUSE = 4000;
 const CHAR_SPEED = 40;
-const TERMINAL_HEIGHT = 520; // Fixed height — no growing
+const TERMINAL_HEIGHT = 620; // Fixed height — no growing
 
 /** Status bar matching the real CLI's 3-row layout */
 function StatusBar({ progress }: { progress: number }) {
@@ -236,7 +236,7 @@ export default function CliShowcase() {
         @keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
         .animate-blink { animation: blink 0.8s step-end infinite; }
       `}</style>
-      <div className="container mx-auto px-6 lg:px-8 max-w-4xl">
+      <div className="container mx-auto px-6 lg:px-8 max-w-5xl">
         <div
           className="rounded-xl border border-white/10 bg-[#0d0d0f] shadow-2xl shadow-black/50 overflow-hidden ring-1 ring-white/[0.04] flex flex-col"
           style={{ height: TERMINAL_HEIGHT }}

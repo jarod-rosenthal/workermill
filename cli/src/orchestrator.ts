@@ -2834,9 +2834,14 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     for await (const _chunk of reviewStream.textStream) { /* consumed */ }
     reviewText = reviewerOutput;
     const reviewUsage = await reviewStream.totalUsage;
+    // Track cost
+    const revInputTokens = reviewUsage?.inputTokens || 0;
+    const revOutputTokens = reviewUsage?.outputTokens || 0;
+    const costTracker = new CostTracker();
+    costTracker.addUsage("Tech Lead Review", revProvider, revModel, revInputTokens, revOutputTokens);
+    output.updateCost?.(costTracker.getTotalCost());
     // Track tok/s for reviewer model
     const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
-    const revOutputTokens = reviewUsage?.outputTokens || 0;
     if (revOutputTokens > 0 && reviewElapsed > 0) {
       const reviewTokPerSec = Math.round(revOutputTokens / reviewElapsed);
       output.updateTokPerSec?.(`${revProvider}/${revModel}`, reviewTokPerSec);

@@ -7,8 +7,17 @@ interface Line {
   typing?: boolean;
 }
 
-// The real WorkerMill flow: /review finds a security bug → creates GH issue → /ship fixes it → PR opened
+// The real WorkerMill flow: splash → /review finds a security bug → creates GH issue → /ship fixes it → PR opened
 const SCRIPT: Line[] = [
+  // User launches — then splash appears
+  { text: "$ npx workermill", color: "text-slate-400", delay: 800 },
+  { text: "", color: "", delay: 400 },
+  { text: "  \u25c6 WorkerMill v0.15.89", color: "text-white font-bold", delay: 600 },
+  { text: "", color: "", delay: 200 },
+  { text: "  Use /model <provider>/<model> to switch models mid-session.", color: "text-slate-500", delay: 400 },
+  { text: "  Type /help for all commands.", color: "text-slate-500", delay: 400 },
+  { text: "", color: "", delay: 800 },
+
   // User kicks off a review
   { text: "> /review branch", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },

@@ -64,6 +64,79 @@ const SCRIPT: Line[] = [
 const LOOP_PAUSE = 4000;
 const CHAR_SPEED = 40;
 
+/** Status bar matching the real CLI's 3-row layout */
+function StatusBar({ progress }: { progress: number }) {
+  // Animate tool counts based on progress
+  const reads = progress > 0.3 ? Math.min(26, Math.round(progress * 30)) : 0;
+  const bashes = progress > 0.5 ? Math.min(13, Math.round((progress - 0.3) * 20)) : 0;
+  const edits = progress > 0.55 ? Math.min(3, Math.round((progress - 0.5) * 10)) : 0;
+  const verifies = progress > 0.6 ? Math.min(5, Math.round((progress - 0.55) * 15)) : 0;
+  const pct = Math.min(38, Math.round(progress * 40));
+  const filled = Math.round(pct / 10);
+  const empty = 10 - filled;
+  const cost = (progress * 0.09).toFixed(2);
+  const mins = Math.max(1, Math.round(progress * 19));
+  const branch = progress > 0.45 ? "GH-6/auth-middleware-fix" : "main";
+
+  const tools = [
+    reads > 0 && `\u2713 read file \u00d7${reads}`,
+    bashes > 0 && `\u2713 bash \u00d7${bashes}`,
+    verifies > 0 && `\u2713 verify \u00d7${verifies}`,
+    edits > 0 && `\u2713 edit file \u00d7${edits}`,
+  ].filter(Boolean);
+
+  return (
+    <div className="border-t border-white/[0.06] bg-[#111113] px-4 py-2 font-mono text-[11px] leading-[1.6]">
+      {/* Row 1: model + context bar + branch + cost */}
+      <div className="flex flex-wrap items-center gap-x-1 text-slate-400">
+        <span className="text-white/80">[</span>
+        <span className="text-teal-400 font-semibold">ollama/qwen3-coder:30b</span>
+        <span className="text-slate-500">(64k context)</span>
+        <span className="text-white/80">]</span>
+        <span className="text-slate-600 ml-1">78t/s</span>
+        <span className="ml-2">
+          <span className={pct < 50 ? "text-emerald-500" : pct < 80 ? "text-yellow-500" : "text-red-500"}>
+            {"\u2588".repeat(filled)}
+          </span>
+          <span className="text-slate-700">{"\u2591".repeat(empty)}</span>
+        </span>
+        <span className="ml-1">{pct}%</span>
+        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-400">cli-demo</span>
+        <span className="text-slate-500 ml-1">git:(</span>
+        <span className="text-emerald-400">{branch}</span>
+        <span className="text-slate-500">)</span>
+        <span className="text-slate-700 mx-1">\u2502</span>
+        <span>~${cost}</span>
+        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-500">{mins}m</span>
+      </div>
+      {/* Row 2: tool counts */}
+      <div className="flex flex-wrap items-center gap-x-1 text-slate-500">
+        {tools.length > 0 ? tools.map((t, i) => (
+          <span key={i} className="flex items-center">
+            <span className="text-emerald-500/70">{t}</span>
+            {i < tools.length - 1 && <span className="text-slate-700 mx-1">\u2502</span>}
+          </span>
+        )) : <span className="text-slate-600">no tool calls</span>}
+      </div>
+      {/* Row 3: permission mode + role models */}
+      <div className="flex flex-wrap items-center gap-x-1">
+        <span className="text-red-400 font-bold">{"\u25C8"} bypassPermissions</span>
+        <span className="text-slate-600">(shift+tab)</span>
+        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-cyan-400 font-bold">plan</span>
+        <span className="text-slate-500">:</span>
+        <span className="text-cyan-400">google/gemini-3.1-pro</span>
+        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-purple-400 font-bold">review</span>
+        <span className="text-slate-500">:</span>
+        <span className="text-purple-300">anthropic/claude-opus-4-6</span>
+      </div>
+    </div>
+  );
+}
+
 function renderLine(line: Line, isActive: boolean, typedChars: number) {
   if (!line.text) return <br />;
 
@@ -198,6 +271,8 @@ export default function CliShowcase() {
               </div>
             )}
           </div>
+          {/* Status bar — matches the real CLI */}
+          <StatusBar progress={visibleLines / SCRIPT.length} />
         </div>
       </div>
     </section>

@@ -169,16 +169,16 @@ describe("Dangerous File Protection (isDangerousFile)", () => {
     expect(isDangerousFile(".git/config")).toBeTruthy();
   });
 
-  it("matches .github/workflows/deploy.yml", () => {
-    expect(isDangerousFile(".github/workflows/deploy.yml")).toBeTruthy();
+  it("does not flag .github/workflows/deploy.yml (agents need CI)", () => {
+    expect(isDangerousFile(".github/workflows/deploy.yml")).toBeNull();
   });
 
   it("matches package-lock.json", () => {
     expect(isDangerousFile("package-lock.json")).toBeTruthy();
   });
 
-  it("matches Dockerfile", () => {
-    expect(isDangerousFile("Dockerfile")).toBeTruthy();
+  it("does not flag Dockerfile (agents need Docker)", () => {
+    expect(isDangerousFile("Dockerfile")).toBeNull();
   });
 
   it("returns null for src/app.ts (safe)", () => {
@@ -195,7 +195,7 @@ describe("Dangerous File Protection (isDangerousFile)", () => {
 
   it("normalizes Windows backslashes", () => {
     expect(isDangerousFile(".ssh\\id_rsa")).toBeTruthy();
-    expect(isDangerousFile(".github\\workflows\\deploy.yml")).toBeTruthy();
+    expect(isDangerousFile(".github\\workflows\\deploy.yml")).toBeNull();
   });
 });
 

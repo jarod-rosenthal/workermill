@@ -8,6 +8,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { loadPersona } from "./personas.js";
 import { formatProjectInstructions } from "./instructions.js";
+import { findModelInfo } from "../../api/src/providers/index.js";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
@@ -46,6 +47,20 @@ function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
 }
 
 const MAX_RATE_LIMIT_RETRIES = 3;
+
+/** Get context window for a model — from pricing registry or configured override */
+function getModelContext(model: string, configuredCtx?: number): number {
+  if (configuredCtx) return configuredCtx;
+  const info = findModelInfo(model);
+  return info?.contextWindow || 128_000;
+}
+
+/** Format context limit for display: 200000 → "200K" */
+function formatContext(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Math.round(tokens / 1000)}K`;
+  if (tokens >= 1000) return `${Math.round(tokens / 1024)}K`;
+  return `${tokens}`;
+}
 
 /** Sleep helper for rate limit backoff */
 function rateLimitSleep(ms: number): Promise<void> {
@@ -608,7 +623,7 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
   logger.info("Planner started", { provider: pProvider, model: pModel });
-  output.log("planner", `Starting planning agent using \x1b[36m${pProvider}/${pModel}\x1b[0m`);
+  output.log("planner", `Planning with \x1b[36m${pProvider}/${pModel}\x1b[0m (${formatContext(getModelContext(pModel, pCtx))} context)`);
   output.status("Planner reading repository...");
 
   // Heartbeat — show elapsed time so users know it's still working
@@ -1310,7 +1325,7 @@ export async function runOrchestration(
     }
 
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
-    output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m)`);
+    output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m, ${formatContext(getModelContext(modelName, contextLength))} context)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -1882,7 +1897,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
-      output.log("tech_lead", `Starting agent execution (\x1b[35m${revProvider}/${revModel}\x1b[0m)`);
+      output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
@@ -1948,6 +1963,22 @@ ${previousReviewFeedback}
             if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
             if (diff) codeDiff += diff;
           } catch { /* not a git repo */ }
+        }
+
+        // Cap diff to fit within the reviewer model's context window.
+        // Rough estimate: 1 token ≈ 4 chars. Reserve 40% of context for system prompt,
+        // tools, instructions, and response. The diff gets the remaining 60%.
+        const revContextWindow = getModelContext(revModel, revCtx);
+        const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
+        if (codeDiff.length > maxDiffChars) {
+          // Write full diff to a temp file so the reviewer can read_file it
+          const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
+          try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+          const stat = codeDiff.match(/## Branch Diff.*?\n([\s\S]*?)\n\n/)?.[1] || "";
+          codeDiff = codeDiff.slice(0, maxDiffChars) +
+            `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
+            `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+            `${stat ? `File list:\n${stat}` : ""}`;
         }
 
         const reviewerProjectInstructions = formatProjectInstructions(workingDir);
@@ -2255,7 +2286,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
           output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
-          output.log(story.persona, `Starting revision: ${story.title} (\x1b[38;5;208m${sProvider}/${sModel}\x1b[0m)`);
+          output.log(story.persona, `Starting revision: ${story.title} (\x1b[38;5;208m${sProvider}/${sModel}\x1b[0m, ${formatContext(getModelContext(sModel, sCtx))} context)`);
 
           output.status(`${story.persona}: revising...`);
 
@@ -2539,10 +2570,258 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
     }
   }
 
+  // Clean up temp review diff file
+  try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
+
   // Stop MCP servers and language server
   stopAllMCPServers();
   const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
   shutdownLSP();
 
   return { stories: sorted, completedStoryIds, featureBranch, userTask };
+}
+
+// ---------------------------------------------------------------------------
+// Standalone Review — extracted review step for /review command
+// ---------------------------------------------------------------------------
+
+export interface StandaloneReviewResult {
+  score: number;
+  decision: "approved" | "revision_needed" | "rejected";
+  feedback: string;
+  reviewText: string;
+}
+
+/**
+ * Run a standalone Tech Lead review against the current branch or uncommitted changes.
+ * Uses the same model, prompt, and scoring as the orchestrator review loop.
+ */
+export async function runStandaloneReview(
+  config: CliConfig,
+  output: OrchestrationOutput,
+  target?: string,
+  abortSignal?: AbortSignal,
+): Promise<StandaloneReviewResult | null> {
+  const reviewer = loadPersona("tech_lead");
+  if (!reviewer) {
+    output.error("Tech Lead persona not found.");
+    return null;
+  }
+
+  const workingDir = process.cwd();
+  const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
+
+  // Set API key
+  const revApiKey = config.providers[revProvider]?.apiKey;
+  if (revApiKey) {
+    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+    const envVar = envMap[revProvider];
+    const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
+    if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
+  }
+
+  output.coordinatorLog(`Starting Tech Lead review (${revProvider}/${revModel})...`);
+  output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
+  output.status("Reviewer -- Checking code quality");
+
+  const sandboxed = config.sandbox ?? true;
+  const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
+  const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
+
+  // Build reviewer tools — same pattern as orchestrator
+  const reviewerTools: Record<string, AnyToolDef> = {};
+  for (const toolName of reviewer.tools) {
+    const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
+    if (toolDef) {
+      reviewerTools[toolName] = {
+        ...toolDef,
+        execute: async (input: Record<string, unknown>) => {
+          output.log("tech_lead", formatToolCallDisplay(toolName, input));
+          const result = await toolDef.execute(input);
+          return result;
+        },
+      };
+    }
+  }
+
+  // Get the diff based on target
+  let codeDiff = "";
+  const normalizedTarget = (target || "branch").toLowerCase().trim();
+  const prMatch = normalizedTarget.match(/^(?:pr)?#?(\d+)$/i);
+
+  if (prMatch) {
+    // PR review — fetch diff via gh CLI
+    const prNumber = prMatch[1];
+    try {
+      const prDiff = execSync(`gh pr diff ${prNumber}`, {
+        cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 30_000,
+      }).trim();
+      codeDiff += `## PR #${prNumber}\n\n${prDiff}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output.error(`Failed to fetch PR #${prNumber}: ${msg}`);
+      output.statusDone();
+      return null;
+    }
+  } else if (normalizedTarget === "diff") {
+    // Uncommitted changes only
+    try {
+      const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
+        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+      }).trim();
+      const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
+        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+      }).trim();
+      if (stat) codeDiff += `## Uncommitted Changes\n${stat}\n\n`;
+      if (diff) codeDiff += diff;
+    } catch { /* not a git repo */ }
+  } else {
+    // "branch" or anything else — diff current branch vs main
+    let mainBranch = "main";
+    try {
+      mainBranch = execSync("git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/heads/main", {
+        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+      }).trim().replace(/^refs\/heads\/|^refs\/remotes\/origin\//g, "");
+    } catch { /* default to main */ }
+
+    const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+    if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
+    if (diff) codeDiff += diff;
+  }
+
+  if (!codeDiff.trim()) {
+    output.error("No changes to review.");
+    output.statusDone();
+    return null;
+  }
+
+  // Cap diff to fit within context window.
+  // Conservative: ~3 chars/token for code, 50% budget for diff (rest is system prompt, tools, instructions).
+  const revContextWindow = getModelContext(revModel, revCtx);
+  const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
+  if (codeDiff.length > maxDiffChars) {
+    const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
+    try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+    const stat = codeDiff.match(/## (?:Branch Diff|Uncommitted|PR).*?\n([\s\S]*?)\n\n/)?.[1] || "";
+    codeDiff = codeDiff.slice(0, maxDiffChars) +
+      `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
+      `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+      `${stat ? `File list:\n${stat}` : ""}`;
+  }
+
+  const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+  const reviewPrompt = `${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Code Changes
+
+The diff below shows what was changed. Use your read_file tool to inspect specific files in detail.
+
+${codeDiff || "(no code changes detected)"}
+
+## Review Instructions
+
+Review the code changes above for quality, correctness, and security.
+
+### APPROVE when:
+- Code correctly implements the requirements
+- No obvious bugs or security issues
+- Code follows existing patterns in the codebase
+- Appropriate error handling is in place
+- Minor cosmetic issues are NOT grounds for revision
+
+### REVISION_NEEDED when:
+- Code has functional bugs that affect correctness
+- Security vulnerabilities that must be fixed
+- Missing required functionality
+- Broken imports, missing dependencies, or code that won't run
+
+### REJECT when:
+- Fundamental approach is wrong and cannot be fixed with revisions
+- Security vulnerability that requires different architecture
+
+**Be fair**: Approve code that works and has no functional bugs or security issues. Request revision for real problems only.
+
+## Output Format
+
+\`\`\`
+REVIEW_DECISION: approved
+\`\`\`
+OR
+\`\`\`
+REVIEW_DECISION: revision_needed
+\`\`\`
+
+Then add:
+\`\`\`
+CODE_QUALITY_SCORE: 8
+FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
+\`\`\`
+
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional. A score of 7+ should almost always accompany an "approved" decision.`;
+
+  // Stream the review — use onStepFinish to capture text between tool calls
+  // This matches the orchestrator's review pattern exactly.
+  let reviewerOutput = "";
+  let reviewText = "";
+  const reviewStartMs = Date.now();
+  try {
+    const reviewStream = streamText({
+      model: reviewModel,
+      abortSignal,
+      system: reviewer.systemPrompt,
+      prompt: reviewPrompt,
+      tools: reviewerTools as ToolSet,
+      stopWhen: stepCountIs(100),
+      timeout: { chunkMs: 120_000 },
+      ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+      onStepFinish({ text }) {
+        if (text) {
+          reviewerOutput += text + "\n";
+          const lines = text.split("\n").filter((l: string) => l.trim());
+          for (const line of lines) {
+            if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+            output.log("tech_lead", line);
+          }
+        }
+        output.status("tech_lead: reviewing...");
+      },
+    });
+    for await (const _chunk of reviewStream.textStream) { /* consumed */ }
+    reviewText = reviewerOutput;
+    const reviewUsage = await reviewStream.totalUsage;
+    // Track tok/s for reviewer model
+    const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
+    const revOutputTokens = reviewUsage?.outputTokens || 0;
+    if (revOutputTokens > 0 && reviewElapsed > 0) {
+      const reviewTokPerSec = Math.round(revOutputTokens / reviewElapsed);
+      output.updateTokPerSec?.(`${revProvider}/${revModel}`, reviewTokPerSec);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    output.error(`Review failed: ${msg}`);
+    output.statusDone();
+    return null;
+  }
+
+  output.statusDone();
+
+  // Parse results — same logic as orchestrator
+  const score = extractScore(reviewText);
+  const threshold = config.review?.approvalThreshold ?? 8;
+  const approved = score >= threshold;
+  const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
+  const decision = approved ? "approved" : (decisionMatch?.[1]?.toLowerCase() as "revision_needed" | "rejected") || "revision_needed";
+
+  // Display structured result
+  output.log("tech_lead", "\u2500".repeat(60));
+  output.log("tech_lead", `::code_quality_score::${score}/10`);
+  output.log("tech_lead", `::review_decision::${decision}`);
+  output.log("tech_lead", "\u2500".repeat(60));
+  output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
+
+  const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
+  const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+
+  // Clean up temp file
+  try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
+
+  return { score, decision, feedback, reviewText };
 }

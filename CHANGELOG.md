@@ -8,6 +8,32 @@ Component releases are tracked via git tags:
 
 ---
 
+## 2026-04-01 — CLI v0.15.89
+
+### Added
+- CLI: `/review branch|diff|#42` — standalone Tech Lead review using the configured reviewer model. Same prompt, scoring, and tools as the `/ship` review loop.
+- CLI: Post-review fix flow — if review finds issues, prompts to create a GitHub issue with findings and automatically kicks off `/ship` to fix them.
+- CLI: Ticket fetch in orchestrator — `/ship GH-1` now fetches the actual GitHub/Jira/Linear issue before planning. Case-insensitive (`gh-1` = `GH-1`).
+- CLI: `/settings tickets|jira.*|linear.key` — configure issue tracker mid-session without re-running setup.
+- CLI: "Trust all" option in every permission prompt — bypass permissions from any prompt, not just Shift+Tab.
+- CLI: Completion summary — "Shipped. 5 experts · 4 stories shipped · 3m 42s" instead of "Orchestration complete."
+- CLI: Context window display — all model announcements show context limit from pricing registry.
+- CLI: Tech Lead PR review — posts `gh pr review --approve|--request-changes` with score and feedback after PR creation.
+- CLI: Story completion and review comments posted to GitHub issues (matching worker pattern).
+- CLI: Startup tips for issue tracker usage (`/ship GH-42`, `/ship PROJ-123`).
+
+### Fixed
+- CLI: Permission mode (Shift+Tab) now takes effect mid-run via ref-based `isBypassMode()`.
+- CLI: Reviewer inventing story numbers — prompt now lists valid stories explicitly, out-of-range numbers filtered.
+- CLI: PR creation failing on multi-line bodies — body passed via stdin (`--body-file -`).
+- CLI: Review diff truncation — caps diff to 50% of model context window, writes full diff to temp file for `read_file` access.
+- CLI: `--resume` typed in chat no longer sent to model — caught with helpful message.
+- CLI: Branch names capped at 3 words with ticket key prefix (`GH-1/full-stack-task`).
+- CLI: Distinct error messages for missing credentials vs issue not found.
+- CLI: Removed Dockerfile and CI files from sensitive file list — agents need to write these.
+
+---
+
 ## 2026-03-31 — CLI v0.15.88
 
 ### Added

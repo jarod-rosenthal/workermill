@@ -63,6 +63,8 @@ export interface UseOrchestratorReturn {
   start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
+  /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
+  review: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
   /** Cancel the running orchestration. */
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
@@ -165,12 +167,19 @@ export function useOrchestrator(
             "../orchestrator.js"
           );
 
+          // Track completion stats for summary
+          const seenPersonas = new Set<string>();
+          let storiesCompleted = 0;
+          const startTime = Date.now();
+
           // ---- Build the OrchestrationOutput adapter -----------------
           const output: OrchestrationOutput = {
             log(persona: string, message: string): void {
               const emoji = getEmoji(persona);
               const trimmed = message.trim();
               if (trimmed) {
+                seenPersonas.add(persona);
+                if (trimmed.includes("— completed!")) storiesCompleted++;
                 emitLine(`[${emoji} ${persona}] ${trimmed}`);
               }
             },
@@ -195,10 +204,27 @@ export function useOrchestrator(
             },
 
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
+              // If already in bypassPermissions mode, auto-approve
+              const isTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
+              if (isTrusted) return Promise.resolve(true);
+
               return new Promise((resolve) => {
+                // Poll for mode changes — if user switches to
+                // bypassPermissions while the prompt is showing,
+                // auto-approve and dismiss immediately.
+                const interval = setInterval(() => {
+                  const nowTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
+                  if (nowTrusted) {
+                    clearInterval(interval);
+                    setConfirmRequest(null);
+                    resolve(true);
+                  }
+                }, 200);
+
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    clearInterval(interval);
                     setConfirmRequest(null);
                     if (mode) {
                       resolve({ allowed: yes, mode });
@@ -276,7 +302,15 @@ export function useOrchestrator(
           await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined, ticketKey);
 
           flushLine();
-          addMessage(retryPlan ? "**Retry complete.**" : "**Orchestration complete.**");
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          const parts: string[] = [];
+          if (seenPersonas.size > 0) parts.push(`${seenPersonas.size} expert${seenPersonas.size === 1 ? "" : "s"}`);
+          if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
+          parts.push(timeStr);
+          addMessage(`**Shipped.** ${parts.join(" · ")}`);
           notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
           flushLine();
@@ -324,8 +358,184 @@ export function useOrchestrator(
   );
 
   // ------------------------------------------------------------------
+  // review() — standalone Tech Lead review
+  // ------------------------------------------------------------------
+
+  const review = useCallback(
+    (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => {
+      if (running) return;
+      setRunning(true);
+      setStatusMessage("Reviewing...");
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      (async () => {
+        function emitLine(line: string): void {
+          addMessage(line);
+          setPreviewLine(line);
+        }
+        function flushLine(): void {
+          setPreviewLine("");
+        }
+
+        const config = cliConfig ?? resolveConfig();
+        if (!config) {
+          addMessage("No provider configured. Run `workermill` (setup) first.");
+          setRunning(false);
+          return;
+        }
+
+        try {
+          const { runStandaloneReview } = await import("../orchestrator.js");
+
+          const seenPersonas = new Set<string>();
+          const startTime = Date.now();
+
+          const output: OrchestrationOutput = {
+            log(persona: string, message: string): void {
+              const emoji = getEmoji(persona);
+              const trimmed = message.trim();
+              if (trimmed) {
+                seenPersonas.add(persona);
+                emitLine(`[${emoji} ${persona}] ${trimmed}`);
+              }
+            },
+            coordinatorLog(message: string): void {
+              emitLine(`[🎯 coordinator] ${message}`);
+            },
+            toolCall(persona: string, toolName: string, input: Record<string, unknown>): void {
+              const emoji = getEmoji(persona);
+              const detail = input.command || input.file_path || input.path || input.pattern || "";
+              emitLine(`[${emoji} ${persona}] ↓ ${toolName} ${detail}`);
+            },
+            error(message: string): void { emitLine(`Error: ${message}`); },
+            status(msg: string): void { setStatusMessage(msg); },
+            statusDone(): void { setStatusMessage(""); },
+            confirm: async (prompt: string) => {
+              return new Promise<boolean>((resolve) => {
+                setConfirmRequest({
+                  prompt,
+                  resolve: (yes: boolean) => {
+                    setConfirmRequest(null);
+                    resolve(yes);
+                  },
+                });
+              });
+            },
+            updateCost(cost: number): void {
+              setCost?.(cost);
+            },
+            updateTokPerSec(providerModel: string, tokPerSec: number): void {
+              setTokPerSec?.(providerModel, tokPerSec);
+            },
+            updateBranch: undefined,
+          };
+
+          const result = await runStandaloneReview(config, output, target, controller.signal);
+
+          flushLine();
+
+          if (result) {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+            if (result.decision === "approved") {
+              addMessage(`**Review complete.** Score: ${result.score}/10 · ${timeStr}`);
+            } else {
+              addMessage(`**Review complete.** Score: ${result.score}/10 · ${timeStr}`);
+
+              // Ask user if they want to create an issue and fix
+              const shouldFix = await output.confirm(
+                "Create a GitHub issue with these findings and fix them?"
+              );
+              const yes = typeof shouldFix === "boolean" ? shouldFix : shouldFix?.allowed;
+
+              if (yes) {
+                // Create GH issue from review feedback
+                const { execSync } = await import("child_process");
+
+                // Build a useful title from context
+                let reviewSubject = "";
+                try {
+                  const branch = execSync("git branch --show-current 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+                  if (branch && branch !== "main" && branch !== "master") {
+                    // Use branch name, cleaned up: GH-1/full-stack-task → Full stack task
+                    reviewSubject = branch.replace(/^[^/]+\//, "").replace(/-/g, " ").replace(/^\w/, c => c.toUpperCase());
+                  }
+                } catch { /* not a git repo */ }
+                if (!reviewSubject) {
+                  try {
+                    const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+                    const match = remote.match(/[/:]([^/]+?)(?:\.git)?$/);
+                    if (match) reviewSubject = match[1];
+                  } catch { /* no remote */ }
+                }
+                if (!reviewSubject) reviewSubject = "codebase";
+
+                // Extract first concrete issue from feedback for the title
+                const firstIssue = result.feedback.split("\n").find(l => /^\d+\.|^-|^\*/.test(l.trim()));
+                const issueSummary = firstIssue
+                  ? firstIssue.replace(/^\d+\.\s*|^[-*]\s*/, "").replace(/\*\*/g, "").slice(0, 60).trim()
+                  : "quality improvements";
+
+                const issueTitle = `[Review] ${reviewSubject}: ${issueSummary}`;
+                const issueBody = `## Tech Lead Review\n\n**Score:** ${result.score}/10\n**Decision:** ${result.decision}\n\n${result.feedback}\n\n---\n*Created by [WorkerMill CLI](https://workermill.com) /review*`;
+
+                try {
+                  const issueUrl = execSync(
+                    `gh issue create --title "${issueTitle.replace(/"/g, '\\"')}" --body-file -`,
+                    { cwd: process.cwd(), encoding: "utf-8", input: issueBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
+                  ).trim();
+                  // Extract issue number from URL
+                  const issueMatch = issueUrl.match(/\/issues\/(\d+)/);
+                  const issueNumber = issueMatch ? `#${issueMatch[1]}` : null;
+
+                  if (issueNumber) {
+                    emitLine(`[🎯 coordinator] Created issue ${issueNumber}: ${issueTitle}`);
+                    emitLine(`[🎯 coordinator] ${issueUrl}`);
+                    flushLine();
+
+                    // Kick off /ship with the new issue
+                    setRunning(false);
+                    start(`Fix code review findings from ${issueNumber}`, trustAll, sandboxed, issueNumber);
+                    return; // start() takes over — skip the finally block's setRunning(false)
+                  } else {
+                    emitLine(`[🎯 coordinator] Issue created: ${issueUrl}`);
+                    addMessage("Issue created but couldn't parse the number. Run `/ship` manually with the issue number.");
+                  }
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  emitLine(`[🎯 coordinator] Failed to create issue: ${msg}`);
+                  addMessage(`Could not create GitHub issue. You can fix manually or run \`/ship\` with the review feedback.`);
+                }
+              }
+            }
+          }
+        } catch (err: unknown) {
+          flushLine();
+          if (controller.signal.aborted) {
+            addMessage("**Review cancelled.**");
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            addMessage(`**Review failed:** ${msg}`);
+          }
+        } finally {
+          setRunning(false);
+          setStatusMessage("");
+          setPreviewLine("");
+          setConfirmRequest(null);
+        }
+      })();
+    },
+    [addMessage, cliConfig],
+  );
+
+  // ------------------------------------------------------------------
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, retry, cancel, statusMessage, previewLine, confirmRequest };
+  return { running, start, retry, review, cancel, statusMessage, previewLine, confirmRequest };
 }

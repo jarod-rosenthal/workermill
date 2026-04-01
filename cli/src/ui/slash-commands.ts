@@ -244,6 +244,7 @@ export interface SlashCommandContext {
   orchestratorRunning: boolean;
   startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
+  startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
   lastBuildTask: string | null;
   setLastBuildTask: (task: string) => void;
   sandboxed?: boolean;
@@ -446,17 +447,24 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /review [task] ----
     case "review": {
-      const reviewTask = arg || "Review the recent changes in this codebase. Read the git diff, check for bugs, security issues, and code quality. Provide actionable feedback.";
-      const p = loadPersona("tech_lead");
-      if (p) {
-        const personaPrefix =
-          `[Acting as **${p.name}** — ${p.description}]\n\n` +
-          `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
-          `## Task\n\n`;
-        ctx.submit(personaPrefix + reviewTask, `/review${arg ? " " + arg : ""}`);
-      } else {
-        ctx.submit(reviewTask, `/review${arg ? " " + arg : ""}`);
+      if (!arg) {
+        ctx.addSystemMessage(
+          "**Usage:**\n\n" +
+          "| Command | What it reviews |\n" +
+          "|---|---|\n" +
+          "| `/review branch` | Full diff of the current feature branch vs main |\n" +
+          "| `/review diff` | Uncommitted changes only |\n" +
+          "| `/review #42` | A GitHub PR by number |\n\n" +
+          "Uses your configured reviewer model (`/settings route tech_lead <provider>`)."
+        );
+        break;
       }
+      if (ctx.orchestratorRunning) {
+        ctx.addSystemMessage("A build is already running. Wait for it to complete.");
+        break;
+      }
+      ctx.addUserMessage(`/review ${arg}`);
+      ctx.startReview(ctx.isTrustAll, ctx.sandboxed ?? false, arg);
       break;
     }
 

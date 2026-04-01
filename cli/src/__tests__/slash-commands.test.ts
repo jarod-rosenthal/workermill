@@ -142,6 +142,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     orchestratorRunning: false,
     startOrchestrator: vi.fn(),
     retryOrchestrator: vi.fn().mockReturnValue(false),
+    startReview: vi.fn(),
     lastBuildTask: null,
     setLastBuildTask: vi.fn(),
     sandboxed: false,
@@ -1155,41 +1156,28 @@ describe("handleSlashCommand", () => {
   // ---- /review ----
 
   describe("/review", () => {
-    it("submits default review task with no arg", () => {
+    it("shows usage help with no arg", () => {
       const ctx = createContext();
       handleSlashCommand("/review", ctx);
-      expect(loadPersona).toHaveBeenCalledWith("tech_lead");
-      expect(ctx.submit).toHaveBeenCalledWith(
-        expect.stringContaining("Review the recent changes"),
-        "/review",
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Usage"),
       );
+      expect(ctx.startReview).not.toHaveBeenCalled();
     });
 
-    it("submits custom review task with arg", () => {
+    it("starts review with a target", () => {
       const ctx = createContext();
-      handleSlashCommand("/review check the auth middleware for XSS", ctx);
-      expect(loadPersona).toHaveBeenCalledWith("tech_lead");
-      expect(ctx.submit).toHaveBeenCalledWith(
-        expect.stringContaining("check the auth middleware for XSS"),
-        "/review check the auth middleware for XSS",
+      handleSlashCommand("/review branch", ctx);
+      expect(ctx.startReview).toHaveBeenCalled();
+    });
+
+    it("blocks review when orchestrator is running", () => {
+      const ctx = createContext({ orchestratorRunning: true });
+      handleSlashCommand("/review branch", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("already running"),
       );
-    });
-
-    it("includes persona instructions when persona loads", () => {
-      const ctx = createContext();
-      handleSlashCommand("/review", ctx);
-      const submitCall = vi.mocked(ctx.submit).mock.calls[0][0];
-      expect(submitCall).toContain("Acting as");
-      expect(submitCall).toContain("Expert Instructions");
-    });
-
-    it("submits without persona prefix when persona not found", () => {
-      vi.mocked(loadPersona).mockReturnValueOnce(null as any);
-      const ctx = createContext();
-      handleSlashCommand("/review check security", ctx);
-      const submitCall = vi.mocked(ctx.submit).mock.calls[0][0];
-      expect(submitCall).not.toContain("Acting as");
-      expect(submitCall).toBe("check security");
+      expect(ctx.startReview).not.toHaveBeenCalled();
     });
   });
 
@@ -1350,16 +1338,6 @@ describe("handleSlashCommand", () => {
       expect(saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           review: expect.objectContaining({ useCritic: true }),
-        }),
-      );
-    });
-
-    it("updates git.branchPrefix", () => {
-      const ctx = createContext();
-      handleSlashCommand("/settings git.branchPrefix feat", ctx);
-      expect(saveConfig).toHaveBeenCalledWith(
-        expect.objectContaining({
-          git: expect.objectContaining({ branchPrefix: "feat" }),
         }),
       );
     });

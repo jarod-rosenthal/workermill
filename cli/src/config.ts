@@ -66,6 +66,18 @@ export interface PermissionRuleConfig {
   deny?: string[];
 }
 
+export type TicketSystem = "github" | "jira" | "linear";
+
+export interface JiraConfig {
+  baseUrl: string;
+  email: string;
+  apiToken: string;
+}
+
+export interface LinearConfig {
+  apiKey: string;
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
@@ -80,6 +92,12 @@ export interface CliConfig {
   bell?: boolean;
   /** Granular permission rules — pattern-based allow/deny per tool */
   permissions?: PermissionRuleConfig;
+  /** Issue tracker for /ship ticket references (default: "github") */
+  ticketSystem?: TicketSystem;
+  /** Jira credentials (only when ticketSystem === "jira") */
+  jira?: JiraConfig;
+  /** Linear credentials (only when ticketSystem === "linear") */
+  linear?: LinearConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");

@@ -102,14 +102,14 @@ function StatusBar({ progress }: { progress: number }) {
           <span className="text-slate-700">{"\u2591".repeat(empty)}</span>
         </span>
         <span className="ml-1">{pct}%</span>
-        <span className="text-slate-700 mx-1">{"\u2502"}</span>
+        <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-slate-400">cli-demo</span>
         <span className="text-slate-500 ml-1">git:(</span>
         <span className="text-emerald-400">{branch}</span>
         <span className="text-slate-500">)</span>
-        <span className="text-slate-700 mx-1">{"\u2502"}</span>
+        <span className="text-slate-600 mx-1">{"│"}</span>
         <span>~${cost}</span>
-        <span className="text-slate-700 mx-1">{"\u2502"}</span>
+        <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-slate-500">{mins}m</span>
       </div>
       {/* Row 2 */}
@@ -117,7 +117,7 @@ function StatusBar({ progress }: { progress: number }) {
         {tools.length > 0 ? tools.map((t, i) => (
           <span key={i} className="flex items-center">
             <span className="text-emerald-500/70">{t}</span>
-            {i < tools.length - 1 && <span className="text-slate-700 mx-1">{"\u2502"}</span>}
+            {i < tools.length - 1 && <span className="text-slate-600 mx-1">{"│"}</span>}
           </span>
         )) : <span className="text-slate-600">no tool calls</span>}
       </div>
@@ -125,12 +125,12 @@ function StatusBar({ progress }: { progress: number }) {
       <div className="flex flex-wrap items-center gap-x-1">
         <span className="text-red-400 font-bold">{"\u25C8"} bypassPermissions</span>
         <span className="text-slate-600">(shift+tab)</span>
-        <span className="text-slate-700 mx-1">{"\u2502"}</span>
+        <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-cyan-400 font-bold">plan</span>
         <span className="text-slate-500">:</span>
         <span className="text-cyan-400">google/gemini-3.1-pro</span>
         <span className="text-slate-600 ml-1">142t/s</span>
-        <span className="text-slate-700 mx-1">{"\u2502"}</span>
+        <span className="text-slate-600 mx-1">{"│"}</span>
         <span className="text-purple-400 font-bold">review</span>
         <span className="text-slate-500">:</span>
         <span className="text-purple-300">anthropic/claude-opus-4-6</span>

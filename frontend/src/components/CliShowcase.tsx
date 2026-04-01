@@ -19,11 +19,11 @@ const SCRIPT: Line[] = [
   { text: "", color: "", delay: 600 },
 
   // User asks about working tickets — natural lead-in to /ship
-  { text: "> I have open issues on GitHub. Can you work them?", color: "typing", delay: 0, typing: true },
+  { text: "> I have 12 open issues on GitHub. How do I get started?", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
-  { text: "  Yes \u2014 use /ship GH-42 to fetch any issue. I'll plan the work,", color: "text-slate-300", delay: 600 },
-  { text: "  assign the right specialists, run your tests, and open a PR.", color: "text-slate-300", delay: 500 },
-  { text: "  Also works with Jira (PROJ-123) and Linear (TEAM-42).", color: "text-slate-300", delay: 500 },
+  { text: "  Run /ship GH-42 with any issue number. I'll fetch the ticket,", color: "text-slate-300", delay: 600 },
+  { text: "  plan the work, assign specialists, and open a PR when it's done.", color: "text-slate-300", delay: 500 },
+  { text: "  Works with Jira and Linear too \u2014 /ship PROJ-123 or /ship TEAM-42.", color: "text-slate-300", delay: 500 },
   { text: "", color: "", delay: 800 },
 
   // User follows the advice

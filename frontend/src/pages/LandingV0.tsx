@@ -463,27 +463,7 @@ export default function LandingV0() {
                 </div>
               </div>
 
-              {/* Key differentiators */}
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
-                  <h4 className="text-sm font-semibold text-white mb-1">Any LLM provider</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Ollama, Anthropic, OpenAI, Google, LM Studio, or any OpenAI-compatible endpoint. Your models, your keys.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
-                  <h4 className="text-sm font-semibold text-white mb-1">Runs locally</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    No account, no cloud, no data leaves your machine. Just Node.js and <code className="text-slate-400">npx workermill</code>.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
-                  <h4 className="text-sm font-semibold text-white mb-1">Issue tracker integration</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    <code className="text-slate-400">/ship GH-42</code> fetches tickets from GitHub, Jira, or Linear. Posts completion comments back when done.
-                  </p>
-                </div>
-              </div>
+              {/* Differentiator cards removed — the CLI animation demonstrates these better */}
             </div>
           </section>
 

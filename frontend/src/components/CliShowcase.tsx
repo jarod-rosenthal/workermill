@@ -7,34 +7,62 @@ interface Line {
   typing?: boolean;
 }
 
+// The real WorkerMill flow: /review finds a security bug → creates GH issue → /ship fixes it → PR opened
 const SCRIPT: Line[] = [
-  { text: "> /ship GH-42", color: "typing", delay: 0, typing: true },
+  // User kicks off a review
+  { text: "> /review branch", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
-  { text: " system   Fetched GH-42: Add user authentication", color: "text-teal-400", delay: 600 },
+  { text: " \ud83c\udfaf coordinator  Starting Tech Lead review...", color: "text-teal-400", delay: 600 },
+  { text: " \ud83d\udc51 tech_lead  Reading src/routes/auth.js, src/middleware/auth.js...", color: "text-amber-400", delay: 800 },
+  { text: " \ud83d\udc51 tech_lead  Reading src/controllers/authController.js...", color: "text-amber-400", delay: 600 },
+  { text: " \ud83d\udc51 tech_lead  Reading src/routes/tasks.js, src/tests/auth.test.js...", color: "text-amber-400", delay: 600 },
+  { text: "", color: "", delay: 400 },
+
+  // Review finds a real issue
+  { text: " \ud83d\udc51 tech_lead  CRITICAL: Missing auth middleware on /api/auth/profile", color: "text-red-400", delay: 800 },
+  { text: " \ud83d\udc51 tech_lead  The /profile route is unprotected \u2014 anyone can access it without a token", color: "text-amber-400", delay: 600 },
+  { text: " \ud83d\udc51 tech_lead  Score: 5/10 \u2014 revision needed", color: "text-amber-400", delay: 500 },
+  { text: "", color: "", delay: 400 },
+
+  // Auto-creates issue and kicks off /ship
+  { text: " \ud83c\udfaf coordinator  Create a GitHub issue and fix it? (y/n) y", color: "text-teal-400", delay: 800 },
+  { text: " \ud83c\udfaf coordinator  Created issue #6: Missing auth middleware on /profile", color: "text-teal-400", delay: 600 },
+  { text: " \ud83c\udfaf coordinator  Fetched #6 \u2014 starting /ship...", color: "text-teal-400", delay: 500 },
+  { text: "", color: "", delay: 400 },
+
+  // Planner scopes the fix
+  { text: " \ud83d\udca1 planner  Reading codebase + issue #6...", color: "text-violet-400", delay: 700 },
+  { text: " \ud83d\udca1 planner  2 tasks:", color: "text-violet-400", delay: 400 },
+  { text: "          [backend_developer] Apply auth middleware to /profile route", color: "text-slate-500", delay: 200 },
+  { text: "          [qa_engineer] Add test: GET /profile without token returns 401", color: "text-slate-500", delay: 200 },
+  { text: "", color: "", delay: 400 },
+
+  // Backend dev fixes it
+  { text: " \ud83d\udcbb backend_developer  Modified src/routes/auth.js", color: "text-blue-400", delay: 600 },
+  { text: " \ud83d\udcbb backend_developer  Added: const auth = require('../middleware/auth')", color: "text-blue-400", delay: 400 },
+  { text: " \ud83d\udcbb backend_developer  Quality gates... node -c \u2713", color: "check-line-blue", delay: 600 },
   { text: "", color: "", delay: 300 },
-  { text: " planner  Reading codebase... 38 files analyzed", color: "text-violet-400", delay: 800 },
-  { text: " planner  3 tasks:", color: "text-violet-400", delay: 400 },
-  { text: "          [backend_developer] Auth service: JWT tokens, login/signup endpoints", color: "text-slate-500", delay: 200 },
-  { text: "          [backend_developer] Middleware: route protection, session handling", color: "text-slate-500", delay: 200 },
-  { text: "          [frontend_developer] UI: signup form, login page, protected routes", color: "text-slate-500", delay: 200 },
-  { text: "", color: "", delay: 500 },
-  { text: " backend_developer  Created src/services/auth.ts", color: "text-blue-400", delay: 600 },
-  { text: " backend_developer  Created src/middleware/requireAuth.ts", color: "text-blue-400", delay: 400 },
-  { text: " backend_developer  Running quality gates... tsc \u2713 vitest \u2713", color: "check-line-blue", delay: 800 },
+
+  // QA verifies
+  { text: " \ud83e\uddea qa_engineer  Updated src/tests/auth.test.js", color: "text-cyan-400", delay: 500 },
+  { text: " \ud83e\uddea qa_engineer  Added test: missing token \u2192 401 Unauthorized", color: "text-cyan-400", delay: 400 },
+  { text: "", color: "", delay: 400 },
+
+  // Tech lead approves
+  { text: " \ud83d\udc51 tech_lead  Reviewing diffs...", color: "text-amber-400", delay: 800 },
+  { text: " \ud83d\udc51 tech_lead  Auth middleware correctly applied. Tests cover all cases.", color: "text-amber-400", delay: 600 },
+  { text: " \ud83d\udc51 tech_lead  Score: 9/10 \u2014 approved \u2713", color: "check-line-amber", delay: 600 },
+  { text: "", color: "", delay: 400 },
+
+  // Ship it
+  { text: " \ud83e\udd16 system  Branch: GH-6/auth-middleware-fix (2 commits)", color: "text-teal-400", delay: 400 },
+  { text: " \ud83e\udd16 system  \u2713 PR opened \u00b7 Comment posted to #6", color: "check-line-teal", delay: 600 },
   { text: "", color: "", delay: 300 },
-  { text: " frontend_developer  Created src/pages/Login.tsx", color: "text-cyan-400", delay: 500 },
-  { text: " frontend_developer  Modified src/App.tsx", color: "text-cyan-400", delay: 400 },
-  { text: " frontend_developer  Running quality gates... tsc \u2713 vitest \u2713", color: "check-line-cyan", delay: 600 },
-  { text: "", color: "", delay: 500 },
-  { text: " tech_lead  Reviewing diffs against original spec...", color: "text-amber-400", delay: 1000 },
-  { text: " tech_lead  Score: 9/10 \u2014 approved \u2713", color: "check-line-amber", delay: 600 },
-  { text: "", color: "", delay: 500 },
-  { text: " system  Branch: workermill/user-auth (6 commits, 9 files, +680 lines)", color: "text-teal-400", delay: 400 },
-  { text: " system  \u2713 PR opened \u00b7 Comment posted to GH-42", color: "check-line-teal", delay: 600 },
+  { text: " Shipped. 5 experts \u00b7 2 stories \u00b7 Review \u2192 Issue \u2192 Fix \u2192 PR", color: "text-emerald-400", delay: 800 },
 ];
 
-const LOOP_PAUSE = 3000;
-const CHAR_SPEED = 50;
+const LOOP_PAUSE = 4000;
+const CHAR_SPEED = 40;
 
 function renderLine(line: Line, isActive: boolean, typedChars: number) {
   if (!line.text) return <br />;
@@ -46,7 +74,7 @@ function renderLine(line: Line, isActive: boolean, typedChars: number) {
     return (
       <span>
         <span className="text-slate-500">{prompt}</span>
-        <span className="text-white">{visible}</span>
+        <span className="text-white font-bold">{visible}</span>
         {isActive && <span className="animate-blink">|</span>}
       </span>
     );
@@ -54,27 +82,22 @@ function renderLine(line: Line, isActive: boolean, typedChars: number) {
 
   // Lines with checkmarks get special coloring
   if (line.color.startsWith("check-line-")) {
-    const base = line.color.replace("check-line-", "text-") + "-400";
+    const baseColor = line.color.replace("check-line-", "");
+    const colorClass = `text-${baseColor}-400`;
     const parts = line.text.split("\u2713");
     return (
-      <span className={base}>
+      <span className={colorClass}>
         {parts.map((part, i) => (
           <span key={i}>
             {part}
             {i < parts.length - 1 && <span className="text-emerald-400">{"\u2713"}</span>}
           </span>
         ))}
-        {isActive && <span className="animate-blink text-slate-400">|</span>}
       </span>
     );
   }
 
-  return (
-    <span className={line.color}>
-      {line.text}
-      {isActive && <span className="animate-blink text-slate-400">|</span>}
-    </span>
-  );
+  return <span className={line.color}>{line.text}</span>;
 }
 
 export default function CliShowcase() {
@@ -90,7 +113,6 @@ export default function CliShowcase() {
 
   useEffect(() => {
     if (visibleLines >= SCRIPT.length) {
-      // All lines shown -- pause then loop
       timerRef.current = setTimeout(() => {
         setVisibleLines(0);
         setTypedChars(0);
@@ -102,7 +124,6 @@ export default function CliShowcase() {
     const line = SCRIPT[visibleLines];
 
     if (line.typing && !isTyping) {
-      // Start typewriter after line delay
       timerRef.current = setTimeout(() => {
         setIsTyping(true);
         setTypedChars(0);
@@ -111,25 +132,23 @@ export default function CliShowcase() {
     }
 
     if (line.typing && isTyping) {
-      const command = line.text.slice(2); // skip "> "
+      const command = line.text.slice(2);
       if (typedChars < command.length) {
         timerRef.current = setTimeout(() => setTypedChars((c) => c + 1), CHAR_SPEED);
       } else {
-        // Typing done -- brief pause then advance
         timerRef.current = setTimeout(() => {
           setIsTyping(false);
           setVisibleLines((v) => v + 1);
-        }, 300);
+        }, 400);
       }
       return clear;
     }
 
-    // Non-typing line: reveal after delay
     timerRef.current = setTimeout(() => setVisibleLines((v) => v + 1), line.delay || 100);
     return clear;
   }, [visibleLines, typedChars, isTyping, clear]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -153,12 +172,12 @@ export default function CliShowcase() {
               <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
               <div className="w-3 h-3 rounded-full bg-green-500/80" />
             </div>
-            <span className="text-xs text-slate-500 ml-2">workermill</span>
+            <span className="text-xs text-slate-500 ml-2 font-mono">workermill</span>
           </div>
           {/* Terminal content */}
           <div
             ref={containerRef}
-            className="p-6 font-mono text-sm leading-relaxed min-h-[420px] max-h-[520px] overflow-y-auto"
+            className="p-6 font-mono text-[13px] leading-relaxed min-h-[480px] max-h-[580px] overflow-y-auto"
           >
             {SCRIPT.slice(0, visibleLines + (isTyping ? 1 : 0)).map((line, i) => {
               const isActive =
@@ -172,7 +191,6 @@ export default function CliShowcase() {
                 </div>
               );
             })}
-            {/* Blinking cursor when idle at start */}
             {visibleLines === 0 && !isTyping && (
               <div className="min-h-[1.5em]">
                 <span className="text-slate-500">&gt; </span>

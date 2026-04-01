@@ -106,7 +106,9 @@ function buildMockContext(
     denyTool: () => {},
     orchestratorRunning: false,
     startOrchestrator: () => {},
+    startReview: () => {},
     retryOrchestrator: () => false,
+    isTrustAll: () => true,
     lastBuildTask: null,
     setLastBuildTask: () => {},
     sandboxed: true,
@@ -496,40 +498,27 @@ describe("CLI E2E — full lifecycle", () => {
       expect(ctx.submittedInputs[0].input).toContain("review the code");
     });
 
-    it("/review — loads tech_lead persona and submits", () => {
-      if (!ollamaAvailable) {
-        console.log("Skipping: Ollama not available");
-        return;
-      }
-
-      const tempDir = cloneTestRepo();
-      const ctx = buildMockContext({ workingDir: tempDir });
+    it("/review without args — shows usage", () => {
+      const ctx = buildMockContext({ workingDir: process.cwd() });
 
       const handled = handleSlashCommand("/review", ctx);
       expect(handled).toBe(true);
 
-      // Should submit with tech_lead persona
-      expect(ctx.submittedInputs.length).toBe(1);
-      expect(ctx.submittedInputs[0].input).toContain("Acting as");
-      expect(ctx.submittedInputs[0].input).toContain("Tech Lead");
-      // Default review task
-      expect(ctx.submittedInputs[0].input).toContain("Review the recent changes");
+      // Should show usage, not submit
+      const allMessages = ctx.systemMessages.join("\n");
+      expect(allMessages).toContain("Usage");
+      expect(allMessages).toContain("/review");
     });
 
-    it("/review with custom task — passes the task through", () => {
-      if (!ollamaAvailable) {
-        console.log("Skipping: Ollama not available");
-        return;
-      }
+    it("/review with task — starts review", () => {
+      const ctx = buildMockContext({ workingDir: process.cwd() });
 
-      const tempDir = cloneTestRepo();
-      const ctx = buildMockContext({ workingDir: tempDir });
-
-      const handled = handleSlashCommand("/review check for SQL injection vulnerabilities", ctx);
+      const handled = handleSlashCommand("/review branch", ctx);
       expect(handled).toBe(true);
 
-      expect(ctx.submittedInputs.length).toBe(1);
-      expect(ctx.submittedInputs[0].input).toContain("SQL injection vulnerabilities");
+      // Should call startReview, not submit
+      expect(ctx.userMessages.length).toBe(1);
+      expect(ctx.userMessages[0]).toContain("/review branch");
     });
   });
 
@@ -924,7 +913,7 @@ describe("CLI E2E — full lifecycle", () => {
 
       const allMessages = ctx.systemMessages.join("\n");
       expect(allMessages).toContain("Usage");
-      expect(allMessages).toContain("/ship <task description>");
+      expect(allMessages).toContain("/ship <task>");
     });
 
     it("EngineAIClient handles timeout gracefully", async () => {

@@ -4,6 +4,13 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.92] - 2026-04-01
+
+### Fixed
+- **Ticket detection with spaces** — `GH #11`, `GH 11`, and `GH11` now all correctly match as GitHub issue references (previously only `GH-11` and `#11` worked).
+- **Project-level ticket config** — `ticketSystem`, `jira`, and `linear` settings from `.workermill/cli.json` project config now merge correctly into resolved config.
+- **npm audit** — regenerated `package-lock.json` to fix CI `npm ci` sync failures.
+
 ## [0.15.88] - 2026-03-31
 
 ### Added

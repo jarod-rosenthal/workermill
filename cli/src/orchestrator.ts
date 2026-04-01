@@ -948,6 +948,55 @@ export async function runOrchestration(
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
 
+  // Resolve ticket references — fetch from issue tracker if ticketKey is set
+  if (ticketKey) {
+    try {
+      const { TicketOps } = await import("./ticket-ops.js");
+      const ticketSystem = config.ticketSystem || "github";
+
+      // Ensure credentials are available
+      if (ticketSystem === "jira" && config.jira) {
+        process.env.JIRA_BASE_URL = config.jira.baseUrl;
+        process.env.JIRA_EMAIL = config.jira.email;
+        process.env.JIRA_API_TOKEN = config.jira.apiToken;
+      } else if (ticketSystem === "linear" && config.linear) {
+        process.env.LINEAR_API_KEY = config.linear.apiKey;
+      }
+      if (ticketSystem === "github") {
+        if (!process.env.GITHUB_TOKEN) {
+          try {
+            process.env.GITHUB_TOKEN = execSync("gh auth token 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+          } catch { /* gh not installed or not logged in */ }
+        }
+        if (!process.env.GITHUB_REPO) {
+          try {
+            const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+            const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+            if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
+          } catch { /* not a git repo */ }
+        }
+      }
+
+      const ops = new TicketOps(ticketKey, ticketSystem);
+      if (!ops.isAvailable()) {
+        output.error(`Missing credentials for ${ticketSystem}. Run \`/setup\` to configure your issue tracker.`);
+        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      }
+      const ticket = await ops.fetchTicket();
+      if (ticket) {
+        userTask = `# ${ticket.title}\n\n${ticket.body}${ticket.labels?.length ? `\n\nLabels: ${ticket.labels.join(", ")}` : ""}`;
+        output.coordinatorLog(`Fetched ${ticketKey}: ${ticket.title}`);
+      } else {
+        output.error(`Could not find ticket ${ticketKey}. Check that the issue exists and you have access.`);
+        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output.error(`Ticket fetch failed: ${msg}`);
+      return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+    }
+  }
+
   // Ensure Ollama models are loaded with the correct context length
   const defaultProvider = getProviderForPersona(config);
   if (defaultProvider.provider === "ollama" || config.providers[defaultProvider.provider]?.host) {
@@ -1145,9 +1194,22 @@ export async function runOrchestration(
     }
 
     // ── Plan accepted — NOW create the feature branch ──
-    const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
-    const branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
-    featureBranch = createFeatureBranch(workingDir, branchLabel, config.git?.branchPrefix);
+    // Ticket-driven: use ticket key as prefix, title as slug
+    // File/inline: use repo name as prefix, task text as slug
+    let branchPrefix: string | undefined;
+    let branchLabel: string;
+    if (ticketKey) {
+      branchPrefix = ticketKey.startsWith("#")
+        ? `GH-${ticketKey.slice(1)}`
+        : ticketKey.toUpperCase();
+      // Use just the title line (first line after "# ") not the whole body
+      const titleMatch = userTask.match(/^# (.+)/m);
+      branchLabel = titleMatch ? titleMatch[1] : userTask;
+    } else {
+      const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
+      branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
+    }
+    featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix || config.git?.branchPrefix);
     if (featureBranch) {
       output.coordinatorLog(`Working on branch: ${featureBranch}`);
       output.updateBranch?.(featureBranch);
@@ -1933,17 +1995,22 @@ FEEDBACK: Your detailed feedback
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
-When requesting revision, you MUST specify which stories need changes. Use the story numbers from the Story Summary table above.
+There are exactly ${sorted.length} stories (numbered 1 to ${sorted.length}):
+${sorted.map((s, i) => `  ${i + 1}. ${s.title} (${s.persona})`).join("\n")}
+
+AFFECTED_STORIES MUST only contain numbers from 1 to ${sorted.length}. Do NOT invent story numbers that don't exist.
 
 \`\`\`
 AFFECTED_STORIES: [2, 3]
-AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Frontend form has no validation"}
+AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 \`\`\`
 
 **Guidelines:**
-- Only include stories that have ACTUAL implementation issues
+- Only reference story numbers 1-${sorted.length} — these are the ONLY stories that exist
+- Only include stories that have ACTUAL implementation issues in their code
 - If ALL stories need revision, you may omit AFFECTED_STORIES (all will re-run)
-- Be specific in AFFECTED_REASONS so developers know exactly what to fix`;
+- Be specific in AFFECTED_REASONS so developers know exactly what to fix
+- Do NOT list issues as separate "stories" — map issues back to the story that should have handled them`;
 
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
         // TODO: Rate limit retry for reviewer streamText — add isRateLimitError check in catch block
@@ -2055,9 +2122,17 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Parse which stories need revision — send feedback back to the original workers
         // (selective revision from inline-reviewer.ts)
         const affected = parseAffectedStories(reviewText);
-        const affectedSet = affected ? new Set(affected.stories) : null;
-
+        // Filter out invalid story numbers — model may invent numbers beyond the plan
         if (affected) {
+          affected.stories = affected.stories.filter(n => n >= 1 && n <= sorted.length);
+          for (const key of Object.keys(affected.reasons)) {
+            const n = parseInt(key, 10);
+            if (n < 1 || n > sorted.length) delete affected.reasons[n];
+          }
+        }
+        const affectedSet = affected && affected.stories.length > 0 ? new Set(affected.stories) : null;
+
+        if (affected && affected.stories.length > 0) {
           const selectiveInfo = `stories ${affected.stories.join(", ")}`;
           output.coordinatorLog(`Selective revision: ${selectiveInfo}`);
           if (Object.keys(affected.reasons).length > 0) {
@@ -2381,29 +2456,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   });
 
   // Post back to ticket if this was a ticket-driven run
-  if (ticketKey && userTask.match(/^# .+\n/)) {
+  // Credentials are already set from the fetch at the top of this function.
+  if (ticketKey) {
     try {
-      const { loadConfig } = await import("./config.js");
       const { TicketOps, GitHubCommentFormat } = await import("./ticket-ops.js");
-      const cfg = loadConfig();
-      const ticketSystem = cfg?.ticketSystem || "github";
-
-      if (ticketSystem === "jira" && cfg?.jira) {
-        process.env.JIRA_BASE_URL = cfg.jira.baseUrl;
-        process.env.JIRA_EMAIL = cfg.jira.email;
-        process.env.JIRA_API_TOKEN = cfg.jira.apiToken;
-      } else if (ticketSystem === "linear" && cfg?.linear) {
-        process.env.LINEAR_API_KEY = cfg.linear.apiKey;
-      }
-      if (ticketSystem === "github" && !process.env.GITHUB_REPO) {
-        try {
-          const { execSync: exec } = await import("child_process");
-          const remote = exec("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
-          const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-          if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
-        } catch { /* not a git repo */ }
-      }
-
+      const ticketSystem = config.ticketSystem || "github";
       const ops = new TicketOps(ticketKey, ticketSystem);
       if (ops.isAvailable()) {
         const completedCount = sorted.filter((s) => completedStoryIds.includes(s.id)).length;

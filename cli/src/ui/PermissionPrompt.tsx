@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { theme } from "./theme.js";
 import type { PermissionRequest } from "./types.js";
+import { getCommandPrefix } from "../safety.js";
 
 interface Option {
   key: string;
@@ -30,16 +31,30 @@ interface PermissionPromptProps {
  * Claude Code's permission/suggestion color). Renders a bordered box with
  * the tool name, action detail, and a selectable list of options with
  * radio-button style selection.
+ *
+ * For bash commands, the "don't ask again" option shows a prefix pattern
+ * (e.g. "npm run:*") so the user knows exactly what they're allowing.
+ * This matches Claude Code's editable prefix pattern.
  */
 export function PermissionPrompt({ request }: PermissionPromptProps): React.ReactElement {
+  // For bash, compute a prefix pattern for the "don't ask again" label
+  const bashPrefix = request.toolName === "bash" && request.toolInput.command
+    ? getCommandPrefix(String(request.toolInput.command))
+    : null;
+  const prefixLabel = bashPrefix ? `${bashPrefix}:*` : null;
+
   const options: Option[] = request.isDangerous
     ? [
         { key: "y", label: "Yes, allow" },
         { key: "n", label: "No, deny" },
+        { key: "t", label: "Trust all (bypass permissions for this session)" },
       ]
     : [
         { key: "y", label: "Yes" },
-        { key: "a", label: "Yes, don't ask again" },
+        { key: "a", label: prefixLabel
+            ? `Yes, don\u2019t ask again for ${prefixLabel}`
+            : "Yes, don\u2019t ask again" },
+        { key: "t", label: "Trust all (bypass permissions for this session)" },
         { key: "n", label: "Deny" },
       ];
 
@@ -95,6 +110,9 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
       } else if (!request.isDangerous && (input === "a" || input === "A")) {
         setResolved(true);
         request.resolve(true, "always");
+      } else if (input === "t" || input === "T") {
+        setResolved(true);
+        request.resolve(true, "trust");
       }
     },
     { isActive: !resolved },

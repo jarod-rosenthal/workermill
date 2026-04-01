@@ -54,10 +54,6 @@ export const DANGEROUS_FILE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: st
   { pattern: /\.gitignore$/, label: ".gitignore" },
   // Package manager configs that run scripts
   { pattern: /\.npmrc$/, label: "npm config" },
-  // CI/CD
-  { pattern: /\.github\/workflows\//, label: "GitHub Actions workflow" },
-  { pattern: /\.gitlab-ci\.yml$/, label: "GitLab CI config" },
-  { pattern: /Dockerfile$/i, label: "Dockerfile" },
   // Lock files
   { pattern: /package-lock\.json$/, label: "package lock file" },
   { pattern: /yarn\.lock$/, label: "yarn lock file" },
@@ -147,23 +143,68 @@ export function splitCompoundCommand(command: string): string[] {
   return parts;
 }
 
+/** Bare shell/wrapper commands that must not get prefix rules (too dangerous). */
+const BARE_SHELL_PREFIXES = new Set([
+  "sh", "bash", "zsh", "fish", "csh", "tcsh", "ksh", "dash",
+  "cmd", "powershell", "pwsh",
+  "env", "xargs", "nice", "stdbuf", "nohup", "timeout", "time",
+  "sudo", "doas", "pkexec",
+]);
+
 /**
- * Generate a permission rule pattern from a bash command.
- * Keeps the command name and first few args, adds * for flexibility.
- * e.g. "npm run test --verbose" → "bash(npm run test *)"
- * e.g. "git status" → "bash(git status)"
+ * Extract a command prefix for "don't ask again" rules.
+ * Returns the first two tokens if the second looks like a subcommand,
+ * otherwise the first token alone.
+ * e.g. "npm run test --verbose" → "npm run"
+ * e.g. "git status" → "git status"
+ * e.g. "cat /tmp/foo" → "cat"
+ * e.g. "python3 script.py" → null (second token is a file)
+ * Returns null if the command is too dangerous for a prefix rule.
  */
-export function commandToRule(command: string): string {
-  const trimmed = command.trim();
-  // Take up to first 3 tokens for the pattern, append * if there are more
-  const tokens = trimmed.split(/\s+/);
-  if (tokens.length <= 3) {
-    return `bash(${trimmed})`;
+export function getCommandPrefix(command: string): string | null {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  // Skip env var assignments (VAR=value) at the start
+  let i = 0;
+  while (i < tokens.length && /^[A-Z_][A-Z0-9_]*=/.test(tokens[i]!)) {
+    i++;
   }
-  return `bash(${tokens.slice(0, 3).join(" ")} *)`;
+
+  const remaining = tokens.slice(i);
+  if (remaining.length === 0) return null;
+
+  const cmd = remaining[0]!;
+  // Must look like a command name (lowercase alpha, optional hyphens)
+  if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(cmd)) return null;
+  if (BARE_SHELL_PREFIXES.has(cmd)) return null;
+
+  // Two-word prefix if second token looks like a subcommand
+  if (remaining.length >= 2) {
+    const subcmd = remaining[1]!;
+    if (/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(subcmd)) {
+      return remaining.slice(0, 2).join(" ");
+    }
+  }
+
+  return cmd;
 }
 
-/** Match a rule like "bash(npm run *)" against a tool name and value. */
+/**
+ * Generate a permission rule pattern from a bash command.
+ * Uses prefix:* format matching Claude Code's pattern.
+ * e.g. "npm run test --verbose" → "bash(npm run:*)"
+ * e.g. "git status" → "bash(git status:*)"
+ * e.g. "cat /tmp/foo" → "bash(cat:*)"
+ * Falls back to exact command if no prefix can be extracted.
+ */
+export function commandToRule(command: string): string {
+  const prefix = getCommandPrefix(command);
+  if (prefix) return `bash(${prefix}:*)`;
+  return `bash(${command.trim()})`;
+}
+
+/** Match a rule like "bash(npm run:*)" against a tool name and value. */
 function matchesRule(rule: string, toolName: string, value: string): boolean {
   const parenIdx = rule.indexOf("(");
   if (parenIdx === -1) {
@@ -171,11 +212,20 @@ function matchesRule(rule: string, toolName: string, value: string): boolean {
     return rule === toolName;
   }
 
-  // Pattern match: "bash(npm run *)"
+  // Pattern match: "bash(npm run:*)"
   const ruleTool = rule.slice(0, parenIdx);
   if (ruleTool !== toolName) return false;
 
   const pattern = rule.slice(parenIdx + 1, rule.endsWith(")") ? -1 : undefined);
+
+  // Prefix rule: "npm run:*" matches any command starting with "npm run"
+  // The :* suffix is Claude Code's format for prefix matching.
+  const prefixMatch = pattern.match(/^(.+):\*$/);
+  if (prefixMatch) {
+    const prefix = prefixMatch[1]!;
+    return value === prefix || value.startsWith(prefix + " ");
+  }
+
   return globMatch(pattern, value);
 }
 

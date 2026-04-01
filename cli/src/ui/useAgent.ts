@@ -158,6 +158,8 @@ export interface UseAgentReturn {
   denyTool: (name: string) => void;
   /** Current permission mode label. */
   permissionMode: string;
+  /** Synchronous ref-based check for bypass mode (not subject to React state delay). */
+  isBypassMode: () => boolean;
   /** Cycle to the next permission mode (ask → auto-edit → trust all → ask). */
   cyclePermissionMode: () => void;
   /** Increment tool count for the status bar (used by orchestrator). */
@@ -596,6 +598,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStatus("permission");
 
           const { allowed, mode } = await checkPermission(name, input);
+
+          // Handle "Trust all" — switch to bypassPermissions mode for this session.
+          if (mode === "trust" && allowed) {
+            permModeRef.current = "bypassPermissions";
+            setPermMode("bypassPermissions");
+            trustAllRef.current = true;
+            setTrustAllState(true);
+          }
 
           // Handle "Yes, don't ask again" — save permanent rule for bash, session-only for edits.
           if (mode === "always" && allowed) {
@@ -1100,6 +1110,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     planModeRef.current = v;
   }, []);
 
+  const isBypassMode = useCallback(() => permModeRef.current === "bypassPermissions", []);
+
   const cyclePermissionMode = useCallback(() => {
     // dontAsk is not in the cycle — skip it
     const cycleModes = PERMISSION_MODES;
@@ -1253,6 +1265,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     allowTool,
     denyTool,
     permissionMode: permMode,
+    isBypassMode,
     cyclePermissionMode,
     toolCounts,
     sessionStart: sessionStartRef.current,

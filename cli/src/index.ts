@@ -53,7 +53,9 @@ async function printWelcome(workingDir: string, isFirstRun = false): Promise<voi
     "/init creates a WORKERMILL.md — project context that every expert reads before starting.",
     "Route specific experts to different providers with /settings route <persona> <provider>.",
     "Use /model <provider>/<model> to switch models mid-session without restarting.",
-    "Resume your last session with --resume — all messages and context are restored.",
+    "Next time, launch with `workermill --resume` to restore this session's messages and context.",
+    "/ship GH-42 or /ship #42 fetches a GitHub issue and builds it. Set up with /setup.",
+    "/ship PROJ-123 fetches a Jira or Linear ticket and builds it. Configure with /setup.",
   ];
   console.log(dim(`  ${tips[Math.floor(Math.random() * tips.length)]}`));
   console.log(dim(`  Type ${white("/help")} for all commands.`));

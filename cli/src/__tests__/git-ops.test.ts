@@ -68,22 +68,24 @@ describe("git-ops", () => {
   });
 
   describe("createFeatureBranch()", () => {
-    it("creates a workermill/ prefixed branch", () => {
+    it("uses directory name as prefix when no remote", () => {
       const branch = createFeatureBranch(repoDir, "Add login form");
-      expect(branch).toBe("workermill/add-login-form");
+      const dirName = path.basename(repoDir);
+      expect(branch).toBe(`${dirName}/add-login-form`);
 
       const current = getCurrentBranch(repoDir);
-      expect(current).toBe("workermill/add-login-form");
+      expect(current).toBe(`${dirName}/add-login-form`);
     });
 
-    it("uses custom prefix", () => {
+    it("uses custom prefix when provided", () => {
       const branch = createFeatureBranch(repoDir, "fix tests", "feature");
       expect(branch).toBe("feature/fix-tests");
     });
 
     it("returns fallback branch when no description", () => {
       const branch = createFeatureBranch(repoDir);
-      expect(branch).toMatch(/^workermill\/ship-/);
+      const dirName = path.basename(repoDir);
+      expect(branch).toMatch(new RegExp(`^${dirName}/ship-`));
     });
 
     it("returns null for non-git directory", () => {
@@ -95,12 +97,23 @@ describe("git-ops", () => {
       }
     });
 
-    it("slugifies task description (max 5 words, lowercase)", () => {
+    it("slugifies task description (max 3 words, lowercase)", () => {
       const branch = createFeatureBranch(
         repoDir,
         "Add the new login form with validation",
       );
-      expect(branch).toBe("workermill/add-the-new-login-form");
+      const dirName = path.basename(repoDir);
+      expect(branch).toBe(`${dirName}/add-the-new`);
+    });
+
+    it("uses ticket key as prefix when provided", () => {
+      const branch = createFeatureBranch(repoDir, "implement auth", "GH-42");
+      expect(branch).toBe("GH-42/implement-auth");
+    });
+
+    it("uses Jira key as prefix when provided", () => {
+      const branch = createFeatureBranch(repoDir, "add login", "ACME-123");
+      expect(branch).toBe("ACME-123/add-login");
     });
   });
 
@@ -163,7 +176,8 @@ describe("git-ops", () => {
     it("switches back to the original branch", () => {
       const original = getCurrentBranch(repoDir)!;
       createFeatureBranch(repoDir, "temp branch");
-      expect(getCurrentBranch(repoDir)).toBe("workermill/temp-branch");
+      const dirName = path.basename(repoDir);
+      expect(getCurrentBranch(repoDir)).toBe(`${dirName}/temp-branch`);
 
       returnToOriginalBranch(repoDir, original);
       expect(getCurrentBranch(repoDir)).toBe(original);

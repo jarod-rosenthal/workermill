@@ -498,46 +498,13 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             `Use \`/retry\` to continue it instead.`
           );
         }
-        // Detect ticket references — fetch before orchestrating
+        // Detect ticket references — pass the key to the orchestrator which
+        // handles the async fetch internally (handleSlashCommand is sync).
         const ticketRef = detectTicketRef(arg);
         if (ticketRef) {
-          void (async () => {
-            const { TicketOps } = await import("../ticket-ops.js");
-            const cfg = loadConfig();
-            const ticketSystem = ticketRef.system === "github"
-              ? "github"
-              : (cfg?.ticketSystem || "github");
-
-            // Set env vars for TicketOps credential detection
-            if (ticketSystem === "jira" && cfg?.jira) {
-              process.env.JIRA_BASE_URL = cfg.jira.baseUrl;
-              process.env.JIRA_EMAIL = cfg.jira.email;
-              process.env.JIRA_API_TOKEN = cfg.jira.apiToken;
-            } else if (ticketSystem === "linear" && cfg?.linear) {
-              process.env.LINEAR_API_KEY = cfg.linear.apiKey;
-            }
-            if (ticketSystem === "github" && !process.env.GITHUB_REPO) {
-              try {
-                const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
-                const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-                if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
-              } catch { /* not a git repo */ }
-            }
-
-            const ops = new TicketOps(ticketRef.key, ticketSystem);
-            const ticket = await ops.fetchTicket();
-
-            if (!ticket) {
-              ctx.addSystemMessage(`Could not fetch ticket ${ticketRef.key}. Check your credentials with \`/setup\`.`);
-              return;
-            }
-
-            const taskPrompt = `# ${ticket.title}\n\n${ticket.body}${ticket.labels?.length ? `\n\nLabels: ${ticket.labels.join(", ")}` : ""}`;
-            ctx.addSystemMessage(`Fetched **${ticketRef.key}**: ${ticket.title}`);
-            ctx.setLastBuildTask(taskPrompt);
-            ctx.addUserMessage(`/ship ${ticketRef.key}`);
-            ctx.startOrchestrator(taskPrompt, ctx.isTrustAll, ctx.sandboxed ?? false, ticketRef.key);
-          })();
+          ctx.setLastBuildTask(arg);
+          ctx.addUserMessage(`/ship ${ticketRef.key}`);
+          ctx.startOrchestrator(ticketRef.key, ctx.isTrustAll, ctx.sandboxed ?? false, ticketRef.key);
         } else {
           ctx.setLastBuildTask(arg);
           ctx.addUserMessage(`/ship ${arg}`);
@@ -757,7 +724,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const criticThreshold = config.review?.criticThreshold ?? 8;
         const autoRevise = config.review?.autoRevise ?? false;
         const useCritic = config.review?.useCritic ?? false;
-        const branchPrefix = config.git?.branchPrefix || "workermill";
         const sandboxEnabled = config.sandbox !== false;
         const bellEnabled = config.bell === true;
         const allowRules = config.permissions?.allow || [];
@@ -775,9 +741,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Critic threshold | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
           `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
-          `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
+          `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |\n` +
           `| Permission allow rules | ${allowRules.length} rule(s) | Edit \`cli.json\` |\n` +
           `| Permission deny rules | ${denyRules.length} rule(s) | Edit \`cli.json\` |`
@@ -845,16 +811,42 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.review = { ...config.review, useCritic: boolVal(value) };
             break;
           }
-          case "git.branchPrefix": {
-            config.git = { ...config.git, branchPrefix: value };
-            break;
-          }
           case "sandbox": {
             config.sandbox = boolVal(value);
             break;
           }
           case "bell": {
             config.bell = boolVal(value);
+            break;
+          }
+          case "tickets": {
+            const valid = ["github", "jira", "linear"];
+            if (!valid.includes(value)) {
+              ctx.addSystemMessage(`Invalid tracker: \`${value}\`. Use one of: ${valid.join(", ")}`);
+              break;
+            }
+            config.ticketSystem = value as "github" | "jira" | "linear";
+            if (value === "jira" && !config.jira) {
+              ctx.addSystemMessage("**Switched to Jira.** Now set credentials:\n\n```\n/settings jira.url https://myteam.atlassian.net\n/settings jira.email you@company.com\n/settings jira.token <api-token>\n```");
+            } else if (value === "linear" && !config.linear) {
+              ctx.addSystemMessage("**Switched to Linear.** Now set your API key:\n\n```\n/settings linear.key <api-key>\n```");
+            }
+            break;
+          }
+          case "jira.url": {
+            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, baseUrl: value };
+            break;
+          }
+          case "jira.email": {
+            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, email: value };
+            break;
+          }
+          case "jira.token": {
+            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, apiToken: value };
+            break;
+          }
+          case "linear.key": {
+            config.linear = { apiKey: value };
             break;
           }
           case "route": {
@@ -907,7 +899,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "bell", "route", "key"].includes(key)) {
+        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "sandbox", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }
@@ -1094,6 +1086,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         `| Route planner to a provider | \`/settings route planner <provider>\` |\n` +
         `| Route reviewer to a provider | \`/settings route tech_lead <provider>\` |\n` +
         `| Add a new provider | \`/settings key <provider> <key>\` then \`/model <provider>/<model>\` |\n` +
+        `| Issue tracker | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
         `| Start over from scratch | \`/setup reset\` |`
       );
       break;

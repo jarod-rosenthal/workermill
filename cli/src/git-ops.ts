@@ -86,20 +86,29 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
   try {
     let slug: string;
     if (taskDescription) {
-      // Derive branch name from task: strip file extensions, take first 5 words, slugify
+      // Derive branch name from task: strip file extensions, take first 3 words, slugify
       slug = taskDescription
         .replace(/\.md$/i, "")
         .replace(/[^a-zA-Z0-9\s-]/g, "")
         .trim()
         .split(/\s+/)
-        .slice(0, 5)
+        .slice(0, 3)
         .join("-")
         .toLowerCase()
         .replace(/-+/g, "-");
     } else {
       slug = `ship-${Date.now().toString(36)}`;
     }
-    const prefix = branchPrefix || "workermill";
+    // Default prefix: repo name from git remote, fall back to directory name
+    let prefix = branchPrefix;
+    if (!prefix) {
+      try {
+        const remote = execSync("git remote get-url origin 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+        const match = remote.match(/[/:]([^/]+?)(?:\.git)?$/);
+        if (match) prefix = match[1];
+      } catch { /* no remote */ }
+      if (!prefix) prefix = path.basename(workingDir);
+    }
     const branchName = `${prefix}/${slug}`;
 
     // Create and checkout the feature branch — reuse if it already exists

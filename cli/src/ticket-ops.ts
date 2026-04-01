@@ -14,7 +14,7 @@ type TicketSystem = "jira" | "linear" | "github" | "internal";
 
 /** Extract numeric issue number from GH-42, #42, or bare 42 formats */
 export function extractGithubIssueNumber(key: string): string {
-  return key.replace(/^(GH-|#)/, "");
+  return key.replace(/^(GH-|#)/i, "");
 }
 
 export class TicketOps {

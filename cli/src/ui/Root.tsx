@@ -158,7 +158,7 @@ export function Root(props: RootProps): React.ReactElement {
         tokens: agent.tokens,
         permissionMode: agent.permissionMode,
         trustAll: props.trustAll,
-        isTrustAll: () => agent.permissionMode === "bypassPermissions",
+        isTrustAll: agent.isBypassMode,
         planMode: props.planMode,
         setPlanMode: agent.setPlanMode,
         setTrustAll: agent.setTrustAll,
@@ -231,6 +231,12 @@ export function Root(props: RootProps): React.ReactElement {
 
       // Record in history (all inputs, including commands).
       pushHistory(trimmed);
+
+      // Catch CLI flags typed in chat
+      if (trimmed === "--resume" || trimmed === "--fork") {
+        agent.addSystemMessage(`\`${trimmed}\` is a launch flag, not a chat command. Use it when starting workermill:\n\n  \`workermill ${trimmed}\``);
+        return;
+      }
 
       // Slash commands -- fully static, no LLM.
       if (handleSlashCommand(trimmed)) {

@@ -22,9 +22,9 @@ function parseLinearResponse<T>(json: unknown): T {
   return res.data as T;
 }
 
-/** Extract numeric issue number from GH-42, #42, or bare 42 formats */
+/** Extract numeric issue number from GH-42, GH#42, GH42, #42, or bare 42 formats */
 export function extractGithubIssueNumber(key: string): string {
-  return key.replace(/^(GH-|#)/i, "");
+  return key.replace(/^(GH[-#]?|#)/i, "");
 }
 
 export class TicketOps {

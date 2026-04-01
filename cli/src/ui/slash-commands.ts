@@ -31,11 +31,14 @@ import crypto from "crypto";
 
 /** Detect if input is a ticket reference. Returns { system, key } or null. */
 function detectTicketRef(input: string): { system: "github" | "external"; key: string } | null {
-  const trimmed = input.trim();
-  if (/^#\d+$/.test(trimmed) || /^GH-\d+$/i.test(trimmed)) {
+  // Normalize: collapse whitespace, trim
+  const trimmed = input.trim().replace(/\s+/g, "");
+  // GitHub: #11, GH-11, GH11, GH #11 (space collapsed above)
+  if (/^#\d+$/.test(trimmed) || /^GH-?\d+$/i.test(trimmed)) {
     return { system: "github", key: trimmed };
   }
-  if (/^[A-Z][A-Z0-9]+-\d+$/.test(trimmed)) {
+  // Jira/Linear: PROJ-123
+  if (/^[A-Z][A-Z0-9]+-\d+$/i.test(trimmed)) {
     return { system: "external", key: trimmed };
   }
   return null;

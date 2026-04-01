@@ -322,7 +322,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const retry = useCallback(
-    (trustAll: boolean, sandboxed: boolean): boolean => {
+    (trustAll: boolean | (() => boolean), sandboxed: boolean): boolean => {
       const run = getRetryableRun(process.cwd());
       if (!run) return false;
 

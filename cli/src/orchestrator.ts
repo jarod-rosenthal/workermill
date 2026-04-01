@@ -1028,7 +1028,7 @@ export async function runOrchestration(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      output.error(`Failed to fetch ${ticketKey} from ${ticketSystem}: ${msg}`);
+      output.error(`Failed to fetch ${ticketKey}: ${msg}`);
       return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
   }
@@ -1261,7 +1261,7 @@ export async function runOrchestration(
       const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
       branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
     }
-    featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix || config.git?.branchPrefix);
+    featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix);
     if (featureBranch) {
       output.coordinatorLog(`Working on branch: ${featureBranch}`);
       output.updateBranch?.(featureBranch);
@@ -1601,7 +1601,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${rev
             // Track actions for ticket update
             for (const tc of toolCalls) {
               const name = tc.toolName;
-              const input = tc.args as Record<string, unknown>;
+              const input = tc.input as Record<string, unknown>;
               if (name === "write_file" && input.file_path) {
                 storyActions.push({ tool: "created", detail: String(input.file_path) });
               } else if ((name === "edit_file" || name === "patch") && input.file_path) {

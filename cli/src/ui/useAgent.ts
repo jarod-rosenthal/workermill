@@ -166,6 +166,10 @@ export interface UseAgentReturn {
   incrementToolCount: (toolName: string) => void;
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec: Record<string, number>;
+  /** Switch the active model at runtime. */
+  switchModel: (provider: string, model: string) => void;
+  /** Force a compaction of the conversation. */
+  forceCompact: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -956,7 +960,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             // Extract memories before they're compacted away
             const extractedMemories = extractMemoriesBeforeCompact(plainMessages);
             for (const mem of extractedMemories) {
-              addMemory(mem, "learning");
+              addMemory("learning", mem);
             }
             const compacted = await compactMessages(
               model,

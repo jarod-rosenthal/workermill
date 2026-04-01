@@ -230,8 +230,8 @@ export interface SlashCommandContext {
     totalTokens: number;
     startedAt: string;
     name?: string;
-    provider?: string;
-    model?: string;
+    provider: string;
+    model: string;
   };
   cost: number;
   tokens: number;
@@ -786,6 +786,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         const boolVal = (v: string) => v === "true" || v === "1" || v === "on" || v === "yes";
         const numVal = (v: string) => parseInt(v, 10);
+        let settingApplied = true;
 
         switch (key) {
           case "ollama.host": {
@@ -834,6 +835,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             const valid = ["github", "jira", "linear"];
             if (!valid.includes(value)) {
               ctx.addSystemMessage(`Invalid tracker: \`${value}\`. Use one of: ${valid.join(", ")}`);
+              settingApplied = false;
               break;
             }
             config.ticketSystem = value as "github" | "jira" | "linear";
@@ -869,7 +871,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             }
             const [persona, provider] = routeParts;
             if (!config.providers[provider]) {
-              ctx.addSystemMessage(`Provider \`${provider}\` not found in config. Available: ${Object.keys(config.providers).join(", ")}`);
+              ctx.addSystemMessage(`Provider \`${provider}\` not found in config. Available: ${Object.keys(config.providers).join(", ")}\n\nTo add a provider first: \`/settings key ${provider} <api-key>\``);
+              settingApplied = false;
               break;
             }
             config.routing = { ...config.routing, [persona]: provider };
@@ -907,10 +910,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           default:
             ctx.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings\` to see all options.`);
+            settingApplied = false;
             break;
         }
 
-        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "sandbox", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "sandbox", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }

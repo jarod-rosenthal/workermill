@@ -34,7 +34,7 @@ export function BillingSection({
   hasUnsavedChanges,
   handleSaveSettings,
   organization,
-  handleOpenBillingPortal,
+  handleOpenBillingPortal: _handleOpenBillingPortal,
   handleResetCounters,
   resetCountersLoading,
   resetMessage,

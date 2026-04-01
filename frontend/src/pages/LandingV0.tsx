@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Copy, CheckCircle, Terminal, Github, Star, ExternalLink, Download, MessageSquare, GitBranch, Users, Zap, Wrench } from "lucide-react";
+import { Copy, CheckCircle, Terminal, Github, Star, ExternalLink, Download, MessageSquare, GitBranch, Users, Zap } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";

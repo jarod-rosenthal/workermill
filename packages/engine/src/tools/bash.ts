@@ -1,59 +1,40 @@
-import { spawn, execSync } from "child_process";
-import fs from "fs";
-import os from "os";
+import { spawn } from "child_process";
+import {
+  SandboxManager,
+  type SandboxRuntimeConfig,
+} from "@anthropic-ai/sandbox-runtime";
 
 let activeChild: ReturnType<typeof spawn> | null = null;
 
 // ---------------------------------------------------------------------------
-// OS-level sandboxing via bubblewrap (Linux)
+// OS-level sandboxing via @anthropic-ai/sandbox-runtime
 // ---------------------------------------------------------------------------
 
-let bwrapAvailable: boolean | null = null;
-
-function isBwrapAvailable(): boolean {
-  if (bwrapAvailable !== null) return bwrapAvailable;
-  try {
-    execSync("which bwrap", { stdio: "pipe" });
-    bwrapAvailable = true;
-  } catch {
-    bwrapAvailable = false;
-  }
-  return bwrapAvailable;
-}
+let sandboxInitialized = false;
+let sandboxInitPromise: Promise<void> | undefined;
 
 /**
- * Build bwrap arguments for sandboxed bash execution.
- * - Read-only bind to system dirs (/usr, /lib, /bin, /etc, /proc, /dev)
- * - Read-write bind to the working directory
- * - Read-write bind to /tmp
- * - No network restriction (many tools need it)
+ * Initialize the sandbox runtime once per session.
+ * Uses a minimal config: allow writes to cwd, no network filtering.
  */
-function buildBwrapArgs(command: string, cwd: string): string[] {
-  return [
-    // System dirs — read-only
-    "--ro-bind", "/usr", "/usr",
-    "--ro-bind", "/lib", "/lib",
-    ...(fs.existsSync("/lib64") ? ["--ro-bind", "/lib64", "/lib64"] : []),
-    "--ro-bind", "/bin", "/bin",
-    ...(fs.existsSync("/sbin") ? ["--ro-bind", "/sbin", "/sbin"] : []),
-    "--ro-bind", "/etc", "/etc",
-    // Special filesystems
-    "--proc", "/proc",
-    "--dev", "/dev",
-    // Temp — writable
-    "--tmpfs", "/tmp",
-    // Home dir — read-only except working directory
-    "--ro-bind", os.homedir(), os.homedir(),
-    // Working directory — read-write
-    "--bind", cwd, cwd,
-    // Set working directory
-    "--chdir", cwd,
-    // Unshare namespaces for isolation
-    "--unshare-pid",
-    "--die-with-parent",
-    // The command
-    "/bin/bash", "-c", command,
-  ];
+async function initSandbox(cwd: string): Promise<void> {
+  if (sandboxInitialized) return;
+  if (sandboxInitPromise) return sandboxInitPromise;
+
+  sandboxInitPromise = (async () => {
+    const config: SandboxRuntimeConfig = {
+      network: { allowedDomains: [], deniedDomains: [] },
+      filesystem: {
+        allowWrite: [cwd],
+        denyWrite: [],
+        denyRead: [],
+      },
+    };
+    await SandboxManager.initialize(config);
+    sandboxInitialized = true;
+  })();
+
+  return sandboxInitPromise;
 }
 
 export function killActiveProcess(): void {
@@ -225,32 +206,27 @@ export async function execute({
     };
   }
 
+  const effectiveCwd = cwd || process.cwd();
+  const useSandbox = osSandbox && SandboxManager.isSupportedPlatform();
+
+  let shellCommand = command;
+  if (useSandbox) {
+    await initSandbox(effectiveCwd);
+    shellCommand = await SandboxManager.wrapWithSandbox(command);
+  }
+
   return new Promise((resolve) => {
     const startTime = Date.now();
     let stdout = "";
     let stderr = "";
     let killed = false;
 
-    // Use shell to execute the command
-    // Use /bin/bash explicitly to ensure it's found in container environments
-    // Use the user's actual PATH — don't override it.
-    // The hardcoded PATH was for Docker containers; in CLI mode the user's
-    // local tools (nvm, homebrew, cargo, etc.) must be available.
-    const effectiveCwd = cwd || process.cwd();
-    const useBwrap = osSandbox && process.platform === "linux" && isBwrapAvailable();
-
-    const child = useBwrap
-      ? spawn("bwrap", buildBwrapArgs(command, effectiveCwd), {
-          env: process.env,
-          stdio: ["pipe", "pipe", "pipe"],
-          detached: true,
-        })
-      : spawn("/bin/bash", ["-c", command], {
-          cwd: effectiveCwd,
-          env: process.env,
-          stdio: ["pipe", "pipe", "pipe"],
-          detached: true,
-        });
+    const child = spawn("/bin/bash", ["-c", shellCommand], {
+      cwd: effectiveCwd,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
+    });
 
     activeChild = child;
 
@@ -286,6 +262,7 @@ export async function execute({
     child.on("close", (code: number | null) => {
       clearTimeout(timeoutId);
       activeChild = null;
+      if (useSandbox) SandboxManager.cleanupAfterCommand();
       const duration = Date.now() - startTime;
 
       if (killed) {
@@ -306,11 +283,14 @@ export async function execute({
           duration,
         });
       } else {
+        const finalStderr = useSandbox
+          ? SandboxManager.annotateStderrWithSandboxFailures(command, stderr.trim())
+          : stderr.trim();
         resolve({
           success: false,
           exitCode: code,
           stdout: stdout.trim(),
-          stderr: stderr.trim(),
+          stderr: finalStderr,
           error: `Command exited with code ${code}`,
           duration,
         });

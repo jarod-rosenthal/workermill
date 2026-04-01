@@ -41,9 +41,11 @@ const SCRIPT: Line[] = [
   { text: " \ud83d\udcbb backend_developer  Modified src/routes/auth.js, src/routes/tasks.js", color: "text-blue-400", delay: 600 },
   { text: " \ud83d\udcbb backend_developer  Created src/middleware/validate.js", color: "text-blue-400", delay: 400 },
   { text: " \ud83d\udcbb backend_developer  Quality gates... node -c \u2713 npm test \u2713", color: "check-line-blue", delay: 700 },
+  { text: " \ud83e\udd16 system  Updated GH-42: task 1/3 complete \u2014 rate limiting applied", color: "text-teal-400/70", delay: 400 },
   { text: "", color: "", delay: 300 },
   { text: " \ud83e\uddea qa_engineer  Created src/tests/rateLimit.test.js", color: "text-cyan-400", delay: 500 },
   { text: " \ud83e\uddea qa_engineer  Created src/tests/validation.test.js", color: "text-cyan-400", delay: 400 },
+  { text: " \ud83e\udd16 system  Updated GH-42: task 2/3 complete \u2014 validation tests added", color: "text-teal-400/70", delay: 400 },
   { text: "", color: "", delay: 500 },
 
   // Tech lead reviews
@@ -54,7 +56,7 @@ const SCRIPT: Line[] = [
 
   // Ship it
   { text: " \ud83e\udd16 system  Branch: GH-42/rate-limiting-validation (3 commits, 7 files)", color: "text-teal-400", delay: 400 },
-  { text: " \ud83e\udd16 system  \u2713 PR opened \u00b7 Comment posted to GH-42: completed", color: "check-line-teal", delay: 600 },
+  { text: " \ud83e\udd16 system  \u2713 PR opened \u00b7 GH-42 updated: all tasks complete", color: "check-line-teal", delay: 600 },
   { text: "", color: "", delay: 300 },
   { text: " Shipped. 4 experts \u00b7 3 tasks \u00b7 2m 48s", color: "text-emerald-400", delay: 800 },
 ];

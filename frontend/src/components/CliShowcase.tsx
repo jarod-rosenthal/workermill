@@ -7,85 +7,77 @@ interface Line {
   typing?: boolean;
 }
 
-// The real WorkerMill flow: splash → /review finds a security bug → creates GH issue → /ship fixes it → PR opened
+// Full demo: launch → chat → /ship GH-42 → plan → execute → review → PR
 const SCRIPT: Line[] = [
-  // User launches — then splash appears
+  // Launch
   { text: "$ npx workermill", color: "text-slate-400", delay: 800 },
   { text: "", color: "", delay: 400 },
   { text: "  \u25c6 WorkerMill v0.15.89", color: "text-white font-bold", delay: 600 },
   { text: "", color: "", delay: 200 },
   { text: "  Use /model <provider>/<model> to switch models mid-session.", color: "text-slate-500", delay: 400 },
-  { text: "  Type /help for all commands.", color: "text-slate-500", delay: 400 },
+  { text: "  Type /help for all commands.", color: "text-slate-500", delay: 600 },
+  { text: "", color: "", delay: 600 },
+
+  // User chats first — natural interaction
+  { text: "> what does this project do?", color: "typing", delay: 0, typing: true },
+  { text: "", color: "", delay: 400 },
+  { text: "  Reading package.json, src/routes/, src/controllers/...", color: "text-slate-500", delay: 800 },
+  { text: "", color: "", delay: 200 },
+  { text: "  This is a task management API built with Express and Prisma.", color: "text-slate-300", delay: 500 },
+  { text: "  It has user auth (JWT), CRUD for tasks and categories,", color: "text-slate-300", delay: 400 },
+  { text: "  a React frontend, and Docker/CI configuration.", color: "text-slate-300", delay: 400 },
   { text: "", color: "", delay: 800 },
 
-  // User kicks off a review
-  { text: "> /review branch", color: "typing", delay: 0, typing: true },
+  // Now the real work — /ship a ticket
+  { text: "> /ship GH-42", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
-  { text: " \ud83c\udfaf coordinator  Starting Tech Lead review...", color: "text-teal-400", delay: 600 },
-  { text: " \ud83d\udc51 tech_lead  Reading src/routes/auth.js, src/middleware/auth.js...", color: "text-amber-400", delay: 800 },
-  { text: " \ud83d\udc51 tech_lead  Reading src/controllers/authController.js...", color: "text-amber-400", delay: 600 },
-  { text: " \ud83d\udc51 tech_lead  Reading src/routes/tasks.js, src/tests/auth.test.js...", color: "text-amber-400", delay: 600 },
-  { text: "", color: "", delay: 400 },
-
-  // Review finds a real issue
-  { text: " \ud83d\udc51 tech_lead  CRITICAL: Missing auth middleware on /api/auth/profile", color: "text-red-400", delay: 800 },
-  { text: " \ud83d\udc51 tech_lead  The /profile route is unprotected \u2014 anyone can access it without a token", color: "text-amber-400", delay: 600 },
-  { text: " \ud83d\udc51 tech_lead  Score: 5/10 \u2014 revision needed", color: "text-amber-400", delay: 500 },
-  { text: "", color: "", delay: 400 },
-
-  // Auto-creates issue and kicks off /ship
-  { text: " \ud83c\udfaf coordinator  Create a GitHub issue and fix it? (y/n) y", color: "text-teal-400", delay: 800 },
-  { text: " \ud83c\udfaf coordinator  Created issue #6: Missing auth middleware on /profile", color: "text-teal-400", delay: 600 },
-  { text: " \ud83c\udfaf coordinator  Fetched #6 \u2014 starting /ship...", color: "text-teal-400", delay: 500 },
-  { text: "", color: "", delay: 400 },
-
-  // Planner scopes the fix
-  { text: " \ud83d\udca1 planner  Reading codebase + issue #6...", color: "text-violet-400", delay: 700 },
-  { text: " \ud83d\udca1 planner  2 tasks:", color: "text-violet-400", delay: 400 },
-  { text: "          [backend_developer] Apply auth middleware to /profile route", color: "text-slate-500", delay: 200 },
-  { text: "          [qa_engineer] Add test: GET /profile without token returns 401", color: "text-slate-500", delay: 200 },
-  { text: "", color: "", delay: 400 },
-
-  // Backend dev fixes it
-  { text: " \ud83d\udcbb backend_developer  Modified src/routes/auth.js", color: "text-blue-400", delay: 600 },
-  { text: " \ud83d\udcbb backend_developer  Added: const auth = require('../middleware/auth')", color: "text-blue-400", delay: 400 },
-  { text: " \ud83d\udcbb backend_developer  Quality gates... node -c \u2713", color: "check-line-blue", delay: 600 },
+  { text: " \ud83e\udd16 system   Fetched GH-42: Add rate limiting and input validation", color: "text-teal-400", delay: 600 },
   { text: "", color: "", delay: 300 },
+  { text: " \ud83d\udca1 planner  Reading codebase... 24 files analyzed", color: "text-violet-400", delay: 800 },
+  { text: " \ud83d\udca1 planner  3 tasks:", color: "text-violet-400", delay: 400 },
+  { text: "          [backend_developer] Add express-rate-limit to auth and API routes", color: "text-slate-500", delay: 200 },
+  { text: "          [backend_developer] Add Zod validation to all request bodies", color: "text-slate-500", delay: 200 },
+  { text: "          [qa_engineer] Add tests for rate limiting and validation errors", color: "text-slate-500", delay: 200 },
+  { text: "", color: "", delay: 500 },
 
-  // QA verifies
-  { text: " \ud83e\uddea qa_engineer  Updated src/tests/auth.test.js", color: "text-cyan-400", delay: 500 },
-  { text: " \ud83e\uddea qa_engineer  Added test: missing token \u2192 401 Unauthorized", color: "text-cyan-400", delay: 400 },
-  { text: "", color: "", delay: 400 },
+  // Specialists execute
+  { text: " \ud83d\udcbb backend_developer  Modified src/routes/auth.js, src/routes/tasks.js", color: "text-blue-400", delay: 600 },
+  { text: " \ud83d\udcbb backend_developer  Created src/middleware/validate.js", color: "text-blue-400", delay: 400 },
+  { text: " \ud83d\udcbb backend_developer  Quality gates... node -c \u2713 npm test \u2713", color: "check-line-blue", delay: 700 },
+  { text: "", color: "", delay: 300 },
+  { text: " \ud83e\uddea qa_engineer  Created src/tests/rateLimit.test.js", color: "text-cyan-400", delay: 500 },
+  { text: " \ud83e\uddea qa_engineer  Created src/tests/validation.test.js", color: "text-cyan-400", delay: 400 },
+  { text: "", color: "", delay: 500 },
 
-  // Tech lead approves
-  { text: " \ud83d\udc51 tech_lead  Reviewing diffs...", color: "text-amber-400", delay: 800 },
-  { text: " \ud83d\udc51 tech_lead  Auth middleware correctly applied. Tests cover all cases.", color: "text-amber-400", delay: 600 },
+  // Tech lead reviews
+  { text: " \ud83d\udc51 tech_lead  Reviewing diffs against issue GH-42...", color: "text-amber-400", delay: 900 },
+  { text: " \ud83d\udc51 tech_lead  Rate limiting applied. Zod schemas validate all inputs.", color: "text-amber-400", delay: 600 },
   { text: " \ud83d\udc51 tech_lead  Score: 9/10 \u2014 approved \u2713", color: "check-line-amber", delay: 600 },
   { text: "", color: "", delay: 400 },
 
   // Ship it
-  { text: " \ud83e\udd16 system  Branch: GH-6/auth-middleware-fix (2 commits)", color: "text-teal-400", delay: 400 },
-  { text: " \ud83e\udd16 system  \u2713 PR opened \u00b7 Comment posted to #6", color: "check-line-teal", delay: 600 },
+  { text: " \ud83e\udd16 system  Branch: GH-42/rate-limiting-validation (3 commits, 7 files)", color: "text-teal-400", delay: 400 },
+  { text: " \ud83e\udd16 system  \u2713 PR opened \u00b7 Comment posted to GH-42: completed", color: "check-line-teal", delay: 600 },
   { text: "", color: "", delay: 300 },
-  { text: " Shipped. 5 experts \u00b7 2 stories \u00b7 Review \u2192 Issue \u2192 Fix \u2192 PR", color: "text-emerald-400", delay: 800 },
+  { text: " Shipped. 4 experts \u00b7 3 tasks \u00b7 2m 48s", color: "text-emerald-400", delay: 800 },
 ];
 
 const LOOP_PAUSE = 4000;
 const CHAR_SPEED = 40;
+const TERMINAL_HEIGHT = 520; // Fixed height — no growing
 
 /** Status bar matching the real CLI's 3-row layout */
 function StatusBar({ progress }: { progress: number }) {
-  // Animate tool counts based on progress
-  const reads = progress > 0.3 ? Math.min(26, Math.round(progress * 30)) : 0;
-  const bashes = progress > 0.5 ? Math.min(13, Math.round((progress - 0.3) * 20)) : 0;
-  const edits = progress > 0.55 ? Math.min(3, Math.round((progress - 0.5) * 10)) : 0;
-  const verifies = progress > 0.6 ? Math.min(5, Math.round((progress - 0.55) * 15)) : 0;
-  const pct = Math.min(38, Math.round(progress * 40));
+  const reads = progress > 0.3 ? Math.min(18, Math.round(progress * 22)) : 0;
+  const bashes = progress > 0.5 ? Math.min(8, Math.round((progress - 0.3) * 14)) : 0;
+  const edits = progress > 0.55 ? Math.min(4, Math.round((progress - 0.5) * 12)) : 0;
+  const verifies = progress > 0.6 ? Math.min(3, Math.round((progress - 0.55) * 10)) : 0;
+  const pct = Math.min(32, Math.round(progress * 35));
   const filled = Math.round(pct / 10);
   const empty = 10 - filled;
-  const cost = (progress * 0.09).toFixed(2);
-  const mins = Math.max(1, Math.round(progress * 19));
-  const branch = progress > 0.45 ? "GH-6/auth-middleware-fix" : "main";
+  const cost = (progress * 0.07).toFixed(2);
+  const mins = Math.max(1, Math.round(progress * 3));
+  const branch = progress > 0.5 ? "GH-42/rate-limiting-validation" : "main";
 
   const tools = [
     reads > 0 && `\u2713 read file \u00d7${reads}`,
@@ -95,8 +87,8 @@ function StatusBar({ progress }: { progress: number }) {
   ].filter(Boolean);
 
   return (
-    <div className="border-t border-white/[0.06] bg-[#111113] px-4 py-2 font-mono text-[11px] leading-[1.6]">
-      {/* Row 1: model + context bar + branch + cost */}
+    <div className="border-t border-white/[0.06] bg-[#111113] px-4 py-2 font-mono text-[11px] leading-[1.6] flex-shrink-0">
+      {/* Row 1 */}
       <div className="flex flex-wrap items-center gap-x-1 text-slate-400">
         <span className="text-white/80">[</span>
         <span className="text-teal-400 font-semibold">ollama/qwen3-coder:30b</span>
@@ -110,35 +102,35 @@ function StatusBar({ progress }: { progress: number }) {
           <span className="text-slate-700">{"\u2591".repeat(empty)}</span>
         </span>
         <span className="ml-1">{pct}%</span>
-        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-700 mx-1">{"\u2502"}</span>
         <span className="text-slate-400">cli-demo</span>
         <span className="text-slate-500 ml-1">git:(</span>
         <span className="text-emerald-400">{branch}</span>
         <span className="text-slate-500">)</span>
-        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-700 mx-1">{"\u2502"}</span>
         <span>~${cost}</span>
-        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-700 mx-1">{"\u2502"}</span>
         <span className="text-slate-500">{mins}m</span>
       </div>
-      {/* Row 2: tool counts */}
+      {/* Row 2 */}
       <div className="flex flex-wrap items-center gap-x-1 text-slate-500">
         {tools.length > 0 ? tools.map((t, i) => (
           <span key={i} className="flex items-center">
             <span className="text-emerald-500/70">{t}</span>
-            {i < tools.length - 1 && <span className="text-slate-700 mx-1">\u2502</span>}
+            {i < tools.length - 1 && <span className="text-slate-700 mx-1">{"\u2502"}</span>}
           </span>
         )) : <span className="text-slate-600">no tool calls</span>}
       </div>
-      {/* Row 3: permission mode + role models */}
+      {/* Row 3 */}
       <div className="flex flex-wrap items-center gap-x-1">
         <span className="text-red-400 font-bold">{"\u25C8"} bypassPermissions</span>
         <span className="text-slate-600">(shift+tab)</span>
-        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-700 mx-1">{"\u2502"}</span>
         <span className="text-cyan-400 font-bold">plan</span>
         <span className="text-slate-500">:</span>
         <span className="text-cyan-400">google/gemini-3.1-pro</span>
         <span className="text-slate-600 ml-1">142t/s</span>
-        <span className="text-slate-700 mx-1">\u2502</span>
+        <span className="text-slate-700 mx-1">{"\u2502"}</span>
         <span className="text-purple-400 font-bold">review</span>
         <span className="text-slate-500">:</span>
         <span className="text-purple-300">anthropic/claude-opus-4-6</span>
@@ -164,7 +156,6 @@ function renderLine(line: Line, isActive: boolean, typedChars: number) {
     );
   }
 
-  // Lines with checkmarks get special coloring
   if (line.color.startsWith("check-line-")) {
     const baseColor = line.color.replace("check-line-", "");
     const colorClass = `text-${baseColor}-400`;
@@ -232,7 +223,7 @@ export default function CliShowcase() {
     return clear;
   }, [visibleLines, typedChars, isTyping, clear]);
 
-  // Auto-scroll
+  // Auto-scroll within fixed container
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -248,9 +239,12 @@ export default function CliShowcase() {
         .animate-blink { animation: blink 0.8s step-end infinite; }
       `}</style>
       <div className="container mx-auto px-6 lg:px-8 max-w-4xl">
-        <div className="rounded-xl border border-white/10 bg-[#0d0d0f] shadow-2xl shadow-black/50 overflow-hidden ring-1 ring-white/[0.04]">
+        <div
+          className="rounded-xl border border-white/10 bg-[#0d0d0f] shadow-2xl shadow-black/50 overflow-hidden ring-1 ring-white/[0.04] flex flex-col"
+          style={{ height: TERMINAL_HEIGHT }}
+        >
           {/* Title bar */}
-          <div className="flex items-center gap-2 px-4 py-3 bg-[#1a1a1c] border-b border-white/[0.06]">
+          <div className="flex items-center gap-2 px-4 py-3 bg-[#1a1a1c] border-b border-white/[0.06] flex-shrink-0">
             <div className="flex gap-1.5">
               <div className="w-3 h-3 rounded-full bg-red-500/80" />
               <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
@@ -258,10 +252,10 @@ export default function CliShowcase() {
             </div>
             <span className="text-xs text-slate-500 ml-2 font-mono">workermill</span>
           </div>
-          {/* Terminal content */}
+          {/* Terminal content — scrolls within fixed height */}
           <div
             ref={containerRef}
-            className="p-6 font-mono text-[13px] leading-relaxed min-h-[480px] max-h-[580px] overflow-y-auto"
+            className="p-6 font-mono text-[13px] leading-relaxed flex-1 overflow-y-auto"
           >
             {SCRIPT.slice(0, visibleLines + (isTyping ? 1 : 0)).map((line, i) => {
               const isActive =
@@ -282,7 +276,7 @@ export default function CliShowcase() {
               </div>
             )}
           </div>
-          {/* Status bar — matches the real CLI */}
+          {/* Status bar — pinned to bottom */}
           <StatusBar progress={visibleLines / SCRIPT.length} />
         </div>
       </div>

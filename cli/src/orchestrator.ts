@@ -338,19 +338,16 @@ export async function checkToolPermission(
     if (result.mode === "always" && result.allowed) {
       // "Yes, don't ask again" — for bash save permanent rule, otherwise session-only
       if (toolName === "bash" && toolInput.command) {
-        const { splitCompoundCommand, commandToRule } = await import("./safety.js");
+        const { commandToRule } = await import("./safety.js");
         const { loadConfig, saveConfig } = await import("./config.js");
         try {
           const cfg = loadConfig();
           if (cfg) {
             cfg.permissions = cfg.permissions || {};
             cfg.permissions.allow = cfg.permissions.allow || [];
-            const subcommands = splitCompoundCommand(String(toolInput.command));
-            for (const sub of subcommands) {
-              const rule = commandToRule(sub);
-              if (!cfg.permissions.allow.includes(rule)) {
-                cfg.permissions.allow.push(rule);
-              }
+            const rule = commandToRule(String(toolInput.command));
+            if (!cfg.permissions.allow.includes(rule)) {
+              cfg.permissions.allow.push(rule);
             }
             saveConfig(cfg);
           }
@@ -946,6 +943,7 @@ export async function runOrchestration(
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
   retryPlan?: RetryPlan,
+  ticketKey?: string,
 ): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
@@ -1341,6 +1339,24 @@ export async function runOrchestration(
     // TODO: Deferred tool loading — skipped in orchestrator because persona-based filtering
     // already limits tools per story. MCP tools are the only unbounded set. If MCP tool counts
     // become large, add partitionTools() here (see useAgent.ts for the pattern).
+
+    // Add skill tool — lets story workers invoke custom skills mid-execution
+    personaTools["skill"] = {
+      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
+      inputSchema: z.object({
+        name: z.string().describe("The skill name to invoke"),
+        args: z.string().optional().describe("Optional arguments"),
+      }),
+      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
+        const { loadCustomCommands } = await import("./custom-commands.js");
+        const skills = loadCustomCommands();
+        const match = skills.find(
+          (s: { name: string }) => s.name.toLowerCase() === skillName.toLowerCase(),
+        );
+        if (!match) return `Skill "${skillName}" not found.`;
+        return args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt;
+      },
+    };
 
     // Apply concurrency control — safe tools (read_file, list_dir, etc.) run in parallel
     for (const [name, td] of Object.entries(personaTools)) {
@@ -2363,6 +2379,41 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   runLifecycleHooks("ship_complete", config.hooks, workingDir, {
     WORKERMILL_COST: costTracker.getTotalCost().toFixed(4),
   });
+
+  // Post back to ticket if this was a ticket-driven run
+  if (ticketKey && userTask.match(/^# .+\n/)) {
+    try {
+      const { loadConfig } = await import("./config.js");
+      const { TicketOps, GitHubCommentFormat } = await import("./ticket-ops.js");
+      const cfg = loadConfig();
+      const ticketSystem = cfg?.ticketSystem || "github";
+
+      if (ticketSystem === "jira" && cfg?.jira) {
+        process.env.JIRA_BASE_URL = cfg.jira.baseUrl;
+        process.env.JIRA_EMAIL = cfg.jira.email;
+        process.env.JIRA_API_TOKEN = cfg.jira.apiToken;
+      } else if (ticketSystem === "linear" && cfg?.linear) {
+        process.env.LINEAR_API_KEY = cfg.linear.apiKey;
+      }
+      if (ticketSystem === "github" && !process.env.GITHUB_REPO) {
+        try {
+          const { execSync: exec } = await import("child_process");
+          const remote = exec("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
+          const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+          if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
+        } catch { /* not a git repo */ }
+      }
+
+      const ops = new TicketOps(ticketKey, ticketSystem);
+      if (ops.isAvailable()) {
+        const completedCount = sorted.filter((s) => completedStoryIds.includes(s.id)).length;
+        const summary = `WorkerMill completed: ${completedCount}/${sorted.length} stories done.`;
+        await ops.postComment(GitHubCommentFormat.completed(summary));
+      }
+    } catch {
+      // Soft failure — don't crash on post-back errors
+    }
+  }
 
   // Stop MCP servers and language server
   stopAllMCPServers();

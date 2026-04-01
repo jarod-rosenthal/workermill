@@ -60,7 +60,7 @@ export interface UseOrchestratorReturn {
   /** Whether orchestration is currently running. */
   running: boolean;
   /** Start orchestration for a task. */
-  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => void;
+  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   /** Cancel the running orchestration. */
@@ -121,7 +121,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const start = useCallback(
-    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => {
+    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => {
       // Abort any previous run
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
@@ -273,7 +273,7 @@ export function useOrchestrator(
           // ---- Run full orchestration --------------------------------
           const retryPlan = retryPlanRef.current;
           retryPlanRef.current = null;
-          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined);
+          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined, ticketKey);
 
           flushLine();
           addMessage(retryPlan ? "**Retry complete.**" : "**Orchestration complete.**");

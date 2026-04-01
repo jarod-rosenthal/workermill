@@ -242,7 +242,7 @@ export interface SlashCommandContext {
   allowTool: (name: string) => void;
   denyTool: (name: string) => void;
   orchestratorRunning: boolean;
-  startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => void;
+  startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   lastBuildTask: string | null;
   setLastBuildTask: (task: string) => void;
@@ -536,7 +536,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             ctx.addSystemMessage(`Fetched **${ticketRef.key}**: ${ticket.title}`);
             ctx.setLastBuildTask(taskPrompt);
             ctx.addUserMessage(`/ship ${ticketRef.key}`);
-            ctx.startOrchestrator(taskPrompt, ctx.isTrustAll, ctx.sandboxed ?? false);
+            ctx.startOrchestrator(taskPrompt, ctx.isTrustAll, ctx.sandboxed ?? false, ticketRef.key);
           })();
         } else {
           ctx.setLastBuildTask(arg);

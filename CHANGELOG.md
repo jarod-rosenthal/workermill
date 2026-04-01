@@ -44,6 +44,8 @@ Component releases are tracked via git tags:
 - CLI: Branch names capped at 3 words with ticket key prefix (`GH-1/full-stack-task`).
 - CLI: Distinct error messages for missing credentials vs issue not found.
 - CLI: Removed Dockerfile and CI files from sensitive file list — agents need to write these.
+- CLI: Ticket detection with spaces — `GH #11`, `GH 11` now match (whitespace collapsed before regex).
+- CLI: Sandbox comment updated — `bwrap` replaced by `@anthropic-ai/sandbox-runtime`.
 - CLI: Dangling `clearInterval` reference in orchestrator confirm — would crash on user response.
 
 ---

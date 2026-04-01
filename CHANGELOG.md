@@ -32,6 +32,10 @@ Component releases are tracked via git tags:
 - CLI: Blocking pre-hooks wired in — both useAgent.ts and orchestrator.ts use `runPreHooksWithBlocking()`. Pre-hooks that exit non-zero abort the tool call. Post-hooks receive tool output.
 - CLI: Rate limit retry in orchestrator — story and revision execution retry on 429 with exponential backoff, matching the single-agent behavior.
 - CLI: Test suite expanded — 52 new unit tests (maturity features + loop detection), 81 total for new features.
+- CLI: Model-invocable skills — `skill` tool lets the model invoke custom skills mid-conversation. Works in both chat and `/ship`. Skills from `.workermill/skills/` with `whenToUse` frontmatter appear in the system prompt and can be called programmatically.
+- CLI: npm package now includes CHANGELOG.md. `prepublishOnly` copies root README.md so npm and GitHub always show the same content.
+- CLI: npm description and keywords updated to match branding ("AI coding team", added workermill, multi-agent, code-review, llm, mcp, terminal).
+- CLI: Ticket-ops integration — `/ship #42` fetches a GitHub Issue and uses it as the task spec. Also supports Jira (`/ship PROJ-123`) and Linear tickets. Credentials configured via `/setup`. Posts completion comments back to the ticket when done.
 
 ---
 

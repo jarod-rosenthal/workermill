@@ -2460,6 +2460,25 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 { cwd: workingDir, encoding: "utf-8", input: prBody, stdio: ["pipe", "pipe", "pipe"] },
               ).trim();
               output.log("system", `Pull request created: ${prUrl}`);
+
+              // Post the tech lead review as a proper GitHub PR review
+              // Matches worker/epic/coordinator-review.ts ensureGitHubReviewPosted()
+              if (finalReviewText) {
+                try {
+                  const reviewScore = extractScore(finalReviewText);
+                  const feedbackMatch = finalReviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
+                  const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+                  const emoji = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "✅" : "🔄";
+                  const reviewBody = `## ${emoji} Tech Lead Review\n\n**Code Quality Score:** ${reviewScore}/10\n\n${feedback}`;
+                  const reviewFlag = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "--approve" : "--request-changes";
+                  execSync(
+                    `gh pr review --body-file - ${reviewFlag} 2>&1`,
+                    { cwd: workingDir, encoding: "utf-8", input: reviewBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
+                  );
+                } catch {
+                  // Non-critical — review comment is best-effort
+                }
+              }
             } catch (prErr) {
               const prMsg = prErr instanceof Error ? (prErr as any).stdout || prErr.message : String(prErr);
               output.log("system", `Branch pushed. Create a PR manually (gh CLI error: ${prMsg.split("\n")[0]})`);

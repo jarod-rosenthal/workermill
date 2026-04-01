@@ -1,231 +1,230 @@
-# WorkerMill CLI
+# WorkerMill
 
-AI coding agent with multi-expert orchestration. Works with any LLM provider.
-
-The lightweight, zero-setup version of [WorkerMill](https://workermill.com) — the open-source orchestration platform for AI coding agents. Same multi-expert engine, directly in your terminal. No server, no Docker, no account.
-
-Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and any OpenAI-compatible provider — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
-
-## Quick Start
+An AI coding team in your terminal. Different models plan, build, and review — so bad code gets caught, not shipped.
 
 ```bash
 npx workermill
 ```
 
-First run launches a setup wizard — pick providers for workers, planner, and reviewer independently. Ollama is auto-detected (including WSL). Config saved to `~/.workermill/cli.json`.
+Describe what you want to build. A planner breaks it down, assigns the right specialists automatically, and a reviewer catches what they missed. You get a feature branch with clean commits — reviewed before you ever look at it.
+
+Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and any OpenAI-compatible provider — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
+
+## What You Can Do
+
+### Ship a feature — one command, full team
+
+Say you're building a task management app and you need user login:
+
+```
+> /ship add user authentication — email/password signup, login, logout, and a protected dashboard route
+
+ planner  Reading codebase... 38 files analyzed
+ planner  3 stories:
+          [backend_developer] Auth service: password hashing, JWT tokens, login/signup/logout endpoints
+          [backend_developer] Middleware: route protection, token verification, session handling
+          [frontend_developer] UI: signup form, login form, redirect to dashboard on success
+
+ backend_developer  Created src/services/auth.ts, src/routes/auth.ts
+ backend_developer  Running quality gates... tsc ✓ vitest ✓
+ frontend_developer Created src/pages/Login.tsx, src/pages/Signup.tsx
+ frontend_developer Running quality gates... tsc ✓ vitest ✓
+
+ tech_lead  Reviewing against original spec...
+ tech_lead  Score: 9/10 — approved
+
+ system  Branch: workermill/user-auth (6 commits, 9 files, +680 lines)
+         Push and open PR? (y/n)
+```
+
+### Review didn't pass? `/retry` picks up where you left off
+
+```
+> /retry
+
+ planner  Reading existing branch... 6 commits found
+ planner  Previous review feedback: "JWT should be HttpOnly cookie, not response body."
+ planner  1 revision story:
+          [backend_developer] Move JWT to HttpOnly cookie, add token blacklist on logout
+
+ backend_developer  Modified src/routes/auth.ts, src/middleware/requireAuth.ts
+ backend_developer  Running quality gates... vitest ✓ (23 passed)
+
+ tech_lead  Score: 9/10 — approved
+```
+
+### Target a single expert
+
+```
+/as security_engineer audit this repository — check for injection, broken auth, and data exposure
+/as backend_developer add pagination to the /api/tasks endpoint
+/as frontend_developer redesign the settings page to use tabs instead of a long form
+/as devops_engineer set up a GitHub Actions CI pipeline with lint, test, and build steps
+```
+
+### Switch models on the fly
+
+```
+> /model google/gemini-3.1-pro
+ Switched to google/gemini-3.1-pro (1M context)
+
+> /model ollama/qwen3-coder:30b 256k
+ Switched to ollama/qwen3-coder:30b (256k context)
+```
+
+## Why a Team, Not a Single Agent
+
+One model doing everything writes bad code and approves its own bad code. WorkerMill separates planning, execution, and review — and lets you assign a different model to each role.
+
+You pay flagship prices for judgment (2 API calls), not for every line of code. Run workers on Ollama for free while the planner and reviewer hold the quality bar.
+
+```json
+{
+  "providers": {
+    "ollama": { "model": "qwen3-coder:30b" },
+    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
+  },
+  "default": "ollama",
+  "routing": {
+    "planner": "anthropic",
+    "tech_lead": "anthropic"
+  }
+}
+```
 
 ## Install
 
 ```bash
-# Run without installing
+# Run without installing (recommended)
 npx workermill
 
 # Or install globally
 npm install -g workermill
-workermill
 
 # Check your setup
 wm doctor
 ```
 
-## Usage
+No server, no Docker, no account. First run walks you through provider setup in 60 seconds — pick a model, add a key (or point at Ollama), and you're building.
 
-```bash
-# Interactive chat
-workermill
-
-# Skip permission prompts
-workermill --trust
-
-# Resume last conversation
-workermill --resume
-
-# Override provider/model
-workermill --provider anthropic --model claude-sonnet-4-6
-
-# Cap output tokens
-workermill --max-tokens 4096
-
-# Then use /ship inside the CLI for multi-expert orchestration
-# /ship spec.md
-# /ship REST API with auth, React dashboard, Docker
-```
+**Requirements:** Node.js 20+, Git, and an LLM provider. [GitHub CLI](https://cli.github.com/) (`gh`) optional for automatic PR creation.
 
 ## Features
 
-- **Multi-expert orchestration** — `/ship` decomposes tasks into stories, each assigned to a specialist persona
-- **Per-persona model routing** — Map any persona to any provider. Run security reviews on Claude, frontend on GPT, workers on Ollama. Use `/settings route <persona> <provider>` or edit `cli.json`
-- **Built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent, plus 8 browser tools
-- **WORKERMILL.md** — Project instructions file read by all agents. Also supports CLAUDE.md, .cursorrules
-- **MCP servers** — Connect external tools via Model Context Protocol
-- **Hooks** — Pre/post tool execution hooks for linting, formatting, etc.
-- **Custom commands** — Drop `.md` files in `.workermill/commands/` for custom slash commands
-- **Persistent learnings** — `::learning::` markers saved across sessions
-- **@mentions** — `@file.ts` inlines code, `@dir/` inlines tree, `@https://url` fetches content, `@image.png` sends multimodal
-- **Code review** — Tech lead reads actual code diffs, with configurable revision cycles
-- **Bash guardrails** — Blocks destructive commands and writes outside the project directory
-- **Permissions** — Shift+Tab to cycle: Ask → Auto-edit → Trust all. Per-tool always-allow from prompt.
-- **Session management** — Persistent conversations with resume
-- **Cost tracking** — Live in status bar with per-model pricing
-- **Live model switching** — `/model` hot-swaps provider and model mid-session with autocomplete, context validation, and auto-compaction
-- **Status bar** — Shows active model, context window, usage percentage, cost, git branch, and tokens/sec
-- **Auto-update** — Notifies when a newer version is available
+**Multi-expert orchestration** — `/ship` decomposes, assigns specialists, reviews diffs, revises until approved. Commits to a feature branch.
 
-## Commands
+**Mix models per role** — planner on Claude, workers on Ollama, reviewer on GPT. Different models for different jobs.
 
-| Command | Description |
-|---------|-------------|
-| `/ship <task>` | Multi-expert orchestration — plans, executes, reviews (alias: `/build`) |
-| `/review [task]` | Code review using the tech lead (defaults to reviewing recent changes) |
-| `/as <persona> <task>` | Run a task with a specific expert (e.g. `/as security_engineer review auth`) |
-| `/retry` | Re-run the last ship task |
-| `/personas` | List all available experts, view/create custom personas |
-| `/init` | Generate `WORKERMILL.md` for this project |
-| `/settings` | View/change settings (review, ollama, etc.) |
-| `/permissions` | Manage tool permissions (trust/ask/allow/deny) |
-| `/undo` | Revert last ship's changes (git stash or reset) |
-| `/diff` | Preview uncommitted changes |
-| `/model [provider/model] [context]` | Switch model mid-session with autocomplete. Context: `/model ollama/qwen3-coder:30b 256k`. Chain: `/model openai/gpt-5.4 /as backend_developer fix auth` |
-| `/compact [focus]` | Compact conversation history (optional focus: `/compact focus on API changes`) |
-| `/trust` | Auto-approve all tools for this session |
-| `/hooks` | View configured pre/post tool hooks |
-| `/skills` | Custom slash commands from `.workermill/commands/` |
-| `/chrome` | Open/close headless Chrome *(experimental)* |
-| `/voice` | Voice input *(experimental)* |
-| `/schedule` | Scheduled recurring tasks *(experimental)* |
-| `/update` | Check for updates |
-| `/release-notes` | Show changelog |
-| `/cost` | Session cost and token usage |
-| `/status` | Session info |
-| `/log` | Show recent CLI log entries |
-| `/git` | Git branch and status |
-| `/sessions` | List/switch sessions |
-| `/editor` | Open $EDITOR for longer input |
-| `/clear` | Reset conversation |
-| `/quit` | Exit |
+**12 specialist personas** — backend, frontend, architect, DevOps, security, QA, data/ML, mobile, tech writer, plus planner, reviewer, and critic. Create your own in `.workermill/personas/`.
 
-**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Shift+Tab` cycles permission mode, `Ctrl+C Ctrl+C` exits, `←/→` cursor movement, `Ctrl+←/→` word jump, `Ctrl+A/E` home/end, `Tab` autocomplete.
+**15 built-in tools + MCP** — bash (sandboxed), file read/write/edit/patch, glob, grep, ls, git, web search, fetch, verify, LSP, sub-agent with worktree isolation, headless Chrome. MCP tools auto-detected and loaded on demand.
 
-## Multi-Expert Orchestration
+**Custom skills** — `.workermill/skills/*.md` with YAML frontmatter. Define reusable workflows the model can invoke mid-conversation.
 
-`/ship` triggers multi-expert mode (alias: `/build`):
+**You stay in control** — four permission modes (Shift+Tab to cycle), granular allow/deny rules, dangerous command and file detection, OS-level sandboxing, blocking pre-hooks, `/undo` for instant rollback.
 
-1. **Plans** — Explores the codebase, designs stories as scope labels with dependencies and persona assignments. Workers receive the full original spec — the planner scopes, not rewrites.
-2. **Executes** — Each story assigned to a specialist persona. Workers see `## Ticket Requirements — THIS IS YOUR SPEC` with your full task, plus their file scope.
-3. **Reviews** — Tech lead reviews actual code with a 3-tier decision: `approved`, `revision_needed`, or `rejected`. Bias toward approval — cosmetic issues don't block. Quality score (1-10) is informational.
-4. **Revises** — If revision needed, only affected stories re-run with per-story feedback from the reviewer.
-5. **Commits** — Stages changes and commits (with your approval).
+**Context that doesn't run out** — micro-compaction at 60%, LLM summarization at 80%, memory extraction before compaction. Rate limit retry. Loop detection. Read-only tools run in parallel.
 
-For single-expert tasks, use `/as <persona> <task>` — runs one expert with the full tool set and their specialized prompt.
+**Persistent memory** — `::learning::` markers and `/remember` save knowledge across sessions.
 
-Use `/retry` to re-plan the same task — the planner sees existing code and fills gaps.
+**Project instructions** — reads `WORKERMILL.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`.
 
 ## Configuration
 
-### Files
+Config lives at `~/.workermill/cli.json`. Project overrides in `.workermill/config.json`.
 
 | File | Purpose |
 |------|---------|
-| `WORKERMILL.md` | Project instructions — read by all agents (committed to repo) |
-| `~/.workermill/cli.json` | Global config (providers, routing, review, hooks, MCP) |
-| `~/.workermill/sessions/` | Conversation sessions |
-| `~/.workermill/logs/` | Debug logs (per-project) |
-| `~/.workermill/memory/` | Project memory — learnings, preferences, context (per-project) |
+| `WORKERMILL.md` | Project instructions read by all agents |
+| `~/.workermill/cli.json` | Global config — providers, routing, review, hooks, MCP |
 | `.workermill/config.json` | Per-project config overrides |
-| `.workermill/commands/*.md` | Custom slash commands |
+| `.workermill/skills/*.md` | Custom skills with YAML frontmatter |
 | `.workermill/personas/*.md` | Custom persona overrides |
 
-### Example Config
+Change settings at runtime:
 
-```json
-{
-  "providers": {
-    "ollama": {
-      "model": "qwen3-coder:30b",
-      "host": "http://localhost:11434",
-      "contextLength": 262144
-    },
-    "anthropic": {
-      "model": "claude-sonnet-4-6",
-      "apiKey": "{env:ANTHROPIC_API_KEY}"
-    },
-    "google": {
-      "model": "gemini-3.1-pro-preview",
-      "apiKey": "{env:GOOGLE_API_KEY}"
-    }
-  },
-  "default": "ollama",
-  "routing": {
-    "planner": "google",
-    "tech_lead": "anthropic",
-    "security_engineer": "anthropic"
-  },
-  "review": {
-    "enabled": true,
-    "maxRevisions": 3
-  },
-  "hooks": {
-    "post": [
-      { "command": "npx eslint --fix", "tools": ["write_file", "edit_file"] }
-    ]
-  },
-  "mcp": {
-    "my-server": { "command": "npx", "args": ["-y", "my-mcp-server"] }
-  }
-}
+```
+/settings key anthropic sk-ant-...        # Add an API key
+/settings route security_engineer anthropic   # Route a persona to a provider
+/settings review.maxRevisions 5           # Adjust review cycles
+/model ollama/qwen3-coder:30b 256k        # Switch model mid-session
 ```
 
-### Settings
+## Full Command Reference
 
-Change settings at runtime with `/settings`:
+<details>
+<summary>Expand</summary>
 
-| Setting | Default | Command |
-|---------|---------|---------|
-| Ollama host | auto-detected | `/settings ollama.host <url>` |
-| Ollama context | chosen during setup | `/settings ollama.context <n>` |
-| Review enabled | true | `/settings review.enabled true/false` |
-| Max revisions | 3 | `/settings review.maxRevisions <n>` |
-| Auto-revise | false | `/settings review.autoRevise true/false` |
-| API key | — | `/settings key <provider> <api-key>` |
+**Build**
 
-### Per-Persona Model Routing
+| Command | What it does |
+|---------|-------------|
+| `/ship <task>` | Full team: plan, execute with experts, review, commit to branch |
+| `/ship spec.md` | Same, but read the task from a file |
+| `/as <persona> <task>` | One expert, full tools, no planning overhead |
+| `/retry` | Resume last `/ship` — targets what's missing |
+| `/review` | Tech lead review of current changes |
 
-By default, all worker personas use the same model. The planner and reviewer can be routed to different models during setup. You can also route any individual persona to any configured provider:
+**Session**
 
-```bash
-/settings route backend_developer anthropic
-/settings route frontend_developer google
-/settings route security_engineer anthropic
-```
+| Command | What it does |
+|---------|-------------|
+| `/model provider/model [ctx]` | Hot-swap model (e.g. `/model google/gemini-3.1-pro`) |
+| `/compact [focus]` | Compress conversation |
+| `/cost` | Session cost estimate and token usage |
+| `/sessions` | List, switch, or resume past conversations |
+| `/clear` | Reset conversation |
+| `/editor` | Open `$EDITOR` for longer input |
 
-This lets you mix providers — e.g., local Ollama for most workers, but route security reviews to a cloud model. Routing is stored in `cli.json` under the `routing` key. Unrouted personas use the default provider.
+**Project**
 
-## Expert Personas
+| Command | What it does |
+|---------|-------------|
+| `/init` | Generate `WORKERMILL.md` from codebase analysis |
+| `/remember <text>` | Save a persistent memory |
+| `/forget <id>` | Remove a memory |
+| `/memories` | View all saved project memories |
+| `/personas` | List, view, or create expert personas |
+| `/skills` | List custom skills |
 
-| Persona | Role |
-|---------|------|
-| `architect` | System design and architecture |
-| `backend_developer` | APIs, databases, server logic |
-| `frontend_developer` | React, UI components, styling |
-| `devops_engineer` | Docker, CI/CD, infrastructure |
-| `qa_engineer` | Testing, quality gates |
-| `security_engineer` | Auth, vulnerabilities, hardening |
-| `data_ml_engineer` | Data pipelines, ML integration |
-| `mobile_developer` | Mobile apps and responsive design |
-| `tech_writer` | Documentation and API docs |
-| `tech_lead` | Code review (used automatically) |
-| `planner` | Task decomposition (used automatically) |
+**Safety**
 
-Use `/personas` to list all available personas. Use `/as <persona> <task>` to run a task with a specific expert.
+| Command | What it does |
+|---------|-------------|
+| `/undo` | Revert file changes |
+| `/diff` | Preview uncommitted changes |
+| `/git` | Branch and status |
+| `/permissions` | Manage tool allow/deny rules |
+| `/trust` | Auto-approve all tools for this session |
 
-Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/.workermill/personas/` globally. Project personas override built-ins with the same name.
+**Config**
 
-## Requirements
+| Command | What it does |
+|---------|-------------|
+| `/settings` | View and change configuration inline |
+| `/settings key <provider> <key>` | Add an API key |
+| `/setup` | Re-run provider setup wizard |
+| `/hooks` | View configured hooks |
+| `/mcp` | MCP server status |
 
-- Node.js 20+
-- Git
-- An LLM provider (Ollama for local, or an API key for cloud providers)
-- [GitHub CLI](https://cli.github.com/) (`gh`) — optional, needed for automatic PR creation
+**Experimental**
+
+| Command | What it does |
+|---------|-------------|
+| `/chrome` | Headless Chrome |
+| `/voice` | Voice input |
+| `/schedule` | Scheduled recurring tasks |
+
+**Shortcuts:** `!command` runs shell · `ESC` cancels · `ESC ESC` rolls back · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
+
+</details>
+
+## Links
+
+- [GitHub Repository](https://github.com/jarod-rosenthal/workermill)
+- [Documentation](https://workermill.com/docs)
+- [Discussions](https://github.com/jarod-rosenthal/workermill/discussions)
+- [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill)
 
 ## License
 

@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">WorkerMill</h1>
-  <p align="center">An AI coding team in your terminal. Different models plan, build, and review — so bad code gets caught, not shipped.</p>
+  <p align="center">Point at a ticket. Get a pull request.<br/>A team of AI engineers that works your backlog — planning, coding, reviewing, and opening PRs while you sleep.</p>
 </p>
 
 <p align="center">
@@ -30,17 +30,17 @@
 npx workermill
 ```
 
-That's it. If you have Ollama running, you don't even need an API key. The setup wizard takes 60 seconds.
+Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It assigns the right engineers, writes the code, runs your tests, reviews its own work, and opens a PR — ticket by ticket until your backlog is done.
 
-Works with **Ollama** (fully local, no API key), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support).
+Or just chat. Ask it to fix a bug, explain a function, or refactor a module. It reads your code and makes the changes.
+
+Setup takes 60 seconds. Works with **Ollama** (fully local, no API key), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support).
 
 ---
 
 ## What You Can Do
 
-### Just chat — ask questions, fix bugs, explore code
-
-Most of the time you're just talking to it:
+### Chat — ask questions, fix bugs, explore code
 
 ```
 > why is the checkout test failing?

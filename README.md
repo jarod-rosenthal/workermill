@@ -137,20 +137,21 @@ Other examples:
 /as qa_engineer write integration tests for the checkout flow
 ```
 
-### Switch models on the fly
+### Switch models and chain commands
 
 ```
-> /model google/gemini-3.1-pro
+> /model anthropic/claude-opus-4-6 /as security_engineer audit how credentials are stored and transmitted in this codebase
 
- Switched to google/gemini-3.1-pro (1M context)
- Previous context auto-compacted to fit.
+ Switched to anthropic/claude-opus-4-6 (1M context)
 
-> /model ollama/qwen3-coder:30b 256k
-
- Switched to ollama/qwen3-coder:30b (256k context)
+ security_engineer  Reading config files, auth middleware, environment handling...
+ security_engineer  Found 2 issues:
+   1. API keys stored in plaintext in config.json — should use OS keychain or encrypted env
+   2. JWT secret loaded from .env with no rotation mechanism
+ security_engineer  Fixing both...
 ```
 
-`/model` hot-swaps mid-session. Autocomplete helps with provider and model names. If the new model has a smaller context window, conversation history compacts automatically. Mix and match: start exploring with a big-context model, switch to a fast local model for execution.
+`/model` hot-swaps mid-session and chains with any command. Switch to a flagship model for a security audit, then back to a local model for the fix. Autocomplete helps with provider and model names. If the new model has a smaller context window, conversation history compacts automatically.
 
 ---
 

@@ -2,6 +2,8 @@ import readline from "readline";
 import { execSync } from "child_process";
 import chalk from "chalk";
 import { loadConfig, saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
+import type { TicketSystem } from "./config.js";
+import { TicketOps } from "./ticket-ops.js";
 import * as logger from "./logger.js";
 
 interface ProviderOption {
@@ -566,6 +568,120 @@ async function configureLmStudio(providerConfig: ProviderConfig, lmStudioProvide
   console.log(chalk.yellow("  ⚠ Could not connect to LM Studio. Make sure it's running."));
 }
 
+function detectGithubRepo(): string | null {
+  try {
+    const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
+    const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+    return match ? match[1].replace(/\.git$/, "") : null;
+  } catch {
+    return null;
+  }
+}
+
+async function configureTicketSystem(
+  p: Prompter,
+  existingConfig: CliConfig | null,
+): Promise<{ ticketSystem: TicketSystem; jira?: { baseUrl: string; email: string; apiToken: string }; linear?: { apiKey: string } }> {
+  console.log(chalk.hex("#D77757").bold("  ④ Issue Tracker") + chalk.dim(" — for /ship #123 ticket references"));
+  console.log();
+
+  const trackers = [
+    { name: "github" as const, label: "GitHub Issues (uses your GitHub token)" },
+    { name: "jira" as const, label: "Jira" },
+    { name: "linear" as const, label: "Linear" },
+  ];
+
+  trackers.forEach((t, i) => {
+    console.log(`    ${chalk.cyan(`${i + 1}`)}. ${t.label}`);
+  });
+  console.log();
+
+  const choiceStr = await p.ask(chalk.dim("  Choose [1]: "));
+  const choice = parseInt(choiceStr.trim(), 10) - 1;
+  const selected = trackers[choice] || trackers[0];
+  console.log(chalk.dim(`  → ${selected.label}`));
+
+  if (selected.name === "github") {
+    const repo = detectGithubRepo();
+    if (repo) {
+      const token = process.env.GITHUB_TOKEN || "";
+      if (token) {
+        const error = await TicketOps.validateCredentials("github", { githubToken: token, githubRepo: repo });
+        if (error) {
+          console.log(chalk.yellow(`  ⚠ GitHub validation failed: ${error}`));
+        } else {
+          console.log(chalk.green(`  ✓ GitHub Issues connected (${repo})`));
+        }
+      }
+    }
+    return { ticketSystem: "github" };
+  }
+
+  if (selected.name === "jira") {
+    const existing = existingConfig?.jira;
+    if (existing) {
+      console.log(chalk.dim(`  Existing: ${existing.baseUrl} (${existing.email})`));
+      const reuse = await p.ask(chalk.dim("  Keep existing? [Y/n] "));
+      if (reuse.trim().toLowerCase() !== "n") {
+        const error = await TicketOps.validateCredentials("jira", existing);
+        if (error) {
+          console.log(chalk.yellow(`  ⚠ Validation failed: ${error}`));
+        } else {
+          console.log(chalk.green(`  ✓ Connected to Jira`));
+          return { ticketSystem: "jira", jira: existing };
+        }
+      }
+    }
+
+    const baseUrl = (await p.ask(chalk.dim("  Jira URL (e.g. https://myteam.atlassian.net): "))).trim();
+    const email = (await p.ask(chalk.dim("  Jira email: "))).trim();
+    const resume = p.suspend();
+    const apiToken = (await readKeyMasked(chalk.dim("  Jira API token: "))).trim();
+    resume();
+
+    const error = await TicketOps.validateCredentials("jira", { baseUrl, email, apiToken });
+    if (error) {
+      console.log(chalk.yellow(`  ⚠ ${error} — credentials saved anyway, fix later`));
+    } else {
+      console.log(chalk.green(`  ✓ Connected to Jira (${baseUrl})`));
+    }
+
+    return { ticketSystem: "jira", jira: { baseUrl, email, apiToken } };
+  }
+
+  if (selected.name === "linear") {
+    const existing = existingConfig?.linear;
+    if (existing) {
+      console.log(chalk.dim("  Existing Linear API key found."));
+      const reuse = await p.ask(chalk.dim("  Keep existing? [Y/n] "));
+      if (reuse.trim().toLowerCase() !== "n") {
+        const error = await TicketOps.validateCredentials("linear", { apiKey: existing.apiKey });
+        if (error) {
+          console.log(chalk.yellow(`  ⚠ Validation failed: ${error}`));
+        } else {
+          console.log(chalk.green(`  ✓ Connected to Linear`));
+          return { ticketSystem: "linear", linear: existing };
+        }
+      }
+    }
+
+    const resume = p.suspend();
+    const apiKey = (await readKeyMasked(chalk.dim("  Linear API key: "))).trim();
+    resume();
+
+    const error = await TicketOps.validateCredentials("linear", { apiKey });
+    if (error) {
+      console.log(chalk.yellow(`  ⚠ ${error} — key saved anyway, fix later`));
+    } else {
+      console.log(chalk.green(`  ✓ Connected to Linear`));
+    }
+
+    return { ticketSystem: "linear", linear: { apiKey } };
+  }
+
+  return { ticketSystem: "github" };
+}
+
 export async function runSetup(): Promise<CliConfig> {
   const p = new Prompter();
   const apiKeys = new Map<string, string>();
@@ -689,6 +805,11 @@ export async function runSetup(): Promise<CliConfig> {
     console.log(chalk.dim(`  → ${workerProvider.display} / ${workerModel}`));
   }
 
+  console.log();
+
+  // ── Step 4: Issue Tracker ──
+  const ticketConfig = await configureTicketSystem(p, existingConfig);
+
   p.close();
 
   // ── Build config ──
@@ -756,6 +877,9 @@ export async function runSetup(): Promise<CliConfig> {
     providers,
     default: workerConfigKey,
     ...(Object.keys(routing).length > 0 ? { routing } : {}),
+    ticketSystem: ticketConfig.ticketSystem,
+    ...(ticketConfig.jira ? { jira: ticketConfig.jira } : {}),
+    ...(ticketConfig.linear ? { linear: ticketConfig.linear } : {}),
   };
 
   saveConfig(config);
@@ -766,6 +890,7 @@ export async function runSetup(): Promise<CliConfig> {
   console.log(chalk.dim("  Workers:  ") + `${workerConfigKey}/${workerModel}`);
   console.log(chalk.dim("  Planner:  ") + `${plannerProviderName}/${plannerModel}`);
   console.log(chalk.dim("  Reviewer: ") + `${reviewerProviderName}/${reviewerModel}`);
+  console.log(chalk.dim("  Tickets:  ") + `${config.ticketSystem || "github"}`);
   console.log();
 
   return config;

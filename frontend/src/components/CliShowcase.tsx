@@ -19,7 +19,7 @@ const SCRIPT: Line[] = [
   { text: "", color: "", delay: 600 },
 
   // User asks about working tickets — natural lead-in to /ship
-  { text: "> I have open issues on GitHub, can you help clear them?", color: "typing", delay: 0, typing: true },
+  { text: "> Can you help me with open issues in GitHub?", color: "typing", delay: 0, typing: true },
   { text: "", color: "", delay: 400 },
   { text: "  Run /ship <ticket> with any issue number. I'll fetch it, plan", color: "text-slate-300", delay: 600 },
   { text: "  the work, assign specialists, and open a PR when it passes review.", color: "text-slate-300", delay: 500 },

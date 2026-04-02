@@ -204,7 +204,7 @@ export default function LandingV0() {
                 </span>
               </h1>
               <p className="mt-6 text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto text-center leading-relaxed">
-                Assign different models to different roles. Specialist personas — from backend developer to tech lead — plan, build, and review as a team.
+                Assign different models to different roles. Specialist personas — from backend developer to devops engineer — plan, build, review, commit and deploy.
               </p>
 
               {/* Install CTA */}

@@ -1166,63 +1166,15 @@ export async function runOrchestration(
     });
     output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
 
-    // Optional critic pass (--critic or config.review.useCritic)
+    // [EXPERIMENTAL] Planning critic — not yet implemented.
+    // The platform has a battle-tested Planner-Critic loop in
+    // api/src/services/critic-agent.ts (cloud) and critic-agent-local.ts (local).
+    // It scores plans on completeness, feasibility, dependencies, quality, and risk
+    // (85/100 threshold, up to 3 refinement iterations). When we add full spec builds
+    // to the CLI, port the local critic (buildCriticPrompt, runLocalCriticAgent,
+    // runPlanCriticLoop) from critic-agent-local.ts — it already supports all providers.
     if (config.review?.useCritic) {
-      const critic = loadPersona("critic");
-      if (critic) {
-        const { provider: cProvider, model: cModel, host: cHost, contextLength: cCtx } = getProviderForPersona(config, "critic");
-        const criticModel = createModel(cProvider as AIProvider, cModel, cHost, cCtx);
-        const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
-        const criticReadOnly: Record<string, AnyToolDef> = {};
-        for (const name of critic.tools) {
-          const toolDef = criticTools[name as keyof typeof criticTools] as AnyToolDef;
-          if (toolDef) {
-            criticReadOnly[name] = {
-              ...toolDef,
-              execute: async (input: Record<string, unknown>) => {
-                output.log("critic", formatToolCallDisplay(name, input));
-                const result = await toolDef.execute(input);
-                return result;
-              },
-            };
-          }
-        }
-
-        output.status("Critic reviewing plan...");
-        // TODO: Rate limit retry for critic streamText — add isRateLimitError check in catch block
-        const criticStream = streamText({
-          model: criticModel,
-          abortSignal,
-          system: critic.systemPrompt,
-          prompt: `Review this implementation plan. Score it 1-10 using CODE_QUALITY_SCORE: N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
-          tools: criticReadOnly as ToolSet,
-          stopWhen: stepCountIs(100),
-          timeout: { chunkMs: 120_000 },
-          ...buildOllamaOptions(cProvider as AIProvider, cCtx),
-        });
-        const criticStartMs = Date.now();
-        for await (const _chunk of criticStream.textStream) { /* drive */ }
-        const criticText = await criticStream.text;
-        output.statusDone();
-
-        const criticUsage = await criticStream.totalUsage;
-        costTracker.addUsage("Critic", cProvider, cModel, criticUsage?.inputTokens || 0, criticUsage?.outputTokens || 0);
-        output.updateCost?.(costTracker.getTotalCost());
-
-        // Track tok/s for critic model
-        const criticElapsed = (Date.now() - criticStartMs) / 1000;
-        const criticOutTokens = criticUsage?.outputTokens || 0;
-        if (criticOutTokens > 0 && criticElapsed > 0) {
-          const criticTokPerSec = Math.round(criticOutTokens / criticElapsed);
-          output.updateTokPerSec?.(`${cProvider}/${cModel}`, criticTokPerSec);
-          logger.info("Model performance", { provider: cProvider, model: cModel, tokPerSec: criticTokPerSec });
-        }
-
-        const score = extractScore(criticText);
-        output.log("critic", `::review_score::${score}`);
-        const criticThreshold = config.review?.criticThreshold ?? 8;
-        output.log("critic", score >= criticThreshold ? "Plan approved" : "Plan needs revision");
-          }
+      output.log("planner", "Planning critic is experimental and not yet implemented — skipping.");
     }
 
     // Ensure every story has a unique ID (some planners output stories without IDs)

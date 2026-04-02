@@ -4,42 +4,24 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.15.94] - 2026-04-01
+## [0.15.94] - 2026-04-02
 
 ### Changed
-- **LSP tool hardened** — crash recovery (auto-restarts on server exit), push diagnostics capture (`textDocument/publishDiagnostics` from typescript-language-server), file version tracking (`didChange` instead of re-opening), init failure recovery (retries instead of caching rejections), dual symbol format support (`DocumentSymbol` and `SymbolInformation`). No longer experimental.
-- **LSP conditionally eager** — `lsp` tool schema only sent to the model when the project has language markers (`tsconfig.json`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`). Deferred otherwise — saves ~200 tokens/turn for projects without a supported language. Still loadable via `tool_search`.
+- **LSP tool hardened** — crash recovery (auto-restarts on server exit), push diagnostics capture, file version tracking (`didChange` instead of re-opening), init failure recovery, dual symbol format support. No longer experimental.
+- **LSP conditionally loaded** — tool schema only sent to the model when the project has language markers (`tsconfig.json`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`). Deferred otherwise — saves ~200 tokens/turn. Still loadable via `tool_search`.
+- **Compaction overhauled** — thresholds lowered (micro: 50%, soft: 70%, hard: 90%). Three-tier micro-compaction: recent messages untouched, middle messages pattern-compressed, old messages aggressively compressed. Soft compaction summarizer sends 2000 chars per message (up from 500) and preserves file paths and decisions.
+- **Planning critic marked experimental** — the critic pass (`review.useCritic`) is scaffolded but not yet functional. Settings show *(experimental)* label. Full implementation will port the platform's battle-tested Planner-Critic loop from `critic-agent-local.ts`.
 
 ### Fixed
-- **Context windows corrected across all providers** — OpenAI GPT-5.x models were showing 128K context windows instead of their actual 400K–1.05M. Claude Opus 4.6 and Sonnet 4.6 compaction limits were 200K instead of 1M. GPT-5.4-mini was 200K instead of 400K. All values verified against provider pricing pages (April 2026). Removed ancient models (<256K context) from the OpenAI registry (gpt-4o, gpt-4-turbo, o1, o1-mini). Added missing models (o3, o3-mini, o3-pro, o4-mini, gpt-5-codex, gpt-5-pro, gpt-5.1, gpt-5.1-codex-mini).
-- **Unknown model fallback raised to 256K** — orchestrator and `/model` switch no longer fall back to 128K for unrecognized models. No cloud model ships below 256K anymore.
-- **Context estimation uses message content, not inflated SDK totals** — `shouldCompact()` was receiving the Vercel AI SDK's `totalUsage.inputTokens` which sums across ALL steps in a multi-step tool-calling turn (e.g. 5 steps × 20K = 100K reported for a 25K actual context). Now uses `estimateContextTokens()` based on actual message content + system prompt size.
-- **Status bar token count accurate** — displayed token count now reflects the real context size instead of the inflated multi-step sum.
-- **Regex backtracking safety** — tool output patterns used `[\s\S]+?` with trailing literals which could cause catastrophic backtracking on content with stray backticks. Replaced with bounded `(?:[^`]|`(?!``))*` patterns.
-
-### Changed
-- **Compaction thresholds lowered** — micro: 60% → 50%, soft: 80% → 70%, hard: 95% → 90%. Triggers compression earlier to prevent the context window from filling up before compaction kicks in.
-- **Smarter micro-compaction** — three-tier strategy replaces the old blunt truncation. Recent messages (last 4) untouched, middle messages (4–10 from end) get tool output pattern-compressed with a 2K fallback, old messages (>10 from end) aggressively compressed to 300 chars. Detects code blocks, JSON/XML blocks, command output, file listings, stack traces, and log output.
-- **Better soft compaction summarizer** — each message now gets up to 2000 chars (after tool output compression) sent to the LLM summarizer, up from the previous 500-char truncation that lost critical details like file paths and error context. Summarizer prompt improved to explicitly preserve file paths and decisions while dropping raw output.
-
-## [0.15.93] - 2026-04-01
-
-### Fixed
-- **Rate limit detection rewritten** — fresh implementation of `isRateLimitError()` in both orchestrator and agent loop. Cleaner parsing, no legacy code.
-- **`GH#1` ticket format** — `GH#1` now detected as a GitHub issue reference alongside `#1`, `GH-1`, `GH 1`.
-- **Review threshold from config** — review prompts and score guides now use the configured `approvalThreshold` instead of hardcoded `8`. Score fallbacks no longer assume a specific threshold.
-- **System prompt guides users to /ship** — when users ask about GitHub issues, the agent now suggests `/ship #<number>` instead of saying it can't access GitHub.
-- **Status bar flicker reduced** — `setStatusMessage` throttled to 2s intervals in orchestrator mode. Removed per-tool-call status update that caused excessive re-renders.
-- **Stale provider pricing JS** — rebuilt `api/src/providers/` JS files. Context windows (GPT-5.4: 1M, Gemini 3.1 Pro: 1M) now display correctly instead of falling back to 128K.
-- **README description** — "assigns the right engineers" → "assigns specialist AI personas — backend, frontend, devops, security"
-
-## [0.15.92] - 2026-04-01
-
-### Fixed
-- **Ticket detection with spaces** — `GH #11`, `GH 11`, and `GH11` now all correctly match as GitHub issue references (previously only `GH-11` and `#11` worked).
-- **Project-level ticket config** — `ticketSystem`, `jira`, and `linear` settings from `.workermill/cli.json` project config now merge correctly into resolved config.
-- **npm audit** — regenerated `package-lock.json` to fix CI `npm ci` sync failures.
-- **Documentation audit** — fixed `/retry` example (showed planner running, actually skips planning), persona count (12 → 11+), tool count (15 → 15+), `/sessions` description, `/as` example, permission mode descriptions. See platform CHANGELOG for full list.
+- **Context windows corrected across all providers** — OpenAI GPT-5.x models were showing 128K instead of 400K–1.05M. Claude Opus 4.6 and Sonnet 4.6 compaction limits were 200K instead of 1M. All values verified against provider pricing pages. Removed deprecated models (<256K context) from OpenAI registry. Added missing models (o3, o3-mini, o3-pro, o4-mini, gpt-5-codex, gpt-5-pro, gpt-5.1, gpt-5.1-codex-mini). Unknown model fallback raised from 128K to 256K.
+- **Context estimation accurate** — `shouldCompact()` now uses actual message content size instead of the Vercel AI SDK's inflated multi-step totals. Status bar token count matches.
+- **Rate limit detection rewritten** — fresh `isRateLimitError()` in both orchestrator and agent loop.
+- **Ticket detection** — `GH#1`, `GH #11`, `GH 11` all recognized. Project-level ticket config (`ticketSystem`, `jira`, `linear`) merges correctly from `.workermill/cli.json`.
+- **Review threshold from config** — review prompts use configured `approvalThreshold` instead of hardcoded `8`.
+- **Status bar flicker** — throttled to 2s intervals in orchestrator mode.
+- **Regex backtracking safety** — tool output patterns replaced with bounded alternatives.
+- **npm audit** — regenerated `package-lock.json` for CI compatibility.
+- **Documentation audit** — fixed `/retry` example, persona/tool counts, `/sessions` description, `/as` example, permission mode descriptions.
 
 ## [0.15.88] - 2026-03-31
 

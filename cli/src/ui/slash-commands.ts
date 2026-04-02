@@ -787,9 +787,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
           `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
           `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
-          `| Critic threshold | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
+          `| Critic threshold *(experimental)* | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
-          `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
+          `| Critic pass *(experimental)* | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +

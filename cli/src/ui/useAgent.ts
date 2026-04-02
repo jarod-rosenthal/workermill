@@ -522,7 +522,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     // Partition tools: core tools get full schemas, MCP tools are deferred
     // to save context window space. Promoted tools (via tool_search) are
     // treated as eager on subsequent calls.
-    const { eager: eagerTools, deferred } = partitionTools(allRawTools);
+    const { eager: eagerTools, deferred } = partitionTools(allRawTools, workingDirRef.current);
 
     // Re-promote any tools the model previously loaded via tool_search
     for (const name of promotedToolsRef.current) {

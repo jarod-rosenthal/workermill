@@ -1,15 +1,15 @@
-import { execSync, spawn, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
 
 export const name = "lsp";
 
 export const description =
-  "(Experimental) Query the language server for code intelligence: diagnostics (type errors/warnings), " +
+  "Query the language server for code intelligence: diagnostics (type errors/warnings), " +
   "go-to-definition, find-references, hover info, and workspace symbols. " +
   "Auto-detects and spawns the correct language server (TypeScript, Python, Go, Rust). " +
-  "Requires a language server installed on the machine — falls back gracefully if unavailable. " +
-  "For TypeScript, tries npx automatically. If this tool fails, use bash (e.g. npx tsc --noEmit) or grep instead.";
+  "For TypeScript, auto-provisions via npx. Other languages require a globally installed server. " +
+  "Use after editing files to check for type errors without running a full build.";
 
 export const parameters = {
   type: "object" as const,
@@ -41,7 +41,7 @@ export const parameters = {
 };
 
 // ---------------------------------------------------------------------------
-// LSP JSON-RPC helpers
+// LSP JSON-RPC types
 // ---------------------------------------------------------------------------
 
 interface JsonRpcMessage {
@@ -53,168 +53,322 @@ interface JsonRpcMessage {
   error?: { code: number; message: string };
 }
 
-let serverProcess: ChildProcess | null = null;
-let serverLanguage: string | null = null;
-let requestId = 1;
-let initPromise: Promise<void> | null = null;
-let responseBuffer = "";
-let pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }> = new Map();
+interface DiagnosticItem {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  message: string;
+  severity?: number;
+  source?: string;
+  code?: string | number;
+}
 
-function detectLanguage(workingDir: string): { language: string; command: string; args: string[] } | null {
+interface LocationResult {
+  uri: string;
+  range: { start: { line: number; character: number } };
+}
+
+interface SymbolResult {
+  name: string;
+  kind: number;
+  range: { start: { line: number } };
+  children?: SymbolResult[];
+}
+
+// ---------------------------------------------------------------------------
+// Server state — encapsulated for crash recovery
+// ---------------------------------------------------------------------------
+
+interface ServerState {
+  process: ChildProcess;
+  language: string;
+  requestId: number;
+  responseBuffer: string;
+  pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  openFiles: Map<string, number>; // uri -> version
+  publishedDiagnostics: Map<string, DiagnosticItem[]>; // uri -> diagnostics from push notifications
+  ready: boolean;
+}
+
+let server: ServerState | null = null;
+let initPromise: Promise<void> | null = null;
+
+// ---------------------------------------------------------------------------
+// Language detection
+// ---------------------------------------------------------------------------
+
+interface LanguageServerConfig {
+  language: string;
+  command: string;
+  args: string[];
+  installHint: string;
+}
+
+const INSTALL_HINTS: Record<string, string> = {
+  typescript: "npm i -g typescript-language-server typescript",
+  python: "pip install pyright (or pip install python-lsp-server for pylsp)",
+  go: "go install golang.org/x/tools/gopls@latest",
+  rust: "rustup component add rust-analyzer",
+};
+
+function commandExists(cmd: string): boolean {
+  try {
+    const { execSync } = require("child_process");
+    execSync(`which ${cmd}`, { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function detectLanguage(workingDir: string): LanguageServerConfig | null {
   // TypeScript / JavaScript
-  if (fs.existsSync(path.join(workingDir, "tsconfig.json")) ||
-      fs.existsSync(path.join(workingDir, "package.json"))) {
-    // Check if typescript-language-server is available
-    try {
-      execSync("which typescript-language-server", { stdio: "pipe" });
-      return { language: "typescript", command: "typescript-language-server", args: ["--stdio"] };
-    } catch {
-      // Try npx
-      try {
-        execSync("npx --yes typescript-language-server --version", { stdio: "pipe", timeout: 15000 });
-        return { language: "typescript", command: "npx", args: ["--yes", "typescript-language-server", "--stdio"] };
-      } catch {
-        return null;
-      }
+  if (
+    fs.existsSync(path.join(workingDir, "tsconfig.json")) ||
+    fs.existsSync(path.join(workingDir, "package.json"))
+  ) {
+    if (commandExists("typescript-language-server")) {
+      return {
+        language: "typescript",
+        command: "typescript-language-server",
+        args: ["--stdio"],
+        installHint: INSTALL_HINTS.typescript,
+      };
     }
+    // Auto-provision via npx — typescript-language-server is small and fast to install
+    return {
+      language: "typescript",
+      command: "npx",
+      args: ["--yes", "typescript-language-server", "--stdio"],
+      installHint: INSTALL_HINTS.typescript,
+    };
   }
 
   // Python
-  if (fs.existsSync(path.join(workingDir, "pyproject.toml")) ||
-      fs.existsSync(path.join(workingDir, "setup.py")) ||
-      fs.existsSync(path.join(workingDir, "requirements.txt"))) {
-    try {
-      execSync("which pyright-langserver", { stdio: "pipe" });
-      return { language: "python", command: "pyright-langserver", args: ["--stdio"] };
-    } catch {
-      try {
-        execSync("which pylsp", { stdio: "pipe" });
-        return { language: "python", command: "pylsp", args: [] };
-      } catch {
-        return null;
-      }
+  if (
+    fs.existsSync(path.join(workingDir, "pyproject.toml")) ||
+    fs.existsSync(path.join(workingDir, "setup.py")) ||
+    fs.existsSync(path.join(workingDir, "requirements.txt"))
+  ) {
+    if (commandExists("pyright-langserver")) {
+      return { language: "python", command: "pyright-langserver", args: ["--stdio"], installHint: INSTALL_HINTS.python };
     }
+    if (commandExists("pylsp")) {
+      return { language: "python", command: "pylsp", args: [], installHint: INSTALL_HINTS.python };
+    }
+    return null;
   }
 
   // Go
   if (fs.existsSync(path.join(workingDir, "go.mod"))) {
-    try {
-      execSync("which gopls", { stdio: "pipe" });
-      return { language: "go", command: "gopls", args: ["serve"] };
-    } catch {
-      return null;
+    if (commandExists("gopls")) {
+      return { language: "go", command: "gopls", args: ["serve"], installHint: INSTALL_HINTS.go };
     }
+    return null;
   }
 
   // Rust
   if (fs.existsSync(path.join(workingDir, "Cargo.toml"))) {
-    try {
-      execSync("which rust-analyzer", { stdio: "pipe" });
-      return { language: "rust", command: "rust-analyzer", args: [] };
-    } catch {
-      return null;
+    if (commandExists("rust-analyzer")) {
+      return { language: "rust", command: "rust-analyzer", args: [], installHint: INSTALL_HINTS.rust };
     }
+    return null;
   }
 
   return null;
 }
 
-function sendMessage(msg: JsonRpcMessage): void {
-  if (!serverProcess?.stdin?.writable) return;
+// ---------------------------------------------------------------------------
+// JSON-RPC transport
+// ---------------------------------------------------------------------------
+
+function sendMessage(s: ServerState, msg: JsonRpcMessage): void {
+  if (!s.process.stdin?.writable) return;
   const body = JSON.stringify(msg);
   const header = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`;
-  serverProcess.stdin.write(header + body);
+  s.process.stdin.write(header + body);
 }
 
-function sendRequest(method: string, params: unknown): Promise<unknown> {
-  const id = requestId++;
+function sendRequest(s: ServerState, method: string, params: unknown): Promise<unknown> {
+  const id = s.requestId++;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingRequests.delete(id);
-      reject(new Error(`LSP request timed out: ${method}`));
+      s.pendingRequests.delete(id);
+      reject(new Error(`LSP request timed out after 30s: ${method}`));
     }, 30000);
 
-    pendingRequests.set(id, {
-      resolve: (v) => { clearTimeout(timeout); resolve(v); },
-      reject: (e) => { clearTimeout(timeout); reject(e); },
+    s.pendingRequests.set(id, {
+      resolve: (v) => {
+        clearTimeout(timeout);
+        resolve(v);
+      },
+      reject: (e) => {
+        clearTimeout(timeout);
+        reject(e);
+      },
     });
-    sendMessage({ jsonrpc: "2.0", id, method, params });
+    sendMessage(s, { jsonrpc: "2.0", id, method, params });
   });
 }
 
-function sendNotification(method: string, params: unknown): void {
-  sendMessage({ jsonrpc: "2.0", method, params });
+function sendNotification(s: ServerState, method: string, params: unknown): void {
+  sendMessage(s, { jsonrpc: "2.0", method, params });
 }
 
-function handleData(data: Buffer): void {
-  responseBuffer += data.toString();
+function handleData(s: ServerState, data: Buffer): void {
+  s.responseBuffer += data.toString();
 
   while (true) {
-    const headerEnd = responseBuffer.indexOf("\r\n\r\n");
+    const headerEnd = s.responseBuffer.indexOf("\r\n\r\n");
     if (headerEnd === -1) break;
 
-    const header = responseBuffer.slice(0, headerEnd);
+    const header = s.responseBuffer.slice(0, headerEnd);
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) {
-      responseBuffer = responseBuffer.slice(headerEnd + 4);
+      s.responseBuffer = s.responseBuffer.slice(headerEnd + 4);
       continue;
     }
 
     const contentLength = parseInt(match[1], 10);
     const bodyStart = headerEnd + 4;
-    if (responseBuffer.length < bodyStart + contentLength) break;
+    if (s.responseBuffer.length < bodyStart + contentLength) break;
 
-    const body = responseBuffer.slice(bodyStart, bodyStart + contentLength);
-    responseBuffer = responseBuffer.slice(bodyStart + contentLength);
+    const body = s.responseBuffer.slice(bodyStart, bodyStart + contentLength);
+    s.responseBuffer = s.responseBuffer.slice(bodyStart + contentLength);
 
     try {
       const msg = JSON.parse(body) as JsonRpcMessage;
-      if (msg.id !== undefined && pendingRequests.has(msg.id)) {
-        const pending = pendingRequests.get(msg.id)!;
-        pendingRequests.delete(msg.id);
+
+      // Handle push diagnostics (textDocument/publishDiagnostics)
+      if (msg.method === "textDocument/publishDiagnostics" && msg.params) {
+        const params = msg.params as { uri: string; diagnostics: DiagnosticItem[] };
+        s.publishedDiagnostics.set(params.uri, params.diagnostics);
+        continue;
+      }
+
+      // Handle responses to our requests
+      if (msg.id !== undefined && s.pendingRequests.has(msg.id)) {
+        const pending = s.pendingRequests.get(msg.id)!;
+        s.pendingRequests.delete(msg.id);
         if (msg.error) {
           pending.reject(new Error(msg.error.message));
         } else {
           pending.resolve(msg.result);
         }
       }
-      // Notifications (diagnostics published, etc.) are ignored for now
     } catch {
       // Malformed JSON — skip
     }
   }
 }
 
-async function ensureServer(workingDir: string): Promise<void> {
-  if (serverProcess && serverLanguage) return;
-  if (initPromise) return initPromise;
+// ---------------------------------------------------------------------------
+// Server lifecycle
+// ---------------------------------------------------------------------------
 
-  initPromise = (async () => {
+function destroyServer(): void {
+  // Always clear initPromise — even if server never started (e.g. failed detection)
+  initPromise = null;
+
+  if (!server) return;
+  const s = server;
+  server = null;
+
+  // Reject all pending requests
+  for (const [, pending] of s.pendingRequests) {
+    pending.reject(new Error("LSP server shut down"));
+  }
+  s.pendingRequests.clear();
+
+  // Best-effort graceful shutdown
+  try {
+    sendRequest(s, "shutdown", null).catch(() => {});
+    sendNotification(s, "exit", null);
+  } catch {
+    // ignore
+  }
+  setTimeout(() => {
+    try {
+      s.process.kill();
+    } catch {
+      // already dead
+    }
+  }, 2000);
+}
+
+async function ensureServer(workingDir: string): Promise<ServerState> {
+  // If server exists and is still alive, reuse it
+  if (server?.ready && server.process.exitCode === null) {
+    return server;
+  }
+
+  // Server died — clean up stale state
+  if (server) {
+    destroyServer();
+  }
+
+  if (initPromise) {
+    await initPromise;
+    if (!server) throw new Error("LSP server initialization failed");
+    return server;
+  }
+
+  const doInit = async () => {
     const detected = detectLanguage(workingDir);
     if (!detected) {
+      const projectFiles = [
+        "tsconfig.json", "package.json", "pyproject.toml",
+        "setup.py", "requirements.txt", "go.mod", "Cargo.toml",
+      ];
+      const found = projectFiles.filter((f) => fs.existsSync(path.join(workingDir, f)));
       throw new Error(
-        "No language server found. Install one: npm i -g typescript-language-server typescript (TS/JS), " +
-        "pip install pyright (Python), go install golang.org/x/tools/gopls@latest (Go), " +
-        "or rustup component add rust-analyzer (Rust)."
+        `No language server found.${found.length > 0 ? ` Detected project files: ${found.join(", ")}.` : ""}\n` +
+        `Install one:\n` +
+        Object.entries(INSTALL_HINTS)
+          .map(([lang, hint]) => `  ${lang}: ${hint}`)
+          .join("\n")
       );
     }
 
-    serverLanguage = detected.language;
-    serverProcess = spawn(detected.command, detected.args, {
-      cwd: workingDir,
-      stdio: ["pipe", "pipe", "pipe"],
+    const s: ServerState = {
+      process: spawn(detected.command, detected.args, {
+        cwd: workingDir,
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+      language: detected.language,
+      requestId: 1,
+      responseBuffer: "",
+      pendingRequests: new Map(),
+      openFiles: new Map(),
+      publishedDiagnostics: new Map(),
+      ready: false,
+    };
+
+    s.process.stdout!.on("data", (data: Buffer) => handleData(s, data));
+    s.process.stderr!.on("data", () => {
+      // Absorb stderr — language servers are noisy
     });
 
-    serverProcess.stdout!.on("data", handleData);
-    serverProcess.stderr!.on("data", () => {});
-    serverProcess.on("exit", () => {
-      serverProcess = null;
-      serverLanguage = null;
-      initPromise = null;
+    // Crash recovery: clean up state when server exits unexpectedly
+    s.process.on("exit", (code) => {
+      if (server === s) {
+        server = null;
+        initPromise = null;
+      }
+    });
+
+    s.process.on("error", (err) => {
+      // Spawn failure — reject all pending and clean up
+      for (const [, pending] of s.pendingRequests) {
+        pending.reject(new Error(`LSP server failed to start: ${err.message}`));
+      }
+      s.pendingRequests.clear();
+      if (server === s) {
+        server = null;
+        initPromise = null;
+      }
     });
 
     // LSP initialize handshake
-    const initResult = await sendRequest("initialize", {
+    await sendRequest(s, "initialize", {
       processId: process.pid,
       rootUri: `file://${workingDir}`,
       capabilities: {
@@ -224,96 +378,166 @@ async function ensureServer(workingDir: string): Promise<void> {
           references: { dynamicRegistration: false },
           hover: { contentFormat: ["plaintext", "markdown"] },
           documentSymbol: { dynamicRegistration: false },
+          synchronization: {
+            didSave: true,
+            willSave: false,
+            willSaveWaitUntil: false,
+          },
         },
       },
     });
 
-    sendNotification("initialized", {});
+    sendNotification(s, "initialized", {});
+    s.ready = true;
+    server = s;
+  };
 
-    // Small delay for server to finish indexing
-    await new Promise((r) => setTimeout(r, 1000));
-  })();
+  initPromise = doInit().catch((err) => {
+    // Clear initPromise on failure so the next call can retry
+    initPromise = null;
+    throw err;
+  });
 
-  return initPromise;
+  await initPromise;
+  if (!server) throw new Error("LSP server initialization failed");
+  return server;
 }
+
+// ---------------------------------------------------------------------------
+// File management — tracks versions, sends didOpen/didChange
+// ---------------------------------------------------------------------------
 
 function fileUri(filePath: string): string {
   return `file://${path.resolve(filePath)}`;
 }
 
-// Notify the server about a file's current content
-function didOpen(filePath: string): void {
-  const resolvedPath = path.resolve(filePath);
-  const content = fs.readFileSync(resolvedPath, "utf-8");
-  const langId = resolvedPath.endsWith(".ts") || resolvedPath.endsWith(".tsx") ? "typescript"
-    : resolvedPath.endsWith(".js") || resolvedPath.endsWith(".jsx") ? "javascript"
-    : resolvedPath.endsWith(".py") ? "python"
-    : resolvedPath.endsWith(".go") ? "go"
-    : resolvedPath.endsWith(".rs") ? "rust"
-    : "plaintext";
+function languageId(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const map: Record<string, string> = {
+    ".ts": "typescript", ".tsx": "typescriptreact",
+    ".js": "javascript", ".jsx": "javascriptreact",
+    ".py": "python",
+    ".go": "go",
+    ".rs": "rust",
+    ".json": "json",
+    ".md": "markdown",
+    ".css": "css",
+    ".html": "html",
+  };
+  return map[ext] || "plaintext";
+}
 
-  sendNotification("textDocument/didOpen", {
-    textDocument: {
-      uri: fileUri(resolvedPath),
-      languageId: langId,
-      version: 1,
-      text: content,
-    },
-  });
+function syncFile(s: ServerState, filePath: string): void {
+  const resolvedPath = path.resolve(filePath);
+  const uri = fileUri(resolvedPath);
+  const content = fs.readFileSync(resolvedPath, "utf-8");
+  const currentVersion = s.openFiles.get(uri);
+
+  if (currentVersion === undefined) {
+    // First time — didOpen
+    sendNotification(s, "textDocument/didOpen", {
+      textDocument: {
+        uri,
+        languageId: languageId(resolvedPath),
+        version: 1,
+        text: content,
+      },
+    });
+    s.openFiles.set(uri, 1);
+  } else {
+    // Already open — didChange with full content (incremental sync not worth the complexity)
+    const newVersion = currentVersion + 1;
+    sendNotification(s, "textDocument/didChange", {
+      textDocument: { uri, version: newVersion },
+      contentChanges: [{ text: content }],
+    });
+    s.openFiles.set(uri, newVersion);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Tool actions
 // ---------------------------------------------------------------------------
 
-interface DiagnosticItem {
-  range: { start: { line: number; character: number }; end: { line: number; character: number } };
-  message: string;
-  severity?: number;
-  source?: string;
-}
-
 async function getDiagnostics(filePath: string, workingDir: string): Promise<string> {
-  await ensureServer(workingDir);
-  didOpen(filePath);
+  const s = await ensureServer(workingDir);
+  const uri = fileUri(path.resolve(filePath));
 
-  // Request diagnostics via textDocument/diagnostic (LSP 3.17+) or pull model
-  // Many servers publish diagnostics via notification instead — use a pull request with fallback
+  // Clear any stale push diagnostics for this file
+  s.publishedDiagnostics.delete(uri);
+
+  // Sync file content to server
+  syncFile(s, filePath);
+
+  // Try pull diagnostics first (LSP 3.17+)
   try {
-    const result = await sendRequest("textDocument/diagnostic", {
-      textDocument: { uri: fileUri(filePath) },
+    const result = await sendRequest(s, "textDocument/diagnostic", {
+      textDocument: { uri },
     }) as { items?: DiagnosticItem[] } | null;
 
     const items = result?.items || [];
     if (items.length === 0) return "No diagnostics (errors or warnings) found.";
-
     return formatDiagnostics(items, filePath);
   } catch {
-    // Server doesn't support pull diagnostics — wait briefly for push diagnostics
-    // Fall back to a typecheck-style approach: just return what we got
-    return "Diagnostics not available via pull model. Use `bash tsc --noEmit` for TypeScript or equivalent.";
+    // Server doesn't support pull diagnostics — wait for push diagnostics
+    // Give the server a moment to publish diagnostics after our didOpen/didChange
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const pushed = s.publishedDiagnostics.get(uri);
+    if (pushed && pushed.length > 0) {
+      return formatDiagnostics(pushed, filePath);
+    }
+
+    // No push diagnostics arrived either — might just be clean
+    // Check if the server has published empty diagnostics (meaning it processed the file)
+    if (pushed !== undefined) {
+      return "No diagnostics (errors or warnings) found.";
+    }
+
+    // Server hasn't responded at all — wait a bit more for large projects
+    await new Promise((r) => setTimeout(r, 2000));
+    const delayedPushed = s.publishedDiagnostics.get(uri);
+    if (delayedPushed && delayedPushed.length > 0) {
+      return formatDiagnostics(delayedPushed, filePath);
+    }
+    if (delayedPushed !== undefined) {
+      return "No diagnostics (errors or warnings) found.";
+    }
+
+    return "Diagnostics not available — the language server may still be indexing. Try again in a few seconds, or use `bash tsc --noEmit` for TypeScript.";
   }
 }
 
 function formatDiagnostics(items: DiagnosticItem[], filePath: string): string {
   const severityMap: Record<number, string> = { 1: "ERROR", 2: "WARNING", 3: "INFO", 4: "HINT" };
-  const lines: string[] = [`${items.length} diagnostic(s) in ${path.basename(filePath)}:`, ""];
-  for (const d of items) {
+
+  // Sort: errors first, then warnings, then info/hint
+  const sorted = [...items].sort((a, b) => (a.severity || 1) - (b.severity || 1));
+
+  const errorCount = sorted.filter((d) => (d.severity || 1) === 1).length;
+  const warnCount = sorted.filter((d) => (d.severity || 1) === 2).length;
+  const otherCount = sorted.length - errorCount - warnCount;
+
+  const header = `${sorted.length} diagnostic(s) in ${path.basename(filePath)}: ${errorCount} error(s), ${warnCount} warning(s)${otherCount > 0 ? `, ${otherCount} info/hint` : ""}`;
+  const lines: string[] = [header, ""];
+
+  for (const d of sorted) {
     const sev = severityMap[d.severity || 1] || "UNKNOWN";
     const loc = `${d.range.start.line + 1}:${d.range.start.character + 1}`;
-    lines.push(`  ${sev} ${loc} — ${d.message}${d.source ? ` [${d.source}]` : ""}`);
+    const code = d.code ? ` (${d.code})` : "";
+    lines.push(`  ${sev} ${loc} — ${d.message}${code}${d.source ? ` [${d.source}]` : ""}`);
   }
   return lines.join("\n");
 }
 
 async function getDefinition(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  await ensureServer(workingDir);
-  didOpen(filePath);
+  const s = await ensureServer(workingDir);
+  syncFile(s, filePath);
 
-  const result = await sendRequest("textDocument/definition", {
+  const result = (await sendRequest(s, "textDocument/definition", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
-  }) as { uri: string; range: { start: { line: number; character: number } } }[] | { uri: string; range: { start: { line: number; character: number } } } | null;
+  })) as LocationResult[] | LocationResult | null;
 
   if (!result) return "No definition found.";
 
@@ -330,14 +554,14 @@ async function getDefinition(filePath: string, line: number, character: number, 
 }
 
 async function getReferences(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  await ensureServer(workingDir);
-  didOpen(filePath);
+  const s = await ensureServer(workingDir);
+  syncFile(s, filePath);
 
-  const result = await sendRequest("textDocument/references", {
+  const result = (await sendRequest(s, "textDocument/references", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
     context: { includeDeclaration: true },
-  }) as { uri: string; range: { start: { line: number; character: number } } }[] | null;
+  })) as LocationResult[] | null;
 
   if (!result || result.length === 0) return "No references found.";
 
@@ -351,13 +575,13 @@ async function getReferences(filePath: string, line: number, character: number, 
 }
 
 async function getHover(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  await ensureServer(workingDir);
-  didOpen(filePath);
+  const s = await ensureServer(workingDir);
+  syncFile(s, filePath);
 
-  const result = await sendRequest("textDocument/hover", {
+  const result = (await sendRequest(s, "textDocument/hover", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
-  }) as { contents: string | { value: string; kind?: string } | Array<string | { value: string }> } | null;
+  })) as { contents: string | { value: string; kind?: string } | Array<string | { value: string }> } | null;
 
   if (!result) return "No hover info available.";
 
@@ -370,12 +594,12 @@ async function getHover(filePath: string, line: number, character: number, worki
 }
 
 async function getSymbols(filePath: string, workingDir: string): Promise<string> {
-  await ensureServer(workingDir);
-  didOpen(filePath);
+  const s = await ensureServer(workingDir);
+  syncFile(s, filePath);
 
-  const result = await sendRequest("textDocument/documentSymbol", {
+  const result = (await sendRequest(s, "textDocument/documentSymbol", {
     textDocument: { uri: fileUri(filePath) },
-  }) as Array<{ name: string; kind: number; range: { start: { line: number } }; children?: unknown[] }> | null;
+  })) as Array<Record<string, unknown>> | null;
 
   if (!result || result.length === 0) return "No symbols found.";
 
@@ -388,12 +612,26 @@ async function getSymbols(filePath: string, workingDir: string): Promise<string>
     25: "Operator", 26: "TypeParameter",
   };
 
+  // LSP servers return either DocumentSymbol[] (has range, children)
+  // or SymbolInformation[] (has location.range, no children)
+  function getLine(sym: Record<string, unknown>): number {
+    // DocumentSymbol format: { range: { start: { line } } }
+    const range = sym.range as { start?: { line?: number } } | undefined;
+    if (range?.start?.line !== undefined) return range.start.line;
+
+    // SymbolInformation format: { location: { range: { start: { line } } } }
+    const location = sym.location as { range?: { start?: { line?: number } } } | undefined;
+    if (location?.range?.start?.line !== undefined) return location.range.start.line;
+
+    return 0;
+  }
+
   const lines: string[] = [`${result.length} symbol(s) in ${path.basename(filePath)}:`, ""];
-  function formatSymbol(sym: { name: string; kind: number; range: { start: { line: number } }; children?: unknown[] }, indent: number): void {
-    const kind = kindMap[sym.kind] || `Kind(${sym.kind})`;
-    lines.push(`${"  ".repeat(indent)}${kind} ${sym.name} (line ${sym.range.start.line + 1})`);
-    if (sym.children) {
-      for (const child of sym.children as Array<{ name: string; kind: number; range: { start: { line: number } }; children?: unknown[] }>) {
+  function formatSymbol(sym: Record<string, unknown>, indent: number): void {
+    const kind = kindMap[sym.kind as number] || `Kind(${sym.kind})`;
+    lines.push(`${"  ".repeat(indent)}${kind} ${sym.name} (line ${getLine(sym) + 1})`);
+    if (Array.isArray(sym.children)) {
+      for (const child of sym.children as Array<Record<string, unknown>>) {
         formatSymbol(child, indent + 1);
       }
     }
@@ -454,7 +692,15 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
     }
     return { success: true, content };
   } catch (err) {
-    return { success: false, error: `LSP ${action} failed: ${err instanceof Error ? err.message : String(err)}` };
+    const message = err instanceof Error ? err.message : String(err);
+
+    // If the server crashed, clean up so next call will try to restart
+    if (server && server.process.exitCode !== null) {
+      server = null;
+      initPromise = null;
+    }
+
+    return { success: false, error: `LSP ${action} failed: ${message}` };
   }
 }
 
@@ -462,18 +708,19 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
  * Shut down the language server process. Call on CLI exit.
  */
 export function shutdown(): void {
-  if (serverProcess) {
-    try {
-      sendRequest("shutdown", null).catch(() => {});
-      sendNotification("exit", null);
-    } catch {
-      // Best effort
-    }
-    setTimeout(() => {
-      serverProcess?.kill();
-      serverProcess = null;
-      serverLanguage = null;
-      initPromise = null;
-    }, 2000);
-  }
+  destroyServer();
+}
+
+/**
+ * Check if a language server is currently running.
+ */
+export function isRunning(): boolean {
+  return server !== null && server.ready && server.process.exitCode === null;
+}
+
+/**
+ * Get the current server's language, or null if no server is running.
+ */
+export function getServerLanguage(): string | null {
+  return server?.language ?? null;
 }

@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.15.94] - 2026-04-01
 
+### Changed
+- **LSP tool hardened** — crash recovery (auto-restarts on server exit), push diagnostics capture (`textDocument/publishDiagnostics` from typescript-language-server), file version tracking (`didChange` instead of re-opening), init failure recovery (retries instead of caching rejections), dual symbol format support (`DocumentSymbol` and `SymbolInformation`). No longer experimental.
+- **LSP conditionally eager** — `lsp` tool schema only sent to the model when the project has language markers (`tsconfig.json`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`). Deferred otherwise — saves ~200 tokens/turn for projects without a supported language. Still loadable via `tool_search`.
+
 ### Fixed
 - **Context estimation uses message content, not inflated SDK totals** — `shouldCompact()` was receiving the Vercel AI SDK's `totalUsage.inputTokens` which sums across ALL steps in a multi-step tool-calling turn (e.g. 5 steps × 20K = 100K reported for a 25K actual context). Now uses `estimateContextTokens()` based on actual message content + system prompt size.
 - **Status bar token count accurate** — displayed token count now reflects the real context size instead of the inflated multi-step sum.

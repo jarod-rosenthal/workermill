@@ -1231,8 +1231,7 @@ describe("extractScore via reviewer output patterns", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("critic path uses extractScore and logs the score", async () => {
-
+  it("critic path is skipped as experimental when useCritic is set", async () => {
 
     const planText = `\`\`\`json
 {
@@ -1241,10 +1240,7 @@ describe("extractScore via reviewer output patterns", () => {
   ]
 }
 \`\`\``;
-    const criticText = "The plan looks solid. CODE_QUALITY_SCORE: 9\nApproved.";
 
-    // Call 1 = planner, Call 2 = critic, Call 3 = story worker
-    let callCount = 0;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
       if (typeof opts.onStepFinish === "function") {
@@ -1253,11 +1249,9 @@ describe("extractScore via reviewer output patterns", () => {
           toolCalls: [],
         });
       }
-      callCount++;
-      const text = callCount === 1 ? planText : callCount === 2 ? criticText : "done";
       return {
-        textStream: (async function* () { yield text; })(),
-        text: Promise.resolve(text),
+        textStream: (async function* () { yield planText; })(),
+        text: Promise.resolve(planText),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
     });
@@ -1270,9 +1264,9 @@ describe("extractScore via reviewer output patterns", () => {
 
     await runOrchestration(config, "Task with critic review", true, false, output);
 
-    // Critic should have logged a score marker
-    const scoreLogs = output.logs.filter(l => l.includes("review_score") || l.includes("approved") || l.includes("Plan approved"));
-    expect(scoreLogs.length).toBeGreaterThan(0);
+    // Critic is not yet implemented — should log the experimental skip message
+    const skipLogs = output.logs.filter(l => l.includes("experimental") || l.includes("not yet implemented"));
+    expect(skipLogs.length).toBeGreaterThan(0);
   });
 });
 
@@ -1629,7 +1623,7 @@ describe("extractScore edge cases (via critic config)", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("extractScore parses legacy ::review_score:: marker via critic path", async () => {
+  it("critic is skipped with experimental log when useCritic is enabled", async () => {
 
     const planText = `\`\`\`json
 {
@@ -1639,10 +1633,6 @@ describe("extractScore edge cases (via critic config)", () => {
 }
 \`\`\``;
 
-    // Critic uses legacy score format (0-100 → 1-10 conversion)
-    const criticText = "Plan review: ::review_score::70\nLooks good overall.";
-
-    let callCount = 0;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
       if (typeof opts.onStepFinish === "function") {
@@ -1651,11 +1641,9 @@ describe("extractScore edge cases (via critic config)", () => {
           toolCalls: [],
         });
       }
-      callCount++;
-      const text = callCount === 1 ? planText : callCount === 2 ? criticText : "done";
       return {
-        textStream: (async function* () { yield text; })(),
-        text: Promise.resolve(text),
+        textStream: (async function* () { yield planText; })(),
+        text: Promise.resolve(planText),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
     });
@@ -1666,55 +1654,11 @@ describe("extractScore edge cases (via critic config)", () => {
     };
     const output = createMockOutput();
 
-    await runOrchestration(config, "Task with legacy score", true, false, output);
+    await runOrchestration(config, "Task with critic enabled", true, false, output);
 
-    // Critic logged ::review_score:: which maps to 7 (70/10=7) — below threshold 8 → "needs revision"
-    const reviewLogs = output.logs.filter(l => l.includes("review_score") || l.includes("needs revision") || l.includes("Plan needs revision"));
-    expect(reviewLogs.length).toBeGreaterThan(0);
-  });
-
-  it("extractScore uses 'approve' fallback when no score marker present via critic", async () => {
-
-    const planText = `\`\`\`json
-{
-  "stories": [
-    { "id": "s1", "title": "Story", "persona": "backend_developer", "description": "Task." }
-  ]
-}
-\`\`\``;
-
-    // No score marker — fallback "approve" text returns 8
-    const criticText = "I approve this plan. The design is clean and well-structured.";
-
-    let callCount = 0;
-    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
-      mockStreamTextCalls.push(opts);
-      if (typeof opts.onStepFinish === "function") {
-        (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
-          text: "done",
-          toolCalls: [],
-        });
-      }
-      callCount++;
-      const text = callCount === 1 ? planText : callCount === 2 ? criticText : "done";
-      return {
-        textStream: (async function* () { yield text; })(),
-        text: Promise.resolve(text),
-        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
-      };
-    });
-
-    const config = {
-      ...createTestConfig(),
-      review: { useCritic: true, criticThreshold: 8 },
-    };
-    const output = createMockOutput();
-
-    await runOrchestration(config, "Task with approve fallback", true, false, output);
-
-    // "approve" text → score 8 → at threshold → "Plan approved"
-    const approvedLogs = output.logs.filter(l => l.includes("approved") || l.includes("Plan approved"));
-    expect(approvedLogs.length).toBeGreaterThan(0);
+    // Critic is not yet implemented — should log the experimental skip message
+    const skipLogs = output.logs.filter(l => l.includes("experimental") || l.includes("not yet implemented"));
+    expect(skipLogs.length).toBeGreaterThan(0);
   });
 });
 

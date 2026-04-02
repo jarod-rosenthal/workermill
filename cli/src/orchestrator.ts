@@ -26,23 +26,29 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
 
-/** Detect rate limit errors from any provider */
+/** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
-  if (!(err instanceof Error)) return null;
-  const msg = err.message.toLowerCase();
-  if (!msg.includes("429") && !msg.includes("rate limit") && !msg.includes("too many requests") && !msg.includes("quota exceeded")) {
-    return null;
+  if (!err || typeof err !== "object") return null;
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+
+  // Quick exit — not a rate limit
+  const RATE_LIMIT_SIGNALS = ["429", "rate limit", "too many requests", "quota exceeded"];
+  if (!RATE_LIMIT_SIGNALS.some(signal => lower.includes(signal))) return null;
+
+  // 1. Parse "retry after N" from the error message body
+  const inlineSeconds = lower.match(/retry[\s\-_.]?after[:\s]+(\d+)/)?.[1];
+  if (inlineSeconds) return { retryAfterMs: Number(inlineSeconds) * 1000 };
+
+  // 2. Read the Retry-After HTTP header if the error exposes it
+  const headers = (err as Record<string, unknown>).headers ?? (err as Record<string, unknown>).responseHeaders;
+  if (headers && typeof headers === "object") {
+    const raw = (headers as Record<string, string>)["retry-after"];
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isNaN(parsed) && parsed > 0) return { retryAfterMs: parsed * 1000 };
   }
-  const retryMatch = msg.match(/retry.?after[:\s]*(\d+)/i);
-  if (retryMatch) return { retryAfterMs: parseInt(retryMatch[1], 10) * 1000 };
-  const errAny = err as any;
-  if (errAny.status === 429 || errAny.statusCode === 429) {
-    const retryHeader = errAny.headers?.["retry-after"] || errAny.responseHeaders?.["retry-after"];
-    if (retryHeader) {
-      const seconds = parseInt(retryHeader, 10);
-      if (!isNaN(seconds)) return { retryAfterMs: seconds * 1000 };
-    }
-  }
+
+  // 3. Fallback — wait 30 seconds
   return { retryAfterMs: 30_000 };
 }
 
@@ -904,11 +910,13 @@ function extractScore(text: string): number {
     return Math.max(1, Math.min(10, Math.round(n / 10)));
   }
 
-  // 3. Fallback from decision text
-  if (/\bapprove/i.test(text)) return 8;
+  // 3. Fallback from decision text — return middle-of-range values,
+  // never hardcode the approval threshold. The caller compares against config.
+  if (/\bapprove/i.test(text)) return 10;
   if (/\brevis/i.test(text)) return 5;
+  if (/\breject/i.test(text)) return 2;
 
-  return 7; // No score found — default to decent
+  return 5; // No score found — assume mediocre, let threshold decide
 }
 
 /**
@@ -2097,7 +2105,7 @@ Review the actual code above. You also have tools (read_file, glob, grep) to exa
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
 
-**Bias toward approval**: If the code works and implements the requirements, approve it. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue. A score of 8+ means approved.
+**Bias toward approval**: If the code works and implements the requirements, approve it. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue. A score of ${config.review?.approvalThreshold ?? 8}+ means approved.
 
 ## Output Format
 
@@ -2108,10 +2116,10 @@ You MUST write your detailed feedback FIRST, THEN add the decision markers at th
 **2. Then add these markers at the end:**
 
 REVIEW_DECISION: approved (or revision_needed or rejected)
-CODE_QUALITY_SCORE: 8
+CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
 FEEDBACK: One-line summary of your decision
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional.
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = good quality (approve), 10 = exceptional. A score of ${config.review?.approvalThreshold ?? 8}+ means the code is ready to ship. Below ${config.review?.approvalThreshold ?? 8} means there are real issues to address.
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
@@ -2813,11 +2821,11 @@ REVIEW_DECISION: revision_needed
 
 Then add:
 \`\`\`
-CODE_QUALITY_SCORE: 8
+CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
 FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
 \`\`\`
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional. A score of 7+ should almost always accompany an "approved" decision.`;
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = good quality (approve), 10 = exceptional. A score of ${config.review?.approvalThreshold ?? 8}+ means the code is ready to ship. Below ${config.review?.approvalThreshold ?? 8} means there are real issues to address.`;
 
   // Stream the review — use onStepFinish to capture text between tool calls
   // This matches the orchestrator's review pattern exactly.

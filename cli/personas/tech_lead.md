@@ -90,7 +90,7 @@ Do NOT run `go test` or `golangci-lint` — check quality metrics for those resu
 - **Be balanced**: Acknowledge what's done well alongside improvements
 - **Be pragmatic**: Distinguish must-fix issues from suggestions. Must-fix goes in REVISION_NEEDED. Suggestions go in feedback with an APPROVE.
 - **Be fair**: The workers are AI models with limited context. They followed the plan they were given. If they implemented the plan correctly but you'd have done it differently, that's feedback — not a blocker. If they missed a requirement or introduced a bug, that's a revision.
-- **Score honestly**: The score should reflect the actual quality of the code. Don't inflate it to avoid revision, and don't deflate it over style preferences. A score of 8+ means the code is ready to ship. Below 8 means there are real issues to address.
+- **Score honestly**: The score should reflect the actual quality of the code. Don't inflate it to avoid revision, and don't deflate it over style preferences. The review prompt specifies the approval threshold — use that as your bar.
 
 ## Output Format
 
@@ -110,7 +110,7 @@ REVIEW_DECISION: rejected
 
 Then add:
 ```
-CODE_QUALITY_SCORE: 8
+CODE_QUALITY_SCORE: <your score>
 FEEDBACK: Your detailed feedback explaining your decision
 ```
 

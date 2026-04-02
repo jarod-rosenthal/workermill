@@ -100,7 +100,17 @@ export function useOrchestrator(
   setTokPerSec?: (providerModel: string, tokPerSec: number) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
+  const [statusMessage, setStatusMessageRaw] = useState("");
+  const lastStatusUpdate = useRef(0);
+  const setStatusMessage = (msg: string) => {
+    // Throttle status updates to prevent terminal flicker — redraw at most every 2s
+    // Empty string (clear) and new phase messages always go through immediately
+    const now = Date.now();
+    if (!msg || now - lastStatusUpdate.current >= 2000 || !statusMessage) {
+      lastStatusUpdate.current = now;
+      setStatusMessageRaw(msg);
+    }
+  };
   const [previewLine, setPreviewLine] = useState("");
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
@@ -261,8 +271,6 @@ export function useOrchestrator(
               );
               // Update status bar tool counts
               incrementToolCount?.(toolName);
-              // Keep status line simple — the tool call is already in the message list
-              setStatusMessage(`${persona}: working...`);
             },
 
             updateBranch(branch: string): void {

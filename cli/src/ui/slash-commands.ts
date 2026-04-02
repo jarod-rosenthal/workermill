@@ -33,8 +33,8 @@ import crypto from "crypto";
 function detectTicketRef(input: string): { system: "github" | "external"; key: string } | null {
   // Normalize: collapse whitespace, trim
   const trimmed = input.trim().replace(/\s+/g, "");
-  // GitHub: #11, GH-11, GH11, GH #11 (space collapsed above)
-  if (/^#\d+$/.test(trimmed) || /^GH-?\d+$/i.test(trimmed)) {
+  // GitHub: #11, GH-11, GH11, GH #11, GH#11 (space collapsed above)
+  if (/^#\d+$/.test(trimmed) || /^GH[-#]?\d+$/i.test(trimmed)) {
     return { system: "github", key: trimmed };
   }
   // Jira/Linear: PROJ-123

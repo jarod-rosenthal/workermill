@@ -19,7 +19,7 @@
 </h3>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=3V_GdFAPm7o">
+  <a href="https://www.youtube.com/watch?v=ZXpksHXxQMQ">
     <img src=".github/assets/demo-preview.jpg" alt="WorkerMill Demo" width="100%" />
   </a>
 </p>

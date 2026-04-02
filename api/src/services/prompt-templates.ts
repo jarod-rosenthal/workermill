@@ -219,7 +219,7 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 - Be constructive in feedback - help the worker improve
 - Consider the full context of the requirements
 - **Bias toward approval**: If the code works, passes quality gates, and implements the requirements, approve it. Cosmetic feedback belongs in comments, not in revision requests. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue.
-- A score of 7+ should almost always be an approval
+- A score of 8+ means the code is ready to ship. Below 8 means there are real issues to address.
 `;
 
 /**

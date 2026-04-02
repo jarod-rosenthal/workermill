@@ -50,40 +50,29 @@ const LOOP_THRESHOLD = 4;
 // Rate limit retry config
 const MAX_RATE_LIMIT_RETRIES = 3;
 
-/** Detect rate limit errors from any provider */
+/** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
-  if (!(err instanceof Error)) return null;
-  const msg = err.message.toLowerCase();
+  if (!err || typeof err !== "object") return null;
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
 
-  // Check for 429 status or rate limit keywords
-  if (
-    !msg.includes("429") &&
-    !msg.includes("rate limit") &&
-    !msg.includes("too many requests") &&
-    !msg.includes("quota exceeded")
-  ) {
-    return null;
+  // Quick exit — not a rate limit
+  const RATE_LIMIT_SIGNALS = ["429", "rate limit", "too many requests", "quota exceeded"];
+  if (!RATE_LIMIT_SIGNALS.some(signal => lower.includes(signal))) return null;
+
+  // 1. Parse "retry after N" from the error message body
+  const inlineSeconds = lower.match(/retry[\s\-_.]?after[:\s]+(\d+)/)?.[1];
+  if (inlineSeconds) return { retryAfterMs: Number(inlineSeconds) * 1000 };
+
+  // 2. Read the Retry-After HTTP header if the error exposes it
+  const headers = (err as Record<string, unknown>).headers ?? (err as Record<string, unknown>).responseHeaders;
+  if (headers && typeof headers === "object") {
+    const raw = (headers as Record<string, string>)["retry-after"];
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isNaN(parsed) && parsed > 0) return { retryAfterMs: parsed * 1000 };
   }
 
-  // Try to extract retry-after from error message
-  const retryMatch = msg.match(/retry.?after[:\s]*(\d+)/i);
-  if (retryMatch) {
-    const seconds = parseInt(retryMatch[1], 10);
-    return { retryAfterMs: seconds * 1000 };
-  }
-
-  // Check for Retry-After header in error details
-  const errAny = err as any;
-  if (errAny.status === 429 || errAny.statusCode === 429) {
-    const retryHeader =
-      errAny.headers?.["retry-after"] || errAny.responseHeaders?.["retry-after"];
-    if (retryHeader) {
-      const seconds = parseInt(retryHeader, 10);
-      if (!isNaN(seconds)) return { retryAfterMs: seconds * 1000 };
-    }
-  }
-
-  // Default backoff: 30 seconds
+  // 3. Fallback — wait 30 seconds
   return { retryAfterMs: 30_000 };
 }
 

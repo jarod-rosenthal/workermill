@@ -20,6 +20,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Review threshold from config** — review prompts use configured `approvalThreshold` instead of hardcoded `8`.
 - **Status bar flicker** — throttled to 2s intervals in orchestrator mode.
 - **Regex backtracking safety** — tool output patterns replaced with bounded alternatives.
+- **Session resume compacted** — `--resume` now runs micro-compaction on the loaded session before the first prompt, trimming stale tool output that would otherwise fill the context window.
+- **Dead `MEMORY_INSTRUCTIONS` removed** — unused 190-token constant was defined in the orchestrator but never referenced.
 - **npm audit** — regenerated `package-lock.json` for CI compatibility.
 - **Documentation audit** — fixed `/retry` example, persona/tool counts, `/sessions` description, `/as` example, permission mode descriptions.
 

@@ -286,9 +286,26 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         } else {
           logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
         }
+        // Run micro-compaction on resumed sessions to trim stale tool output
+        // before it hits the model on the first prompt.
+        const plainMessages = session.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+        const { messages: trimmed, charsSaved } = microCompact(plainMessages);
+        if (charsSaved > 0) {
+          session.messages = trimmed.map((m, i) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: session.messages[i]?.timestamp ?? new Date().toISOString(),
+          }));
+          saveSession(session);
+          logger.info("Micro-compacted resumed session", { charsSaved });
+        }
+
         sessionRef.current = session;
         // Hydrate committed messages from the restored session.
-        const restored: Message[] = loaded.messages.map((m) => ({
+        const restored: Message[] = session.messages.map((m) => ({
           id: crypto.randomUUID(),
           role: m.role,
           content: m.content,

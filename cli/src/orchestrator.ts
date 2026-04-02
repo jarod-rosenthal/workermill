@@ -152,30 +152,6 @@ You are NOT restricted to just reading and writing files. Use any available CLI 
 `;
 
 /**
- * Memory instructions — teaches models to emit memory markers.
- */
-const MEMORY_INSTRUCTIONS = `
-
-## Memory
-
-When you discover something specific and actionable, emit a marker to save it:
-
-\`\`\`
-::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
-::remember::This project uses Prisma with PostgreSQL, migrations are in prisma/migrations/
-\`\`\`
-
-**Save when you discover:**
-- A non-obvious requirement (specific env vars, config files, build steps)
-- A codebase convention (naming patterns, file organization, frameworks used)
-- A gotcha you had to work around (unexpected failures, ordering dependencies)
-- Files that must be modified together (route + model + migration + test)
-
-**Do NOT save** generic advice like "write tests" or "handle errors properly."
-Include file paths, commands, and exact details.
-`;
-
-/**
  * Docker/real services instructions — from worker/epic/executor.ts lines 420-471.
  */
 const DOCKER_INSTRUCTIONS = `

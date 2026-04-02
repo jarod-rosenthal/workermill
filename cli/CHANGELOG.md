@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Regex backtracking safety** — tool output patterns replaced with bounded alternatives.
 - **Session resume compacted** — `--resume` now runs micro-compaction on the loaded session before the first prompt, trimming stale tool output that would otherwise fill the context window.
 - **Dead `MEMORY_INSTRUCTIONS` removed** — unused 190-token constant was defined in the orchestrator but never referenced.
+- **`IGNORE_WORKERMILL` removed from orchestrator** — sandbox/directory confinement rules are a cloud worker concern, not CLI. Saves ~110 tokens per worker story.
 - **npm audit** — regenerated `package-lock.json` for CI compatibility.
 - **Documentation audit** — fixed `/retry` example, persona/tool counts, `/sessions` description, `/as` example, permission mode descriptions.
 

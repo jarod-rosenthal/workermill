@@ -184,21 +184,6 @@ If the ticket, PRD, or task description specifies a dependency version, USE THAT
 `;
 
 /**
- * Ignore the internal .workermill directory — it stores sessions, logs, and
- * config. It is not part of the user's project.
- */
-const IGNORE_WORKERMILL = `
-
-## Ignored Directories
-
-NEVER explore, read, or modify files in \`.workermill/\` — it is an internal WorkerMill system directory.
-
-## Sandbox — Stay in the Working Directory
-
-ALL files you create, read, or modify MUST be within the current working directory. Do NOT use /tmp, /var, /home, or any path outside the project root. Temporary files, test fixtures, build output — everything goes inside the project directory. This is non-negotiable.
-`;
-
-/**
  * Build provider-specific reasoning options — from worker/ai-clients/model-factory.ts lines 127-175.
  */
 function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
@@ -1495,7 +1480,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Combine user abort with loop detection abort

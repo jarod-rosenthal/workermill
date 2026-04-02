@@ -12,6 +12,7 @@ import {
   microCompact,
   extractMemoriesBeforeCompact,
   resetCompactionState,
+  estimateContextTokens,
 } from "../compaction.js";
 import { generateText } from "ai";
 
@@ -45,27 +46,27 @@ describe("compaction", () => {
   });
 
   describe("shouldCompact()", () => {
-    it("returns 'none' when tokens are below 60% of limit", () => {
-      // 200000 * 0.59 = 118000
-      expect(shouldCompact(118000, "claude-sonnet-4-6").level).toBe("none");
+    it("returns 'none' when tokens are below 50% of limit", () => {
+      // 200000 * 0.49 = 98000
+      expect(shouldCompact(98000, "claude-sonnet-4-6").level).toBe("none");
     });
 
-    it("returns 'micro' when tokens are between 60% and 80%", () => {
-      // 200000 * 0.65 = 130000
-      const result = shouldCompact(130000, "claude-sonnet-4-6");
+    it("returns 'micro' when tokens are between 50% and 70%", () => {
+      // 200000 * 0.55 = 110000
+      const result = shouldCompact(110000, "claude-sonnet-4-6");
       expect(result.level).toBe("micro");
       expect(result.limit).toBe(200000);
-      expect(result.usage).toBe(130000);
+      expect(result.usage).toBe(110000);
     });
 
-    it("returns 'soft' when tokens are between 80% and 95%", () => {
-      // 200000 * 0.85 = 170000
-      expect(shouldCompact(170000, "claude-sonnet-4-6").level).toBe("soft");
+    it("returns 'soft' when tokens are between 70% and 90%", () => {
+      // 200000 * 0.75 = 150000
+      expect(shouldCompact(150000, "claude-sonnet-4-6").level).toBe("soft");
     });
 
-    it("returns 'hard' when tokens are at or above 95%", () => {
-      // 200000 * 0.95 = 190000
-      expect(shouldCompact(190000, "claude-sonnet-4-6").level).toBe("hard");
+    it("returns 'hard' when tokens are at or above 90%", () => {
+      // 200000 * 0.90 = 180000
+      expect(shouldCompact(180000, "claude-sonnet-4-6").level).toBe("hard");
     });
 
     it("returns 'hard' when tokens exceed the limit", () => {
@@ -74,10 +75,10 @@ describe("compaction", () => {
 
     it("uses configuredContextLength when provided", () => {
       // Custom limit of 10000
-      expect(shouldCompact(5000, "anything", 10000).level).toBe("none");
-      expect(shouldCompact(6500, "anything", 10000).level).toBe("micro");
-      expect(shouldCompact(8500, "anything", 10000).level).toBe("soft");
-      expect(shouldCompact(9600, "anything", 10000).level).toBe("hard");
+      expect(shouldCompact(4000, "anything", 10000).level).toBe("none");
+      expect(shouldCompact(5500, "anything", 10000).level).toBe("micro");
+      expect(shouldCompact(7500, "anything", 10000).level).toBe("soft");
+      expect(shouldCompact(9100, "anything", 10000).level).toBe("hard");
     });
 
     it("returns 'none' for zero tokens", () => {
@@ -85,9 +86,9 @@ describe("compaction", () => {
     });
 
     it("includes limit and usage in result", () => {
-      const result = shouldCompact(170000, "claude-sonnet-4-6");
+      const result = shouldCompact(150000, "claude-sonnet-4-6");
       expect(result.limit).toBe(200000);
-      expect(result.usage).toBe(170000);
+      expect(result.usage).toBe(150000);
     });
   });
 
@@ -133,7 +134,7 @@ describe("compaction", () => {
       // Should have: 2 summary messages + 4 kept messages = 6
       expect(result.length).toBe(6);
       expect(result[0].role).toBe("user");
-      expect(result[0].content).toContain("Summarize the conversation");
+      expect(result[0].content).toContain("summarized from earlier");
       expect(result[1].role).toBe("assistant");
       expect(result[1].content).toContain("Summary of earlier discussion.");
       // Last 4 preserved
@@ -157,7 +158,7 @@ describe("compaction", () => {
 
       // 2 summary + 2 kept = 4
       expect(result.length).toBe(4);
-      expect(result[0].content).toContain("Summarize");
+      expect(result[0].content).toContain("summarized from earlier");
       expect(result[1].content).toContain("Hard compacted summary.");
       expect(result[2].content).toBe("recent");
       expect(result[3].content).toBe("recent reply");
@@ -201,7 +202,7 @@ describe("compaction", () => {
         expect.objectContaining({
           model: fakeModel,
           system: expect.stringContaining("Summarize"),
-          prompt: expect.stringContaining("user: a"),
+          prompt: expect.stringContaining("USER: a"),
         }),
       );
     });
@@ -296,14 +297,16 @@ describe("compaction", () => {
       ];
       const { messages, charsSaved } = microCompact(msgs);
 
-      // First two messages should be truncated
-      expect(messages[0].content.length).toBeLessThan(500);
-      expect(messages[0].content).toContain("[... truncated 5000 chars");
-      expect(messages[1].content).toContain("[... truncated 5000 chars");
+      // First two messages are in "middle" bucket — content > 2000 triggers fallback truncation
+      expect(messages[0].content.length).toBeLessThan(600);
+      expect(messages[0].content).toContain("truncated");
+      expect(messages[1].content).toContain("truncated");
 
-      // Last 6 untouched
-      expect(messages[6].content).toBe("recent 5");
+      // Last 4 untouched (preserveRecent default = 4)
       expect(messages[7].content).toBe("recent 6");
+      expect(messages[6].content).toBe("recent 5");
+      expect(messages[5].content).toBe("recent 4");
+      expect(messages[4].content).toBe("recent 3");
 
       expect(charsSaved).toBeGreaterThan(8000);
     });
@@ -312,7 +315,7 @@ describe("compaction", () => {
       const msgs = [
         { role: "user" as const, content: "short old message" },
         { role: "assistant" as const, content: "short old reply" },
-        ...Array.from({ length: 6 }, (_, i) => ({
+        ...Array.from({ length: 4 }, (_, i) => ({
           role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
           content: `recent ${i}`,
         })),
@@ -322,17 +325,57 @@ describe("compaction", () => {
       expect(messages[0].content).toBe("short old message");
     });
 
-    it("respects custom preserveRecent and maxChars", () => {
+    it("compresses tool output patterns in middle messages", () => {
+      // Code block that matches tool output pattern
+      const codeOutput = "```json\n" + '{"key": "value", '.repeat(100) + "}\n```";
+      const msgs = [
+        { role: "user" as const, content: "old message" },
+        { role: "assistant" as const, content: codeOutput },
+        { role: "user" as const, content: "middle message" },
+        { role: "assistant" as const, content: codeOutput },
+        { role: "user" as const, content: "recent 1" },
+        { role: "assistant" as const, content: "recent 2" },
+        { role: "user" as const, content: "recent 3" },
+        { role: "assistant" as const, content: "recent 4" },
+      ];
+      const { messages, charsSaved } = microCompact(msgs);
+      // Old and middle messages with tool output should be compressed
+      expect(charsSaved).toBeGreaterThan(0);
+      // Recent 4 preserved
+      expect(messages[7].content).toBe("recent 4");
+    });
+
+    it("respects custom preserveRecent", () => {
       const msgs = [
         { role: "user" as const, content: "a".repeat(3000) },
         { role: "assistant" as const, content: "b".repeat(3000) },
         { role: "user" as const, content: "recent" },
         { role: "assistant" as const, content: "recent" },
       ];
-      const { messages, charsSaved } = microCompact(msgs, 2, 50);
-      expect(messages[0].content).toContain("[... truncated 3000 chars");
-      expect(messages[1].content).toContain("[... truncated 3000 chars");
+      const { messages, charsSaved } = microCompact(msgs, 2);
+      // First two messages are middle bucket (3000 > 2000) — fallback truncation
       expect(charsSaved).toBeGreaterThan(0);
+      expect(messages[2].content).toBe("recent");
+      expect(messages[3].content).toBe("recent");
+    });
+  });
+
+  describe("estimateContextTokens()", () => {
+    it("estimates tokens from message content", () => {
+      const msgs = [
+        { content: "a".repeat(400) },  // 100 tokens
+        { content: "b".repeat(800) },  // 200 tokens
+      ];
+      expect(estimateContextTokens(msgs)).toBe(300);
+    });
+
+    it("includes system prompt size when provided", () => {
+      const msgs = [{ content: "a".repeat(400) }];
+      expect(estimateContextTokens(msgs, 400)).toBe(200); // 400 + 400 = 800 chars = 200 tokens
+    });
+
+    it("returns 0 for empty messages", () => {
+      expect(estimateContextTokens([])).toBe(0);
     });
   });
 

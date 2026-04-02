@@ -18,7 +18,7 @@ import {
   forkSession,
   type Session,
 } from "../session.js";
-import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact } from "../compaction.js";
+import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
@@ -904,7 +904,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             inputTokens,
             outputTokens,
           );
-          setTokens(inputTokens);
           setCost(costTrackerRef.current.getTotalCost());
 
           // Track tok/s for this model — use active refs, not startup options
@@ -919,8 +918,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           saveSession(session);
 
           // ---- Auto-compaction ---- //
+          // Use content-based estimation, not SDK's inputTokens which sums
+          // across all multi-step tool calls and inflates the real context size.
+          const estimatedContextTokens = estimateContextTokens(
+            session.messages,
+            systemPrompt.length,
+          );
+          // Show the grounded estimate in the status bar, not the inflated SDK sum
+          setTokens(estimatedContextTokens);
           const compactionResult = shouldCompact(
-            inputTokens,
+            estimatedContextTokens,
             options.model,
             options.contextLength,
           );

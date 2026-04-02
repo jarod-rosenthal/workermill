@@ -4,6 +4,18 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.94] - 2026-04-01
+
+### Fixed
+- **Context estimation uses message content, not inflated SDK totals** — `shouldCompact()` was receiving the Vercel AI SDK's `totalUsage.inputTokens` which sums across ALL steps in a multi-step tool-calling turn (e.g. 5 steps × 20K = 100K reported for a 25K actual context). Now uses `estimateContextTokens()` based on actual message content + system prompt size.
+- **Status bar token count accurate** — displayed token count now reflects the real context size instead of the inflated multi-step sum.
+- **Regex backtracking safety** — tool output patterns used `[\s\S]+?` with trailing literals which could cause catastrophic backtracking on content with stray backticks. Replaced with bounded `(?:[^`]|`(?!``))*` patterns.
+
+### Changed
+- **Compaction thresholds lowered** — micro: 60% → 50%, soft: 80% → 70%, hard: 95% → 90%. Triggers compression earlier to prevent the context window from filling up before compaction kicks in.
+- **Smarter micro-compaction** — three-tier strategy replaces the old blunt truncation. Recent messages (last 4) untouched, middle messages (4–10 from end) get tool output pattern-compressed with a 2K fallback, old messages (>10 from end) aggressively compressed to 300 chars. Detects code blocks, JSON/XML blocks, command output, file listings, stack traces, and log output.
+- **Better soft compaction summarizer** — each message now gets up to 2000 chars (after tool output compression) sent to the LLM summarizer, up from the previous 500-char truncation that lost critical details like file paths and error context. Summarizer prompt improved to explicitly preserve file paths and decisions while dropping raw output.
+
 ## [0.15.93] - 2026-04-01
 
 ### Fixed

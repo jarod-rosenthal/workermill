@@ -178,7 +178,7 @@ describe("compaction", () => {
       });
     }
 
-    const result = microCompact(messages, 4, 2000);
+    const result = microCompact(messages, 4);
 
     // Last 4 messages (indices 6-9) are unchanged
     for (let i = 6; i < 10; i++) {

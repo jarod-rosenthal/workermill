@@ -23,6 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Session resume compacted** — `--resume` now runs micro-compaction on the loaded session before the first prompt, trimming stale tool output that would otherwise fill the context window.
 - **Dead `MEMORY_INSTRUCTIONS` removed** — unused 190-token constant was defined in the orchestrator but never referenced.
 - **`IGNORE_WORKERMILL` removed from orchestrator** — sandbox/directory confinement rules are a cloud worker concern, not CLI. Saves ~110 tokens per worker story.
+- **`VERSION_TRUST` removed** — obsolete workaround for older models that downgraded dependency versions. Current models don't need this. Saves ~70 tokens per story.
+- **`DOCKER_INSTRUCTIONS` conditional** — only injected when the story mentions databases, Docker, migrations, or services. Saves ~240 tokens on frontend/refactoring/docs stories.
 - **npm audit** — regenerated `package-lock.json` for CI compatibility.
 - **Documentation audit** — fixed `/retry` example, persona/tool counts, `/sessions` description, `/as` example, permission mode descriptions.
 

@@ -173,15 +173,12 @@ Tests that pass against mocks but fail against real services are worthless.
 When creating GitHub Actions CI workflows that run tests requiring databases, add \`services:\` blocks so CI has real instances. Match your local Docker setup with CI service containers.
 `;
 
-/**
- * Technology version trust — from worker/epic/executor.ts lines 473-478.
- */
-const VERSION_TRUST = `
-
-## Technology Versions — Trust the Spec
-
-If the ticket, PRD, or task description specifies a dependency version, USE THAT VERSION. Do NOT downgrade or "fix" versions you don't recognize — your training data has a cutoff and newer releases exist. Trust the spec over your knowledge.
-`;
+/** Check if a story likely involves databases/services that need Docker. */
+const SERVICE_KEYWORDS = /\b(postgres|mysql|mongo|redis|database|db|docker|compose|migration|schema|seed|service.?container)\b/i;
+function needsDockerInstructions(story: Story, userTask: string): boolean {
+  const text = `${story.description} ${story.implementationNotes ?? ""} ${userTask} ${(story.targetFiles ?? []).join(" ")}`;
+  return SERVICE_KEYWORDS.test(text);
+}
 
 /**
  * Build provider-specific reasoning options — from worker/ai-clients/model-factory.ts lines 127-175.
@@ -1480,7 +1477,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Combine user abort with loop detection abort

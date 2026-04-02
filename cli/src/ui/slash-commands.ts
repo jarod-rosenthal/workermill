@@ -416,7 +416,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           const newCtxWindow = contextOverride
             || (newProvider === "ollama" ? modelConfig?.providers?.[newProvider]?.contextLength : undefined)
             || findModelInfo(newModel)?.contextWindow
-            || 128_000;
+            || 256_000;
           if (ctx.tokens > 0 && ctx.tokens > newCtxWindow * 0.8 && ctx.forceCompact) {
             ctx.addSystemMessage(
               `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel} — compacting conversation to fit...`

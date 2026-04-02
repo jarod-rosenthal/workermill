@@ -1,30 +1,38 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 
-// Context limits by model family (tokens)
-const CONTEXT_LIMITS: Record<string, number> = {
-  // Anthropic (Claude 4.5/4.6)
-  "claude-opus": 200000,
-  "claude-sonnet": 200000,
-  "claude-haiku": 200000,
-  // OpenAI (GPT-5.x)
-  "gpt-5.4": 400000,
-  "gpt-5.3": 400000,
-  "gpt-5.2": 200000,
-  "gpt-5.4-mini": 200000,
-  // Google (Gemini 3.x)
-  "gemini-3.1": 1000000,
-  "gemini-3.0": 1000000,
-  "gemini-2.5": 1000000,
-  // Ollama — uses configured contextLength, this is just fallback
-  "default": 65536,
-};
+// Context limits by model family (tokens).
+// Verified April 2026 from provider pricing/docs pages.
+// More specific prefixes MUST come before less specific ones.
+const CONTEXT_LIMITS: [string, number][] = [
+  // Anthropic — Opus 4.6 and Sonnet 4.6 are 1M, legacy 4.x and Haiku are 200K
+  ["claude-opus-4-6", 1000000],
+  ["claude-sonnet-4-6", 1000000],
+  ["claude-opus", 200000],
+  ["claude-sonnet", 200000],
+  ["claude-haiku", 200000],
+  // OpenAI — GPT-5.4/5.4-pro are 1.05M, all other GPT-5.x are 400K
+  // More specific entries first so gpt-5.4-mini doesn't match gpt-5.4
+  ["gpt-5.4-mini", 400000],
+  ["gpt-5.4-nano", 400000],
+  ["gpt-5.4-pro", 1050000],
+  ["gpt-5.4", 1050000],
+  ["gpt-5", 400000],
+  // Google — all Gemini 2.5+ are 1M+
+  ["gemini-3", 1048576],
+  ["gemini-2.5", 1048576],
+  ["gemini-2.0", 1048576],
+  ["gemini-1.5", 1000000],
+];
+
+// Fallback for Ollama and unknown models
+const DEFAULT_CONTEXT_LIMIT = 65536;
 
 export function getContextLimit(model: string): number {
-  for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
+  for (const [prefix, limit] of CONTEXT_LIMITS) {
     if (model.includes(prefix)) return limit;
   }
-  return CONTEXT_LIMITS["default"];
+  return DEFAULT_CONTEXT_LIMIT;
 }
 
 export type CompactionLevel = "none" | "micro" | "soft" | "hard";

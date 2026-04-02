@@ -54,11 +54,12 @@ function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
 
 const MAX_RATE_LIMIT_RETRIES = 3;
 
-/** Get context window for a model — from pricing registry or configured override */
+/** Get context window for a model — from pricing registry or configured override.
+ *  If unknown, defaults to 256K — no cloud model ships below that anymore. */
 function getModelContext(model: string, configuredCtx?: number): number {
   if (configuredCtx) return configuredCtx;
   const info = findModelInfo(model);
-  return info?.contextWindow || 128_000;
+  return info?.contextWindow || 256_000;
 }
 
 /** Format context limit for display: 200000 → "200K", 65536 → "64K" */

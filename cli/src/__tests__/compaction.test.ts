@@ -24,20 +24,36 @@ describe("compaction", () => {
   });
 
   describe("getContextLimit()", () => {
-    it("returns 200000 for claude models", () => {
-      expect(getContextLimit("claude-opus-4-6")).toBe(200000);
-      expect(getContextLimit("claude-sonnet-4-6")).toBe(200000);
+    it("returns 1M for claude opus 4.6 and sonnet 4.6", () => {
+      expect(getContextLimit("claude-opus-4-6")).toBe(1000000);
+      expect(getContextLimit("claude-sonnet-4-6")).toBe(1000000);
+    });
+
+    it("returns 200K for legacy claude and haiku", () => {
       expect(getContextLimit("claude-haiku-4-5")).toBe(200000);
+      expect(getContextLimit("claude-opus-4-5")).toBe(200000);
+      expect(getContextLimit("claude-sonnet-4-5")).toBe(200000);
     });
 
-    it("returns 400000 for gpt-5.4", () => {
-      expect(getContextLimit("gpt-5.4")).toBe(400000);
+    it("returns 1.05M for gpt-5.4 and gpt-5.4-pro", () => {
+      expect(getContextLimit("gpt-5.4")).toBe(1050000);
+      expect(getContextLimit("gpt-5.4-pro")).toBe(1050000);
+    });
+
+    it("returns 400K for other gpt-5.x models", () => {
       expect(getContextLimit("gpt-5.4-mini")).toBe(400000);
+      expect(getContextLimit("gpt-5.4-nano")).toBe(400000);
+      expect(getContextLimit("gpt-5.3-codex")).toBe(400000);
+      expect(getContextLimit("gpt-5.2")).toBe(400000);
+      expect(getContextLimit("gpt-5.1-codex")).toBe(400000);
+      expect(getContextLimit("gpt-5")).toBe(400000);
+      expect(getContextLimit("gpt-5-mini")).toBe(400000);
     });
 
-    it("returns 1000000 for gemini models", () => {
-      expect(getContextLimit("gemini-3.1-pro")).toBe(1000000);
-      expect(getContextLimit("gemini-3.1-flash-lite")).toBe(1000000);
+    it("returns 1M+ for gemini models", () => {
+      expect(getContextLimit("gemini-3.1-pro")).toBe(1048576);
+      expect(getContextLimit("gemini-3.1-flash-lite")).toBe(1048576);
+      expect(getContextLimit("gemini-2.5-pro")).toBe(1048576);
     });
 
     it("returns default 65536 for unknown models", () => {
@@ -47,13 +63,13 @@ describe("compaction", () => {
 
   describe("shouldCompact()", () => {
     it("returns 'none' when tokens are below 50% of limit", () => {
-      // 200000 * 0.49 = 98000
-      expect(shouldCompact(98000, "claude-sonnet-4-6").level).toBe("none");
+      // claude-haiku-4-5 = 200K, 200000 * 0.49 = 98000
+      expect(shouldCompact(98000, "claude-haiku-4-5").level).toBe("none");
     });
 
     it("returns 'micro' when tokens are between 50% and 70%", () => {
       // 200000 * 0.55 = 110000
-      const result = shouldCompact(110000, "claude-sonnet-4-6");
+      const result = shouldCompact(110000, "claude-haiku-4-5");
       expect(result.level).toBe("micro");
       expect(result.limit).toBe(200000);
       expect(result.usage).toBe(110000);
@@ -61,16 +77,16 @@ describe("compaction", () => {
 
     it("returns 'soft' when tokens are between 70% and 90%", () => {
       // 200000 * 0.75 = 150000
-      expect(shouldCompact(150000, "claude-sonnet-4-6").level).toBe("soft");
+      expect(shouldCompact(150000, "claude-haiku-4-5").level).toBe("soft");
     });
 
     it("returns 'hard' when tokens are at or above 90%", () => {
       // 200000 * 0.90 = 180000
-      expect(shouldCompact(180000, "claude-sonnet-4-6").level).toBe("hard");
+      expect(shouldCompact(180000, "claude-haiku-4-5").level).toBe("hard");
     });
 
     it("returns 'hard' when tokens exceed the limit", () => {
-      expect(shouldCompact(250000, "claude-sonnet-4-6").level).toBe("hard");
+      expect(shouldCompact(250000, "claude-haiku-4-5").level).toBe("hard");
     });
 
     it("uses configuredContextLength when provided", () => {
@@ -82,11 +98,11 @@ describe("compaction", () => {
     });
 
     it("returns 'none' for zero tokens", () => {
-      expect(shouldCompact(0, "claude-sonnet-4-6").level).toBe("none");
+      expect(shouldCompact(0, "claude-haiku-4-5").level).toBe("none");
     });
 
     it("includes limit and usage in result", () => {
-      const result = shouldCompact(150000, "claude-sonnet-4-6");
+      const result = shouldCompact(150000, "claude-haiku-4-5");
       expect(result.limit).toBe(200000);
       expect(result.usage).toBe(150000);
     });

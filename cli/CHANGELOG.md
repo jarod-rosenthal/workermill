@@ -4,6 +4,17 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.93] - 2026-04-01
+
+### Fixed
+- **Rate limit detection rewritten** — fresh implementation of `isRateLimitError()` in both orchestrator and agent loop. Cleaner parsing, no legacy code.
+- **`GH#1` ticket format** — `GH#1` now detected as a GitHub issue reference alongside `#1`, `GH-1`, `GH 1`.
+- **Review threshold from config** — review prompts and score guides now use the configured `approvalThreshold` instead of hardcoded `8`. Score fallbacks no longer assume a specific threshold.
+- **System prompt guides users to /ship** — when users ask about GitHub issues, the agent now suggests `/ship #<number>` instead of saying it can't access GitHub.
+- **Status bar flicker reduced** — `setStatusMessage` throttled to 2s intervals in orchestrator mode. Removed per-tool-call status update that caused excessive re-renders.
+- **Stale provider pricing JS** — rebuilt `api/src/providers/` JS files. Context windows (GPT-5.4: 1M, Gemini 3.1 Pro: 1M) now display correctly instead of falling back to 128K.
+- **README description** — "assigns the right engineers" → "assigns specialist AI personas — backend, frontend, devops, security"
+
 ## [0.15.92] - 2026-04-01
 
 ### Fixed

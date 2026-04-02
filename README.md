@@ -30,7 +30,7 @@
 npx workermill
 ```
 
-Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It assigns the right engineers, writes the code, runs your tests, reviews its own work, and opens a PR — ticket by ticket until your backlog is done.
+Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
 
 Or just chat. Ask it to fix a bug, explain a function, or refactor a module. It reads your code and makes the changes.
 

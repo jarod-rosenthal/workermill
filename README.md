@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">WorkerMill</h1>
-  <p align="center">Point at a ticket. Get a pull request.<br/>A team of AI engineers that works your backlog — planning, coding, reviewing, and opening PRs while you sleep.</p>
+  <p align="center">Point at a ticket. Get a pull request.<br/>A single model writes bad code and approves its own bad code. WorkerMill separates planning, coding, and review — each with a different model, different strengths, different blind spots.</p>
 </p>
 
 <p align="center">
@@ -14,8 +14,7 @@
   <a href="https://workermill.com">Website</a> ·
   <a href="https://workermill.com/docs">Docs</a> ·
   <a href="https://github.com/jarod-rosenthal/workermill/discussions">Discussions</a> ·
-  <a href="https://www.npmjs.com/package/workermill">npm</a> ·
-  <a href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill">VS Code Extension</a>
+  <a href="https://www.npmjs.com/package/workermill">npm</a>
 </h3>
 
 <p align="center">
@@ -30,71 +29,47 @@
 npx workermill
 ```
 
-Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
-
-Or just chat. Ask it to fix a bug, explain a function, or refactor a module. It reads your code and makes the changes.
-
-Setup takes 60 seconds. Works with **Ollama** (fully local, no API key), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support).
+No API key required — select Ollama during setup to run fully local. Or bring your own keys for **Anthropic**, **OpenAI**, **Google**, **LM Studio**, or [any OpenAI-compatible provider](#ai-provider-support). Setup takes 60 seconds.
 
 ---
 
-## What You Can Do
+## Point at a ticket. Get a pull request.
 
-### Chat — ask questions, fix bugs, explore code
-
-```
-> why is the checkout test failing?
-
- Reading src/__tests__/checkout.test.ts...
- Reading src/services/checkout.ts...
-
- The test expects calculateTotal() to apply the discount before tax,
- but the implementation applies tax first. Line 34 in checkout.ts
- multiplies by taxRate before subtracting the discount.
-
- Fixed: moved discount calculation before tax. Running tests... 14 passed, 0 failed.
-```
-
-You talk, it reads your code, makes changes, runs your tests. Permission prompts by default — four modes to match your trust level.
-
-### Point at a ticket. Get a pull request.
-
-When you have a bigger task, point at a ticket. WorkerMill fetches it, breaks it into scoped subtasks, assigns the right specialists, and posts results back when done:
+Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
 
 ```
-> /ship GH-42
+> /ship #42
 
- system   Fetched GH-42: Add user authentication
+ coordinator  Fetched #42: Add product export to CSV
 
  planner  Reading codebase... 38 files analyzed
- planner  3 tasks:
-          [backend_developer] Auth service: password hashing, JWT tokens, login/signup/logout endpoints
-          [backend_developer] Middleware: route protection, token verification, session handling
-          [frontend_developer] UI: signup form, login form, redirect to dashboard on success
+ planner  2 stories:
+          [backend_developer] CSV export endpoint with filters, auth, tests
+          [frontend_developer] Export button on Products page
 
- backend_developer  Created src/services/auth.ts, src/routes/auth.ts
- backend_developer  Created src/middleware/requireAuth.ts
- backend_developer  Running quality gates... tsc ✓ vitest ✓
- frontend_developer Created src/pages/Login.tsx, src/pages/Signup.tsx
- frontend_developer Modified src/App.tsx — added protected route wrapper
- frontend_developer Running quality gates... tsc ✓ vitest ✓
+ backend_developer  Created src/routers/products.py export endpoint
+ backend_developer  Created tests/test_products.py — 4 new tests
+ frontend_developer Created frontend/src/pages/ProductsPage.tsx — Export CSV button
 
  tech_lead  Reviewing against original spec...
- tech_lead  Score: 9/10 — approved
+ tech_lead  Score: 5/10 — N+1 database query, JSX parsing error
+ tech_lead  Revision needed
 
- system  Branch: workermill/user-auth (6 commits, 9 files, +680 lines)
+ backend_developer  Fixed N+1 with selectinload, updated tests
+ frontend_developer Fixed JSX structure, verified build
+
+ tech_lead  Score: 8/10 — approved
+
+ system  Branch: workermill/add-product-export (4 commits)
          Push and open PR? (y/n)
-
- system  Comment posted to GH-42: completed — 3/3 tasks done
+         Cost: ~$2.50 (planner + reviewer only — workers ran locally for free)
 ```
 
-WorkerMill fetched the issue, planned the work, assigned specialists, ran your project's tests, had a separate model review the code, committed to a feature branch, and posted back to the ticket. You approved at every step.
+The reviewer caught a real N+1 database query. The workers fixed it. The re-review passed. No human intervention. That's the difference between one model approving its own work and a team with independent review.
 
-Works with **GitHub Issues** (`/ship GH-42` or `/ship #42`), **Jira** (`/ship PROJ-123`), **Linear** (`/ship TEAM-42`), spec files (`/ship spec.md`), or just a description (`/ship add dark mode`).
+Works with **GitHub Issues** (`/ship #42`), **Jira** (`/ship PROJ-123`), **Linear** (`/ship TEAM-42`), spec files (`/ship spec.md`), or just a description (`/ship add dark mode`).
 
 ### Review didn't pass? `/retry` picks up where you left off
-
-The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the response body instead of setting it as an HttpOnly cookie, and there's no logout invalidation. You want it fixed, not rebuilt.
 
 ```
 > /retry
@@ -109,11 +84,11 @@ The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the res
  tech_lead  Score: 9/10 — approved
 ```
 
-`/retry` doesn't start over. It loads the existing plan from disk, skips planning entirely, and resumes from the first incomplete story. Workers see their own prior commits via git log. No wasted tokens replanning or rebuilding what already works.
+`/retry` doesn't start over. It loads the existing plan from disk, skips planning entirely, and resumes from the first incomplete story. No wasted tokens replanning or rebuilding what already works.
 
 ### Review your code. Fix what it finds.
 
-`/review` runs a standalone Tech Lead review on your current work — the same reviewer that checks code after `/ship`, but on demand. If it finds issues, WorkerMill offers to create a GitHub issue with the findings and immediately kicks off `/ship` to fix them.
+`/review` runs a standalone Tech Lead review on your current work. If it finds issues, WorkerMill offers to create a GitHub issue with the findings and immediately kicks off `/ship` to fix them.
 
 ```
 > /review branch
@@ -121,120 +96,58 @@ The tech lead scored it 6/10 — the login endpoint returns a raw JWT in the res
  tech_lead  Reading diff against main... 14 files changed
  tech_lead  Score: 6/10
  tech_lead  Issues:
-   1. API key passed as query parameter in src/services/stripe.ts — use headers
-   2. No input validation on POST /api/webhooks — accepts any payload
-   3. Error responses leak stack traces in production mode
+   1. API key passed as query parameter — use headers
+   2. No input validation on POST /api/webhooks
+   3. Error responses leak stack traces in production
 
  Create a GitHub issue with these findings and fix them? (y/n) y
 
- coordinator  Created issue #18: [Review] stripe integration: API key passed as query parameter
- coordinator  https://github.com/you/your-repo/issues/18
-
- planner  Reading codebase + issue #18...
- planner  3 tasks:
-          [backend_developer] Move API key to headers, add webhook validation, sanitize errors
- ...
+ coordinator  Created issue #18 — starting fix...
 ```
 
-One command: review the code, file the issue, fix the findings. Works with `branch` (full diff vs main), `diff` (uncommitted changes), or a PR number (`/review #42`).
+Works with `branch` (full diff vs main), `diff` (uncommitted changes), or a PR number (`/review #42`).
 
-### Target a single expert for focused work
+### Target a single expert
 
-You don't always need the full team. `/as` sends one specialist with full tool access — no planning step, no review loop. Just an expert doing what they're best at.
+`/as` sends one specialist with full tool access — no planning step, no review loop.
 
 ```
-> /as security_engineer audit this repository — check for injection, broken auth, and data exposure
-
- security_engineer  Reading routes, middleware, database queries...
- security_engineer  Found 3 issues:
-   1. SQL injection in src/routes/search.ts:47 — user input concatenated into query string
-   2. No rate limiting on /api/login — brute force attacks possible
-   3. Session cookie missing Secure and HttpOnly flags
- security_engineer  Fixing all three...
- security_engineer  Running tsc --noEmit... ✓  Running vitest... 23 passed ✓
-```
-
-Other examples:
-```
+/as security_engineer audit this repository for injection and broken auth
 /as backend_developer add pagination to the /api/tasks endpoint
-/as frontend_developer redesign the settings page to use tabs instead of a long form
-/as devops_engineer set up a GitHub Actions CI pipeline with lint, test, and build steps
+/as devops_engineer set up a GitHub Actions CI pipeline
 /as qa_engineer write integration tests for the checkout flow
 ```
 
-### Switch models and chain commands
+### Or just chat
 
-```
-> /model anthropic/claude-opus-4-6 /as security_engineer audit how credentials are stored and transmitted in this codebase
-
- Switched to anthropic/claude-opus-4-6 (1M context)
-
- security_engineer  Reading config files, auth middleware, environment handling...
- security_engineer  Found 2 issues:
-   1. API keys stored in plaintext in config.json — should use OS keychain or encrypted env
-   2. JWT secret loaded from .env with no rotation mechanism
- security_engineer  Fixing both...
-```
-
-`/model` hot-swaps mid-session and chains with any command. Switch to a flagship model for a security audit, then back to a local model for the fix. Autocomplete helps with provider and model names. If the new model has a smaller context window, conversation history compacts automatically.
+Ask it to fix a bug, explain a function, or refactor a module. It reads your code, makes changes, runs your tests.
 
 ---
 
-## Multi-Expert Orchestration
+## How It Works
 
-> Other tools give you one model doing everything. WorkerMill gives you a team.
+Unlike single-model tools, WorkerMill never lets the same model review its own code.
 
-A single model writes bad code and approves its own bad code. WorkerMill separates planning, execution, and review into governed roles — each with a different model, different strengths, different blind spots.
-
-1. **A planner** reads your codebase and decomposes the task into scoped subtasks with specific files and clear acceptance criteria.
-2. **Specialist workers** execute one subtask at a time. A backend expert builds the API. A frontend expert wires the UI. A security expert hardens auth.
-3. **A reviewer** reads the actual diffs against your original spec — not a summary, the real code. It rejects bad work with specific feedback until the code meets the standard.
+1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
+2. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run locally via Ollama (free) or on any cloud provider.
+3. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
 
 ```json
 {
   "providers": {
     "ollama": { "model": "qwen3-coder:30b" },
-    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
+    "openai": { "apiKey": "{env:OPENAI_API_KEY}" },
+    "google": { "apiKey": "{env:GOOGLE_API_KEY}" }
   },
   "default": "ollama",
   "routing": {
-    "planner": "anthropic",
-    "tech_lead": "anthropic"
+    "planner": "openai",
+    "tech_lead": "google"
   }
 }
 ```
 
----
-
-## Features
-
-### 11+ specialist personas
-
-Backend, frontend, architect, DevOps, security, QA, data/ML, mobile, tech writer — plus planner and tech lead (reviewer). Create your own in `.workermill/personas/`.
-
-### Mix models per role
-
-Route your planner through Claude Opus while workers run on Ollama locally. Pay flagship prices for judgment, open-weight prices for volume.
-
-### Issue tracker integration
-
-`/ship GH-42`, `/ship PROJ-123`, `/ship TEAM-42` — fetch tickets from GitHub Issues, Jira, or Linear and use them as the task spec. Posts completion comments back to the ticket when done. Configure your tracker with `/setup`.
-
-### 15+ built-in tools + MCP
-
-Bash (sandboxed), file read/write/edit/patch, glob, grep, ls, git, web search, fetch, verify, LSP, todo, sub-agent with worktree isolation, and headless Chrome. Connect anything else via [MCP servers](https://modelcontextprotocol.io).
-
-### Fits into your workflow
-
-Reads `WORKERMILL.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`. Runs your linters and tests as quality gates. Pre/post hooks on any tool call. Custom skills in `.workermill/skills/`. Persistent memory across sessions with `::learning::` markers and `/remember`.
-
-### Safe by default
-
-Four permission modes (`Shift+Tab` to cycle): prompt before every write, auto-approve edits, read-only plan mode, or full trust. Granular allow/deny rules. Dangerous command and file detection. OS-level sandboxing. Blocking pre-hooks. `/undo` to revert instantly.
-
-### Built for long sessions
-
-Three-tier context compaction. Rate limit retry with backoff. Tool call loop detection. Read-only tools run in parallel. Sessions persist and resume.
+Use expensive models for judgment. Free local models for volume.
 
 ---
 
@@ -267,7 +180,7 @@ npm install -g workermill
 wm doctor
 ```
 
-No server, no Docker, no account. First run walks you through provider setup in 60 seconds — pick a model, add a key (or point at Ollama), and you're building.
+No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
 
 **Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
 
@@ -345,12 +258,6 @@ No server, no Docker, no account. First run walks you through provider setup in 
 
 ---
 
-## WorkerMill Platform
-
-The CLI is the fastest way to start. The full [WorkerMill platform](PLATFORM.md) adds a web dashboard, VS Code extension, and managed cloud workers for teams that need more.
-
-## Security
-
 <p>
   <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml/badge.svg" alt="Semgrep"></a>
   <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml/badge.svg" alt="Gitleaks"></a>
@@ -359,6 +266,6 @@ The CLI is the fastest way to start. The full [WorkerMill platform](PLATFORM.md)
   <a href="https://github.com/jarod-rosenthal/workermill/security/dependabot"><img src="https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot" alt="Dependabot"></a>
 </p>
 
-## License
+For teams that need a web dashboard, VS Code extension, and managed cloud workers, see the [WorkerMill Platform](PLATFORM.md).
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.

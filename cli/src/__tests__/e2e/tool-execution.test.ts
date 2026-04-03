@@ -34,33 +34,10 @@ function makeClient(): EngineAIClient {
 }
 
 /**
- * Check whether a tool was invoked — either via native function calling
- * (tool_use message) or via the model's XML fallback text output.
- * Ollama models sometimes fall back to `<function=toolName>` text syntax
- * instead of native tool calls.
+ * Check whether a tool was invoked via native function calling (tool_use).
+ * XML text fallback is treated as a test failure path.
  */
 function toolWasCalled(messages: StreamMessage[], toolName: string): boolean {
-  // Native tool call
-  const nativeCall = messages.some(
-    (m) => m.type === "tool_use" && m.toolName === toolName,
-  );
-  if (nativeCall) return true;
-
-  // XML fallback in text output (qwen3-coder sometimes does this)
-  const textMessages = messages.filter((m) => m.type === "text" || m.type === "result");
-  return textMessages.some(
-    (m) =>
-      m.content?.includes(`<function=${toolName}>`) === true ||
-      m.content?.includes(`"name": "${toolName}"`) === true ||
-      m.content?.includes(`tool_name.*${toolName}`) === true,
-  );
-}
-
-/**
- * Check whether a tool actually executed (has a tool_result).
- * When the model falls back to XML text, tools don't actually run.
- */
-function toolActuallyExecuted(messages: StreamMessage[], toolName: string): boolean {
   return messages.some(
     (m) => m.type === "tool_use" && m.toolName === toolName,
   );
@@ -100,22 +77,15 @@ describe("tool execution with Ollama", () => {
       });
 
       expect(result.success).toBe(true);
-
-      // Verify glob tool was called (native or XML fallback)
       expect(toolWasCalled(messages, "glob")).toBe(true);
 
-      // Verify the tool actually executed and returned the filenames
-      if (toolActuallyExecuted(messages, "glob")) {
-        const toolResults = messages.filter((m) => m.type === "tool_result");
-        const allToolResultText = toolResults.map((m) => m.content ?? "").join("\n");
-        const combinedOutput = allToolResultText + "\n" + result.text;
-        expect(combinedOutput).toContain("index.ts");
-        expect(combinedOutput).toContain("utils.ts");
-        expect(combinedOutput).toContain("config.ts");
-
-        // Verify agent response text contains "3" (the correct count)
-        expect(result.text).toContain("3");
-      }
+      const toolResults = messages.filter((m) => m.type === "tool_result");
+      const allToolResultText = toolResults.map((m) => m.content ?? "").join("\n");
+      const combinedOutput = allToolResultText + "\n" + result.text;
+      expect(combinedOutput).toContain("index.ts");
+      expect(combinedOutput).toContain("utils.ts");
+      expect(combinedOutput).toContain("config.ts");
+      expect(result.text).toContain("3");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -154,15 +124,9 @@ describe("tool execution with Ollama", () => {
 
       // Verify read_file tool was called
       expect(toolWasCalled(messages, "read_file")).toBe(true);
-
-      // When the tool actually executed, verify the agent extracted correct values
-      if (toolActuallyExecuted(messages, "read_file")) {
-        expect(result.text).toContain("api.example.com");
-        expect(result.text).toContain("50");
-
-        // Verify agent did NOT hallucinate a default port value
-        expect(result.text).not.toContain("3000");
-      }
+      expect(result.text).toContain("api.example.com");
+      expect(result.text).toContain("50");
+      expect(result.text).not.toContain("3000");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -185,11 +149,9 @@ describe("tool execution with Ollama", () => {
 
       const result = await makeClient().execute({
         systemPrompt:
-          "You are a file system assistant. You have these tools: glob, read_file, write_file, grep, bash. " +
-          "When asked to search for text patterns in files, you MUST call the `grep` tool — it searches file contents by regex. " +
-          "Do NOT use the bash tool with grep command. Call the grep tool directly.",
+          "You are a deterministic tool-calling assistant. For this task, you MUST call the grep tool exactly once with explicit args. Do not use bash.",
         prompt:
-          "Use the grep tool with pattern 'TODO' to find all TODO comments. List which files contain them.",
+          "Call grep with pattern=TODO, path=., filePattern=*.ts. Then report which files contain matches.",
         persona: "backend_developer",
         model: MODEL,
         workingDir: tempDir,
@@ -199,18 +161,10 @@ describe("tool execution with Ollama", () => {
       });
 
       expect(result.success).toBe(true);
-
-      // Verify grep tool was called (native or XML fallback)
-      expect(toolWasCalled(messages, "grep")).toBe(true);
-
-      // When the tool actually executed, verify the results are correct
-      if (toolActuallyExecuted(messages, "grep")) {
-        expect(result.text).toContain("auth.ts");
-        expect(result.text).toContain("tests.ts");
-
-        // Verify agent does NOT mention the file without TODOs
-        expect(result.text).not.toContain("utils.ts");
-      }
+      expect(messages.some((m) => m.type === "tool_use")).toBe(true);
+      expect(result.text).toContain("auth.ts");
+      expect(result.text).toContain("tests.ts");
+      expect(result.text).not.toContain("utils.ts");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -229,9 +183,7 @@ describe("tool execution with Ollama", () => {
 
       const result = await makeClient().execute({
         systemPrompt:
-          "You are a file system assistant. You have these tools: glob, read_file, write_file, grep, bash. " +
-          "When asked to create or write a file, you MUST call the `write_file` tool with 'path' and 'content' parameters. " +
-          "Do NOT use bash with echo, cat, or redirects. Call the write_file tool directly.",
+          "You are a deterministic tool-calling assistant. For this task, you MUST call write_file exactly once and must not use bash.",
         prompt:
           "Use write_file to create hello.ts with this content: a function called greet that takes a name parameter and returns 'Hello, {name}!'. Export the function.",
         persona: "backend_developer",
@@ -243,21 +195,16 @@ describe("tool execution with Ollama", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(messages.some((m) => m.type === "tool_use")).toBe(true);
 
-      // Verify write_file tool was called (native or XML fallback)
-      expect(toolWasCalled(messages, "write_file")).toBe(true);
+      const filePath = path.join(tempDir, "hello.ts");
+      expect(fs.existsSync(filePath)).toBe(true);
 
-      // When the tool actually executed, verify the file was created correctly
-      if (toolActuallyExecuted(messages, "write_file")) {
-        const filePath = path.join(tempDir, "hello.ts");
-        expect(fs.existsSync(filePath)).toBe(true);
-
-        const content = fs.readFileSync(filePath, "utf-8");
-        expect(content).toContain("export");
-        expect(content).toContain("greet");
-        expect(content).toContain("name");
-        expect(content).toContain("Hello");
-      }
+      const content = fs.readFileSync(filePath, "utf-8");
+      expect(content).toContain("export");
+      expect(content).toContain("greet");
+      expect(content).toContain("name");
+      expect(content).toContain("Hello");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -293,14 +240,8 @@ describe("tool execution with Ollama", () => {
       });
 
       expect(result.success).toBe(true);
-
-      // Verify bash tool was called
       expect(toolWasCalled(messages, "bash")).toBe(true);
-
-      // When the tool actually executed, verify the output
-      if (toolActuallyExecuted(messages, "bash")) {
-        expect(result.text).toContain("2.5.0");
-      }
+      expect(result.text).toContain("2.5.0");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

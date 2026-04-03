@@ -44,6 +44,8 @@ export interface AIClientOptions {
   persona: ExpertPersona;
   model: string;
   workingDir: string;
+  toolChoice?: "auto" | "none" | "required" | { type: "tool"; toolName: string };
+  allowedTools?: string[];
   maxTurns?: number;
   timeoutMs?: number;
   contextLength?: number;

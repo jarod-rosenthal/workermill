@@ -206,6 +206,21 @@ describe("EngineAIClient", () => {
     });
   });
 
+    it("filters tools passed to streamText when allowedTools is set", async () => {
+      const fakeTools = { bash: {}, read_file: {}, write_file: {} };
+      mockCreateToolDefinitions.mockReturnValue(fakeTools);
+      mockStreamText.mockReturnValue(createMockStream());
+
+      const client = new EngineAIClient(makeConfig());
+      await client.execute(makeOptions({ allowedTools: ["read_file"] }));
+
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: { read_file: {} },
+        }),
+      );
+    });
+
   // ── execute() — streaming and callbacks ───────────────────────────────
 
   describe("execute() streaming and callbacks", () => {

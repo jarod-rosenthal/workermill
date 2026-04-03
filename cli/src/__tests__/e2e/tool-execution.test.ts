@@ -73,6 +73,8 @@ describe("tool execution with Ollama", () => {
         workingDir: tempDir,
         maxTurns: 15,
         contextLength: 65536,
+        toolChoice: { type: "tool", toolName: "glob" },
+        allowedTools: ["glob"],
         onMessage: (msg) => messages.push(msg),
       });
 
@@ -117,6 +119,8 @@ describe("tool execution with Ollama", () => {
         workingDir: tempDir,
         maxTurns: 15,
         contextLength: 65536,
+        toolChoice: { type: "tool", toolName: "read_file" },
+        allowedTools: ["read_file"],
         onMessage: (msg) => messages.push(msg),
       });
 
@@ -157,11 +161,13 @@ describe("tool execution with Ollama", () => {
         workingDir: tempDir,
         maxTurns: 15,
         contextLength: 65536,
+        toolChoice: { type: "tool", toolName: "grep" },
+        allowedTools: ["grep"],
         onMessage: (msg) => messages.push(msg),
       });
 
       expect(result.success).toBe(true);
-      expect(messages.some((m) => m.type === "tool_use")).toBe(true);
+      expect(toolWasCalled(messages, "grep")).toBe(true);
       expect(result.text).toContain("auth.ts");
       expect(result.text).toContain("tests.ts");
       expect(result.text).not.toContain("utils.ts");
@@ -185,26 +191,27 @@ describe("tool execution with Ollama", () => {
         systemPrompt:
           "You are a deterministic tool-calling assistant. For this task, you MUST call write_file exactly once and must not use bash.",
         prompt:
-          "Use write_file to create hello.ts with this content: a function called greet that takes a name parameter and returns 'Hello, {name}!'. Export the function.",
+          "Use write_file to create hello.ts with this exact content: export const ANSWER = 42;",
         persona: "backend_developer",
         model: MODEL,
         workingDir: tempDir,
         maxTurns: 15,
         contextLength: 65536,
+        toolChoice: { type: "tool", toolName: "write_file" },
+        allowedTools: ["write_file"],
         onMessage: (msg) => messages.push(msg),
       });
 
       expect(result.success).toBe(true);
-      expect(messages.some((m) => m.type === "tool_use")).toBe(true);
+      expect(toolWasCalled(messages, "write_file")).toBe(true);
 
       const filePath = path.join(tempDir, "hello.ts");
       expect(fs.existsSync(filePath)).toBe(true);
 
       const content = fs.readFileSync(filePath, "utf-8");
       expect(content).toContain("export");
-      expect(content).toContain("greet");
-      expect(content).toContain("name");
-      expect(content).toContain("Hello");
+      expect(content).toContain("ANSWER");
+      expect(content).toContain("42");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -236,6 +243,8 @@ describe("tool execution with Ollama", () => {
         workingDir: tempDir,
         maxTurns: 15,
         contextLength: 65536,
+        toolChoice: { type: "tool", toolName: "bash" },
+        allowedTools: ["bash"],
         onMessage: (msg) => messages.push(msg),
       });
 

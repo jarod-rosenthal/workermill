@@ -17,7 +17,12 @@ export class EngineAIClient {
       this.config.apiKeys.ollamaHost
     );
 
-    const tools = createToolDefinitions(options.workingDir, model);
+    const allTools = createToolDefinitions(options.workingDir, model);
+    const tools = options.allowedTools && options.allowedTools.length > 0
+      ? Object.fromEntries(
+          Object.entries(allTools).filter(([name]) => options.allowedTools!.includes(name)),
+        )
+      : allTools;
 
     try {
       const stream = streamText({
@@ -25,6 +30,7 @@ export class EngineAIClient {
         system: options.systemPrompt,
         prompt: options.prompt,
         tools,
+        toolChoice: options.toolChoice,
         stopWhen: stepCountIs(options.maxTurns || 100),
         abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
         ...buildOllamaOptions(this.config.provider, options.contextLength),

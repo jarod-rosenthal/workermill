@@ -4,6 +4,13 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.97] - 2026-04-03
+
+### Fixed
+- **`/model` not persisting across sessions** — switching the worker model via `/model <provider>/<model>` updated the provider's model entry but never set `config.default` to the new provider. On restart, the CLI loaded the old default provider, ignoring the switch. Now persists both the model and the default provider to `~/.workermill/cli.json`.
+
+---
+
 ## [0.15.96] - 2026-04-03
 
 ### Fixed

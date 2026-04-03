@@ -375,13 +375,18 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         // Update config
         if (modelConfig) {
-          if (!existingProviderConfig) {
+          if (!existingProviderConfig && !targetRole) {
+            const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
+            modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
+            modelConfig.default = newProvider;
+          } else if (!existingProviderConfig && targetRole) {
             const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
             modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
           } else if (!targetRole) {
             // Worker switch — update the provider's default model
             existingProviderConfig.model = newModel;
             if (contextOverride) existingProviderConfig.contextLength = contextOverride;
+            modelConfig.default = newProvider;
           }
 
           if (targetRole) {

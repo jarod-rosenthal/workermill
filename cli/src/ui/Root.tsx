@@ -81,7 +81,25 @@ interface RootProps extends UseAgentOptions {
  */
 export function Root(props: RootProps): React.ReactElement {
   const { exit } = useApp();
-  const agent = useAgent(props);
+
+  // Refresh git branch — extracted before useAgent so it can be passed as callback.
+  const [gitBranch, setGitBranch] = useState(() => getGitBranch());
+  const refreshGitBranch = useCallback(() => {
+    import("child_process").then(({ exec: cpExec }) => {
+      cpExec("git rev-parse --abbrev-ref HEAD", {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        timeout: 2000,
+      }, (_err, stdout) => {
+        const branch = stdout?.trim();
+        if (branch && branch !== "HEAD") {
+          setGitBranch(prev => prev === branch ? prev : branch);
+        }
+      });
+    });
+  }, []);
+
+  const agent = useAgent({ ...props, onBashComplete: refreshGitBranch });
 
   // Active provider/model/context — starts from props, updates on /model switch
   const [activeProvider, setActiveProvider] = useState(props.provider);
@@ -114,7 +132,6 @@ export function Root(props: RootProps): React.ReactElement {
     },
     [agent],
   );
-  const [gitBranch, setGitBranch] = useState(() => getGitBranch());
   const [tokPerSec, setTokPerSecMap] = useState<Record<string, number>>({});
   const handleTokPerSec = useCallback((providerModel: string, tps: number) => {
     setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
@@ -125,15 +142,11 @@ export function Root(props: RootProps): React.ReactElement {
   const lastBuildTask = useRef<string | null>(null);
 
   const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory());
-  // Poll git branch every 5 seconds so the status bar stays current
-  // regardless of how the branch changed (shell escape, orchestrator, external terminal).
+  // Poll git branch every 5s (immediate refresh happens via onBashComplete)
   useEffect(() => {
-    const id = setInterval(() => {
-      const current = getGitBranch();
-      setGitBranch(prev => prev === current ? prev : current);
-    }, 5_000);
+    const id = setInterval(refreshGitBranch, 5_000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshGitBranch]);
 
   // Push an entry to the in-memory and on-disk history.
   const pushHistory = useCallback((line: string) => {

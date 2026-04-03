@@ -53,7 +53,10 @@
     "highlight.js": ">=11.0.0",
     "markdown-it": ">=14.0.0",
     "fast-xml-parser": ">=5.5.7",
-    "@tootallnate/once": ">=3.0.1"
+    "@tootallnate/once": ">=3.0.1",
+    "@expo/plist": {
+      "@xmldom/xmldom": ">=0.8.12"
+    }
   },
   "devDependencies": {
     "@testing-library/jest-native": "^5.4.0",

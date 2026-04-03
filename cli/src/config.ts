@@ -65,7 +65,7 @@ export interface PermissionRuleConfig {
   deny?: string[];
 }
 
-export type TicketSystem = "github" | "jira" | "linear";
+export type TicketSystem = "github" | "jira" | "linear" | "none";
 
 export interface JiraConfig {
   baseUrl: string;
@@ -177,7 +177,7 @@ export function getProviderForPersona(
   }
 
   // Map OpenAI-compatible providers to "openai" for the model factory
-  const knownProviders = new Set(["ollama", "anthropic", "openai", "google", "gemini"]);
+  const knownProviders = new Set(["ollama", "anthropic", "openai", "google", "gemini", "lmstudio"]);
   const resolvedProvider = knownProviders.has(providerName) || knownProviders.has(providerName.replace(/_.*$/, ""))
     ? providerName.replace(/_.*$/, "") // strip _planner/_reviewer suffix
     : providerConfig.host ? "openai" : providerName; // has baseURL → OpenAI-compatible

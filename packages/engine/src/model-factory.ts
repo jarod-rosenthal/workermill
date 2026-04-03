@@ -60,6 +60,65 @@ export async function ensureOllamaContext(
   }
 }
 
+/**
+ * Ensure an LM Studio model is loaded with the correct context length.
+ * Uses LM Studio's /api/v1/ endpoints to unload and reload if needed.
+ * Returns the actual loaded context length for transparency.
+ */
+export async function ensureLmStudioContext(
+  host: string,
+  modelName: string,
+  requiredCtx: number,
+): Promise<{ loadedCtx: number; maxCtx: number } | null> {
+  // Strip /v1 suffix to get base URL for LM Studio's management API
+  const baseHost = host.replace(/\/v1\/?$/, "");
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await globalThis.fetch(`${baseHost}/api/v0/models`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      data?: { id: string; state: string; loaded_context_length?: number; max_context_length?: number }[];
+    };
+    const model = data.data?.find((m) => m.id === modelName);
+    if (!model) return null;
+
+    const maxCtx = model.max_context_length || requiredCtx;
+    const targetCtx = Math.min(requiredCtx, maxCtx);
+
+    if (model.state === "loaded" && model.loaded_context_length === targetCtx) {
+      return { loadedCtx: model.loaded_context_length, maxCtx };
+    }
+
+    // Unload if currently loaded with wrong context
+    if (model.state === "loaded") {
+      await globalThis.fetch(`${baseHost}/api/v1/models/unload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instance_id: modelName }),
+      });
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    // Load with correct context
+    const loadRes = await globalThis.fetch(`${baseHost}/api/v1/models/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelName, context_length: targetCtx }),
+    });
+
+    if (loadRes.ok) {
+      return { loadedCtx: targetCtx, maxCtx };
+    }
+    return null;
+  } catch {
+    // Non-fatal
+    return null;
+  }
+}
+
 export function createModel(
   provider: AIProvider,
   modelName: string,
@@ -101,6 +160,13 @@ export function createModel(
       // Type cast needed — property works at runtime but missing from package types.
       const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, keepAlive: "-1" } as any);
       return ollamaProvider(modelName);
+    }
+    case "lmstudio": {
+      const lmStudioHost = host || "http://localhost:1234/v1";
+      // LM Studio exposes an OpenAI-compatible API but doesn't require an API key.
+      // Pass a dummy key to satisfy the SDK's validation.
+      const lmStudio = createOpenAI({ baseURL: lmStudioHost, apiKey: "lm-studio" });
+      return lmStudio.chat(modelName);
     }
     default: {
       // OpenAI-compatible providers (xAI, Groq, DeepSeek, Mistral, etc.)

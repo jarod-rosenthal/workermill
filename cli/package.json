@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "0.15.94",
+  "version": "0.15.95",
   "description": "AI coding team in your terminal. Different models plan, build, and review — so bad code gets caught, not shipped.",
   "type": "module",
   "bin": {

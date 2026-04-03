@@ -7,6 +7,7 @@ import {
   createModel,
   buildOllamaOptions,
   ensureOllamaContext,
+  ensureLmStudioContext,
 } from "../../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../../packages/engine/src/types.js";
@@ -244,10 +245,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
     aiProviderRef.current = options.provider as AIProvider;
 
-    // Ensure Ollama context length matches config (fire-and-forget —
+    // Ensure local model context length matches config (fire-and-forget —
     // unload completes before the first user prompt in practice)
     if (aiProviderRef.current === "ollama" && options.host && options.contextLength) {
       void ensureOllamaContext(options.host, options.model, options.contextLength);
+    } else if (aiProviderRef.current === "lmstudio" && options.host && options.contextLength) {
+      void ensureLmStudioContext(options.host, options.model, options.contextLength);
     }
 
     modelRef.current = createModel(
@@ -1217,9 +1220,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     activeContextLengthRef.current = contextLength;
     modelRef.current = createModel(newProvider as AIProvider, newModel, host, contextLength);
 
-    // Ollama needs context length ensured before first use
+    // Local providers need context length ensured before first use
     if (newProvider === "ollama" && host && contextLength) {
       void ensureOllamaContext(host, newModel, contextLength);
+    } else if (newProvider === "lmstudio" && host && contextLength) {
+      void ensureLmStudioContext(host, newModel, contextLength);
     }
   }, []);
 

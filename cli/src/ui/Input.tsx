@@ -62,28 +62,47 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
   // Fetch Ollama models once on mount (async)
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
   useEffect(() => {
     const config = resolveConfig();
+    // Ollama
     const ollamaHost = config?.providers?.ollama?.host || "http://localhost:11434";
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    globalThis.fetch(`${ollamaHost}/api/tags`, { signal: controller.signal })
+    const ollamaCtrl = new AbortController();
+    const ollamaTimeout = setTimeout(() => ollamaCtrl.abort(), 3000);
+    globalThis.fetch(`${ollamaHost}/api/tags`, { signal: ollamaCtrl.signal })
       .then(res => res.ok ? res.json() : null)
       .then((data: any) => {
-        clearTimeout(timeout);
+        clearTimeout(ollamaTimeout);
         if (data?.models) {
           setOllamaModels(data.models.map((m: any) => m.name));
         }
       })
-      .catch(() => { clearTimeout(timeout); });
+      .catch(() => { clearTimeout(ollamaTimeout); });
+    // LM Studio
+    const lmHost = config?.providers?.lmstudio?.host?.replace(/\/v1\/?$/, "") || "http://localhost:1234";
+    const lmCtrl = new AbortController();
+    const lmTimeout = setTimeout(() => lmCtrl.abort(), 3000);
+    globalThis.fetch(`${lmHost}/v1/models`, { signal: lmCtrl.signal })
+      .then(res => res.ok ? res.json() : null)
+      .then((data: any) => {
+        clearTimeout(lmTimeout);
+        if (data?.data) {
+          setLmStudioModels(data.data.map((m: any) => m.id));
+        }
+      })
+      .catch(() => { clearTimeout(lmTimeout); });
   }, []);
 
-  // Build model list from provider registry + Ollama for /model completions
+  // Build model list from provider registry + Ollama + LM Studio for /model completions
   const modelChoices = useMemo(() => {
     const choices: { name: string; desc: string }[] = [];
     // Ollama models from live API
     for (const m of ollamaModels) {
       choices.push({ name: `/model ollama/${m}`, desc: "local" });
+    }
+    // LM Studio models from live API
+    for (const m of lmStudioModels) {
+      choices.push({ name: `/model lmstudio/${m}`, desc: "local" });
     }
     // Cloud models from pricing registry
     for (const provider of listProviders()) {
@@ -96,7 +115,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       }
     }
     return choices;
-  }, [ollamaModels]);
+  }, [ollamaModels, lmStudioModels]);
 
   // Filter matching commands when input starts with /
   // After "/ship " or "/build ", complete with .md files from cwd

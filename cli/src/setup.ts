@@ -586,6 +586,7 @@ async function configureTicketSystem(
   console.log();
 
   const trackers = [
+    { name: "none" as const, label: "Skip (no issue tracker)" },
     { name: "github" as const, label: "GitHub Issues (uses your GitHub token)" },
     { name: "jira" as const, label: "Jira" },
     { name: "linear" as const, label: "Linear" },
@@ -600,6 +601,10 @@ async function configureTicketSystem(
   const choice = parseInt(choiceStr.trim(), 10) - 1;
   const selected = trackers[choice] || trackers[0];
   console.log(chalk.dim(`  → ${selected.label}`));
+
+  if (selected.name === "none") {
+    return { ticketSystem: "none" };
+  }
 
   if (selected.name === "github") {
     const repo = detectGithubRepo();
@@ -890,7 +895,7 @@ export async function runSetup(): Promise<CliConfig> {
   console.log(chalk.dim("  Workers:  ") + `${workerConfigKey}/${workerModel}`);
   console.log(chalk.dim("  Planner:  ") + `${plannerProviderName}/${plannerModel}`);
   console.log(chalk.dim("  Reviewer: ") + `${reviewerProviderName}/${reviewerModel}`);
-  console.log(chalk.dim("  Tickets:  ") + `${config.ticketSystem || "github"}`);
+  console.log(chalk.dim("  Tickets:  ") + `${config.ticketSystem === "none" ? "none (skipped)" : config.ticketSystem || "github"}`);
   console.log();
 
   return config;

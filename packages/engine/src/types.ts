@@ -1,4 +1,4 @@
-export type AIProvider = "anthropic" | "openai" | "google" | "gemini" | "ollama";
+export type AIProvider = "anthropic" | "openai" | "google" | "gemini" | "ollama" | "lmstudio";
 
 export type ExpertPersona =
   | "architect"

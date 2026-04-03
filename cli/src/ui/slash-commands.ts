@@ -305,7 +305,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "| Planner model | `/model planner <provider>/<model>` |\n" +
           "| Reviewer model | `/model reviewer <provider>/<model>` |\n\n" +
           "Example: `/model reviewer openai/gpt-5.3-codex`\n\n" +
-          "**Supported providers:** ollama, anthropic, openai, google"
+          "**Context window:** Add size after model name for local models:\n" +
+          "`/model ollama/qwen3-coder:30b 64k` or `/model lmstudio/deepseek-r1 128k`\n" +
+          "Local models default to 128k if not specified.\n\n" +
+          "**Supported providers:** ollama, lmstudio, anthropic, openai, google"
         );
       } else {
         // Detect role prefix: /model planner|reviewer <provider>/<model>
@@ -413,20 +416,26 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           // Worker switch — hot-swap
           ctx.switchModel(newProvider, newModel);
 
+          const isLocalProvider = newProvider === "ollama" || newProvider === "lmstudio";
+          const configCtx = modelConfig?.providers?.[newProvider]?.contextLength;
           const newCtxWindow = contextOverride
-            || (newProvider === "ollama" ? modelConfig?.providers?.[newProvider]?.contextLength : undefined)
+            || (isLocalProvider ? configCtx : undefined)
             || findModelInfo(newModel)?.contextWindow
-            || 256_000;
+            || (isLocalProvider ? 128_000 : 256_000);
+          // Hint: local models default to 128k if no context specified
+          const ctxHint = isLocalProvider && !contextOverride && !configCtx
+            ? `\n*Tip: Local models default to 128k context. Set explicitly: \`/model ${newProvider}/${newModel} 64k\`*`
+            : "";
           if (ctx.tokens > 0 && ctx.tokens > newCtxWindow * 0.8 && ctx.forceCompact) {
             ctx.addSystemMessage(
-              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel} — compacting conversation to fit...`
+              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} — compacting conversation to fit...${ctxHint}`
             );
             void ctx.forceCompact().then(({ before, after }) => {
               ctx.addSystemMessage(`Compacted ${before} → ${after} messages.`);
             });
           } else {
             ctx.addSystemMessage(
-              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel} — active now.`
+              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} — active now.${ctxHint}`
             );
           }
         } else {

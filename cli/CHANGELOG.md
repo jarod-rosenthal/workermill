@@ -4,7 +4,7 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.15.94] - 2026-04-02
+## [0.15.95] - 2026-04-02
 
 ### Added
 - **LM Studio provider** — full native support for LM Studio as a local model provider. Setup wizard detects LM Studio at `localhost:1234` (or Windows host IP from WSL), lists available models, and saves config. `/model lmstudio/<model>` switches mid-session with autocomplete.
@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`/model` supported providers list** — added `lmstudio`.
 
 ### Fixed
+- **Terminal text wrapping** — assistant messages now render at the correct terminal width by passing `stdout.columns` explicitly into the Markdown renderer at commit time. Responses no longer wrap too early on wide terminals.
 - **LM Studio API key error** — LM Studio was being routed through the OpenAI provider without a dummy API key, causing `AI_LoadAPIKeyError` on every request. Now uses `createOpenAI({ apiKey: "lm-studio" })` with the correct `baseURL`.
 - **`lmstudio` provider not recognized** — `getProviderForPersona()` was remapping `lmstudio` to `openai` (losing the host). Added to `knownProviders` set so it routes correctly through the dedicated `lmstudio` case in `createModel()`.
 - **Local model context fallback** — `/model` switch logic only checked `ollama` provider when loading saved context length. Now checks both `ollama` and `lmstudio`.

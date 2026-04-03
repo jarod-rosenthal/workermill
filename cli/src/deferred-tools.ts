@@ -29,7 +29,6 @@ export const EAGER_TOOLS = new Set([
   "grep",
   "ls",
   "patch",
-  "git",
   "sub_agent",
   "verify",
   "todo",

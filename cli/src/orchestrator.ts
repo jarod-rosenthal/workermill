@@ -1032,8 +1032,11 @@ export async function runOrchestration(
     }
   }
 
-  // Start MCP servers — auto-detect Docker Desktop + user config
-  const mcpConfig = autoDetectMCPServers(config.mcp || {});
+  // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
+  const skipAutoDetect = defaultProvider.provider === "ollama" || defaultProvider.provider === "lmstudio";
+  const mcpConfig = skipAutoDetect
+    ? (config.mcp || {})
+    : autoDetectMCPServers(config.mcp || {});
   if (Object.keys(mcpConfig).length > 0) {
     output.coordinatorLog(`Starting ${Object.keys(mcpConfig).length} MCP server(s)...`);
     await startAllMCPServers(mcpConfig);

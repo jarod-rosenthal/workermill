@@ -101,7 +101,6 @@ describe("safety", () => {
       expect(AUTO_EDIT_TOOLS.has("grep")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("ls")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("fetch")).toBe(true);
-      expect(AUTO_EDIT_TOOLS.has("git")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("web_search")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("todo")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("sub_agent")).toBe(true);

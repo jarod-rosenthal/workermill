@@ -166,6 +166,8 @@ function renderCodeBlock(
 
 interface MarkdownProps {
   content: string;
+  /** Terminal columns available for this message. Used to constrain text width at render time. */
+  width?: number;
 }
 
 /**
@@ -174,7 +176,7 @@ interface MarkdownProps {
  * Supported syntax: headers, fenced code blocks (with syntax highlighting),
  * bullet lists, bold, inline code, blockquotes, and horizontal rules.
  */
-export function Markdown({ content }: MarkdownProps): React.ReactElement {
+export function Markdown({ content, width }: MarkdownProps): React.ReactElement {
   const sourceLines = content.split("\n");
   const elements: React.ReactElement[] = [];
   let i = 0;
@@ -294,7 +296,7 @@ export function Markdown({ content }: MarkdownProps): React.ReactElement {
   }
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width={width}>
       {elements}
     </Box>
   );

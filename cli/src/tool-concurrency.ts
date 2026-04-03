@@ -18,8 +18,20 @@ class ToolMutex {
       this.locked = true;
       return;
     }
+    // Timeout prevents permanent deadlock if a tool call hangs or is
+    // aborted without releasing the lock (e.g., user ESC during execution).
     return new Promise<void>((resolve) => {
-      this.queue.push(resolve);
+      const timer = setTimeout(() => {
+        // Remove from queue and force-acquire
+        const idx = this.queue.indexOf(resolve);
+        if (idx !== -1) this.queue.splice(idx, 1);
+        this.locked = true;
+        resolve();
+      }, 30_000);
+      this.queue.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
     });
   }
 

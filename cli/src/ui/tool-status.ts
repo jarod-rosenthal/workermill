@@ -20,8 +20,6 @@ export function toolStatusLabel(toolName: string, input: Record<string, unknown>
       const cmd = String(input.command || "").slice(0, 40);
       return `Running ${cmd}${String(input.command || "").length > 40 ? "..." : ""}`;
     }
-    case "git":
-      return `Git ${input.action || ""}...`;
     case "sub_agent":
       return "Running sub-agent...";
     case "lsp":

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Box, Text, Static, useApp, useInput } from "ink";
+import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
 import { PermissionPrompt } from "./PermissionPrompt.js";
@@ -140,6 +140,7 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
  */
 export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const lastCtrlCRef = useRef(0);
   const lastEscRef = useRef(0);
 
@@ -191,6 +192,9 @@ export function App(props: AppProps): React.ReactElement {
     ? "PLAN"
     : props.permissionMode;
 
+  // marginLeft={2} on assistant boxes consumes 2 cols; cap at a sane max
+  const markdownWidth = Math.max(40, (stdout?.columns ?? 80) - 2);
+
   return (
     <Box flexDirection="column" width="100%">
       {/* Committed messages — rendered once via Static */}
@@ -205,7 +209,7 @@ export function App(props: AppProps): React.ReactElement {
             ) : (
               <Box flexDirection="column" marginLeft={2}>
                 {message.content ? (
-                  <Markdown content={message.content} />
+                  <Markdown content={message.content} width={markdownWidth} />
                 ) : null}
               </Box>
             )}

@@ -44,6 +44,14 @@ import type {
   AgentStatus,
 } from "./types.js";
 
+const TRACE_DISPATCH = process.env.WM_TRACE_DISPATCH === "1";
+const ENABLE_STEP_STREAMING_TEXT = process.env.WM_ENABLE_STEP_STREAMING_TEXT === "1";
+
+function traceDispatch(message: string, data?: Record<string, unknown>): void {
+  if (!TRACE_DISPATCH) return;
+  logger.info(`[dispatch] ${message}`, data);
+}
+
 // Tool call loop detection — matches orchestrator pattern
 const LOOP_WINDOW = 6;
 const LOOP_THRESHOLD = 4;
@@ -101,6 +109,8 @@ export interface UseAgentOptions {
   resume: boolean;
   fork: boolean;
   maxTokens?: number;
+  /** Called after every bash tool execution (e.g. to refresh git branch). */
+  onBashComplete?: () => void;
 }
 
 export interface UseAgentReturn {
@@ -167,6 +177,10 @@ export interface UseAgentReturn {
 // ---------------------------------------------------------------------------
 
 export function useAgent(options: UseAgentOptions): UseAgentReturn {
+  // ------- Callbacks -------- //
+  const onBashCompleteRef = useRef(options.onBashComplete);
+  onBashCompleteRef.current = options.onBashComplete;
+
   // ------- Model & tools (created once) -------- //
   const modelRef = useRef<LanguageModel | null>(null);
   const toolsRef = useRef<Record<string, AnyToolDef> | null>(null);
@@ -212,6 +226,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const planModeRef = useRef(options.planMode);
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
   const workingDirRef = useRef(process.cwd());
+  const systemPromptRef = useRef<string | null>(null);
   const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
   const bellEnabledRef = useRef<boolean | undefined>(undefined);
   const permissionRulesRef = useRef<PermissionRuleConfig | undefined>(undefined);
@@ -268,7 +283,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     // Register MCP servers for lazy start — they won't spawn until first tool use
     try {
       const cliConfig = resolveConfig();
-      const mcpConfig = autoDetectMCPServers(cliConfig?.mcp || {});
+      // Skip Docker MCP auto-detection for local models (Ollama/LM Studio) —
+      // 50+ MCP tools overwhelm small models, causing XML text fallback instead
+      // of structured tool calls. Users can still configure MCP explicitly.
+      const skipAutoDetect = aiProviderRef.current === "ollama" || aiProviderRef.current === "lmstudio";
+      const mcpConfig = skipAutoDetect
+        ? (cliConfig?.mcp || {})
+        : autoDetectMCPServers(cliConfig?.mcp || {});
       registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
       bellEnabledRef.current = cliConfig?.bell;
@@ -529,25 +550,31 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       execute: async () => browserClose(),
     };
 
-    // Wrap tool execute functions with concurrency control —
-    // concurrency-safe tools (read_file, glob, grep, etc.) can run in
-    // parallel while non-safe tools (bash, write_file, etc.) serialize.
+    // Wrap tool execute functions with concurrency control without mutating
+    // shared tool definitions (toolsRef/current MCP objects). Mutating in place
+    // re-wraps every turn and can self-deadlock on the non-reentrant mutex.
+    const concurrencyWrappedTools: Record<string, AnyToolDef> = {};
     for (const [name, td] of Object.entries(allRawTools)) {
       if (td && typeof td.execute === "function") {
         const original = td.execute;
-        (td as any).execute = withConcurrencyControl(name, original as any);
+        concurrencyWrappedTools[name] = {
+          ...td,
+          execute: withConcurrencyControl(name, original as any),
+        };
+      } else {
+        concurrencyWrappedTools[name] = td;
       }
     }
 
     // Partition tools: core tools get full schemas, MCP tools are deferred
     // to save context window space. Promoted tools (via tool_search) are
     // treated as eager on subsequent calls.
-    const { eager: eagerTools, deferred } = partitionTools(allRawTools, workingDirRef.current);
+    const { eager: eagerTools, deferred } = partitionTools(concurrencyWrappedTools, workingDirRef.current);
 
     // Re-promote any tools the model previously loaded via tool_search
     for (const name of promotedToolsRef.current) {
-      if (allRawTools[name] && !eagerTools[name]) {
-        eagerTools[name] = allRawTools[name];
+      if (concurrencyWrappedTools[name] && !eagerTools[name]) {
+        eagerTools[name] = concurrencyWrappedTools[name];
       }
     }
 
@@ -599,35 +626,43 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         execute: async (input: Record<string, unknown>) => {
           const callId = crypto.randomUUID();
 
-          // Register the call — push directly to committed messages (Static)
-          // so it scrolls up naturally and never causes dynamic area jumping.
           const info: ToolCallInfo = {
             id: callId,
             name,
             input,
             status: "pending",
           };
-          setStreamingToolCalls((prev) => [...prev, info]);
-          setStatus("permission");
 
+          // ── ZERO setState before execute ──
+          // Ink Legacy mode calls flushSyncWork() on every setState, which
+          // blocks the entire Node.js event loop synchronously.  This
+          // prevents worker thread message callbacks from firing.
+          // ALL visual updates are batched AFTER the tool completes.
+
+          const wrapperEnterMs = Date.now();
+          traceDispatch("wrapper:enter", { tool: name });
+
+          const permissionStartMs = Date.now();
           const { allowed, mode } = await checkPermission(name, input);
+          traceDispatch("wrapper:permission_done", {
+            tool: name,
+            allowed,
+            mode,
+            durationMs: Date.now() - permissionStartMs,
+          });
 
-          // Handle "Trust all" — switch to bypassPermissions mode for this session.
           if (mode === "trust" && allowed) {
             permModeRef.current = "bypassPermissions";
-            setPermMode("bypassPermissions");
+            // Defer UI update
+            setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
             trustAllRef.current = true;
-            setTrustAllState(true);
           }
 
-          // Handle "Yes, don't ask again" — save permanent rule for bash, session-only for edits.
           if (mode === "always" && allowed) {
             if (name === "bash" && input.command) {
-              // Save permanent rules for each subcommand
               const cmd = String(input.command);
               const subcommands = splitCompoundCommand(cmd);
               const rules = subcommands.map(commandToRule);
-              // Persist to config
               try {
                 const cfg = (await import("../config.js")).loadConfig();
                 if (cfg) {
@@ -639,56 +674,69 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                     }
                   }
                   (await import("../config.js")).saveConfig(cfg);
-                  // Update the live rules ref
                   permissionRulesRef.current = cfg.permissions;
                 }
               } catch {
-                // If config save fails, fall back to session-only
                 sessionAllowRef.current.add(name);
               }
             } else {
-              // File edits: session-only (matches Claude Code behavior)
               sessionAllowRef.current.add(name);
             }
           }
 
           if (!allowed) {
-            setStreamingToolCalls((prev) =>
-              prev.map((tc) =>
-                tc.id === callId ? { ...tc, status: "denied" as const } : tc,
-              ),
-            );
+            traceDispatch("wrapper:denied", {
+              tool: name,
+              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
+            });
+            setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
             setStatus("streaming");
             return "Tool execution denied by user.";
           }
 
-          // Mark as running.
-          setStreamingToolCalls((prev) =>
-            prev.map((tc) =>
-              tc.id === callId ? { ...tc, status: "running" as const } : tc,
-            ),
-          );
-          setStatus("tool_running");
-          setStatusDetail(toolStatusLabel(name, input));
-
           try {
+            traceDispatch("wrapper:before_tool_call_log", {
+              tool: name,
+              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
+            });
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-            // Checkpoint file before write/edit operations
             if ((name === "write_file" || name === "edit_file") && input.path) {
               const filePath = String(input.path);
               const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
               checkpoint(resolved);
             }
-            setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+            const preHookStartMs = Date.now();
             const hookResult = runPreHooksWithBlocking(name, hooksConfigRef.current, workingDirRef.current, { input: JSON.stringify(input).substring(0, 10000) });
+            traceDispatch("wrapper:prehook_done", {
+              tool: name,
+              blocked: hookResult.blocked,
+              durationMs: Date.now() - preHookStartMs,
+              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
+            });
             if (hookResult.blocked) {
               return `Tool blocked by pre-hook: ${hookResult.reason}`;
             }
+
+            // ── Execute with ZERO renders blocking the event loop ──
+            const executeStartMs = Date.now();
+            traceDispatch("wrapper:before_execute", {
+              tool: name,
+              sinceWrapperEnterMs: executeStartMs - wrapperEnterMs,
+            });
             const result = await td.execute(input);
+            traceDispatch("wrapper:after_execute", {
+              tool: name,
+              executeDurationMs: Date.now() - executeStartMs,
+              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
+            });
+
+            if (name === "bash" && onBashCompleteRef.current) {
+              onBashCompleteRef.current();
+            }
             runHooks("post", name, hooksConfigRef.current, workingDirRef.current, { output: (typeof result === "string" ? result : JSON.stringify(result)).substring(0, 10000), success: true });
             const resultStr =
               typeof result === "string" ? result : JSON.stringify(result);
-            logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
+            logger.info("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
             // Track for loop detection
             const sig = `${name}:${JSON.stringify(input).substring(0, 200)}`;
@@ -700,26 +748,21 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               const maxCount = Math.max(...Object.values(counts));
               if (maxCount >= LOOP_THRESHOLD) {
                 logger.error("Tool call loop detected in single-agent", { tool: name, maxCount });
-                setStreamingToolCalls((prev) =>
-                  prev.map((tc) =>
-                    tc.id === callId
-                      ? { ...tc, status: "done" as const, result: "ABORTED: loop detected" }
-                      : tc,
-                  ),
-                );
+                setStreamingToolCalls((prev) => [
+                  ...prev,
+                  { ...info, status: "done" as const, result: "ABORTED: loop detected" },
+                ]);
                 setStatus("streaming");
                 return "ABORTED: Tool call loop detected — the same tool call was repeated " + maxCount + " times. Stop and summarize what you've accomplished.";
               }
             }
 
-            // Mark as done with result.
-            setStreamingToolCalls((prev) =>
-              prev.map((tc) =>
-                tc.id === callId
-                  ? { ...tc, status: "done" as const, result: resultStr }
-                  : tc,
-              ),
-            );
+            // ── NOW batch all visual updates after tool is done ──
+            setStreamingToolCalls((prev) => [
+              ...prev,
+              { ...info, status: "done" as const, result: resultStr },
+            ]);
+            setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
             setStatus("streaming");
             return result;
           } catch (err) {
@@ -816,9 +859,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const model = modelRef.current!;
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
           const activeTools = (await getActiveTools()) as ToolSet;
-          // Build system prompt with deferred tool listings appended
-          const systemPrompt = buildSystemPrompt(workingDirRef.current)
-            + formatDeferredToolsForPrompt(deferredToolsRef.current);
+          // Cache the system prompt — rebuilding it every turn changes the
+          // text (memories, disk files), which invalidates Ollama's KV cache
+          // and forces a full prompt reprocessing (~30s for 30B models).
+          // Build once on first submit; only rebuild on explicit request.
+          if (!systemPromptRef.current) {
+            systemPromptRef.current = buildSystemPrompt(workingDirRef.current)
+              + formatDeferredToolsForPrompt(deferredToolsRef.current);
+          }
+          const systemPrompt = systemPromptRef.current;
           logger.info("Starting streamText", {
             provider: aiProviderRef.current,
             model: options.model,
@@ -848,12 +897,35 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               aiProviderRef.current,
               activeContextLengthRef.current,
             ),
-            onStepFinish({ text }) {
-              if (text) {
-                // Keep step text in the dynamic area via streamingText.
-                // It will be committed to Static when the full response completes.
+            onStepFinish({ text, toolCalls: calls }) {
+              const stepStartMs = Date.now();
+              const callCount = calls?.length ?? 0;
+              traceDispatch("onStepFinish:enter", {
+                textLength: text?.length ?? 0,
+                callCount,
+              });
+
+              // Skip render when step has tool calls — the setStreamingText
+              // triggers Ink's synchronous flushSyncWork() which blocks the
+              // event loop for the full render duration (~30s with message
+              // history), preventing the SDK from dispatching the tool execute.
+              if (ENABLE_STEP_STREAMING_TEXT && text && callCount === 0) {
+                const setStreamingStartMs = Date.now();
                 setStreamingText(text);
+                const setStreamingDurationMs = Date.now() - setStreamingStartMs;
                 setStatus("streaming");
+                traceDispatch("onStepFinish:text_rendered", {
+                  textLength: text.length,
+                  setStreamingDurationMs,
+                  totalDurationMs: Date.now() - stepStartMs,
+                });
+              } else {
+                traceDispatch("onStepFinish:skip_text_render", {
+                  hasText: Boolean(text),
+                  callCount,
+                  streamingEnabled: ENABLE_STEP_STREAMING_TEXT,
+                  totalDurationMs: Date.now() - stepStartMs,
+                });
               }
             },
           });

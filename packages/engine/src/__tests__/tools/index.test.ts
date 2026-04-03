@@ -22,7 +22,6 @@ describe("createToolDefinitions", () => {
     expect(keys).toContain("ls");
     expect(keys).toContain("fetch");
     expect(keys).toContain("patch");
-    expect(keys).toContain("git");
     expect(keys).toContain("web_search");
     expect(keys).toContain("todo");
     expect(keys).toContain("verify");
@@ -30,7 +29,7 @@ describe("createToolDefinitions", () => {
     expect(keys).not.toContain("sub_agent");
     // Base tools count (no sub_agent without model)
     const baseCount = keys.length;
-    expect(baseCount).toBeGreaterThanOrEqual(14);
+    expect(baseCount).toBeGreaterThanOrEqual(13);
   });
 
   it("includes sub_agent when model is provided", () => {

@@ -101,7 +101,10 @@ export async function execute({
       }
     });
 
-    child.on("close", (code: number | null) => {
+    // Use 'exit' not 'close': 'close' waits for stdio to close, which includes
+    // grandchild processes that inherit file descriptors. 'exit' fires when
+    // the shell itself exits, returning control immediately.
+    child.on("exit", (code: number | null) => {
       clearTimeout(timeoutId);
       const duration = Date.now() - startTime;
 

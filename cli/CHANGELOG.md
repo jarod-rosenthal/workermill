@@ -4,6 +4,19 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.96] - 2026-04-03
+
+### Fixed
+- **Bash tool hang** — tool calls would hang for 30+ seconds (or indefinitely) in interactive mode. Root cause: Ink's Legacy mode `flushSyncWork()` blocks the Node.js event loop on every `setState`, preventing async child process callbacks from firing. Bash tool now runs `spawnSync` in a worker thread with `SharedArrayBuffer` + `Atomics.wait` for synchronous cross-thread communication — executes in ~5ms with zero event loop dependency.
+- **Tool dispatch blocked by render** — `onStepFinish` was calling `setStreamingText()` between AI SDK steps, triggering a synchronous Ink render that blocked tool execution for ~30 seconds when message history was accumulated. Now skips the render when the step contains tool calls.
+- **Git branch display lag** — branch name in the status bar took up to 5 seconds to update after `git checkout`. Now refreshes immediately after every bash tool call via `onBashComplete` callback.
+- **Ollama KV cache invalidation** — system prompt was rebuilt from disk on every turn, changing its content and invalidating Ollama's prompt cache. Now cached per session.
+
+### Changed
+- **Tool visual updates deferred** — `setState` calls for tool status ("pending", "running", "done") are batched after tool completion instead of before, preventing synchronous renders from blocking tool execution.
+
+---
+
 ## [0.15.95] - 2026-04-02
 
 ### Added

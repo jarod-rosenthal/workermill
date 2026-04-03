@@ -48,5 +48,6 @@ export default defineConfig({
     "node:path",
     "node:os",
     "node:child_process",
+    "worker_threads",
   ],
 });

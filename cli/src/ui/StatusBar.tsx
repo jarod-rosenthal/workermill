@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { theme } from "./theme.js";
-import { findModelInfo } from "../../../api/src/providers/index.js";
+import { findModelInfo } from "../provider-registry.js";
 
 interface StatusBarProps {
   model: string;
@@ -38,7 +38,8 @@ function modelCtx(providerModel: string): string {
 
 /** Format a dollar cost as a short string. Prefixed with ~ to indicate estimate. */
 function formatCost(c: number): string {
-  if (c < 0.01) return "~$0.00";
+  if (c <= 0) return "$0.00";
+  if (c < 0.01) return "<$0.01";
   return `~$${c.toFixed(2)}`;
 }
 

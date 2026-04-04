@@ -187,8 +187,9 @@ Other examples:
 A single model writes bad code and approves its own bad code. WorkerMill separates planning, execution, and review into governed roles — each with a different model, different strengths, different blind spots.
 
 1. **A planner** reads your codebase and decomposes the task into scoped subtasks with specific files and clear acceptance criteria.
-2. **Specialist workers** execute one subtask at a time. A backend expert builds the API. A frontend expert wires the UI. A security expert hardens auth.
-3. **A reviewer** reads the actual diffs against your original spec — not a summary, the real code. It rejects bad work with specific feedback until the code meets the standard.
+2. **A critic** scores the plan (1-10) on completeness, feasibility, and risk — refining it up to 3 times until it passes. Bad plans get caught before a single line of code is written.
+3. **Specialist workers** execute one subtask at a time. A backend expert builds the API. A frontend expert wires the UI. A security expert hardens auth.
+4. **A reviewer** reads the actual diffs against your original spec — not a summary, the real code. It rejects bad work with specific feedback until the code meets the standard.
 
 ```json
 {
@@ -249,8 +250,9 @@ Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK]
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | |
 | **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
+| **xAI** | Grok 4.20, Grok 4.1 Fast, Grok Code Fast | 2M context, reasoning models |
 
-Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint.
+Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, Fireworks, or your own custom endpoint.
 
 ---
 

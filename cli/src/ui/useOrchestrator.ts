@@ -18,6 +18,7 @@ import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
 import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
 
 const PREVIEW_THROTTLE_MS = 120;
+export const SESSION_SUMMARY_DIVIDER = "────────────────────────";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -65,10 +66,9 @@ function formatUsageSummary(summary: UsageSummary): string {
     return "";
   }
 
-  const divider = "────────────────────────";
   const lines: string[] = [
     `**Usage:** ${formatTokenCount(summary.total.inputTokens)} in · ${formatTokenCount(summary.total.outputTokens)} out · ${formatCost(summary.total.cost)}`,
-    divider,
+    SESSION_SUMMARY_DIVIDER,
   ];
 
   const roleOrder: Array<"worker" | "planner" | "reviewer"> = ["worker", "planner", "reviewer"];
@@ -87,7 +87,7 @@ function formatUsageSummary(summary: UsageSummary): string {
   lines.push(...roleLines);
 
   if (rolesNeedingModelBreakdown.length > 0) {
-    lines.push(divider);
+    lines.push(SESSION_SUMMARY_DIVIDER);
     lines.push("model breakdown:");
     for (const role of roleOrder) {
       if (!rolesNeedingModelBreakdown.includes(role)) continue;
@@ -99,6 +99,14 @@ function formatUsageSummary(summary: UsageSummary): string {
   }
 
   return lines.join("\n");
+}
+
+export function addSessionSummaryDivider(
+  addMessage: (message: string) => void,
+  hasOperationalOutput: boolean,
+): void {
+  if (!hasOperationalOutput) return;
+  addMessage(SESSION_SUMMARY_DIVIDER);
 }
 
 function asString(value: unknown): string {
@@ -354,11 +362,13 @@ export function useOrchestrator(
 
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
+        let hasOperationalOutput = false;
         // emitLine: commit each line to Static immediately so it renders
         // once and never re-renders. Only the latest line stays in the
         // dynamic area as a preview.
         function emitLine(line: string): void {
           const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+          hasOperationalOutput = true;
           addMessage(normalized);
           setPreviewLineThrottled(normalized);
         }
@@ -506,6 +516,7 @@ export function useOrchestrator(
           if (seenPersonas.size > 0) parts.push(`${seenPersonas.size} expert${seenPersonas.size === 1 ? "" : "s"}`);
           if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
           parts.push(timeStr);
+          addSessionSummaryDivider(addMessage, hasOperationalOutput);
           addMessage(`**Shipped.** ${parts.join(" · ")}`);
           const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
           if (usageSummaryMessage) {
@@ -572,8 +583,10 @@ export function useOrchestrator(
       abortRef.current = controller;
 
       (async () => {
+        let hasOperationalOutput = false;
         function emitLine(line: string): void {
           const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+          hasOperationalOutput = true;
           addMessage(normalized);
           setPreviewLineThrottled(normalized);
         }
@@ -662,6 +675,7 @@ export function useOrchestrator(
             const mins = Math.floor(elapsed / 60);
             const secs = elapsed % 60;
             const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            addSessionSummaryDivider(addMessage, hasOperationalOutput);
 
             if (result.decision === "approved") {
               addMessage(`**Review complete.** Score: ${result.score}/10 · ${timeStr}`);

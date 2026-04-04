@@ -14,6 +14,25 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  addSessionSummaryDivider,
+  SESSION_SUMMARY_DIVIDER,
+} from "../ui/useOrchestrator.js";
+
+describe("session summary divider", () => {
+  it("inserts divider when operational output exists", () => {
+    const addMessage = vi.fn();
+    addSessionSummaryDivider(addMessage, true);
+    expect(addMessage).toHaveBeenCalledTimes(1);
+    expect(addMessage).toHaveBeenCalledWith(SESSION_SUMMARY_DIVIDER);
+  });
+
+  it("skips divider when there was no operational output", () => {
+    const addMessage = vi.fn();
+    addSessionSummaryDivider(addMessage, false);
+    expect(addMessage).not.toHaveBeenCalled();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 1. PERSONA_EMOJIS + getEmoji (pure replication from useOrchestrator.ts)

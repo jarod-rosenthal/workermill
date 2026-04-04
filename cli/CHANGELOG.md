@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.15.98] - 2026-04-04
 
 ### Fixed
+- **Transcript spacing polish (chat + tool flow)** — tightened several rendering edge cases that caused inconsistent vertical rhythm:
+  - always keeps one blank line between a user turn and the first assistant output line,
+  - keeps `/ship`-style compact logs single-spaced after that first gap,
+  - removes accidental wrapped-user artifacts like `word\n\n indented-continuation` in committed user messages.
+- **Live tool-call line crowding** — added a dedicated blank spacer before the active tool-call row so tool activity does not appear visually attached to the preceding transcript line.
+- **Permission prompt status-bar jump** — dismissing a tool permission prompt no longer causes the status bar to snap upward immediately. The prompt lane is temporarily reserved until the turn returns to idle, preventing layout jitter.
+- **Retry/token waste in repeated failure loops** — orchestration retries now stop earlier when the same fixable/transient failure signature repeats, and oversized retry/review feedback is truncated before re-injection into prompts to reduce context bloat.
 - **Pasted path scrambling in terminal input** — the CLI input box mixed functional `setValue(...)` updates with a stale `cursorPos` closure, so rapid pasted text could be inserted at the wrong position and appear garbled. Input editing now uses synchronized refs for value/cursor state so paste, typing, deletion, history restore, and completion acceptance all apply atomically.
 - **Cost tracking accuracy** — normalized `openai/` model prefixes before pricing lookup so usage from OpenAI-compatible model names resolves to the correct price entry.
 - **Bash dispatch latency** — reduced tool-call lag in interactive mode by fixing bash tool execution and preventing render-blocking tool dispatch paths.

@@ -253,8 +253,25 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
-      // Submit
+      // Submit (or insert newline with Shift+Enter / Alt+Enter / Meta+Enter)
       if (key.return) {
+        // Shift+Enter or Alt+Enter (Meta) inserts a newline instead of submitting.
+        // Alt+Enter is the most reliable cross-terminal option — most terminals
+        // send ESC+\r which Ink sees as key.meta + key.return. Shift+Enter works
+        // on terminals that support enhanced keyboard protocols (kitty, WezTerm,
+        // modern Windows Terminal).
+        if (key.shift || key.meta) {
+          const currentValue = valueRef.current;
+          const currentCursorPos = cursorPosRef.current;
+          const nextValue = currentValue.slice(0, currentCursorPos) + "\n" + currentValue.slice(currentCursorPos);
+          const nextCursorPos = currentCursorPos + 1;
+          valueRef.current = nextValue;
+          cursorPosRef.current = nextCursorPos;
+          setValue(nextValue);
+          setCursorPos(nextCursorPos);
+          setCompletionIndex(0);
+          return;
+        }
         const trimmed = valueRef.current.trim();
         if (trimmed) {
           onSubmit(trimmed);
@@ -284,6 +301,21 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // History: up — navigate from most recent to oldest.
       if (key.upArrow) {
+        // Multiline: move cursor up one line if possible, otherwise navigate history
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
+        const lineStart = currentValue.lastIndexOf("\n", currentCursorPos - 1) + 1;
+        if (lineStart > 0) {
+          // There's a previous line — move cursor up
+          const col = currentCursorPos - lineStart;
+          const prevLineStart = currentValue.lastIndexOf("\n", lineStart - 2) + 1;
+          const prevLineLen = lineStart - 1 - prevLineStart;
+          const nextCursorPos = prevLineStart + Math.min(col, prevLineLen);
+          cursorPosRef.current = nextCursorPos;
+          setCursorPos(nextCursorPos);
+          return;
+        }
+        // At top line — navigate history
         const newIdx = Math.min(historyIndex + 1, history.length - 1);
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
@@ -298,6 +330,23 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // History: down — navigate back toward most recent
       if (key.downArrow) {
+        // Multiline: move cursor down one line if possible, otherwise navigate history
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
+        const nextNewline = currentValue.indexOf("\n", currentCursorPos);
+        if (nextNewline !== -1) {
+          // There's a next line — move cursor down
+          const lineStart = currentValue.lastIndexOf("\n", currentCursorPos - 1) + 1;
+          const col = currentCursorPos - lineStart;
+          const nextLineStart = nextNewline + 1;
+          const nextLineEnd = currentValue.indexOf("\n", nextLineStart);
+          const nextLineLen = (nextLineEnd === -1 ? currentValue.length : nextLineEnd) - nextLineStart;
+          const nextCursorPos = nextLineStart + Math.min(col, nextLineLen);
+          cursorPosRef.current = nextCursorPos;
+          setCursorPos(nextCursorPos);
+          return;
+        }
+        // At bottom line — navigate history
         const newIdx = historyIndex - 1;
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
@@ -388,23 +437,68 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     ? completions[completionIndex % completions.length]
     : null;
 
-  return (
-    <Box>
-      <Text color={isActive ? theme.brand : theme.inactive} bold>
-        {isActive ? "\u25C6 " : "\u25C7 "}
-      </Text>
-      <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
-      {isActive ? (
-        <Text inverse>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
-      ) : null}
-      <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
-      {hint ? (
-        <Text color={theme.subtle} dimColor>
-          {hint.name.slice(value.length)}{" "}
-          <Text color={theme.inactive}>{hint.desc}</Text>
-          {completions.length > 1 ? <Text color={theme.inactive}>{` (↑↓ ${completions.length} matches, tab)`}</Text> : <Text color={theme.inactive}>{" (tab)"}</Text>}
+  // Multiline rendering: when the value contains newlines, render each line
+  // on its own row with the cursor positioned correctly within.
+  const isMultiline = value.includes("\n");
+
+  if (!isMultiline) {
+    return (
+      <Box>
+        <Text color={isActive ? theme.brand : theme.inactive} bold>
+          {isActive ? "\u25C6 " : "\u25C7 "}
         </Text>
-      ) : null}
+        <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
+        {isActive ? (
+          <Text inverse>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
+        ) : null}
+        <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
+        {hint ? (
+          <Text color={theme.subtle} dimColor>
+            {hint.name.slice(value.length)}{" "}
+            <Text color={theme.inactive}>{hint.desc}</Text>
+            {completions.length > 1 ? <Text color={theme.inactive}>{` (↑↓ ${completions.length} matches, tab)`}</Text> : <Text color={theme.inactive}>{" (tab)"}</Text>}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  }
+
+  // Multiline render — split value into lines and figure out which line/column the cursor is on
+  const lines = value.split("\n");
+  let cursorLine = 0;
+  let cursorCol = cursorPos;
+  for (let i = 0; i < lines.length; i++) {
+    if (cursorCol <= lines[i].length) {
+      cursorLine = i;
+      break;
+    }
+    cursorCol -= lines[i].length + 1; // +1 for the newline
+  }
+
+  return (
+    <Box flexDirection="column">
+      {lines.map((line, idx) => {
+        const isFirst = idx === 0;
+        const isCursorLine = idx === cursorLine;
+        return (
+          <Box key={idx}>
+            <Text color={isActive ? theme.brand : theme.inactive} bold>
+              {isFirst ? (isActive ? "\u25C6 " : "\u25C7 ") : "  "}
+            </Text>
+            {isCursorLine ? (
+              <>
+                <Text color={theme.text}>{line.slice(0, cursorCol)}</Text>
+                {isActive ? (
+                  <Text inverse>{cursorCol < line.length ? line[cursorCol] : " "}</Text>
+                ) : null}
+                <Text color={theme.text}>{line.slice(cursorCol + 1)}</Text>
+              </>
+            ) : (
+              <Text color={theme.text}>{line || " "}</Text>
+            )}
+          </Box>
+        );
+      })}
     </Box>
   );
 }

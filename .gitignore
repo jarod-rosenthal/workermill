@@ -87,7 +87,6 @@ __pycache__/
 .playwright-mcp/
 
 # Internal docs, plans, and Claude config (not public)
-/docs/
 /private/
 /worker/docs/
 /agent/docs/

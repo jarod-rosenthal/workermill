@@ -278,9 +278,14 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
-      // Newline insert: Shift+Enter or Ctrl+J/Ctrl+Enter.
-      // Ctrl+J is a reliable terminal fallback when Shift+Enter isn't distinct.
-      if ((key.return && key.shift) || (key.ctrl && (input === "j" || input === "\n" || key.return))) {
+      // Newline insert:
+      // - Shift+Enter
+      // - Alt/Meta+Enter sequences (including Shift+Alt+Enter) when the terminal
+      //   emits an ESC-prefixed Enter input.
+      // Keep plain Enter as submit even if some terminals set key.meta=true.
+      const isShiftEnter = key.return && key.shift;
+      const isEscPrefixedAltEnter = key.return && key.meta && input.includes("\u001b");
+      if (isShiftEnter || isEscPrefixedAltEnter) {
         insertNewlineAtCursor();
         return;
       }

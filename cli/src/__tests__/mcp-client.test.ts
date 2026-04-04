@@ -20,6 +20,14 @@ vi.mock("ai", () => ({
   jsonSchema: vi.fn((schema: unknown) => ({ __jsonSchema: schema })),
 }));
 
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+  StreamableHTTPClientTransport: vi.fn().mockImplementation(function() { return {}; }),
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+  SSEClientTransport: vi.fn().mockImplementation(function() { return {}; }),
+}));
+
 // ---------------------------------------------------------------------------
 // Mock ChildProcess factory
 // ---------------------------------------------------------------------------
@@ -37,8 +45,8 @@ function makeMockProcess(
   stdinWrites: string[];
 } {
   const stdinWrites: string[] = [];
-  const stdout = new EventEmitter() as EventEmitter & { resume?: () => void };
-  const stderr = new EventEmitter();
+  const stdout = Object.assign(new EventEmitter(), { resume: vi.fn() });
+  const stderr = Object.assign(new EventEmitter(), { resume: vi.fn() });
 
   const stdin = {
     write: vi.fn((data: string) => {
@@ -46,8 +54,8 @@ function makeMockProcess(
       if (responder) {
         const response = responder(data);
         if (response !== null) {
-          // Emit asynchronously so the listener is registered first
-          setImmediate(() => stdout.emit("data", Buffer.from(response)));
+          // Emit synchronously
+          stdout.emit("data", response);
         }
       }
     }),
@@ -114,15 +122,13 @@ function makeHandshakeResponder(tools: Array<{ name: string; description?: strin
 
     if (method === "tools/call") {
       const params = msg.params as Record<string, unknown>;
-      return (
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            content: [{ type: "text", text: `called:${params.name}` }],
-          },
-        }) + "\n"
-      );
+      return JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: `called:${params.name}` }],
+        },
+      }) + "\n";
     }
 
     return null;
@@ -630,18 +636,18 @@ describe("mcp-client", () => {
         const id = msg.id;
 
         if (method === "initialize") {
-          setImmediate(() => proc.stdout.emit("data", Buffer.from(
+          proc.stdout.write(Buffer.from(
             JSON.stringify({ jsonrpc: "2.0", id, result: { serverInfo: {} } }) + "\n",
-          )));
+          ));
         } else if (method === "notifications/initialized") {
           // no response
         } else if (method === "tools/list") {
-          setImmediate(() => proc.stdout.emit("data", Buffer.from(
+          proc.stdout.write(Buffer.from(
             JSON.stringify({ jsonrpc: "2.0", id, result: { tools: [] } }) + "\n",
-          )));
+          ));
         } else if (method === "tools/call") {
           callCount++;
-          setImmediate(() => proc.stdout.emit("data", Buffer.from(
+          proc.stdout.write(Buffer.from(
             JSON.stringify({
               jsonrpc: "2.0",
               id,
@@ -653,7 +659,7 @@ describe("mcp-client", () => {
                 ],
               },
             }) + "\n",
-          )));
+          ));
         }
       });
 
@@ -681,14 +687,14 @@ describe("mcp-client", () => {
         } else if (method === "notifications/initialized") {
           // no response
         } else if (method === "tools/list") {
-          setImmediate(() => proc.stdout.emit("data", Buffer.from(
+          proc.stdout.write(Buffer.from(
             JSON.stringify({ jsonrpc: "2.0", id, result: { tools: [] } }) + "\n",
-          )));
+          ));
         } else if (method === "tools/call") {
           const imageOnlyResult = { content: [{ type: "image", url: "http://img.com" }] };
-          setImmediate(() => proc.stdout.emit("data", Buffer.from(
+          proc.stdout.write(Buffer.from(
             JSON.stringify({ jsonrpc: "2.0", id, result: imageOnlyResult }) + "\n",
-          )));
+          ));
         }
       });
 
@@ -875,16 +881,14 @@ describe("mcp-client", () => {
             const full = JSON.stringify({ jsonrpc: "2.0", id, result: {} });
             // Split in the middle of the JSON
             const half = Math.floor(full.length / 2);
-            setImmediate(() => {
-              stdout.emit("data", Buffer.from(full.slice(0, half)));
-              stdout.emit("data", Buffer.from(full.slice(half) + "\n"));
-            });
+            stdout.write(full.slice(0, half));
+            stdout.write(full.slice(half) + "\n");
           } else if (method === "notifications/initialized") {
             // no response
           } else if (method === "tools/list") {
-            setImmediate(() => stdout.emit("data", Buffer.from(
+            stdout.write(Buffer.from(
               JSON.stringify({ jsonrpc: "2.0", id, result: { tools: [] } }) + "\n",
-            )));
+            ));
           }
         }),
       };
@@ -981,5 +985,170 @@ describe("mcp-client", () => {
       expect(spawnMock).not.toHaveBeenCalled();
       expect(mcpClient.hasMCPServers()).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTTP transport
+// ---------------------------------------------------------------------------
+
+describe("HTTP transport", () => {
+  let mcpClient: typeof import("../mcp-client.js");
+  let mockClient: ReturnType<typeof vi.fn>;
+  let mockClientInstance: any;
+
+  beforeEach(async () => {
+    vi.resetModules();
+
+    vi.doMock("child_process", () => ({ spawn: vi.fn(), execSync: vi.fn() }));
+
+    vi.doMock("@modelcontextprotocol/sdk/client/index.js", () => ({ Client: vi.fn() }));
+
+    mcpClient = await import("../mcp-client.js");
+
+    mockClient = vi.mocked((await import("@modelcontextprotocol/sdk/client/index.js")).Client);
+
+    mockClientInstance = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] }),
+      close: vi.fn(),
+    };
+
+    mockClient.mockImplementation(function() {
+
+      return mockClientInstance;
+
+    });
+  });
+
+  it("starts server with http transport and discovers tools", async () => {
+    const tools = [
+      { name: "search", description: "Search web", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+      { name: "scrape", description: "Scrape page", inputSchema: { type: "object", properties: { url: { type: "string" } } } },
+    ];
+
+    mockClientInstance.listTools.mockResolvedValue({ tools });
+
+    await mcpClient.startMCPServer("http-srv", { transport: 'http', endpoint: 'http://localhost:3000' });
+
+    expect(mockClientInstance.connect).toHaveBeenCalled();
+    expect(mockClientInstance.listTools).toHaveBeenCalled();
+
+    const allTools = mcpClient.getMCPTools();
+    expect(allTools).toHaveLength(2);
+    expect(allTools.map(t => t.tool.name)).toEqual(["search", "scrape"]);
+  });
+
+  it("handles connection error for http transport", async () => {
+    mockClientInstance.connect.mockRejectedValue(new Error("Connection refused"));
+
+    await expect(
+      mcpClient.startMCPServer("http-srv", { transport: 'http', endpoint: 'http://invalid-host:9999' })
+    ).rejects.toThrow("Connection refused");
+  });
+
+  it("requires endpoint for http transport", async () => {
+    await expect(
+      mcpClient.startMCPServer("http-srv", { transport: 'http' } as any)
+    ).rejects.toThrow('endpoint is required for http transport');
+  });
+
+  it("calls tool with arguments over http transport", async () => {
+    mockClientInstance.callTool.mockResolvedValue({
+      content: [{ type: "text", text: "result from http server" }]
+    });
+
+    await mcpClient.startMCPServer("http-srv", { transport: 'http', endpoint: 'http://localhost:3000' });
+
+    const result = await mcpClient.callMCPTool("http-srv", "test_tool", { arg: "value" });
+
+    expect(mockClientInstance.callTool).toHaveBeenCalledWith({
+      name: "test_tool",
+      arguments: { arg: "value" }
+    });
+    expect(result).toBe("result from http server");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SSE transport
+// ---------------------------------------------------------------------------
+
+describe("SSE transport", () => {
+  let mcpClient: typeof import("../mcp-client.js");
+  let mockClient: ReturnType<typeof vi.fn>;
+  let mockClientInstance: any;
+
+  beforeEach(async () => {
+    vi.resetModules();
+
+    vi.doMock("child_process", () => ({ spawn: vi.fn(), execSync: vi.fn() }));
+
+    vi.doMock("@modelcontextprotocol/sdk/client/index.js", () => ({ Client: vi.fn() }));
+
+    mcpClient = await import("../mcp-client.js");
+
+    mockClient = vi.mocked((await import("@modelcontextprotocol/sdk/client/index.js")).Client);
+
+    mockClientInstance = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] }),
+      close: vi.fn(),
+    };
+
+    mockClient.mockImplementation(function() {
+
+      return mockClientInstance;
+
+    });
+  });
+
+  it("starts server with sse transport and discovers tools", async () => {
+    const tools = [
+      { name: "notify", description: "Send notification", inputSchema: { type: "object", properties: { message: { type: "string" } } } },
+    ];
+
+    mockClientInstance.listTools.mockResolvedValue({ tools });
+
+    await mcpClient.startMCPServer("sse-srv", { transport: 'sse', endpoint: 'http://localhost:3000/events' });
+
+    expect(mockClientInstance.connect).toHaveBeenCalled();
+    expect(mockClientInstance.listTools).toHaveBeenCalled();
+
+    const allTools = mcpClient.getMCPTools();
+    expect(allTools).toHaveLength(1);
+    expect(allTools[0].tool.name).toBe("notify");
+  });
+
+  it("handles connection error for sse transport", async () => {
+    mockClientInstance.connect.mockRejectedValue(new Error("SSE connection failed"));
+
+    await expect(
+      mcpClient.startMCPServer("sse-srv", { transport: 'sse', endpoint: 'http://down-server:8080/sse' })
+    ).rejects.toThrow("SSE connection failed");
+  });
+
+  it("requires endpoint for sse transport", async () => {
+    await expect(
+      mcpClient.startMCPServer("sse-srv", { transport: 'sse' } as any)
+    ).rejects.toThrow('endpoint is required for sse transport');
+  });
+
+  it("calls tool with arguments over sse transport", async () => {
+    mockClientInstance.callTool.mockResolvedValue({
+      content: [{ type: "text", text: "result from sse server" }]
+    });
+
+    await mcpClient.startMCPServer("sse-srv", { transport: 'sse', endpoint: 'http://localhost:3000/events' });
+
+    const result = await mcpClient.callMCPTool("sse-srv", "notify_tool", { message: "hello" });
+
+    expect(mockClientInstance.callTool).toHaveBeenCalledWith({
+      name: "notify_tool",
+      arguments: { message: "hello" }
+    });
+    expect(result).toBe("result from sse server");
   });
 });

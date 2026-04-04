@@ -129,8 +129,9 @@ Ask it to fix a bug, explain a function, or refactor a module. It reads your cod
 Unlike single-model tools, WorkerMill never lets the same model review its own code.
 
 1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
-2. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run locally via Ollama (free) or on any cloud provider.
-3. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
+2. **A critic** (optional) scores the plan 1-10 on completeness, feasibility, and risk — refining it up to 3 times until it passes. Bad plans get caught before a single line of code is written.
+3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run locally via Ollama (free) or on any cloud provider.
+4. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
 
 ```json
 {
@@ -162,8 +163,9 @@ Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK]
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | |
 | **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
+| **xAI** | Grok 4.20, Grok 4.1 Fast, Grok Code Fast | 2M context, reasoning models |
 
-Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint.
+Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, Fireworks, or your own custom endpoint.
 
 ---
 
@@ -255,6 +257,23 @@ No server, no Docker, no account. First run walks you through provider setup —
 **Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
 
 </details>
+
+---
+
+## Documentation
+
+Deeper reference material, extension guides, and workflow recipes:
+
+- **[Commands](cli/docs/commands.md)** — every slash command, subcommand, and flag
+- **[Configuration](cli/docs/configuration.md)** — every field in `~/.workermill/cli.json` with examples
+- **[Personas](cli/docs/personas.md)** — writing custom expert roles, tool restrictions, per-project overrides
+- **[Hooks & Custom Commands](cli/docs/hooks-and-skills.md)** — shell hooks around tool calls, lifecycle events, custom slash commands
+- **[Recipes](cli/docs/recipes.md)** — concrete workflows: mixed-provider teams, quality gates, local-only setups, custom deploys
+- **[Troubleshooting](cli/docs/troubleshooting.md)** — common issues, diagnostics, and fixes
+- **[Architecture](cli/docs/architecture.md)** — how the CLI is put together
+- **[Contributing](cli/docs/contributing.md)** — dev setup and PR guidelines
+
+Also available on [workermill.com/docs/cli/reference](https://workermill.com/docs/cli/reference).
 
 ---
 

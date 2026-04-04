@@ -1,7 +1,7 @@
 {
   "name": "workermill",
   "version": "0.15.98",
-  "description": "AI coding team in your terminal. Different models plan, build, and review — so bad code gets caught, not shipped.",
+  "description": "Professional AI coding team in your terminal. Multi-expert orchestration with planning, execution, and review — ensuring quality code through governance, not just generation.",
   "type": "module",
   "bin": {
     "workermill": "dist/index.js",
@@ -11,7 +11,8 @@
     "dev": "tsx src/index.ts",
     "prebuild": "find ../api/src ../packages/engine/src -name '*.js' -not -path '*/node_modules/*' -delete 2>/dev/null; true",
     "build": "tsup",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "cp ../README.md ./README.md && npm run build",
+    "postpublish": "rm -f ./README.md",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -64,12 +65,23 @@
     "openai",
     "llm",
     "mcp",
-    "terminal"
+    "terminal",
+    "typescript",
+    "javascript",
+    "development",
+    "automation",
+    "git",
+    "ci-cd",
+    "testing",
+    "refactoring",
+    "code-generation",
+    "pair-programming"
   ],
   "license": "Apache-2.0",
   "files": [
     "dist/",
     "personas/",
+    "docs/",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

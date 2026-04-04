@@ -88,10 +88,15 @@ __pycache__/
 
 # Internal docs, plans, and Claude config (not public)
 /docs/
-/cli/docs/
+/private/
 /worker/docs/
 /agent/docs/
 /packages/docs/
+# Note: /cli/docs/ is public — user-facing CLI documentation
+
+# cli/README.md is generated at publish time from the root README.md
+# via the prepublishOnly script. Never edit it directly.
+/cli/README.md
 .plan
 .superpowers/
 CLAUDE.md

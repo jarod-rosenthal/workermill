@@ -4,6 +4,14 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.98] - 2026-04-04
+
+### Fixed
+- **Cost tracking accuracy** — normalized `openai/` model prefixes before pricing lookup so usage from OpenAI-compatible model names resolves to the correct price entry.
+- **Bash dispatch latency** — reduced tool-call lag in interactive mode by fixing bash tool execution and preventing render-blocking tool dispatch paths.
+- **System prompt / persona updates** — refreshed the CLI system prompt and fallback persona guidance to better match current behavior and available commands.
+- **Setup / model filtering** — updated model selection behavior to keep older OpenAI families out of the current-model picker while preserving supported pricing and routing.
+
 ## [0.15.97] - 2026-04-03
 
 ### Fixed

@@ -22,6 +22,11 @@ function resolveBaseProvider(provider: string): string {
   return provider; // fallback — getPricingEngine will use its own fallback
 }
 
+function normalizeOpenAIModel(model: string): string {
+  const normalized = model.startsWith("openai/") ? model.slice("openai/".length) : model;
+  return normalized.replace(/^gpt-5\.4-/, "gpt-5.4-");
+}
+
 export class CostTracker {
   private entries: CostEntry[] = [];
 
@@ -33,15 +38,16 @@ export class CostTracker {
     outputTokens: number
   ): void {
     const engine = getPricingEngine(resolveBaseProvider(provider));
+    const resolvedModel = normalizeOpenAIModel(model);
     const cost = engine.calculateTokenCost(
       { inputTokens, outputTokens, cacheCreationTokens: 0, cacheReadTokens: 0 },
-      model,
+      resolvedModel,
     );
 
     this.entries.push({
       persona,
       provider,
-      model,
+      model: resolvedModel,
       inputTokens,
       outputTokens,
       cost,

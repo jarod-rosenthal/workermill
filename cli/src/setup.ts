@@ -393,14 +393,14 @@ async function fetchCloudModels(
       if (res.ok) {
         const data = (await res.json()) as { data?: { id: string }[] };
         const allModels = (data.data || []).map(m => m.id);
-        // Filter to GPT/o-series models, exclude old junk
+        // Filter to current GPT/o-series models and exclude older families.
         const relevant = allModels.filter(m =>
-          (m.startsWith("gpt-") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) &&
+          (m.startsWith("gpt-") || m.startsWith("o3") || m.startsWith("o4")) &&
           !m.includes("instruct") && !m.includes("realtime") && !m.includes("audio") &&
-          !m.includes("gpt-3.5") && !m.includes("gpt-4-") && !m.includes("gpt-4o-mini-") &&
+          !m.includes("gpt-3.5") && !m.includes("gpt-4") && !m.includes("o1") &&
           !m.includes("-0") // skip dated snapshots like gpt-5.4-0325
         );
-        // Sort by version number descending (gpt-5.4 before gpt-4o)
+        // Sort by version number descending (gpt-5.4 before gpt-5)
         relevant.sort((a, b) => {
           const va = parseFloat(a.match(/(\d+\.?\d*)/)?.[1] || "0");
           const vb = parseFloat(b.match(/(\d+\.?\d*)/)?.[1] || "0");
@@ -706,7 +706,7 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
   console.log(chalk.dim("  Three roles — workers, planner, reviewer — each can use a different model."));
   console.log(chalk.dim("  Best: Ollama for workers (free, local), cloud models for planning/review."));
-  console.log(chalk.dim("  No local models? Haiku or Gemini Flash are low-cost cloud alternatives."));
+  console.log(chalk.dim("  No local models? GPT-5.4 mini or Gemini Flash are low-cost cloud alternatives."));
   console.log();
 
   // ── Step 1: Workers (expert personas — the default provider) ──

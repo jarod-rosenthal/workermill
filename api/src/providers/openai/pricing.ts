@@ -22,7 +22,7 @@ import { ECS_FARGATE_SPOT_RATE_PER_HOUR } from "../../config/pricing.js";
  */
 const OPENAI_MODELS: Record<string, ModelInfo> = {
   // ---------------------------------------------------------------------------
-  // GPT-5.4 family (March 2026) — verified from openai.com/api/pricing
+  // GPT-5.4 family — primary current OpenAI models for WM CLI
   // ---------------------------------------------------------------------------
   "gpt-5.4": {
     id: "gpt-5.4",

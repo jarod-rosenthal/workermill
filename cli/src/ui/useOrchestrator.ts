@@ -158,10 +158,20 @@ export function useOrchestrator(
         }
 
         // ---- Config ------------------------------------------------
-        // Use the CLI-resolved config (has --auto-revise etc.) if available,
-        // otherwise fall back to loading from disk.  Hoisted above try so
-        // `finally` can read `config.bell`.
-        const config = cliConfig ?? resolveConfig();
+        // Always reload from disk so /settings changes take effect
+        // without restarting the CLI. CLI flags (--auto-revise etc.)
+        // are preserved by merging from the startup config.
+        const freshConfig = resolveConfig();
+        const config = freshConfig
+          ? {
+              ...freshConfig,
+              review: {
+                ...freshConfig.review,
+                // Preserve --auto-revise CLI flag if it was set at startup
+                ...(cliConfig?.review?.autoRevise ? { autoRevise: true } : {}),
+              },
+            }
+          : cliConfig ?? null;
 
         try {
           if (!config) {
@@ -372,7 +382,16 @@ export function useOrchestrator(
           setPreviewLine("");
         }
 
-        const config = cliConfig ?? resolveConfig();
+        const freshReviewConfig = resolveConfig();
+        const config = freshReviewConfig
+          ? {
+              ...freshReviewConfig,
+              review: {
+                ...freshReviewConfig.review,
+                ...(cliConfig?.review?.autoRevise ? { autoRevise: true } : {}),
+              },
+            }
+          : cliConfig ?? null;
         if (!config) {
           addMessage("No provider configured. Run `workermill` (setup) first.");
           setRunning(false);

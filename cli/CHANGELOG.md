@@ -12,6 +12,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Bash dispatch latency** — reduced tool-call lag in interactive mode by fixing bash tool execution and preventing render-blocking tool dispatch paths.
 - **System prompt / persona updates** — refreshed the CLI system prompt and fallback persona guidance to better match current behavior and available commands.
 - **Setup / model filtering** — updated model selection behavior to keep older OpenAI families out of the current-model picker while preserving supported pricing and routing.
+- **`/settings review.threshold` not taking effect** — changing the approval threshold via `/settings review.threshold <n>` saved to disk but the orchestrator still used the stale config snapshot from CLI startup, always falling back to the default of 8. `/ship` and `/review` now reload config fresh from disk on each run so settings changes take effect immediately without restarting.
+- **Bash tool debug log below status bar** — the bash worker thread wrote `[bash-worker] received: ...` directly to `process.stderr`, bypassing Ink's terminal management and rendering text below the status bar. Removed the debug log.
+
+### Changed
+- **Model registries updated to April 2026** — removed deprecated/ancient models from `/model` autocomplete. Updated: Anthropic (3 current models), Google (2.5 + 3.x only), xAI (Grok 4.x with 2M context), DeepSeek (+V4), Mistral (Large 3, Small 3.1, Codestral, Devstral 2), Groq (+Qwen3), OpenRouter, Bedrock, Azure.
 
 ## [0.15.97] - 2026-04-03
 

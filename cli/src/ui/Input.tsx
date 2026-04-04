@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
 import { listProviders } from "../provider-registry.js";
@@ -55,10 +55,12 @@ interface InputProps {
  * User text input component with history and slash command autocomplete.
  */
 export function Input({ onSubmit, isActive, history }: InputProps): React.ReactElement {
+  const { stdout } = useStdout();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [completionIndex, setCompletionIndex] = useState(0);
+  const [cursorVisible, setCursorVisible] = useState(true);
   const valueRef = useRef(value);
   const cursorPosRef = useRef(cursorPos);
 
@@ -69,6 +71,18 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   useEffect(() => {
     cursorPosRef.current = cursorPos;
   }, [cursorPos]);
+
+  // Blink cursor while input is active so the caret is visible before typing.
+  useEffect(() => {
+    if (!isActive) {
+      setCursorVisible(true);
+      return;
+    }
+    const id = setInterval(() => {
+      setCursorVisible((v) => !v);
+    }, 650);
+    return () => clearInterval(id);
+  }, [isActive]);
 
   // Fetch Ollama models once on mount (async)
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -255,12 +269,10 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Submit (or insert newline with Shift+Enter / Alt+Enter / Meta+Enter)
       if (key.return) {
-        // Shift+Enter or Alt+Enter (Meta) inserts a newline instead of submitting.
-        // Alt+Enter is the most reliable cross-terminal option — most terminals
-        // send ESC+\r which Ink sees as key.meta + key.return. Shift+Enter works
-        // on terminals that support enhanced keyboard protocols (kitty, WezTerm,
-        // modern Windows Terminal).
-        if (key.shift || key.meta) {
+        // Only Shift+Enter inserts a newline. Treat Enter as submit otherwise.
+        // Some terminals can set key.meta on plain Enter, which caused accidental
+        // hidden newlines and chopped committed user messages.
+        if (key.shift) {
           const currentValue = valueRef.current;
           const currentCursorPos = cursorPosRef.current;
           const nextValue = currentValue.slice(0, currentCursorPos) + "\n" + currentValue.slice(currentCursorPos);
@@ -274,7 +286,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         }
         const trimmed = valueRef.current.trim();
         if (trimmed) {
-          onSubmit(trimmed);
+          onSubmit(trimmed.replace(/\r\n?/g, "\n"));
           valueRef.current = "";
           cursorPosRef.current = 0;
           setValue("");
@@ -437,20 +449,25 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     ? completions[completionIndex % completions.length]
     : null;
 
-  // Multiline rendering: when the value contains newlines, render each line
-  // on its own row with the cursor positioned correctly within.
+  // Render width for the input content area (excluding 2-char prompt prefix).
+  const contentWidth = Math.max(10, (stdout?.columns ?? 80) - 2);
   const isMultiline = value.includes("\n");
+  const isSoftWrappedSingleLine = !isMultiline && value.length > contentWidth;
 
-  if (!isMultiline) {
+  if (!isMultiline && !isSoftWrappedSingleLine) {
     return (
       <Box>
         <Text color={isActive ? theme.brand : theme.inactive} bold>
           {isActive ? "\u25C6 " : "\u25C7 "}
         </Text>
         <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
-        {isActive ? (
-          <Text inverse>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
-        ) : null}
+                {isActive ? (
+                  cursorVisible ? (
+                    <Text color={theme.inactive}>{cursorPos < value.length ? value[cursorPos] : "▏"}</Text>
+                  ) : (
+                    <Text color={theme.text}>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
+                  )
+                ) : null}
         <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
         {hint ? (
           <Text color={theme.subtle} dimColor>
@@ -463,17 +480,35 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     );
   }
 
-  // Multiline render — split value into lines and figure out which line/column the cursor is on
-  const lines = value.split("\n");
+  // Wrapped multiline render (explicit newlines + soft wraps) with an accurate cursor.
+  const lines: string[] = [""];
+  let lineIndex = 0;
+  let col = 0;
   let cursorLine = 0;
-  let cursorCol = cursorPos;
-  for (let i = 0; i < lines.length; i++) {
-    if (cursorCol <= lines[i].length) {
-      cursorLine = i;
-      break;
+  let cursorCol = 0;
+  for (let i = 0; i <= value.length; i++) {
+    if (i === cursorPos) {
+      cursorLine = lineIndex;
+      cursorCol = col;
     }
-    cursorCol -= lines[i].length + 1; // +1 for the newline
+    if (i === value.length) break;
+    const ch = value[i];
+    if (ch === "\n") {
+      lines.push("");
+      lineIndex++;
+      col = 0;
+      continue;
+    }
+    lines[lineIndex] += ch;
+    col++;
+    if (col >= contentWidth) {
+      lines.push("");
+      lineIndex++;
+      col = 0;
+    }
   }
+
+
 
   return (
     <Box flexDirection="column">
@@ -489,7 +524,11 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
               <>
                 <Text color={theme.text}>{line.slice(0, cursorCol)}</Text>
                 {isActive ? (
-                  <Text inverse>{cursorCol < line.length ? line[cursorCol] : " "}</Text>
+                  cursorVisible ? (
+                    <Text color={theme.inactive}>{cursorCol < line.length ? line[cursorCol] : "▏"}</Text>
+                  ) : (
+                    <Text color={theme.text}>{cursorCol < line.length ? line[cursorCol] : " "}</Text>
+                  )
                 ) : null}
                 <Text color={theme.text}>{line.slice(cursorCol + 1)}</Text>
               </>

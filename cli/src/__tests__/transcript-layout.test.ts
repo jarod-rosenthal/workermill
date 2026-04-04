@@ -3,6 +3,7 @@ import type { Message } from "../ui/types.js";
 import {
   getAssistantMarginTop,
   normalizeAssistantContent,
+  normalizeUserContent,
   shouldRenderUserDivider,
 } from "../ui/transcript-layout.js";
 
@@ -79,6 +80,36 @@ describe("transcript layout contract", () => {
   it("normalizes trailing newlines while preserving internal blank lines", () => {
     const content = "line 1\r\n\r\nline 2\n\n";
     expect(normalizeAssistantContent(content)).toBe("line 1\n\nline 2");
+  });
+
+  it("normalizes accidental wrapped user gaps without flattening normal prose", () => {
+    const content = "what is the low\n\n hanging fruit?";
+    expect(normalizeUserContent(content)).toBe("what is the low hanging fruit?");
+  });
+
+  it("keeps intentional user paragraph breaks when next paragraph starts uppercase", () => {
+    const content = "First paragraph.\n\nSecond paragraph.";
+    expect(normalizeUserContent(content)).toBe("First paragraph.\n\nSecond paragraph.");
+  });
+
+  it("reflows chopped prose with mid-word newline splits", () => {
+    const content = "ok, great work ... onl\ny\n\n real issues.";
+    expect(normalizeUserContent(content)).toBe("ok, great work ... only real issues.");
+  });
+
+  it("fixes orphan punctuation line followed by an empty-line gap", () => {
+    const content = "This happens after enter, it gets reformatted\n,\n\n so this is a test.";
+    expect(normalizeUserContent(content)).toBe("This happens after enter, it gets reformatted, so this is a test.");
+  });
+
+  it("reflows lowercase hard-wrap continuation from long submitted input", () => {
+    const content = "I'm checking the terminal and it's\nsupposed to stay on one line.";
+    expect(normalizeUserContent(content)).toBe("I'm checking the terminal and it's supposed to stay on one line.");
+  });
+
+  it("normalizes carriage-return variants before applying user-wrap cleanup", () => {
+    const content = "This happens after enter, it gets reformatted\r,\r\r so this is a test.";
+    expect(normalizeUserContent(content)).toBe("This happens after enter, it gets reformatted, so this is a test.");
   });
 
   it("renders user divider for all but the first user message", () => {

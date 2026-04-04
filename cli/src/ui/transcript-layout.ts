@@ -6,7 +6,51 @@ import type { Message } from "./types.js";
  * commonly appear in streamed/system output.
  */
 export function normalizeAssistantContent(content: string): string {
-  return content.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+  return content.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+}
+
+/**
+ * Normalize user content for transcript display.
+ * Keeps authored structure, but fixes a common terminal artifact where wrapped
+ * prose is persisted with an accidental blank/indented continuation line.
+ */
+export function normalizeUserContent(content: string): string {
+  const unix = content.replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n");
+
+  // Hard guard: if we detect suspicious prose wrapping artifacts
+  // (mid-word splits, punctuation orphaning, lowercase paragraph break),
+  // reflow to a single line so user input is never shown as "chopped up".
+  const hasMidWordSplit = /[A-Za-z]\n[A-Za-z]/.test(unix);
+  const hasOrphanPunctuation = /\n\s*[,.;:!?]/.test(unix);
+  const hasLowercaseParagraphBreak = /\n\s*\n\s*[a-z]/.test(unix);
+  const hasIndentedLowerContinuation = /[a-z0-9]\n[ \t]+[a-z]/.test(unix);
+  const hasLowercaseHardWrap = /[^\n.!?:]\n\s*[a-z]/.test(unix);
+  const lines = unix.split("\n");
+  const hasStructuredMultiline = lines.some((line) =>
+    /^\s*([-*]|\d+\.)\s+/.test(line) || line.includes("```")
+  );
+
+  const hasSuspiciousWrap =
+    hasMidWordSplit ||
+    hasOrphanPunctuation ||
+    hasLowercaseParagraphBreak ||
+    hasIndentedLowerContinuation ||
+    hasLowercaseHardWrap;
+  if (hasSuspiciousWrap && !hasStructuredMultiline) {
+    const healedWords = unix
+      .replace(/([A-Za-z])\n([A-Za-z])/g, "$1$2")
+      .replace(/\n\s*([,.;:!?])/g, "$1");
+    return healedWords
+      .replace(/\s*\n\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  return unix
+    // "low\n\nhanging" -> "low\nhanging" (lowercase prose continuation)
+    .replace(/([a-z0-9])\n\s*\n\s*([a-z])/g, "$1\n$2")
+    // "low\n  hanging" -> "low\nhanging" (indented continuation artifact)
+    .replace(/([a-z0-9])\n[ \t]+([a-z])/g, "$1\n$2");
 }
 
 /**

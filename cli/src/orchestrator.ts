@@ -203,7 +203,7 @@ function buildReasoningOptions(provider: string, modelName: string): Record<stri
 
 // ---------------------------------------------------------------------------
 // Planning Critic — ported from api/src/services/critic-agent-local.ts
-// Scores plans 0-100, approves at >=threshold, refines up to maxIterations.
+// Scores plans 1-10, approves at >=threshold, refines up to maxIterations.
 // ---------------------------------------------------------------------------
 
 interface CriticResult {
@@ -923,7 +923,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
 
   // ── Planning Critic Loop ──
   // Ported from api/src/services/critic-agent-local.ts.
-  // Scores the plan 0-100, refines up to maxIterations if below threshold.
+  // Scores the plan 1-10, refines up to maxIterations if below threshold.
   const criticEnabled = config.review?.useCritic === true; // off by default, enable with /settings review.critic true
   const criticThreshold = config.review?.criticThreshold ?? 8;
   const maxCriticIterations = 3;
@@ -1425,7 +1425,7 @@ export async function runOrchestration(
     });
     output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
 
-    // Planning critic runs inside planStories() — scores 0-100, refines up to 3x.
+    // Planning critic runs inside planStories() — scores 1-10, refines up to 3x.
     // Disable with /settings review.critic false
 
     // Ensure every story has a unique ID (some planners output stories without IDs)

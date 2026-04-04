@@ -924,7 +924,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   // ── Planning Critic Loop ──
   // Ported from api/src/services/critic-agent-local.ts.
   // Scores the plan 0-100, refines up to maxIterations if below threshold.
-  const criticEnabled = config.review?.useCritic !== false; // enabled by default
+  const criticEnabled = config.review?.useCritic === true; // off by default, enable with /settings review.critic true
   const criticThreshold = config.review?.criticThreshold ?? 8;
   const maxCriticIterations = 3;
   let totalInputTokens = planUsage?.inputTokens || 0;

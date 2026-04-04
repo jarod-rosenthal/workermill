@@ -254,10 +254,10 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
       ).toBe("allowed");
     });
 
-    it("allows git in auto-edit mode", () => {
+    it("prompts for git in auto-edit mode", () => {
       expect(
         resolvePermission("git", {}, { permMode: "acceptEdits" }),
-      ).toBe("allowed");
+      ).toBe("prompt");
     });
 
     it("allows fetch in auto-edit mode", () => {

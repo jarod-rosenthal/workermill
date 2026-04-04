@@ -63,7 +63,7 @@ interface AppProps {
   sessionStart?: number;
   /** Whether project instructions are loaded. */
   hasInstructions?: boolean;
-  /** Latest build output line — rendered at cursor in dynamic area. */
+  /** Latest build output line — rendered in the dynamic area above prompts. */
   buildPreviewLine?: string;
   /** Streaming tool calls — only latest shown in dynamic area during execution. */
   streamingToolCalls?: ToolCallInfo[];
@@ -217,28 +217,33 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Tool call — only when running */}
-      {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
-        <Box marginLeft={2}>
-          <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
-        </Box>
-      ) : null}
-
-      {/* Activity indicator — always rendered to keep dynamic area height stable */}
-      <Box marginLeft={2} height={1}>
-        {props.orchestratorStatus ? (
-          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
-        ) : props.status === "thinking" ? (
-          <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
-        ) : props.status === "streaming" ? (
-          <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
-        ) : props.status === "tool_running" ? (
-          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
-        ) : props.status === "permission" ? (
-          <Text color={theme.permission}>● Waiting for permission...</Text>
+      {/* Tool call/activity — fixed region above prompts and status bar */}
+      <Box flexDirection="column" minHeight={2}>
+        {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
+          <Box marginLeft={2}>
+            <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
+          </Box>
         ) : (
-          <Text>{" "}</Text>
+          <Box height={1} />
         )}
+
+        <Box marginLeft={2} height={1}>
+          {props.orchestratorStatus ? (
+            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+          ) : props.status === "thinking" ? (
+            <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+          ) : props.status === "streaming" ? (
+            <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+          ) : props.status === "tool_running" ? (
+            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+          ) : props.status === "permission" ? (
+            <Text color={theme.permission}>● Waiting for permission...</Text>
+          ) : props.buildPreviewLine ? (
+            <Text color={theme.subtle}>{props.buildPreviewLine}</Text>
+          ) : (
+            <Text>{" "}</Text>
+          )}
+        </Box>
       </Box>
 
       {/* Permission/confirm prompts — shown above status bar when active */}

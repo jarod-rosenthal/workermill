@@ -91,11 +91,11 @@ describe("toolStatusLabel", () => {
 
   describe("git", () => {
     it("git with action", () => {
-      expect(toolStatusLabel("git", { action: "commit" })).toBe("Git commit...");
+      expect(toolStatusLabel("git", { action: "commit" })).toBe("Running git...");
     });
 
     it("git without action", () => {
-      expect(toolStatusLabel("git", {})).toBe("Git ...");
+      expect(toolStatusLabel("git", {})).toBe("Running git...");
     });
   });
 

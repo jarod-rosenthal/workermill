@@ -227,6 +227,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
           </>
         ) : null}
       </Box>
+
     </Box>
   );
 }

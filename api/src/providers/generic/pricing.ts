@@ -308,6 +308,17 @@ export const XAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
+  "grok-code-fast-1": {
+    id: "grok-code-fast-1",
+    displayName: "Grok Code Fast",
+    tier: "balanced",
+    inputRate: 0.0002, // $0.20 per 1M
+    outputRate: 0.0015, // $1.50 per 1M
+    cacheReadRate: 0.00002, // $0.02 per 1M
+    contextWindow: 256000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
 };
 
 /**

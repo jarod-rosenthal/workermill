@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
@@ -177,6 +177,22 @@ export function App(props: AppProps): React.ReactElement {
   const { stdout } = useStdout();
   const lastEscRef = useRef(0);
 
+  const exitNow = useCallback(() => {
+    stopAllMCPServers();
+    shutdownLSP();
+    void browserClose();
+    exit();
+    setTimeout(() => process.exit(0), 100);
+  }, [exit]);
+
+  const handleInterrupt = useCallback(() => {
+    if (props.status !== "idle") {
+      props.onCancel();
+      return;
+    }
+    exitNow();
+  }, [props.status, props.onCancel, exitNow]);
+
   // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
   // input so modified Enter combos can be delivered distinctly.
   useEffect(() => {
@@ -190,6 +206,18 @@ export function App(props: AppProps): React.ReactElement {
       }
     };
   }, []);
+
+  // Fallback for terminals/shells that deliver Ctrl+C as SIGINT instead of a
+  // keypress event through Ink's input stream.
+  useEffect(() => {
+    const onSigint = () => {
+      handleInterrupt();
+    };
+    process.on("SIGINT", onSigint);
+    return () => {
+      process.off("SIGINT", onSigint);
+    };
+  }, [handleInterrupt]);
 
   useInput((input, key) => {
     if (key.escape) {
@@ -223,16 +251,8 @@ export function App(props: AppProps): React.ReactElement {
     // Ctrl+C:
     // - while running: cancel current operation
     // - while idle: exit immediately
-    if (key.ctrl && input === "c") {
-      if (props.status !== "idle") {
-        props.onCancel();
-        return;
-      }
-      stopAllMCPServers();
-      shutdownLSP();
-      void browserClose();
-      exit();
-      setTimeout(() => process.exit(0), 100);
+    if (key.ctrl && (input === "c" || input === "\u0003")) {
+      handleInterrupt();
       return;
     }
   }, { isActive: true });

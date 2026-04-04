@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.15.98] - 2026-04-04
 
 ### Fixed
+- **Pasted path scrambling in terminal input** — the CLI input box mixed functional `setValue(...)` updates with a stale `cursorPos` closure, so rapid pasted text could be inserted at the wrong position and appear garbled. Input editing now uses synchronized refs for value/cursor state so paste, typing, deletion, history restore, and completion acceptance all apply atomically.
 - **Cost tracking accuracy** — normalized `openai/` model prefixes before pricing lookup so usage from OpenAI-compatible model names resolves to the correct price entry.
 - **Bash dispatch latency** — reduced tool-call lag in interactive mode by fixing bash tool execution and preventing render-blocking tool dispatch paths.
 - **System prompt / persona updates** — refreshed the CLI system prompt and fallback persona guidance to better match current behavior and available commands.

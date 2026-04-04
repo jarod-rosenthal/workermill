@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
@@ -59,6 +59,16 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   const [cursorPos, setCursorPos] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [completionIndex, setCompletionIndex] = useState(0);
+  const valueRef = useRef(value);
+  const cursorPosRef = useRef(cursorPos);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    cursorPosRef.current = cursorPos;
+  }, [cursorPos]);
 
   // Fetch Ollama models once on mount (async)
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -184,6 +194,8 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         const selected = completions[completionIndex % completions.length];
         if (selected) {
           const newVal = selected.name + " ";
+          valueRef.current = newVal;
+          cursorPosRef.current = newVal.length;
           setValue(newVal);
           setCursorPos(newVal.length);
           setCompletionIndex(0);
@@ -203,33 +215,51 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Left/Right arrow: move cursor
       if (key.leftArrow) {
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
         if (key.ctrl || key.meta) {
           // Jump to previous word boundary
-          const before = value.slice(0, cursorPos);
+          const before = currentValue.slice(0, currentCursorPos);
           const match = before.match(/\S+\s*$/);
-          setCursorPos(match ? cursorPos - match[0].length : 0);
+          const nextCursorPos = match ? currentCursorPos - match[0].length : 0;
+          cursorPosRef.current = nextCursorPos;
+          setCursorPos(nextCursorPos);
         } else {
-          setCursorPos((p) => Math.max(0, p - 1));
+          setCursorPos((p) => {
+            const nextCursorPos = Math.max(0, p - 1);
+            cursorPosRef.current = nextCursorPos;
+            return nextCursorPos;
+          });
         }
         return;
       }
       if (key.rightArrow) {
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
         if (key.ctrl || key.meta) {
           // Jump to next word boundary
-          const after = value.slice(cursorPos);
+          const after = currentValue.slice(currentCursorPos);
           const match = after.match(/^\s*\S+/);
-          setCursorPos(match ? cursorPos + match[0].length : value.length);
+          const nextCursorPos = match ? currentCursorPos + match[0].length : currentValue.length;
+          cursorPosRef.current = nextCursorPos;
+          setCursorPos(nextCursorPos);
         } else {
-          setCursorPos((p) => Math.min(value.length, p + 1));
+          setCursorPos((p) => {
+            const nextCursorPos = Math.min(valueRef.current.length, p + 1);
+            cursorPosRef.current = nextCursorPos;
+            return nextCursorPos;
+          });
         }
         return;
       }
 
       // Submit
       if (key.return) {
-        const trimmed = value.trim();
+        const trimmed = valueRef.current.trim();
         if (trimmed) {
           onSubmit(trimmed);
+          valueRef.current = "";
+          cursorPosRef.current = 0;
           setValue("");
           setCursorPos(0);
           setHistoryIndex(-1);
@@ -240,12 +270,15 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Home / Ctrl+A: beginning of line
       if ((key.ctrl && input === "a")) {
+        cursorPosRef.current = 0;
         setCursorPos(0);
         return;
       }
       // End / Ctrl+E: end of line
       if ((key.ctrl && input === "e")) {
-        setCursorPos(value.length);
+        const nextCursorPos = valueRef.current.length;
+        cursorPosRef.current = nextCursorPos;
+        setCursorPos(nextCursorPos);
         return;
       }
 
@@ -255,6 +288,8 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
           const hist = history[history.length - 1 - newIdx];
+          valueRef.current = hist;
+          cursorPosRef.current = hist.length;
           setValue(hist);
           setCursorPos(hist.length);
         }
@@ -267,10 +302,14 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
           const hist = history[history.length - 1 - newIdx];
+          valueRef.current = hist;
+          cursorPosRef.current = hist.length;
           setValue(hist);
           setCursorPos(hist.length);
         } else {
           setHistoryIndex(-1);
+          valueRef.current = "";
+          cursorPosRef.current = 0;
           setValue("");
           setCursorPos(0);
         }
@@ -287,9 +326,15 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Backspace: delete character before cursor
       if (key.backspace || key.delete) {
-        if (cursorPos > 0) {
-          setValue((v) => v.slice(0, cursorPos - 1) + v.slice(cursorPos));
-          setCursorPos((p) => p - 1);
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
+        if (currentCursorPos > 0) {
+          const nextValue = currentValue.slice(0, currentCursorPos - 1) + currentValue.slice(currentCursorPos);
+          const nextCursorPos = currentCursorPos - 1;
+          valueRef.current = nextValue;
+          cursorPosRef.current = nextCursorPos;
+          setValue(nextValue);
+          setCursorPos(nextCursorPos);
         }
         setCompletionIndex(0);
         return;
@@ -297,6 +342,8 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Ctrl+U: clear line
       if (key.ctrl && input === "u") {
+        valueRef.current = "";
+        cursorPosRef.current = 0;
         setValue("");
         setCursorPos(0);
         setCompletionIndex(0);
@@ -305,19 +352,31 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
       // Ctrl+W: delete last word (from cursor position)
       if (key.ctrl && input === "w") {
-        const before = value.slice(0, cursorPos);
-        const after = value.slice(cursorPos);
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
+        const before = currentValue.slice(0, currentCursorPos);
+        const after = currentValue.slice(currentCursorPos);
         const trimmed = before.replace(/\S+\s*$/, "");
-        setValue(trimmed + after);
-        setCursorPos(trimmed.length);
+        const nextValue = trimmed + after;
+        const nextCursorPos = trimmed.length;
+        valueRef.current = nextValue;
+        cursorPosRef.current = nextCursorPos;
+        setValue(nextValue);
+        setCursorPos(nextCursorPos);
         setCompletionIndex(0);
         return;
       }
 
       // Regular character input (ignore ctrl/meta sequences)
       if (input && !key.ctrl && !key.meta) {
-        setValue((v) => v.slice(0, cursorPos) + input + v.slice(cursorPos));
-        setCursorPos((p) => p + input.length);
+        const currentValue = valueRef.current;
+        const currentCursorPos = cursorPosRef.current;
+        const nextValue = currentValue.slice(0, currentCursorPos) + input + currentValue.slice(currentCursorPos);
+        const nextCursorPos = currentCursorPos + input.length;
+        valueRef.current = nextValue;
+        cursorPosRef.current = nextCursorPos;
+        setValue(nextValue);
+        setCursorPos(nextCursorPos);
         setCompletionIndex(0);
       }
     },

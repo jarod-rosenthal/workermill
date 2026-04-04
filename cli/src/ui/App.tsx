@@ -6,6 +6,11 @@ import { PermissionPrompt } from "./PermissionPrompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { Input } from "./Input.js";
 import { theme } from "./theme.js";
+import {
+  getAssistantMarginTop,
+  normalizeAssistantContent,
+  shouldRenderUserDivider,
+} from "./transcript-layout.js";
 import { stopAllMCPServers } from "../mcp-client.js";
 import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
 import { browserClose } from "../browser.js";
@@ -74,6 +79,31 @@ interface AppProps {
 /** Static activity dot — no animation, no re-renders. */
 function Spinner({ color }: { color: string }): React.ReactElement {
   return <Text color={color}>●</Text>;
+}
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}m`;
+  }
+  if (value >= 1_000) {
+    const thousands = value / 1_000;
+    return `${thousands % 1 === 0 ? thousands.toFixed(0) : thousands.toFixed(1)}k`;
+  }
+  return String(value);
+}
+
+function formatElapsed(elapsedMs: number): string {
+  const secs = Math.max(1, Math.round(elapsedMs / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return rem === 0 ? `${mins}m` : `${mins}m ${rem}s`;
+}
+
+function formatTurnReceipt(receipt: NonNullable<Message["turnReceipt"]>): string {
+  const toolsLabel = receipt.toolCalls === 1 ? "tool" : "tools";
+  return `↳ in ${formatCount(receipt.inputTokens)} • out ${formatCount(receipt.outputTokens)} • ${formatElapsed(receipt.elapsedMs)} • ${receipt.toolCalls} ${toolsLabel} • ~$${receipt.turnCost.toFixed(2)}`;
 }
 
 /** Confirm prompt for orchestrator — context-aware options. */
@@ -194,27 +224,50 @@ export function App(props: AppProps): React.ReactElement {
 
   // marginLeft={2} on assistant boxes consumes 2 cols; cap at a sane max
   const markdownWidth = Math.max(40, (stdout?.columns ?? 80) - 2);
+  const turnDivider = "\u2500".repeat(Math.max(24, Math.min(markdownWidth - 2, 72)));
 
   return (
     <Box flexDirection="column" width="100%">
       {/* Committed messages — rendered once via Static */}
       <Static items={props.messages}>
-        {(message) => (
-          <Box key={message.id} flexDirection="column" marginTop={message.role === "user" ? 1 : 0}>
-            {message.role === "user" ? (
-              <Box marginLeft={1}>
-                <Text color={theme.brand} bold>{"❱ "}</Text>
-                <Text color={theme.text}>{message.content}</Text>
+        {(message) => {
+          // Tool-only assistant placeholders are committed with empty content.
+          // Hide them so transcript spacing stays clean and predictable.
+          if (message.role === "assistant" && !message.content.trim()) return null;
+          const messageIndex = props.messages.findIndex((m) => m.id === message.id);
+
+          if (message.role === "user") {
+            return (
+              <Box key={message.id} flexDirection="column" marginTop={1}>
+                {shouldRenderUserDivider(messageIndex) ? (
+                  <Box marginLeft={1}>
+                    <Text color={theme.subtleDark}>{turnDivider}</Text>
+                  </Box>
+                ) : null}
+                <Box marginLeft={1}>
+                  <Text color={theme.brand} bold>{"❱ "}</Text>
+                  <Text color={theme.text}>{message.content}</Text>
+                </Box>
               </Box>
-            ) : (
+            );
+          }
+
+          const normalizedContent = normalizeAssistantContent(message.content);
+          const assistantMarginTop = getAssistantMarginTop(props.messages, messageIndex);
+          return (
+            <Box key={message.id} flexDirection="column" marginTop={assistantMarginTop}>
               <Box flexDirection="column" marginLeft={2}>
-                {message.content ? (
-                  <Markdown content={message.content} width={markdownWidth} />
+                <Markdown content={normalizedContent} width={markdownWidth} />
+                {message.turnReceipt ? (
+                  <Box flexDirection="column" marginTop={0}>
+                    <Text color={theme.subtle} dimColor>{formatTurnReceipt(message.turnReceipt)}</Text>
+                    <Text color={theme.subtleDark} dimColor>{"── end response ──"}</Text>
+                  </Box>
                 ) : null}
               </Box>
-            )}
-          </Box>
-        )}
+            </Box>
+          );
+        }}
       </Static>
 
       {/* Tool call/activity — fixed region above prompts and status bar */}
@@ -251,13 +304,14 @@ export function App(props: AppProps): React.ReactElement {
         <PermissionPrompt request={props.permissionRequest} />
       ) : props.orchestratorConfirm ? (
         <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
-      ) : (
+      ) : props.status === "idle" && !props.orchestratorStatus ? (
         <Input
           onSubmit={props.onSubmit}
-          isActive={props.status === "idle" && !props.orchestratorStatus}
+          isActive={true}
           history={props.inputHistory}
         />
-      )}
+      ) : null
+      }
 
       {/* Status bar — always visible */}
       <StatusBar

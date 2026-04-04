@@ -22,7 +22,7 @@ import { cleanupStaleWorktrees } from "../../../packages/engine/src/tools/sub-ag
 import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
-import { findModelInfo } from "../../../api/src/providers/index.js";
+import { findModelInfo } from "../provider-registry.js";
 import crypto from "crypto";
 
 // ---------------------------------------------------------------------------

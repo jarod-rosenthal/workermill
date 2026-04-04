@@ -9,7 +9,7 @@ import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
 import { handleSlashCommand as dispatchSlashCommand, getGitBranch, type SlashCommandContext } from "./slash-commands.js";
 import type { UseAgentOptions } from "./useAgent.js";
-import { findModelInfo } from "../../../api/src/providers/index.js";
+import { findModelInfo } from "../provider-registry.js";
 import { resolveConfig, getProviderForPersona } from "../config.js";
 
 /**

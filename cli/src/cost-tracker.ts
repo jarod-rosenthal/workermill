@@ -1,4 +1,4 @@
-import { getPricingEngine, hasProvider } from "../../api/src/providers/index.js";
+import { getPricingEngine, hasProvider } from "./provider-registry.js";
 import * as logger from "./logger.js";
 
 export interface CostEntry {

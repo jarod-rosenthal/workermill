@@ -58,6 +58,7 @@ const LOOP_THRESHOLD = 4;
 
 // Rate limit retry config
 const MAX_RATE_LIMIT_RETRIES = 3;
+const LONG_RESPONSE_RECEIPT_MIN_CHARS = 600;
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -947,6 +948,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const usage = await stream.totalUsage;
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
+          const turnElapsedMs = Date.now() - turnStartTime;
+          const currentToolCalls = streamingToolCallsRef.current;
+          const toolCallCount = currentToolCalls.length;
 
           // Extract and save memories from model output
           const newMemories = extractMemoryMarkers(finalText);
@@ -954,13 +958,25 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             addMemory(m.type, m.content);
           }
 
+          // Cost tracking — use active refs, not startup options (user may have switched via /model).
+          const totalCostBefore = costTrackerRef.current.getTotalCost();
+          costTrackerRef.current.addUsage(
+            "agent",
+            aiProviderRef.current,
+            activeModelNameRef.current,
+            inputTokens,
+            outputTokens,
+          );
+          const totalCostAfter = costTrackerRef.current.getTotalCost();
+          const turnCost = Math.max(0, totalCostAfter - totalCostBefore);
+          setCost(totalCostAfter);
+
           // Commit the full response to Static as one message.
           // Tool calls and text were kept in the dynamic area until now.
           setMessages((prev) => {
             const newMessages: Message[] = [];
 
             // Commit accumulated tool calls
-            const currentToolCalls = streamingToolCallsRef.current;
             if (currentToolCalls.length > 0) {
               newMessages.push({
                 id: crypto.randomUUID(),
@@ -977,6 +993,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                 id: crypto.randomUUID(),
                 role: "assistant" as const,
                 content: finalText,
+                turnReceipt:
+                  finalText.length >= LONG_RESPONSE_RECEIPT_MIN_CHARS
+                    ? {
+                        inputTokens,
+                        outputTokens,
+                        elapsedMs: turnElapsedMs,
+                        toolCalls: toolCallCount,
+                        turnCost,
+                      }
+                    : undefined,
                 timestamp: new Date().toISOString(),
               });
             }
@@ -992,16 +1018,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           addMessage(session, "assistant", finalText);
           session.totalTokens += inputTokens + outputTokens;
           logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
-
-          // Cost tracking — use active refs, not startup options (user may have switched via /model).
-          costTrackerRef.current.addUsage(
-            "agent",
-            aiProviderRef.current,
-            activeModelNameRef.current,
-            inputTokens,
-            outputTokens,
-          );
-          setCost(costTrackerRef.current.getTotalCost());
 
           // Track tok/s for this model — use active refs, not startup options
           const agentElapsed = (Date.now() - agentStreamStartMs) / 1000;
@@ -1245,6 +1261,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       id: crypto.randomUUID(),
       role: "assistant",
       content,
+      compact: true,
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, msg]);

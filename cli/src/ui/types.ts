@@ -16,7 +16,16 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Compact render mode for function/system logs (single-spaced). */
+  compact?: boolean;
   toolCalls?: ToolCallInfo[];
+  turnReceipt?: {
+    inputTokens: number;
+    outputTokens: number;
+    elapsedMs: number;
+    toolCalls: number;
+    turnCost: number;
+  };
   timestamp: string;
 }
 

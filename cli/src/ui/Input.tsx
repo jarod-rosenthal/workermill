@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
-import { listProviders } from "../../../api/src/providers/index.js";
+import { listProviders } from "../provider-registry.js";
 import { resolveConfig } from "../config.js";
 
 const BUILTIN_COMMANDS = [

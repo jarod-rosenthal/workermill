@@ -14,6 +14,7 @@ import type { OrchestrationOutput, RetryPlan } from "../orchestrator.js";
 import { resolveConfig, type CliConfig } from "../config.js";
 import { getRetryableRun } from "../ship-state.js";
 import { notifyIfEnabled } from "../notify.js";
+import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -101,16 +102,16 @@ export function useOrchestrator(
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessageRaw] = useState("");
+  const statusMessageRef = useRef("");
   const lastStatusUpdate = useRef(0);
-  const setStatusMessage = (msg: string) => {
-    // Throttle status updates to prevent terminal flicker — redraw at most every 2s
-    // Empty string (clear) and new phase messages always go through immediately
+  const setStatusMessage = useCallback((msg: string) => {
     const now = Date.now();
-    if (!msg || now - lastStatusUpdate.current >= 2000 || !statusMessage) {
-      lastStatusUpdate.current = now;
-      setStatusMessageRaw(msg);
-    }
-  };
+    const current = statusMessageRef.current;
+    if (!shouldCommitStatusUpdate(current, msg, now - lastStatusUpdate.current)) return;
+    lastStatusUpdate.current = now;
+    statusMessageRef.current = msg;
+    setStatusMessageRaw(msg);
+  }, []);
   const [previewLine, setPreviewLine] = useState("");
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
@@ -150,8 +151,9 @@ export function useOrchestrator(
         // once and never re-renders. Only the latest line stays in the
         // dynamic area as a preview.
         function emitLine(line: string): void {
-          addMessage(line);
-          setPreviewLine(line);
+          const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+          addMessage(normalized);
+          setPreviewLine(normalized);
         }
         function flushLine(): void {
           setPreviewLine("");

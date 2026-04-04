@@ -142,10 +142,7 @@ function runCommand(
   w.postMessage({ command, cwd, timeout });
 
   // SYNCHRONOUS wait
-  const _wt0 = Date.now();
-  const _wr = Atomics.wait(sig, 0, 0, timeout + 5000);
-  const _wt1 = Date.now();
-  process.stderr.write(`[bash] wait=${_wt1-_wt0}ms result="${_wr}" sig=${Atomics.load(sig,0)} cmd="${command.slice(0,40)}"\n`);
+  Atomics.wait(sig, 0, 0, timeout + 5000);
 
   if (Atomics.load(sig, 0) !== 1) {
     return { exitCode: -1, stdout: "", stderr: "", killed: true, error: `Command timed out after ${timeout}ms` };

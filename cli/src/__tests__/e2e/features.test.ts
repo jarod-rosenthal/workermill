@@ -186,9 +186,9 @@ describe("compaction", () => {
     }
 
     // Older long messages (indices 0, 2, 4) should be truncated
-    expect(result.messages[0].content).toContain("[... truncated");
-    expect(result.messages[2].content).toContain("[... truncated");
-    expect(result.messages[4].content).toContain("[... truncated");
+    expect(result.messages[0].content).toContain("chars of earlier output truncated");
+    expect(result.messages[2].content).toContain("chars of earlier output truncated");
+    expect(result.messages[4].content).toContain("chars of earlier output truncated");
 
     // Older short messages (indices 1, 3, 5) should be unchanged
     expect(result.messages[1].content).toBe(messages[1].content);
@@ -200,16 +200,16 @@ describe("compaction", () => {
   });
 
   it("shouldCompact returns correct levels", () => {
-    // Under 60% of 65536 = under 39321 -> "none"
-    expect(shouldCompact(35000, "qwen3-coder:30b").level).toBe("none");
+    // Under 50% of 65536 = under 32768 -> "none"
+    expect(shouldCompact(30000, "qwen3-coder:30b").level).toBe("none");
 
-    // Over 60% (39321) but under 80% (52428) -> "micro"
+    // Over 50% (32768) but under 70% (45875) -> "micro"
     expect(shouldCompact(42000, "qwen3-coder:30b").level).toBe("micro");
 
-    // Over 80% (52428) but under 95% (62259) -> "soft"
+    // Over 70% (45875) but under 90% (58982) -> "soft"
     expect(shouldCompact(55000, "qwen3-coder:30b").level).toBe("soft");
 
-    // Over 95% (62259) -> "hard"
+    // Over 90% (58982) -> "hard"
     expect(shouldCompact(63000, "qwen3-coder:30b").level).toBe("hard");
   });
 });

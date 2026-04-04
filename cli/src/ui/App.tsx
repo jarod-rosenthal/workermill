@@ -200,7 +200,7 @@ export function App(props: AppProps): React.ReactElement {
       {/* Committed messages — rendered once via Static */}
       <Static items={props.messages}>
         {(message) => (
-          <Box key={message.id} flexDirection="column" marginTop={1}>
+          <Box key={message.id} flexDirection="column" marginTop={message.role === "user" ? 1 : 0}>
             {message.role === "user" ? (
               <Box marginLeft={1}>
                 <Text color={theme.brand} bold>{"❱ "}</Text>

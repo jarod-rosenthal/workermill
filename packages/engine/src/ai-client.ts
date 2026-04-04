@@ -30,7 +30,7 @@ export class EngineAIClient {
         system: options.systemPrompt,
         prompt: options.prompt,
         tools,
-        toolChoice: options.toolChoice,
+        toolChoice: options.toolChoice as any,
         stopWhen: stepCountIs(options.maxTurns || 100),
         abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
         ...buildOllamaOptions(this.config.provider, options.contextLength),

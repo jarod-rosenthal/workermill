@@ -322,7 +322,7 @@ export function useOrchestrator(
           } else {
             const msg = err instanceof Error ? err.message : String(err);
             addMessage(`**Orchestration failed:** ${msg}`);
-            notifyIfEnabled(config.bell, "WorkerMill", "Ship failed");
+            notifyIfEnabled(config?.bell, "WorkerMill", "Ship failed");
           }
         } finally {
           setRunning(false);

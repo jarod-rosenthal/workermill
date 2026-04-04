@@ -56,8 +56,6 @@ const signal = new Int32Array(sab, 0, 7);
 
 parentPort.on('message', (msg) => {
   const { command, cwd, timeout } = msg;
-  process.stderr.write('[bash-worker] received: ' + command.slice(0, 40) + '\\n');
-
   const result = spawnSync('/bin/bash', ['-c', command], {
     cwd,
     env: { ...process.env, GIT_EDITOR: 'true' },

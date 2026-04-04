@@ -506,6 +506,7 @@ export function useOrchestrator(
           if (seenPersonas.size > 0) parts.push(`${seenPersonas.size} expert${seenPersonas.size === 1 ? "" : "s"}`);
           if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
           parts.push(timeStr);
+          addMessage("────────────────────────");
           addMessage(`**Shipped.** ${parts.join(" · ")}`);
           const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
           if (usageSummaryMessage) {

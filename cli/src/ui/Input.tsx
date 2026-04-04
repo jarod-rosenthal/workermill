@@ -57,6 +57,7 @@ interface InputProps {
 export function Input({ onSubmit, isActive, history }: InputProps): React.ReactElement {
   const { stdout } = useStdout();
   const [value, setValue] = useState("");
+  const [multilineMode, setMultilineMode] = useState(false);
   const [cursorPos, setCursorPos] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [completionIndex, setCompletionIndex] = useState(0);
@@ -198,6 +199,14 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   }, [value, modelChoices]);
 
   const showCompletions = isActive && completions.length > 0;
+  const resetInput = () => {
+    valueRef.current = "";
+    cursorPosRef.current = 0;
+    setValue("");
+    setCursorPos(0);
+    setHistoryIndex(-1);
+    setCompletionIndex(0);
+  };
   const insertNewlineAtCursor = () => {
     const currentValue = valueRef.current;
     const currentCursorPos = cursorPosRef.current;
@@ -278,11 +287,37 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
-      // Newline insert:
+      // Local multiline toggle (terminal-safe fallback when modified Enter is unavailable).
+      if (key.return) {
+        const command = valueRef.current.trim().toLowerCase();
+        if (command === "/multiline" || command === "/ml") {
+          setMultilineMode((v) => !v);
+          resetInput();
+          return;
+        }
+      }
+
+      // Multiline compose mode: Enter always inserts newline, Ctrl+D sends.
+      if (multilineMode && key.return) {
+        insertNewlineAtCursor();
+        return;
+      }
+      if (multilineMode && key.ctrl && input === "d") {
+        const normalized = valueRef.current.replace(/\r\n?/g, "\n");
+        if (normalized.trim()) {
+          onSubmit(normalized);
+        }
+        resetInput();
+        return;
+      }
+
+      // Newline insert with modifier keys where terminals expose them:
       // - Shift+Enter
+      // - ESC-prefixed Alt/Meta+Enter (including Shift+Alt+Enter)
       // Keep plain Enter as submit even if some terminals set key.meta=true.
       const isShiftEnter = key.return && key.shift;
-      if (isShiftEnter) {
+      const isEscPrefixedAltEnter = key.return && key.meta && input.includes("\u001b");
+      if (isShiftEnter || isEscPrefixedAltEnter) {
         insertNewlineAtCursor();
         return;
       }
@@ -292,12 +327,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         const trimmed = valueRef.current.trim();
         if (trimmed) {
           onSubmit(trimmed.replace(/\r\n?/g, "\n"));
-          valueRef.current = "";
-          cursorPosRef.current = 0;
-          setValue("");
-          setCursorPos(0);
-          setHistoryIndex(-1);
-          setCompletionIndex(0);
+          resetInput();
         }
         return;
       }
@@ -459,6 +489,9 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   const contentWidth = Math.max(10, (stdout?.columns ?? 80) - 2);
   const isMultiline = value.includes("\n");
   const isSoftWrappedSingleLine = !isMultiline && value.length > contentWidth;
+  const multilineModeHint = multilineMode
+    ? " [multiline: Enter=newline, Ctrl+D=send, /multiline=off]"
+    : null;
 
   if (!isMultiline && !isSoftWrappedSingleLine) {
     return (
@@ -482,6 +515,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
             {completions.length > 1 ? <Text color={theme.inactive}>{` (↑↓ ${completions.length} matches, tab)`}</Text> : <Text color={theme.inactive}>{" (tab)"}</Text>}
           </Text>
         ) : null}
+        {multilineModeHint ? <Text color={theme.inactive}>{multilineModeHint}</Text> : null}
       </Box>
     );
   }
@@ -544,6 +578,11 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
           </Box>
         );
       })}
+      {multilineModeHint ? (
+        <Box marginLeft={2}>
+          <Text color={theme.inactive}>{multilineModeHint}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

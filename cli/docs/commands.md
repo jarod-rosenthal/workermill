@@ -128,7 +128,7 @@ Sessions persist automatically after each turn. Resume the last one by launching
 
 ### `/editor`
 
-Open `$EDITOR` for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Shift+Alt+Enter` instead.
+Open `$EDITOR` for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Shift+Alt+Enter`. If your terminal does not emit modified Enter keys reliably, toggle local compose mode with `/multiline` and submit with `Ctrl+D`.
 
 ### `/git`
 
@@ -320,6 +320,7 @@ These work but the UX is rough — expect sharp edges.
 |---|---|
 | `Enter` | Submit |
 | `Shift+Enter` / `Shift+Alt+Enter` | Insert a newline (multiline input) |
+| `Ctrl+D` | Submit while `/multiline` compose mode is active |
 | `↑` / `↓` | Navigate history (and move within lines in multiline input) |
 | `Tab` | Accept the highlighted autocomplete |
 | `ESC` | Cancel current operation |
@@ -332,6 +333,14 @@ These work but the UX is rough — expect sharp edges.
 - Start with `/` — command autocomplete
 - `/ship ` or `/build ` — `.md` file autocomplete from the working directory
 - `/model ` — provider/model autocomplete from the curated registry plus live Ollama / LM Studio models
+
+### Local Input Mode
+
+- `/multiline` (alias `/ml`) toggles a local compose mode in the input box.
+- In compose mode:
+  - `Enter` inserts a newline every time
+  - `Ctrl+D` submits the composed text
+  - `/multiline` toggles compose mode off
 
 ---
 

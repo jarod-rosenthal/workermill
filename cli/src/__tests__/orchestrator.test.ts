@@ -1943,6 +1943,32 @@ describe("classifyError categories (via story execution errors)", () => {
     const allLogs = output.logs.join(" ");
     expect(allLogs).toMatch(/typescript.*error.*retry|retrying|fix.*context/i);
   });
+
+  it("stops early when the same fixable error repeats", async () => {
+    const planText = makePlanWithOneStory();
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          textStream: (async function* () { yield planText; })(),
+          text: Promise.resolve(planText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+      throw new Error("TypeError: cannot find name 'Foo' — TypeScript compilation failed");
+    });
+
+    const config = { ...createTestConfig(), review: { enabled: false } };
+    const output = createMockOutput();
+
+    await runOrchestration(config as any, "Build feature", true, false, output);
+
+    // Planner + 2 failed story attempts (second identical error stops retries)
+    expect(callCount).toBe(3);
+    const allErrors = output.errors.join(" ");
+    expect(allErrors).toMatch(/same .*error|token waste|stopping retries/i);
+  });
 });
 
 // ---- Additional coverage: checkToolPermission "always" and "trust" modes ----

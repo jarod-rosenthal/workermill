@@ -11,15 +11,29 @@ export function normalizeAssistantContent(content: string): string {
 
 /**
  * Vertical spacing contract:
- * - Compact messages (function/system logs) are always single-spaced.
- * - Normal assistant replies get top spacing only when they follow a user turn.
+ * - Always add one blank line between a user turn and the first assistant output.
+ * - Compact assistant logs remain single-spaced with each other.
+ * - Hidden assistant placeholders (empty content) do not affect spacing decisions.
  */
 export function getAssistantMarginTop(messages: Message[], index: number): number {
   const current = messages[index];
   if (!current || current.role !== "assistant") return 0;
+
+  // Find the previous visible message (App hides empty assistant placeholders).
+  let previousVisible: Message | null = null;
+  for (let i = index - 1; i >= 0; i--) {
+    const candidate = messages[i];
+    if (candidate.role === "assistant" && !candidate.content.trim()) continue;
+    previousVisible = candidate;
+    break;
+  }
+
+  // Guarantee separation between user input and any assistant output.
+  if (previousVisible?.role === "user") return 1;
+
+  // Otherwise keep compact logs tight.
   if (current.compact) return 0;
-  const previous = index > 0 ? messages[index - 1] : null;
-  return previous?.role === "user" ? 1 : 0;
+  return 0;
 }
 
 /** Show a user-turn divider for every user message except the first one. */

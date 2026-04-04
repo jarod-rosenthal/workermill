@@ -255,9 +255,10 @@ export function App(props: AppProps): React.ReactElement {
           }
 
           const normalizedContent = normalizeAssistantContent(message.content);
-          const assistantMarginTop = getAssistantMarginTop(props.messages, messageIndex);
+          const assistantNeedsGap = getAssistantMarginTop(props.messages, messageIndex) > 0;
           return (
-            <Box key={message.id} flexDirection="column" marginTop={assistantMarginTop}>
+            <Box key={message.id} flexDirection="column">
+              {assistantNeedsGap ? <Box height={1} /> : null}
               <Box flexDirection="column" marginLeft={2}>
                 <Markdown content={normalizedContent} width={markdownWidth} />
                 {message.turnReceipt ? (

@@ -29,12 +29,12 @@ describe("transcript layout contract", () => {
     expect(getAssistantMarginTop(messages, 1)).toBe(1);
   });
 
-  it("keeps compact function/system lines single-spaced even after user input", () => {
+  it("adds one blank line before first compact output after user input", () => {
     const messages: Message[] = [
       msg("user", "/ship GH-7"),
       msg("assistant", "[planner] reading files", true),
     ];
-    expect(getAssistantMarginTop(messages, 1)).toBe(0);
+    expect(getAssistantMarginTop(messages, 1)).toBe(1);
   });
 
   it("keeps consecutive compact lines single-spaced", () => {
@@ -47,12 +47,33 @@ describe("transcript layout contract", () => {
     expect(getAssistantMarginTop(messages, 2)).toBe(0);
   });
 
+  it("keeps /ship-style compact output single-spaced after the first line", () => {
+    const messages: Message[] = [
+      msg("user", "/ship GH-7"),
+      msg("assistant", "[coordinator] fetched issue", true),
+      msg("assistant", "[planner] reading files", true),
+      msg("assistant", "[planner] produced plan", true),
+    ];
+    expect(getAssistantMarginTop(messages, 1)).toBe(1); // one blank line after user input
+    expect(getAssistantMarginTop(messages, 2)).toBe(0); // then single-spaced
+    expect(getAssistantMarginTop(messages, 3)).toBe(0);
+  });
+
   it("does not add extra top margin between consecutive normal assistant messages", () => {
     const messages: Message[] = [
       msg("assistant", "part one"),
       msg("assistant", "part two"),
     ];
     expect(getAssistantMarginTop(messages, 1)).toBe(0);
+  });
+
+  it("ignores hidden empty assistant placeholders when computing spacing", () => {
+    const messages: Message[] = [
+      msg("user", "hello"),
+      msg("assistant", "", false), // hidden by App
+      msg("assistant", "response"),
+    ];
+    expect(getAssistantMarginTop(messages, 2)).toBe(1);
   });
 
   it("normalizes trailing newlines while preserving internal blank lines", () => {

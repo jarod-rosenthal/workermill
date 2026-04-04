@@ -74,6 +74,24 @@ function formatContext(tokens: number): string {
   return `${tokens}`;
 }
 
+/** Bound large payloads before reinserting them into prompts. */
+function truncateForPrompt(text: string, maxChars: number, label: string): string {
+  if (text.length <= maxChars) return text;
+  const clipped = text.slice(0, maxChars);
+  return `${clipped}\n\n...[${label} truncated to ${maxChars} chars]`;
+}
+
+/** Stable signature used to detect repeated identical failures in retry loops. */
+function normalizeErrorSignature(message: string): string {
+  return message
+    .replace(/\s+/g, " ")
+    .replace(/[0-9a-f]{8,}/gi, "<id>")
+    .replace(/\bline \d+\b/gi, "line <n>")
+    .trim()
+    .toLowerCase()
+    .slice(0, 240);
+}
+
 /** Sleep helper for rate limit backoff */
 function rateLimitSleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -865,9 +883,10 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
 
     try {
       const { generateText } = await import("ai");
+      const extractionInput = truncateForPrompt(planText, 12_000, "planner analysis");
       const extractionResult = await generateText({
         model: plannerModel,
-        prompt: `You previously analyzed a codebase and produced the following plan:\n\n${planText}\n\n` +
+        prompt: `You previously analyzed a codebase and produced the following plan:\n\n${extractionInput}\n\n` +
           `Convert your analysis into the required JSON format. Output ONLY a \`\`\`json code block:\n\n` +
           "```json\n" +
           `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
@@ -1696,6 +1715,7 @@ export async function runOrchestration(
 
     let revisionFeedback = "";
     let storyRateLimitRetries = 0;
+    const retryErrorSignatureCounts = new Map<string, number>();
     for (let revision = 0; revision <= 2; revision++) {
 
     // Reset loop detection for each revision attempt
@@ -2063,9 +2083,18 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       // Classify error — from worker/epic/types.ts + worker-decision-engine.ts
       const errorClass = classifyError(errMsg);
       logger.info(`Error classified`, { category: errorClass.category, fixable: errorClass.fixable, persona: story.persona });
+      const signature = `${errorClass.category}:${normalizeErrorSignature(errMsg)}`;
+      const seenCount = (retryErrorSignatureCounts.get(signature) || 0) + 1;
+      retryErrorSignatureCounts.set(signature, seenCount);
 
       // Transient errors — retry as-is
       if (errorClass.category === "transient" && revision < 2) {
+        if (seenCount >= 2) {
+          output.error(`Story ${i + 1} kept failing with the same transient error — stopping retries to avoid token waste.`);
+          logger.info("Retry stopped on repeated transient error", { story: i + 1, signature });
+          failedStories.add(story.id);
+          break;
+        }
         output.log(story.persona, `Transient error: ${errMsg} — retrying...`);
         logger.info(`Story ${i + 1} retrying (transient)`, { revision });
         continue;
@@ -2073,9 +2102,16 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
 
       // Fixable errors (typescript, lint, test, build) — retry with fix context
       if (errorClass.fixable && revision < 2) {
+        if (seenCount >= 2) {
+          output.error(`Story ${i + 1} repeated the same ${errorClass.category} error — stopping retries to avoid token waste.`);
+          logger.info("Retry stopped on repeated fixable error", { story: i + 1, signature, category: errorClass.category });
+          failedStories.add(story.id);
+          break;
+        }
         output.log(story.persona, `${errorClass.category} error detected — retrying with fix context (${revision + 1}/3)`);
         logger.info(`Story ${i + 1} retrying (fixable ${errorClass.category})`, { revision });
-        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${errMsg}\n\n**${errorClass.fixHint}**`;
+        const errorForPrompt = truncateForPrompt(errMsg, 2_500, "error details");
+        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${errorForPrompt}\n\n**${errorClass.fixHint}**`;
         continue;
       }
 
@@ -2185,7 +2221,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
           ? `## Previous Review Feedback (Round ${reviewRound})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
-${previousReviewFeedback}
+${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
 
 **Evaluate whether the revision addressed the issues you raised.**
 - If your major issues were fixed, approve — even if minor items remain
@@ -2504,27 +2540,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           preRevisionHash = getHeadHash(workingDir);
         }
 
-        // Capture prior work context before revision — prevents oscillation
-        // (from worker/epic/coordinator-review.ts captureStoryBranchSummaries pattern)
-        let priorWorkSummary = "";
-        try {
-          const diffStat = execSync("git diff --stat HEAD 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 10_000 }).trim();
-          const diffContent = execSync("git diff HEAD 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 15_000 }).trim();
-          // Also capture any recent commits on this session
-          const recentCommits = execSync("git log --oneline -5 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 5_000 }).trim();
-          if (diffStat || recentCommits) {
-            const parts: string[] = [];
-            if (recentCommits) parts.push(`**Recent commits:**\n${recentCommits}`);
-            if (diffStat) parts.push(`**Uncommitted changes:**\n${diffStat}`);
-            if (diffContent) {
-              parts.push(`**Current diff (what exists now):**\n\`\`\`diff\n${diffContent}\n\`\`\``);
-            }
-            priorWorkSummary = parts.join("\n\n");
-          }
-        } catch {
-          // Non-fatal — proceed without prior work context
-        }
-
         for (let i = 0; i < sorted.length; i++) {
           const story = sorted[i];
 
@@ -2554,9 +2569,10 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
           // Build per-story feedback: use AFFECTED_REASONS if available, otherwise full review text
           const storyReason = affected?.reasons?.[i + 1];
+          const fallbackReviewFeedback = truncateForPrompt(reviewText, 6_000, "review feedback");
           const storyFeedback = storyReason
             ? `Story ${i + 1} (${story.title}):\n${storyReason}`
-            : reviewText;
+            : fallbackReviewFeedback;
 
           output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });

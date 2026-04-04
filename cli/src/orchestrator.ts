@@ -97,6 +97,34 @@ function rateLimitSleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function clipLogText(text: string, maxChars = 1200): string {
+  if (!text) return "";
+  return text.length > maxChars ? `${text.slice(0, maxChars)} ...[truncated ${text.length - maxChars} chars]` : text;
+}
+
+function extractExecErrorDetail(err: unknown): { summary: string; stdout: string; stderr: string } {
+  const anyErr = err as { message?: unknown; stdout?: unknown; stderr?: unknown };
+  const message = typeof anyErr?.message === "string" ? anyErr.message : String(err);
+  const stdout =
+    typeof anyErr?.stdout === "string"
+      ? anyErr.stdout
+      : Buffer.isBuffer(anyErr?.stdout)
+        ? anyErr.stdout.toString("utf-8")
+        : "";
+  const stderr =
+    typeof anyErr?.stderr === "string"
+      ? anyErr.stderr
+      : Buffer.isBuffer(anyErr?.stderr)
+        ? anyErr.stderr.toString("utf-8")
+        : "";
+  const firstUsefulLine =
+    [...stderr.split("\n"), ...stdout.split("\n"), ...message.split("\n")]
+      .map((line) => line.trim())
+      .find(Boolean) || message;
+
+  return { summary: firstUsefulLine, stdout, stderr };
+}
+
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
  * read the file and return its contents as the task. Otherwise return as-is.
@@ -2756,16 +2784,26 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         output.log("system", `To review the full diff first, say no and run: \`!git diff ${mainBranch}..HEAD\``);
         const cr = await output.confirm("Push branch and open a pull request?");
         const confirmed = typeof cr === "object" ? cr.allowed : cr;
+        logger.info("PR prompt answered", { confirmed, featureBranch, mainBranch });
         if (confirmed) {
           try {
             output.status("Pushing branch...");
-            execSync(`git push -u origin "${featureBranch}" 2>&1`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
+            const pushOutput = execSync(`git push -u origin "${featureBranch}" 2>&1`, {
+              cwd: workingDir,
+              encoding: "utf-8",
+              stdio: "pipe",
+            }).trim();
+            logger.info("Branch push completed", {
+              featureBranch,
+              output: clipLogText(pushOutput),
+            });
             output.statusDone();
 
             // Try to create PR with gh CLI
             try {
               const storyTitles = sorted.map(s => s.title).join(", ");
               const prTitle = storyTitles.length > 70 ? storyTitles.slice(0, 67) + "..." : storyTitles;
+              logger.info("Creating pull request", { featureBranch, mainBranch, prTitle });
 
               // Build PR body: task overview + stories + tech lead review
               const prParts: string[] = [];
@@ -2788,6 +2826,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body-file - --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
                 { cwd: workingDir, encoding: "utf-8", input: prBody, stdio: ["pipe", "pipe", "pipe"] },
               ).trim();
+              logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
 
               // Post the tech lead review as a proper GitHub PR review
@@ -2809,16 +2848,30 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 }
               }
             } catch (prErr) {
-              const prMsg = prErr instanceof Error ? (prErr as any).stdout || prErr.message : String(prErr);
-              output.log("system", `Branch pushed. Create a PR manually (gh CLI error: ${prMsg.split("\n")[0]})`);
+              const prDetail = extractExecErrorDetail(prErr);
+              logger.error("Pull request creation failed", {
+                featureBranch,
+                mainBranch,
+                summary: prDetail.summary,
+                stdout: clipLogText(prDetail.stdout),
+                stderr: clipLogText(prDetail.stderr),
+              });
+              output.log("system", `Branch pushed. Create a PR manually (gh CLI error: ${prDetail.summary})`);
             }
           } catch (pushErr) {
             output.statusDone();
-            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-            output.log("system", `Push failed: ${pushMsg.split("\n")[0]}`);
+            const pushDetail = extractExecErrorDetail(pushErr);
+            logger.error("Branch push failed", {
+              featureBranch,
+              summary: pushDetail.summary,
+              stdout: clipLogText(pushDetail.stdout),
+              stderr: clipLogText(pushDetail.stderr),
+            });
+            output.log("system", `Push failed: ${pushDetail.summary}`);
             output.log("system", `Branch is local: \`${featureBranch}\`. Push manually with: git push -u origin ${featureBranch}`);
           }
         } else {
+          logger.info("PR prompt declined", { featureBranch, mainBranch });
           output.log("system", `Branch is local: \`${featureBranch}\``);
           output.log("system", `To push later: git push -u origin ${featureBranch}`);
           output.log("system", `To create a PR: gh pr create --head ${featureBranch}`);

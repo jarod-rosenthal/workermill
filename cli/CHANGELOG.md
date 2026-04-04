@@ -33,7 +33,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **xAI reasoning not surfacing** — `reasoningSummary: "detailed"` was not being sent for xAI provider in either single-agent or orchestrator paths.
 
 ### Added
-- **Multiline input** — `Shift+Enter` or `Alt+Enter` inserts a newline in the input box instead of submitting. Alt+Enter works in all terminals; Shift+Enter requires enhanced keyboard protocols (kitty, WezTerm, modern Windows Terminal). Up/Down arrows navigate within lines first, falling back to history at the top/bottom.
+- **Multiline input** — `Shift+Enter` inserts a newline in the input box instead of submitting, and `Ctrl+J` is supported as a terminal-safe fallback when Shift+Enter is not distinguishable. Up/Down arrows navigate within lines first, falling back to history at the top/bottom.
 - **Planning critic loop** — ported from the platform (`api/src/services/critic-agent-local.ts`). After the planner produces stories, a critic pass scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Plans scoring below threshold (default 8, configurable via `/settings review.criticThreshold`) are sent back for refinement, up to 3 iterations. Off by default; enable with `/settings review.critic true`.
 - **Grok Code Fast model** — added `grok-code-fast-1` to xAI registry ($0.20/$1.50 per M, 256K context, purpose-built for agentic coding).
 

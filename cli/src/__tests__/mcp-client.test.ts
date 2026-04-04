@@ -163,7 +163,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("srv", { command: "node", args: ["server.js"] });
+      await mcpClient.startMCPServer("srv", { transport: 'stdio', command: "node", args: ["server.js"] });
       expect(mcpClient.hasMCPServers()).toBe(true);
     });
   });
@@ -185,7 +185,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("filesys", { command: "node", args: ["fs-server.js"] });
+      await mcpClient.startMCPServer("filesys", { transport: 'stdio', command: "node", args: ["fs-server.js"] });
 
       const result = mcpClient.getMCPTools();
       expect(result).toHaveLength(2);
@@ -201,8 +201,8 @@ describe("mcp-client", () => {
       const { proc: procB } = makeMockProcess(makeHandshakeResponder(toolsB));
       spawnMock.mockReturnValueOnce(procA).mockReturnValueOnce(procB);
 
-      await mcpClient.startMCPServer("serverA", { command: "node", args: ["a.js"] });
-      await mcpClient.startMCPServer("serverB", { command: "node", args: ["b.js"] });
+      await mcpClient.startMCPServer("serverA", { transport: 'stdio', command: "node", args: ["a.js"] });
+      await mcpClient.startMCPServer("serverB", { transport: 'stdio', command: "node", args: ["b.js"] });
 
       const result = mcpClient.getMCPTools();
       expect(result).toHaveLength(2);
@@ -232,7 +232,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("brave", { command: "npx", args: ["brave-search"] });
+      await mcpClient.startMCPServer("brave", { transport: 'stdio', command: "npx", args: ["brave-search"] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(Object.keys(defs)).toEqual(["mcp__brave__search"]);
@@ -243,7 +243,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("github", { command: "mcp-github", args: [] });
+      await mcpClient.startMCPServer("github", { transport: 'stdio', command: "mcp-github", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(defs["mcp__github__list_repos"].description).toBe("[MCP: github] List repositories");
@@ -254,7 +254,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("gh", { command: "mcp-gh", args: [] });
+      await mcpClient.startMCPServer("gh", { transport: 'stdio', command: "mcp-gh", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(defs["mcp__gh__get_user"].description).toBe("[MCP: gh] get_user");
@@ -266,7 +266,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("search_srv", { command: "search-mcp", args: [] });
+      await mcpClient.startMCPServer("search_srv", { transport: 'stdio', command: "search-mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       // ai.jsonSchema wraps the schema — our mock returns { __jsonSchema: schema }
@@ -278,7 +278,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("noop_srv", { command: "noop-mcp", args: [] });
+      await mcpClient.startMCPServer("noop_srv", { transport: 'stdio', command: "noop-mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(defs["mcp__noop_srv__noop"].parameters).toEqual({
@@ -292,7 +292,7 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValue(proc);
 
       // Server name contains hyphens and dots
-      await mcpClient.startMCPServer("my-server.v2", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("my-server.v2", { transport: 'stdio', command: "mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(Object.keys(defs)).toEqual(["mcp__my_server_v2__ping"]);
@@ -303,7 +303,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("srv", { transport: 'stdio', command: "mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(Object.keys(defs)).toEqual(["mcp__srv__my_tool_v1"]);
@@ -314,7 +314,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("my-server/prod", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("my-server/prod", { transport: 'stdio', command: "mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(Object.keys(defs)).toEqual(["mcp__my_server_prod__do_something_"]);
@@ -325,7 +325,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("runner", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("runner", { transport: 'stdio', command: "mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       expect(typeof defs["mcp__runner__run"].execute).toBe("function");
@@ -336,7 +336,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("pinger", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("pinger", { transport: 'stdio', command: "mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
       // Calling execute triggers a tools/call JSON-RPC request; the mock
@@ -386,7 +386,7 @@ describe("mcp-client", () => {
       });
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("docker", { transport: 'stdio', command: "mcp", args: [] });
       const defs = mcpClient.getMCPToolDefinitions();
       await defs["mcp__docker__list_issues"].execute({ state: "open" });
 
@@ -430,7 +430,7 @@ describe("mcp-client", () => {
       });
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("docker", { transport: 'stdio', command: "mcp", args: [] });
       const defs = mcpClient.getMCPToolDefinitions();
       await defs["mcp__docker__search_issues"].execute({});
 
@@ -485,7 +485,7 @@ describe("mcp-client", () => {
       });
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("docker", { transport: 'stdio', command: "mcp", args: [] });
       const defs = mcpClient.getMCPToolDefinitions();
 
       await defs["mcp__docker__list_issues"].execute({ owner: "other", repo: "repo2" });
@@ -532,7 +532,7 @@ describe("mcp-client", () => {
       });
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("tracker", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("tracker", { transport: 'stdio', command: "mcp", args: [] });
       const defs = mcpClient.getMCPToolDefinitions();
       await defs["mcp__tracker__list_issues"].execute({ state: "open" });
 
@@ -556,8 +556,8 @@ describe("mcp-client", () => {
       const { proc: procB } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValueOnce(procA).mockReturnValueOnce(procB);
 
-      await mcpClient.startMCPServer("srvA", { command: "mcp-a", args: [] });
-      await mcpClient.startMCPServer("srvB", { command: "mcp-b", args: [] });
+      await mcpClient.startMCPServer("srvA", { transport: 'stdio', command: "mcp-a", args: [] });
+      await mcpClient.startMCPServer("srvB", { transport: 'stdio', command: "mcp-b", args: [] });
 
       mcpClient.stopAllMCPServers();
 
@@ -569,7 +569,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("srv", { transport: 'stdio', command: "mcp", args: [] });
       expect(mcpClient.hasMCPServers()).toBe(true);
 
       mcpClient.stopAllMCPServers();
@@ -585,8 +585,8 @@ describe("mcp-client", () => {
         throw new Error("ESRCH: process already exited");
       });
 
-      await mcpClient.startMCPServer("srvA", { command: "mcp-a", args: [] });
-      await mcpClient.startMCPServer("srvB", { command: "mcp-b", args: [] });
+      await mcpClient.startMCPServer("srvA", { transport: 'stdio', command: "mcp-a", args: [] });
+      await mcpClient.startMCPServer("srvB", { transport: 'stdio', command: "mcp-b", args: [] });
 
       // Should not throw even though procA.kill() throws
       expect(() => mcpClient.stopAllMCPServers()).not.toThrow();
@@ -598,7 +598,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("srv", { transport: 'stdio', command: "mcp", args: [] });
       expect(Object.keys(mcpClient.getMCPToolDefinitions())).toHaveLength(1);
 
       mcpClient.stopAllMCPServers();
@@ -657,7 +657,7 @@ describe("mcp-client", () => {
         }
       });
 
-      await mcpClient.startMCPServer("srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("srv", { transport: 'stdio', command: "mcp", args: [] });
       const result = await mcpClient.callMCPTool("srv", "my_tool", { arg: "val" });
 
       expect(result).toBe("line one\nline two");
@@ -692,7 +692,7 @@ describe("mcp-client", () => {
         }
       });
 
-      await mcpClient.startMCPServer("srv2", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("srv2", { transport: 'stdio', command: "mcp", args: [] });
       const result = await mcpClient.callMCPTool("srv2", "get_image", {});
 
       // No text blocks → JSON.stringify(result)
@@ -739,7 +739,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("no-args-srv", { command: "mcp-binary" } as any);
+      await mcpClient.startMCPServer("no-args-srv", { transport: 'stdio', command: "mcp-binary" } as any);
 
       expect(spawnMock).toHaveBeenCalledWith("mcp-binary", [], expect.any(Object));
     });
@@ -748,7 +748,7 @@ describe("mcp-client", () => {
       const { proc, stdinWrites } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("handshake-srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("handshake-srv", { transport: 'stdio', command: "mcp", args: [] });
 
       const messages = stdinWrites.map((s) => JSON.parse(s.trim()));
 
@@ -767,7 +767,7 @@ describe("mcp-client", () => {
       const { proc, stdinWrites } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("list-srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("list-srv", { transport: 'stdio', command: "mcp", args: [] });
 
       const messages = stdinWrites.map((s) => JSON.parse(s.trim()));
       const listMsg = messages.find((m) => m.method === "tools/list");
@@ -782,7 +782,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("tool-srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("tool-srv", { transport: 'stdio', command: "mcp", args: [] });
 
       const allTools = mcpClient.getMCPTools();
       expect(allTools).toHaveLength(2);
@@ -794,7 +794,7 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValue(proc);
 
       expect(mcpClient.hasMCPServers()).toBe(false);
-      await mcpClient.startMCPServer("reg-srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("reg-srv", { transport: 'stdio', command: "mcp", args: [] });
       expect(mcpClient.hasMCPServers()).toBe(true);
     });
 
@@ -816,7 +816,7 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValue(proc);
 
       await expect(
-        mcpClient.startMCPServer("fail-srv", { command: "bad-mcp", args: [] }),
+        mcpClient.startMCPServer("fail-srv", { transport: 'stdio', command: "bad-mcp", args: [] }),
       ).rejects.toThrow("Invalid request");
 
       expect(proc.kill).toHaveBeenCalledOnce();
@@ -840,7 +840,7 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValue(proc);
 
       await expect(
-        mcpClient.startMCPServer("failed-srv", { command: "mcp", args: [] }),
+        mcpClient.startMCPServer("failed-srv", { transport: 'stdio', command: "mcp", args: [] }),
       ).rejects.toThrow();
 
       expect(mcpClient.hasMCPServers()).toBe(false);
@@ -850,7 +850,7 @@ describe("mcp-client", () => {
       const { proc } = makeMockProcess(makeHandshakeResponder([]));
       spawnMock.mockReturnValue(proc);
 
-      await mcpClient.startMCPServer("exit-srv", { command: "mcp", args: [] });
+      await mcpClient.startMCPServer("exit-srv", { transport: 'stdio', command: "mcp", args: [] });
       expect(mcpClient.hasMCPServers()).toBe(true);
 
       // Simulate process exit
@@ -894,7 +894,7 @@ describe("mcp-client", () => {
 
       // Should resolve correctly even with chunked delivery
       await expect(
-        mcpClient.startMCPServer("chunk-srv", { command: "mcp", args: [] }),
+        mcpClient.startMCPServer("chunk-srv", { transport: 'stdio', command: "mcp", args: [] }),
       ).resolves.not.toThrow();
     });
   });
@@ -910,8 +910,8 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValueOnce(procA).mockReturnValueOnce(procB);
 
       await mcpClient.startAllMCPServers({
-        alpha: { command: "mcp-alpha", args: [] },
-        beta: { command: "mcp-beta", args: [] },
+        alpha: { transport: 'stdio', command: "mcp-alpha", args: [] },
+        beta: { transport: 'stdio', command: "mcp-beta", args: [] },
       });
 
       expect(spawnMock).toHaveBeenCalledTimes(2);
@@ -939,8 +939,8 @@ describe("mcp-client", () => {
 
       await expect(
         mcpClient.startAllMCPServers({
-          good: { command: "good-mcp", args: [] },
-          bad: { command: "bad-mcp", args: [] },
+          good: { transport: 'stdio', command: "good-mcp", args: [] },
+          bad: { transport: 'stdio', command: "bad-mcp", args: [] },
         }),
       ).resolves.not.toThrow();
 
@@ -967,8 +967,8 @@ describe("mcp-client", () => {
       spawnMock.mockReturnValueOnce(goodProc).mockReturnValueOnce(failProc);
 
       await mcpClient.startAllMCPServers({
-        ok: { command: "ok-mcp", args: [] },
-        err: { command: "err-mcp", args: [] },
+        ok: { transport: 'stdio', command: "ok-mcp", args: [] },
+        err: { transport: 'stdio', command: "err-mcp", args: [] },
       });
 
       expect(logger.error).toHaveBeenCalledWith(

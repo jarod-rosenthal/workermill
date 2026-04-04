@@ -198,6 +198,17 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   }, [value, modelChoices]);
 
   const showCompletions = isActive && completions.length > 0;
+  const insertNewlineAtCursor = () => {
+    const currentValue = valueRef.current;
+    const currentCursorPos = cursorPosRef.current;
+    const nextValue = currentValue.slice(0, currentCursorPos) + "\n" + currentValue.slice(currentCursorPos);
+    const nextCursorPos = currentCursorPos + 1;
+    valueRef.current = nextValue;
+    cursorPosRef.current = nextCursorPos;
+    setValue(nextValue);
+    setCursorPos(nextCursorPos);
+    setCompletionIndex(0);
+  };
 
   useInput(
     (input, key) => {
@@ -267,23 +278,15 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
-      // Submit (or insert newline with Shift+Enter / Alt+Enter / Meta+Enter)
+      // Newline insert: Shift+Enter or Ctrl+J/Ctrl+Enter.
+      // Ctrl+J is a reliable terminal fallback when Shift+Enter isn't distinct.
+      if ((key.return && key.shift) || (key.ctrl && (input === "j" || input === "\n" || key.return))) {
+        insertNewlineAtCursor();
+        return;
+      }
+
+      // Submit on Enter.
       if (key.return) {
-        // Only Shift+Enter inserts a newline. Treat Enter as submit otherwise.
-        // Some terminals can set key.meta on plain Enter, which caused accidental
-        // hidden newlines and chopped committed user messages.
-        if (key.shift) {
-          const currentValue = valueRef.current;
-          const currentCursorPos = cursorPosRef.current;
-          const nextValue = currentValue.slice(0, currentCursorPos) + "\n" + currentValue.slice(currentCursorPos);
-          const nextCursorPos = currentCursorPos + 1;
-          valueRef.current = nextValue;
-          cursorPosRef.current = nextCursorPos;
-          setValue(nextValue);
-          setCursorPos(nextCursorPos);
-          setCompletionIndex(0);
-          return;
-        }
         const trimmed = valueRef.current.trim();
         if (trimmed) {
           onSubmit(trimmed.replace(/\r\n?/g, "\n"));
@@ -432,8 +435,9 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       if (input && !key.ctrl && !key.meta) {
         const currentValue = valueRef.current;
         const currentCursorPos = cursorPosRef.current;
-        const nextValue = currentValue.slice(0, currentCursorPos) + input + currentValue.slice(currentCursorPos);
-        const nextCursorPos = currentCursorPos + input.length;
+        const normalizedInput = input.replace(/\r\n?/g, "\n");
+        const nextValue = currentValue.slice(0, currentCursorPos) + normalizedInput + currentValue.slice(currentCursorPos);
+        const nextCursorPos = currentCursorPos + normalizedInput.length;
         valueRef.current = nextValue;
         cursorPosRef.current = nextCursorPos;
         setValue(nextValue);

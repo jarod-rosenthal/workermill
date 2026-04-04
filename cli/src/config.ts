@@ -11,10 +11,17 @@ export interface ProviderConfig {
   contextLength?: number;
 }
 
+export type MCPTransportType = 'stdio' | 'http' | 'sse';
+
 export interface MCPServerConfig {
-  command: string;
+  transport: MCPTransportType;
+  // For stdio transport
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // For http/sse transports
+  endpoint?: string;
+  headers?: Record<string, string>;
 }
 
 export interface ReviewConfig {

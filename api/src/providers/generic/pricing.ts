@@ -72,23 +72,23 @@ export class GenericPricingEngine implements ProviderPricingEngine {
  * OpenRouter uses underlying provider pricing plus a small markup
  */
 export const OPENROUTER_MODELS: Record<string, ModelInfo> = {
-  "anthropic/claude-sonnet-4": {
-    id: "anthropic/claude-sonnet-4",
-    displayName: "Claude Sonnet 4 (via OR)",
+  "anthropic/claude-sonnet-4-6": {
+    id: "anthropic/claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6 (via OR)",
     tier: "balanced",
     inputRate: 0.003,
     outputRate: 0.015,
-    contextWindow: 200000,
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: false,
   },
-  "openai/gpt-4o": {
-    id: "openai/gpt-4o",
-    displayName: "GPT-4o (via OR)",
-    tier: "balanced",
+  "openai/gpt-5.4": {
+    id: "openai/gpt-5.4",
+    displayName: "GPT-5.4 (via OR)",
+    tier: "powerful",
     inputRate: 0.0025,
-    outputRate: 0.01,
-    contextWindow: 128000,
+    outputRate: 0.015,
+    contextWindow: 1050000,
     supportsStreaming: true,
     supportsCaching: false,
   },
@@ -96,9 +96,9 @@ export const OPENROUTER_MODELS: Record<string, ModelInfo> = {
     id: "google/gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash (via OR)",
     tier: "balanced",
-    inputRate: 0.00015,
-    outputRate: 0.0006,
-    contextWindow: 1000000,
+    inputRate: 0.0003,
+    outputRate: 0.0025,
+    contextWindow: 1048576,
     supportsStreaming: true,
     supportsCaching: false,
   },
@@ -124,7 +124,7 @@ export const OPENROUTER_MODELS: Record<string, ModelInfo> = {
   },
   "mistralai/mistral-large": {
     id: "mistralai/mistral-large",
-    displayName: "Mistral Large (via OR)",
+    displayName: "Mistral Large 3 (via OR)",
     tier: "powerful",
     inputRate: 0.002,
     outputRate: 0.006,
@@ -137,14 +137,15 @@ export const OPENROUTER_MODELS: Record<string, ModelInfo> = {
 /**
  * Groq Models
  * Groq offers ultra-fast inference at competitive prices
+ * Pricing verified April 2026 from groq.com/pricing
  */
 export const GROQ_MODELS: Record<string, ModelInfo> = {
   "llama-3.3-70b-versatile": {
     id: "llama-3.3-70b-versatile",
     displayName: "Llama 3.3 70B",
     tier: "powerful",
-    inputRate: 0.00059,
-    outputRate: 0.00079,
+    inputRate: 0.00059, // $0.59 per 1M
+    outputRate: 0.00079, // $0.79 per 1M
     contextWindow: 131072,
     supportsStreaming: true,
     supportsCaching: false,
@@ -153,29 +154,19 @@ export const GROQ_MODELS: Record<string, ModelInfo> = {
     id: "llama-3.1-8b-instant",
     displayName: "Llama 3.1 8B Instant",
     tier: "budget",
-    inputRate: 0.00005,
-    outputRate: 0.00008,
+    inputRate: 0.00005, // $0.05 per 1M
+    outputRate: 0.00008, // $0.08 per 1M
     contextWindow: 131072,
     supportsStreaming: true,
     supportsCaching: false,
   },
-  "mixtral-8x7b-32768": {
-    id: "mixtral-8x7b-32768",
-    displayName: "Mixtral 8x7B",
+  "qwen3-32b": {
+    id: "qwen3-32b",
+    displayName: "Qwen3 32B",
     tier: "balanced",
-    inputRate: 0.00024,
-    outputRate: 0.00024,
-    contextWindow: 32768,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
-  "gemma2-9b-it": {
-    id: "gemma2-9b-it",
-    displayName: "Gemma 2 9B",
-    tier: "budget",
-    inputRate: 0.0002,
-    outputRate: 0.0002,
-    contextWindow: 8192,
+    inputRate: 0.00029, // $0.29 per 1M
+    outputRate: 0.00059, // $0.59 per 1M
+    contextWindow: 131072,
     supportsStreaming: true,
     supportsCaching: false,
   },
@@ -183,26 +174,39 @@ export const GROQ_MODELS: Record<string, ModelInfo> = {
 
 /**
  * DeepSeek Models
- * DeepSeek offers powerful reasoning models at very low prices
+ * Pricing verified April 2026 from api-docs.deepseek.com
  */
 export const DEEPSEEK_MODELS: Record<string, ModelInfo> = {
   "deepseek-chat": {
     id: "deepseek-chat",
-    displayName: "DeepSeek Chat",
+    displayName: "DeepSeek Chat V3.2",
     tier: "balanced",
-    inputRate: 0.00014,
-    outputRate: 0.00028,
+    inputRate: 0.00028, // $0.28 per 1M
+    outputRate: 0.00042, // $0.42 per 1M
+    cacheReadRate: 0.000028, // $0.028 per 1M
     contextWindow: 128000,
     supportsStreaming: true,
     supportsCaching: true,
   },
   "deepseek-reasoner": {
     id: "deepseek-reasoner",
-    displayName: "DeepSeek Reasoner",
+    displayName: "DeepSeek R1",
     tier: "powerful",
-    inputRate: 0.00055,
-    outputRate: 0.00219,
+    inputRate: 0.00055, // $0.55 per 1M
+    outputRate: 0.00219, // $2.19 per 1M
+    cacheReadRate: 0.00014, // $0.14 per 1M
     contextWindow: 128000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  "deepseek-v4": {
+    id: "deepseek-v4",
+    displayName: "DeepSeek V4",
+    tier: "powerful",
+    inputRate: 0.0003, // $0.30 per 1M
+    outputRate: 0.0005, // $0.50 per 1M
+    cacheReadRate: 0.00003, // $0.03 per 1M
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },
@@ -210,56 +214,46 @@ export const DEEPSEEK_MODELS: Record<string, ModelInfo> = {
 
 /**
  * Mistral AI Models
- * European AI leader with strong code and multilingual capabilities
+ * Pricing verified April 2026 from mistral.ai
  */
 export const MISTRAL_MODELS: Record<string, ModelInfo> = {
   "mistral-large-latest": {
     id: "mistral-large-latest",
-    displayName: "Mistral Large",
+    displayName: "Mistral Large 3",
     tier: "powerful",
-    inputRate: 0.002,
-    outputRate: 0.006,
+    inputRate: 0.002, // $2.00 per 1M
+    outputRate: 0.006, // $6.00 per 1M
     contextWindow: 128000,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
-  "mistral-medium-latest": {
-    id: "mistral-medium-latest",
-    displayName: "Mistral Medium",
-    tier: "balanced",
-    inputRate: 0.00275,
-    outputRate: 0.0081,
-    contextWindow: 32000,
     supportsStreaming: true,
     supportsCaching: false,
   },
   "mistral-small-latest": {
     id: "mistral-small-latest",
-    displayName: "Mistral Small",
+    displayName: "Mistral Small 3.1",
     tier: "budget",
-    inputRate: 0.0002,
-    outputRate: 0.0006,
-    contextWindow: 32000,
+    inputRate: 0.00003, // $0.03 per 1M
+    outputRate: 0.00011, // $0.11 per 1M
+    contextWindow: 128000,
     supportsStreaming: true,
     supportsCaching: false,
   },
   "codestral-latest": {
     id: "codestral-latest",
-    displayName: "Codestral (Code)",
+    displayName: "Codestral",
     tier: "balanced",
-    inputRate: 0.0003,
-    outputRate: 0.0009,
-    contextWindow: 32000,
+    inputRate: 0.0003, // $0.30 per 1M
+    outputRate: 0.0009, // $0.90 per 1M
+    contextWindow: 256000,
     supportsStreaming: true,
     supportsCaching: false,
   },
-  "pixtral-large-latest": {
-    id: "pixtral-large-latest",
-    displayName: "Pixtral Large (Vision)",
-    tier: "powerful",
-    inputRate: 0.002,
-    outputRate: 0.006,
-    contextWindow: 128000,
+  "devstral-latest": {
+    id: "devstral-latest",
+    displayName: "Devstral 2",
+    tier: "balanced",
+    inputRate: 0.0005, // $0.50 per 1M
+    outputRate: 0.0015, // $1.50 per 1M
+    contextWindow: 262000,
     supportsStreaming: true,
     supportsCaching: false,
   },
@@ -267,38 +261,52 @@ export const MISTRAL_MODELS: Record<string, ModelInfo> = {
 
 /**
  * xAI Models (Grok)
- * Strong reasoning with real-time knowledge
+ * Pricing verified April 2026 from docs.x.ai
  */
 export const XAI_MODELS: Record<string, ModelInfo> = {
-  "grok-3": {
-    id: "grok-3",
-    displayName: "Grok 3",
+  "grok-4.20": {
+    id: "grok-4.20",
+    displayName: "Grok 4.20",
     tier: "powerful",
-    inputRate: 0.003,
-    outputRate: 0.015,
-    contextWindow: 131072,
+    inputRate: 0.002, // $2.00 per 1M
+    outputRate: 0.006, // $6.00 per 1M
+    cacheReadRate: 0.0002, // $0.20 per 1M
+    contextWindow: 2000000,
     supportsStreaming: true,
-    supportsCaching: false,
+    supportsCaching: true,
   },
-  "grok-3-fast": {
-    id: "grok-3-fast",
-    displayName: "Grok 3 Fast",
-    tier: "balanced",
-    inputRate: 0.005,
-    outputRate: 0.025,
-    contextWindow: 131072,
+  "grok-4.20-reasoning": {
+    id: "grok-4.20-reasoning",
+    displayName: "Grok 4.20 Reasoning",
+    tier: "powerful",
+    inputRate: 0.002, // $2.00 per 1M
+    outputRate: 0.006, // $6.00 per 1M
+    cacheReadRate: 0.0002, // $0.20 per 1M
+    contextWindow: 2000000,
     supportsStreaming: true,
-    supportsCaching: false,
+    supportsCaching: true,
   },
-  "grok-2": {
-    id: "grok-2",
-    displayName: "Grok 2",
+  "grok-4.1-fast": {
+    id: "grok-4.1-fast",
+    displayName: "Grok 4.1 Fast",
     tier: "balanced",
-    inputRate: 0.002,
-    outputRate: 0.01,
-    contextWindow: 131072,
+    inputRate: 0.0002, // $0.20 per 1M
+    outputRate: 0.0005, // $0.50 per 1M
+    cacheReadRate: 0.00005, // $0.05 per 1M
+    contextWindow: 2000000,
     supportsStreaming: true,
-    supportsCaching: false,
+    supportsCaching: true,
+  },
+  "grok-4.1-fast-reasoning": {
+    id: "grok-4.1-fast-reasoning",
+    displayName: "Grok 4.1 Fast Reasoning",
+    tier: "balanced",
+    inputRate: 0.0002, // $0.20 per 1M
+    outputRate: 0.0005, // $0.50 per 1M
+    cacheReadRate: 0.00005, // $0.05 per 1M
+    contextWindow: 2000000,
+    supportsStreaming: true,
+    supportsCaching: true,
   },
 };
 
@@ -308,32 +316,22 @@ export const XAI_MODELS: Record<string, ModelInfo> = {
  * Pricing may vary by region - these are US East baseline rates
  */
 export const BEDROCK_MODELS: Record<string, ModelInfo> = {
-  "anthropic.claude-3-5-sonnet-20241022-v2:0": {
-    id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    displayName: "Claude 3.5 Sonnet v2 (Bedrock)",
+  "anthropic.claude-sonnet-4-6-20250514-v1:0": {
+    id: "anthropic.claude-sonnet-4-6-20250514-v1:0",
+    displayName: "Claude Sonnet 4.6 (Bedrock)",
     tier: "balanced",
     inputRate: 0.003,
     outputRate: 0.015,
-    contextWindow: 200000,
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: false,
   },
-  "anthropic.claude-3-5-haiku-20241022-v1:0": {
-    id: "anthropic.claude-3-5-haiku-20241022-v1:0",
-    displayName: "Claude 3.5 Haiku (Bedrock)",
+  "anthropic.claude-haiku-4-5-20251001-v1:0": {
+    id: "anthropic.claude-haiku-4-5-20251001-v1:0",
+    displayName: "Claude Haiku 4.5 (Bedrock)",
     tier: "budget",
-    inputRate: 0.0008,
-    outputRate: 0.004,
-    contextWindow: 200000,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
-  "anthropic.claude-3-opus-20240229-v1:0": {
-    id: "anthropic.claude-3-opus-20240229-v1:0",
-    displayName: "Claude 3 Opus (Bedrock)",
-    tier: "powerful",
-    inputRate: 0.015,
-    outputRate: 0.075,
+    inputRate: 0.001,
+    outputRate: 0.005,
     contextWindow: 200000,
     supportsStreaming: true,
     supportsCaching: false,
@@ -358,26 +356,6 @@ export const BEDROCK_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: false,
   },
-  "meta.llama3-70b-instruct-v1:0": {
-    id: "meta.llama3-70b-instruct-v1:0",
-    displayName: "Llama 3 70B (Bedrock)",
-    tier: "powerful",
-    inputRate: 0.00265,
-    outputRate: 0.0035,
-    contextWindow: 8192,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
-  "mistral.mistral-large-2407-v1:0": {
-    id: "mistral.mistral-large-2407-v1:0",
-    displayName: "Mistral Large (Bedrock)",
-    tier: "powerful",
-    inputRate: 0.004,
-    outputRate: 0.012,
-    contextWindow: 128000,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
 };
 
 /**
@@ -386,54 +364,34 @@ export const BEDROCK_MODELS: Record<string, ModelInfo> = {
  * Note: Actual model names depend on your Azure deployment names
  */
 export const AZURE_MODELS: Record<string, ModelInfo> = {
-  "gpt-4o": {
-    id: "gpt-4o",
-    displayName: "GPT-4o (Foundry)",
-    tier: "balanced",
+  "gpt-5.4": {
+    id: "gpt-5.4",
+    displayName: "GPT-5.4 (Foundry)",
+    tier: "powerful",
     inputRate: 0.0025,
-    outputRate: 0.01,
-    contextWindow: 128000,
+    outputRate: 0.015,
+    contextWindow: 1050000,
     supportsStreaming: true,
-    supportsCaching: false,
+    supportsCaching: true,
   },
-  "gpt-4o-mini": {
-    id: "gpt-4o-mini",
-    displayName: "GPT-4o Mini (Foundry)",
+  "gpt-5.4-mini": {
+    id: "gpt-5.4-mini",
+    displayName: "GPT-5.4 Mini (Foundry)",
     tier: "budget",
-    inputRate: 0.00015,
-    outputRate: 0.0006,
-    contextWindow: 128000,
+    inputRate: 0.00075,
+    outputRate: 0.0045,
+    contextWindow: 400000,
     supportsStreaming: true,
-    supportsCaching: false,
+    supportsCaching: true,
   },
-  "gpt-4-turbo": {
-    id: "gpt-4-turbo",
-    displayName: "GPT-4 Turbo (Foundry)",
-    tier: "powerful",
-    inputRate: 0.01,
-    outputRate: 0.03,
-    contextWindow: 128000,
-    supportsStreaming: true,
-    supportsCaching: false,
-  },
-  "o1-preview": {
-    id: "o1-preview",
-    displayName: "o1-preview (Foundry)",
-    tier: "powerful",
-    inputRate: 0.015,
-    outputRate: 0.06,
-    contextWindow: 128000,
-    supportsStreaming: false,
-    supportsCaching: false,
-  },
-  "o1-mini": {
-    id: "o1-mini",
-    displayName: "o1-mini (Foundry)",
+  "o4-mini": {
+    id: "o4-mini",
+    displayName: "o4-mini (Foundry)",
     tier: "balanced",
-    inputRate: 0.003,
-    outputRate: 0.012,
-    contextWindow: 128000,
+    inputRate: 0.004,
+    outputRate: 0.016,
+    contextWindow: 256000,
     supportsStreaming: false,
-    supportsCaching: false,
+    supportsCaching: true,
   },
 };

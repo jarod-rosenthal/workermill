@@ -30,21 +30,8 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
-  // Legacy Haiku 3.5 alias (resolves to 4.5 pricing)
-  "claude-3-5-haiku-20241022": {
-    id: "claude-3-5-haiku-20241022",
-    displayName: "Claude 3.5 Haiku",
-    tier: "budget",
-    inputRate: 0.001,
-    outputRate: 0.005,
-    cacheWriteRate: 0.00125,
-    cacheReadRate: 0.0001,
-    contextWindow: 200000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
 
-  // Sonnet 4.6 (current balanced tier) — 1M context
+  // Sonnet 4.6 (balanced tier) — 1M context
   "claude-sonnet-4-6": {
     id: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
@@ -54,32 +41,6 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     cacheWriteRate: 0.00375, // 1.25x input
     cacheReadRate: 0.0003, // 0.1x input
     contextWindow: 1000000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
-  // Sonnet 4.5 (legacy)
-  "claude-sonnet-4-5-20250929": {
-    id: "claude-sonnet-4-5-20250929",
-    displayName: "Claude Sonnet 4.5",
-    tier: "balanced",
-    inputRate: 0.003,
-    outputRate: 0.015,
-    cacheWriteRate: 0.00375, // 1.25x input
-    cacheReadRate: 0.0003, // 0.1x input
-    contextWindow: 200000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
-  // Sonnet 4 (legacy)
-  "claude-sonnet-4-20250514": {
-    id: "claude-sonnet-4-20250514",
-    displayName: "Claude Sonnet 4",
-    tier: "balanced",
-    inputRate: 0.003,
-    outputRate: 0.015,
-    cacheWriteRate: 0.00375,
-    cacheReadRate: 0.0003,
-    contextWindow: 200000,
     supportsStreaming: true,
     supportsCaching: true,
   },
@@ -94,19 +55,6 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     cacheWriteRate: 0.00625, // 1.25x input
     cacheReadRate: 0.0005, // 0.1x input
     contextWindow: 1000000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
-  // Opus 4.5 (legacy powerful tier)
-  "claude-opus-4-5-20251101": {
-    id: "claude-opus-4-5-20251101",
-    displayName: "Claude Opus 4.5",
-    tier: "powerful",
-    inputRate: 0.005,
-    outputRate: 0.025,
-    cacheWriteRate: 0.00625, // 1.25x input
-    cacheReadRate: 0.0005, // 0.1x input
-    contextWindow: 200000,
     supportsStreaming: true,
     supportsCaching: true,
   },

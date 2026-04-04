@@ -56,6 +56,8 @@ import {
   DocsCompliance,
   AgentSetup,
   CLIDocs,
+  CLIReferenceIndex,
+  CLIReferencePage,
   VSCodeExtension,
   Repositories as DocsRepositories,
   CodebaseIndexing,
@@ -253,6 +255,8 @@ function App() {
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
             <Route path="cli" element={<CLIDocs />} />
+            <Route path="cli/reference" element={<CLIReferenceIndex />} />
+            <Route path="cli/reference/:slug" element={<CLIReferencePage />} />
             <Route path="agent" element={<AgentSetup />} />
             <Route
               path="local-agent"

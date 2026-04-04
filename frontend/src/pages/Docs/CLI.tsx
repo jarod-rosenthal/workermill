@@ -1,5 +1,6 @@
-import { TerminalSquare, Copy, Check } from "lucide-react";
+import { TerminalSquare, Copy, Check, BookOpen } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 function CopyBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -430,6 +431,21 @@ export default function CLI() {
           <li>An LLM provider (Ollama for local, or an API key for cloud providers)</li>
           <li><a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub CLI</a> (<code className="px-1 bg-muted rounded text-xs">gh</code>) — optional, needed for automatic PR creation</li>
         </ul>
+      </section>
+
+      {/* Deep reference */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">Deep Reference</h2>
+        <p className="text-muted-foreground">
+          Every slash command, every configuration field, and guides for extending the CLI with custom personas, hooks, and skills.
+        </p>
+        <Link
+          to="/docs/cli/reference"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors"
+        >
+          <BookOpen className="w-4 h-4 text-primary" />
+          <span>Browse CLI Reference</span>
+        </Link>
       </section>
     </div>
   );

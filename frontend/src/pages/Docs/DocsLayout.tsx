@@ -31,6 +31,7 @@ const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
   { to: "/docs/cli", label: "WorkerMill CLI", icon: TerminalSquare },
+  { to: "/docs/cli/reference", label: "  ↳ CLI Reference", icon: BookOpen },
   { to: "/docs/vscode-extension", label: "VS Code Extension", icon: Radio },
   { to: "/docs/agent", label: "Agent Setup", icon: Monitor },
   { to: "/docs/repositories", label: "Repositories", icon: FolderGit2 },

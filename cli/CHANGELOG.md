@@ -14,9 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Setup / model filtering** — updated model selection behavior to keep older OpenAI families out of the current-model picker while preserving supported pricing and routing.
 - **`/settings review.threshold` not taking effect** — changing the approval threshold via `/settings review.threshold <n>` saved to disk but the orchestrator still used the stale config snapshot from CLI startup, always falling back to the default of 8. `/ship` and `/review` now reload config fresh from disk on each run so settings changes take effect immediately without restarting.
 - **Bash tool debug log below status bar** — the bash worker thread wrote `[bash-worker] received: ...` directly to `process.stderr`, bypassing Ink's terminal management and rendering text below the status bar. Removed the debug log.
+- **API keys not passed to OpenAI-compatible providers** — xAI, Groq, DeepSeek, and Mistral all route through `createOpenAI()` which defaulted to `OPENAI_API_KEY`. Now reads provider-specific env vars (`XAI_API_KEY`, `GROQ_API_KEY`, etc.) and passes the key from config directly.
+- **Cost tracking wrong after `/model` switch** — cost tracker read the startup provider/model instead of the active one, so switching mid-session tracked costs against the wrong pricing tier.
+- **Sub-penny costs shown as `~$0.00`** — status bar now shows `<$0.01` for small amounts so you can tell costs are being tracked.
+- **Git tool auto-allowed in acceptEdits mode** — git now prompts for permission in auto-edit mode instead of silently allowing.
+- **4 typecheck errors** — fixed nullable guards in `/model` switch and orchestrator error handler, plus `toolChoice` type mismatch.
 
 ### Changed
-- **Model registries updated to April 2026** — removed deprecated/ancient models from `/model` autocomplete. Updated: Anthropic (3 current models), Google (2.5 + 3.x only), xAI (Grok 4.x with 2M context), DeepSeek (+V4), Mistral (Large 3, Small 3.1, Codestral, Devstral 2), Groq (+Qwen3), OpenRouter, Bedrock, Azure.
+- **Model registries updated to April 2026** — removed deprecated/ancient models from `/model` autocomplete. Updated: Anthropic (3 current models), Google (2.5 + 3.x only), xAI (Grok 4.x with 2M context + Grok Code Fast), DeepSeek (+V4), Mistral (Large 3, Small 3.1, Codestral, Devstral 2), Groq (+Qwen3), OpenRouter, Bedrock, Azure.
+- **Prebuild cleanup** — `npm run build` now auto-deletes orphan `.js` files from `api/src/` and `packages/engine/src/` that shadow `.ts` sources during bundling.
 
 ## [0.15.97] - 2026-04-03
 

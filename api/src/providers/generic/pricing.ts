@@ -264,19 +264,8 @@ export const MISTRAL_MODELS: Record<string, ModelInfo> = {
  * Pricing verified April 2026 from docs.x.ai
  */
 export const XAI_MODELS: Record<string, ModelInfo> = {
-  "grok-4.20": {
-    id: "grok-4.20",
-    displayName: "Grok 4.20",
-    tier: "powerful",
-    inputRate: 0.002, // $2.00 per 1M
-    outputRate: 0.006, // $6.00 per 1M
-    cacheReadRate: 0.0002, // $0.20 per 1M
-    contextWindow: 2000000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
-  "grok-4.20-reasoning": {
-    id: "grok-4.20-reasoning",
+  "grok-4.20-0309-reasoning": {
+    id: "grok-4.20-0309-reasoning",
     displayName: "Grok 4.20 Reasoning",
     tier: "powerful",
     inputRate: 0.002, // $2.00 per 1M
@@ -286,9 +275,20 @@ export const XAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
-  "grok-4.1-fast": {
-    id: "grok-4.1-fast",
-    displayName: "Grok 4.1 Fast",
+  "grok-4.20-0309-non-reasoning": {
+    id: "grok-4.20-0309-non-reasoning",
+    displayName: "Grok 4.20",
+    tier: "powerful",
+    inputRate: 0.002, // $2.00 per 1M
+    outputRate: 0.006, // $6.00 per 1M
+    cacheReadRate: 0.0002, // $0.20 per 1M
+    contextWindow: 2000000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  "grok-4-1-fast-reasoning": {
+    id: "grok-4-1-fast-reasoning",
+    displayName: "Grok 4.1 Fast Reasoning",
     tier: "balanced",
     inputRate: 0.0002, // $0.20 per 1M
     outputRate: 0.0005, // $0.50 per 1M
@@ -297,9 +297,9 @@ export const XAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
-  "grok-4.1-fast-reasoning": {
-    id: "grok-4.1-fast-reasoning",
-    displayName: "Grok 4.1 Fast Reasoning",
+  "grok-4-1-fast-non-reasoning": {
+    id: "grok-4-1-fast-non-reasoning",
+    displayName: "Grok 4.1 Fast",
     tier: "balanced",
     inputRate: 0.0002, // $0.20 per 1M
     outputRate: 0.0005, // $0.50 per 1M

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
+    "prebuild": "find ../api/src ../packages/engine/src -name '*.js' -not -path '*/node_modules/*' -delete 2>/dev/null; true",
     "build": "tsup",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",

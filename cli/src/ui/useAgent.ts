@@ -251,6 +251,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         anthropic: "ANTHROPIC_API_KEY",
         openai: "OPENAI_API_KEY",
         google: "GOOGLE_GENERATIVE_AI_API_KEY",
+        xai: "XAI_API_KEY",
+        groq: "GROQ_API_KEY",
+        deepseek: "DEEPSEEK_API_KEY",
+        mistral: "MISTRAL_API_KEY",
       };
       const envVar = envMap[options.provider];
       if (envVar && !process.env[envVar]) {
@@ -273,6 +277,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.model,
       options.host,
       options.contextLength,
+      options.apiKey,
     );
     toolsRef.current = createToolDefinitions(
       workingDirRef.current,
@@ -1290,7 +1295,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     aiProviderRef.current = newProvider as AIProvider;
     activeModelNameRef.current = newModel;
     activeContextLengthRef.current = contextLength;
-    modelRef.current = createModel(newProvider as AIProvider, newModel, host, contextLength);
+    const resolvedApiKey = apiKey?.startsWith("{env:")
+      ? process.env[apiKey.slice(5, -1)] || undefined
+      : apiKey;
+    modelRef.current = createModel(newProvider as AIProvider, newModel, host, contextLength, resolvedApiKey);
 
     // Local providers need context length ensured before first use
     if (newProvider === "ollama" && host && contextLength) {

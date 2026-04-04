@@ -104,7 +104,7 @@ const providers: Record<string, ProviderConfig> = {
     id: "xai",
     name: "xAI (Grok)",
     pricingEngine: new GenericPricingEngine("xai", XAI_MODELS),
-    defaultModel: "grok-4.20",
+    defaultModel: "grok-4-1-fast-reasoning",
     requiresApiKey: true,
     apiKeyEnvVar: "XAI_API_KEY",
   },

@@ -123,7 +123,8 @@ export function createModel(
   provider: AIProvider,
   modelName: string,
   host?: string,
-  contextLength?: number
+  contextLength?: number,
+  apiKey?: string,
 ): LanguageModel {
   switch (provider) {
     case "anthropic":
@@ -131,7 +132,7 @@ export function createModel(
     case "openai": {
       if (host) {
         // OpenAI-compatible provider with custom baseURL (Groq, DeepSeek, Mistral, etc.)
-        const customOpenAI = createOpenAI({ baseURL: host });
+        const customOpenAI = createOpenAI({ baseURL: host, ...(apiKey ? { apiKey } : {}) });
         return customOpenAI.chat(modelName);
       }
       // Codex models (gpt-5-codex, gpt-5.1-codex, etc.) are Responses API only —
@@ -178,7 +179,15 @@ export function createModel(
       };
       const compatHost = host || compatibleHosts[provider];
       if (compatHost) {
-        const compat = createOpenAI({ baseURL: compatHost });
+        // Map provider to its env var for API key lookup
+        const envKeys: Record<string, string> = {
+          xai: "XAI_API_KEY",
+          groq: "GROQ_API_KEY",
+          deepseek: "DEEPSEEK_API_KEY",
+          mistral: "MISTRAL_API_KEY",
+        };
+        const resolvedKey = apiKey || (envKeys[provider] ? process.env[envKeys[provider]] : undefined);
+        const compat = createOpenAI({ baseURL: compatHost, ...(resolvedKey ? { apiKey: resolvedKey } : {}) });
         return compat.chat(modelName);
       }
       throw new Error(`Unsupported provider: ${provider}`);

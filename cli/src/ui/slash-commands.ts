@@ -213,7 +213,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/release-notes\` | Show changelog |
 | \`/quit\` | Exit |
 
-**Shortcuts:** \`!command\` runs shell, \`ESC\` cancels, \`ESC ESC\` rolls back, \`Shift+Tab\` cycles permissions, \`Ctrl+C Ctrl+C\` exits, \`←/→\` cursor, \`Tab\` autocomplete.`;
+**Shortcuts:** \`!command\` runs shell, \`ESC\` cancels, \`ESC ESC\` rolls back, \`Shift+Tab\` cycles permissions, \`Ctrl+C\` exits (or cancels while running), \`←/→\` cursor, \`Tab\` autocomplete.`;
 
 // ---------------------------------------------------------------------------
 // Context interface

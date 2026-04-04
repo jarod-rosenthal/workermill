@@ -175,7 +175,6 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
 export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const lastCtrlCRef = useRef(0);
   const lastEscRef = useRef(0);
 
   // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
@@ -221,18 +220,20 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
-    // Double Ctrl+C when idle to exit
+    // Ctrl+C:
+    // - while running: cancel current operation
+    // - while idle: exit immediately
     if (key.ctrl && input === "c") {
-      const now = Date.now();
-      if (props.status === "idle" && now - lastCtrlCRef.current < 500) {
-        stopAllMCPServers();
-        shutdownLSP();
-        void browserClose();
-        exit();
-        setTimeout(() => process.exit(0), 100);
+      if (props.status !== "idle") {
+        props.onCancel();
         return;
       }
-      lastCtrlCRef.current = now;
+      stopAllMCPServers();
+      shutdownLSP();
+      void browserClose();
+      exit();
+      setTimeout(() => process.exit(0), 100);
+      return;
     }
   }, { isActive: true });
 

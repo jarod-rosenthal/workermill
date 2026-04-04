@@ -158,7 +158,7 @@ vi.mock("../safety.js", () => ({
 
 // Now import the functions under test
 import { runOrchestration, classifyComplexity, type OrchestrationOutput } from "../orchestrator.js";
-import { streamText } from "ai";
+import { streamText, generateText } from "ai";
 
 // ---- Helpers ----
 
@@ -1231,7 +1231,7 @@ describe("extractScore via reviewer output patterns", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("critic path is skipped as experimental when useCritic is set", async () => {
+  it("critic scores and approves the plan when useCritic is set", async () => {
 
     const planText = `\`\`\`json
 {
@@ -1240,6 +1240,14 @@ describe("extractScore via reviewer output patterns", () => {
   ]
 }
 \`\`\``;
+
+    const criticResponse = JSON.stringify({
+      score: 9,
+      approved: true,
+      risks: [],
+      suggestions: [],
+      reasoning: "Plan looks solid.",
+    });
 
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
@@ -1256,6 +1264,11 @@ describe("extractScore via reviewer output patterns", () => {
       };
     });
 
+    vi.mocked(generateText).mockResolvedValue({
+      text: criticResponse,
+      usage: { inputTokens: 200, outputTokens: 100 },
+    } as any);
+
     const config = {
       ...createTestConfig(),
       review: { useCritic: true, criticThreshold: 8 },
@@ -1264,9 +1277,9 @@ describe("extractScore via reviewer output patterns", () => {
 
     await runOrchestration(config, "Task with critic review", true, false, output);
 
-    // Critic is not yet implemented — should log the experimental skip message
-    const skipLogs = output.logs.filter(l => l.includes("experimental") || l.includes("not yet implemented"));
-    expect(skipLogs.length).toBeGreaterThan(0);
+    // Critic should log approval
+    const approvalLogs = output.logs.filter(l => l.includes("Critic approved") || l.includes("9/10"));
+    expect(approvalLogs.length).toBeGreaterThan(0);
   });
 });
 
@@ -1623,7 +1636,7 @@ describe("extractScore edge cases (via critic config)", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("critic is skipped with experimental log when useCritic is enabled", async () => {
+  it("critic revises plan when score is below threshold", async () => {
 
     const planText = `\`\`\`json
 {
@@ -1633,8 +1646,34 @@ describe("extractScore edge cases (via critic config)", () => {
 }
 \`\`\``;
 
+    const lowScoreResponse = JSON.stringify({
+      score: 5,
+      approved: false,
+      risks: ["Missing error handling"],
+      suggestions: ["Add validation story"],
+      reasoning: "Plan is incomplete.",
+    });
+
+    const approvedResponse = JSON.stringify({
+      score: 9,
+      approved: true,
+      risks: [],
+      suggestions: [],
+      reasoning: "Revised plan is solid.",
+    });
+
+    let generateTextCallCount = 0;
+    vi.mocked(generateText).mockImplementation(async () => {
+      generateTextCallCount++;
+      const text = generateTextCallCount === 1 ? lowScoreResponse : approvedResponse;
+      return { text, usage: { inputTokens: 200, outputTokens: 100 } } as any;
+    });
+
+    // streamText needs to return plan for both initial plan AND revision
+    let streamCallCount = 0;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
+      streamCallCount++;
       if (typeof opts.onStepFinish === "function") {
         (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
           text: "done",
@@ -1656,9 +1695,9 @@ describe("extractScore edge cases (via critic config)", () => {
 
     await runOrchestration(config, "Task with critic enabled", true, false, output);
 
-    // Critic is not yet implemented — should log the experimental skip message
-    const skipLogs = output.logs.filter(l => l.includes("experimental") || l.includes("not yet implemented"));
-    expect(skipLogs.length).toBeGreaterThan(0);
+    // Should see revision logs
+    const revisionLogs = output.logs.filter(l => l.includes("revising") || l.includes("5/10"));
+    expect(revisionLogs.length).toBeGreaterThan(0);
   });
 });
 

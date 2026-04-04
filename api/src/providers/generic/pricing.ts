@@ -399,8 +399,8 @@ export const AZURE_MODELS: Record<string, ModelInfo> = {
     id: "o4-mini",
     displayName: "o4-mini (Foundry)",
     tier: "balanced",
-    inputRate: 0.004,
-    outputRate: 0.016,
+    inputRate: 0.00055, // $0.55 per 1M
+    outputRate: 0.0022, // $2.20 per 1M
     contextWindow: 256000,
     supportsStreaming: false,
     supportsCaching: true,

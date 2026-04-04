@@ -229,9 +229,9 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     id: "o4-mini",
     displayName: "o4 Mini",
     tier: "balanced",
-    inputRate: 0.004, // $4 per 1M
-    outputRate: 0.016, // $16 per 1M
-    cacheReadRate: 0.001, // $1 per 1M
+    inputRate: 0.00055, // $0.55 per 1M
+    outputRate: 0.0022, // $2.20 per 1M
+    cacheReadRate: 0.000275, // $0.275 per 1M
     contextWindow: 256000,
     supportsStreaming: false,
     supportsCaching: true,
@@ -242,9 +242,10 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     tier: "powerful",
     inputRate: 0.002, // $2 per 1M
     outputRate: 0.008, // $8 per 1M
+    cacheReadRate: 0.0005, // $0.50 per 1M
     contextWindow: 256000,
     supportsStreaming: false,
-    supportsCaching: false,
+    supportsCaching: true,
   },
   "o3-mini": {
     id: "o3-mini",

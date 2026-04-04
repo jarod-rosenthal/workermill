@@ -34,6 +34,91 @@ const activeServers: Map<string, MCPServer> = new Map();
 let pendingConfig: Record<string, MCPServerConfig> | null = null;
 let lazyStartPromise: Promise<void> | null = null;
 
+type GitHubRepoContext = {
+  owner: string;
+  repo: string;
+};
+
+let cachedGitHubRepoContext: GitHubRepoContext | null | undefined;
+
+function parseGitHubRepoFromRemote(remoteUrl: string): GitHubRepoContext | null {
+  const trimmed = remoteUrl.trim();
+  if (!trimmed) return null;
+
+  const sshMatch = trimmed.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (sshMatch) {
+    return { owner: sshMatch[1], repo: sshMatch[2] };
+  }
+
+  const httpsMatch = trimmed.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  if (httpsMatch) {
+    return { owner: httpsMatch[1], repo: httpsMatch[2] };
+  }
+
+  const sshUrlMatch = trimmed.match(/^ssh:\/\/git@github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  if (sshUrlMatch) {
+    return { owner: sshUrlMatch[1], repo: sshUrlMatch[2] };
+  }
+
+  return null;
+}
+
+function getGitHubRepoContext(): GitHubRepoContext | null {
+  if (cachedGitHubRepoContext !== undefined) return cachedGitHubRepoContext;
+
+  try {
+    const remoteUrl = nodeExecSync("git config --get remote.origin.url", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 1500,
+    }).trim();
+
+    cachedGitHubRepoContext = parseGitHubRepoFromRemote(remoteUrl);
+    if (cachedGitHubRepoContext) {
+      logger.debug("Detected GitHub repo context for MCP argument hydration", {
+        owner: cachedGitHubRepoContext.owner,
+        repo: cachedGitHubRepoContext.repo,
+      });
+    }
+  } catch {
+    cachedGitHubRepoContext = null;
+  }
+
+  return cachedGitHubRepoContext;
+}
+
+function normalizeMCPInput(input: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  return input;
+}
+
+function hydrateGitHubIssueToolArgs(
+  serverName: string,
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const args = { ...normalizeMCPInput(input) };
+  const normalizedServer = serverName.toLowerCase();
+  const isLikelyGitHubServer = normalizedServer.includes("docker") || normalizedServer.includes("github");
+  if (!isLikelyGitHubServer) return args;
+
+  const repoContext = getGitHubRepoContext();
+
+  if (!repoContext) return args;
+
+  if (toolName === "list_issues") {
+    if (typeof args.owner !== "string" || !args.owner.trim()) args.owner = repoContext.owner;
+    if (typeof args.repo !== "string" || !args.repo.trim()) args.repo = repoContext.repo;
+    return args;
+  }
+
+  if (toolName === "search_issues" && (typeof args.query !== "string" || !args.query.trim())) {
+    args.query = `repo:${repoContext.owner}/${repoContext.repo} is:issue is:open`;
+  }
+
+  return args;
+}
+
 // ---------------------------------------------------------------------------
 // JSON-RPC transport over stdio
 // ---------------------------------------------------------------------------
@@ -244,9 +329,12 @@ export function getMCPToolDefinitions(): Record<string, AnyToolDef> {
 
       // Use the MCP tool's inputSchema directly via AI SDK's jsonSchema().
       // Fall back to an empty-object schema if none is provided.
-      const schema = mcpTool.inputSchema && Object.keys(mcpTool.inputSchema).length > 0
-        ? mcpTool.inputSchema
+      // Ensure every MCP tool schema has type: "object" — Anthropic's API
+      // rejects tools without input_schema.type. Force it unconditionally.
+      const rawSchema = (mcpTool.inputSchema && typeof mcpTool.inputSchema === "object" && Object.keys(mcpTool.inputSchema).length > 0)
+        ? { type: "object" as const, ...mcpTool.inputSchema }
         : { type: "object" as const, properties: {} };
+      const schema = { ...rawSchema, type: "object" as const };
 
       // Capture loop variables for the closure
       const capturedServerName = serverName;
@@ -256,7 +344,8 @@ export function getMCPToolDefinitions(): Record<string, AnyToolDef> {
         description: `[MCP: ${serverName}] ${mcpTool.description || mcpTool.name}`,
         parameters: jsonSchema(schema),
         execute: async (input: Record<string, unknown>) => {
-          return callMCPTool(capturedServerName, capturedToolName, input);
+          const hydratedInput = hydrateGitHubIssueToolArgs(capturedServerName, capturedToolName, input);
+          return callMCPTool(capturedServerName, capturedToolName, hydratedInput);
         },
       };
     }

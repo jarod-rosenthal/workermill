@@ -20,9 +20,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Git tool auto-allowed in acceptEdits mode** — git now prompts for permission in auto-edit mode instead of silently allowing.
 - **4 typecheck errors** — fixed nullable guards in `/model` switch and orchestrator error handler, plus `toolChoice` type mismatch.
 
+- **MCP tool schemas breaking Anthropic API** — Docker Desktop MCP gateway returns tools without `input_schema.type`, which Anthropic rejects with `tools.5.custom.input_schema.type: Field required`. Now forces `type: "object"` on all MCP tool schemas. MCP tools also removed from planner tool set (planner only needs codebase read tools).
+- **Planner producing text instead of JSON** — when the planner outputs analysis text without a JSON stories block, a single cheap follow-up call now extracts the plan as JSON instead of failing outright.
+- **o4-mini pricing was 7x too high** — had $4/$16 per M, corrected to $0.55/$2.20. Also fixed o3 (added caching support) and gemini-2.5-pro input ($1.25 → $1.00).
+- **xAI reasoning not surfacing** — `reasoningSummary: "detailed"` was not being sent for xAI provider in either single-agent or orchestrator paths.
+
+### Added
+- **Planning critic loop** — ported from the platform (`api/src/services/critic-agent-local.ts`). After the planner produces stories, a critic pass scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Plans scoring below threshold (default 8, configurable via `/settings review.criticThreshold`) are sent back for refinement, up to 3 iterations. Enabled by default; disable with `/settings review.critic false`.
+- **Grok Code Fast model** — added `grok-code-fast-1` to xAI registry ($0.20/$1.50 per M, 256K context, purpose-built for agentic coding).
+
 ### Changed
 - **Model registries updated to April 2026** — removed deprecated/ancient models from `/model` autocomplete. Updated: Anthropic (3 current models), Google (2.5 + 3.x only), xAI (Grok 4.x with 2M context + Grok Code Fast), DeepSeek (+V4), Mistral (Large 3, Small 3.1, Codestral, Devstral 2), Groq (+Qwen3), OpenRouter, Bedrock, Azure.
 - **Prebuild cleanup** — `npm run build` now auto-deletes orphan `.js` files from `api/src/` and `packages/engine/src/` that shadow `.ts` sources during bundling.
+- **Status bar context label** — removed the word "context" from the model display (e.g. `(2M)` instead of `(2M context)`).
 
 ## [0.15.97] - 2026-04-03
 

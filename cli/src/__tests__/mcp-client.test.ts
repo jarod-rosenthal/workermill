@@ -138,12 +138,14 @@ describe("mcp-client", () => {
   // empty. vi.resetModules() clears the module registry between tests.
   let mcpClient: typeof import("../mcp-client.js");
   let spawnMock: ReturnType<typeof vi.fn>;
+  let execSyncMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
 
     spawnMock = vi.fn();
-    vi.doMock("child_process", () => ({ spawn: spawnMock }));
+    execSyncMock = vi.fn();
+    vi.doMock("child_process", () => ({ spawn: spawnMock, execSync: execSyncMock }));
 
     mcpClient = await import("../mcp-client.js");
   });
@@ -341,6 +343,202 @@ describe("mcp-client", () => {
       // responder returns "called:ping"
       const result = await defs["mcp__pinger__ping"].execute({ arg1: "value" });
       expect(result).toBe("called:ping");
+    });
+
+    it("hydrates missing owner/repo for list_issues from git remote", async () => {
+      execSyncMock.mockReturnValue("git@github.com:acme/widgets.git\n");
+
+      const tools = [{
+        name: "list_issues",
+        inputSchema: {
+          type: "object",
+          properties: {
+            owner: { type: "string" },
+            repo: { type: "string" },
+            state: { type: "string" },
+          },
+        },
+      }];
+
+      let capturedArgs: Record<string, unknown> | undefined;
+      const { proc } = makeMockProcess((written: string) => {
+        let msg: Record<string, unknown>;
+        try { msg = JSON.parse(written.trim()); } catch { return null; }
+        const method = msg.method as string;
+        const id = msg.id;
+        if (method === "initialize") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { serverInfo: {} } }) + "\n";
+        }
+        if (method === "notifications/initialized") return null;
+        if (method === "tools/list") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { tools } }) + "\n";
+        }
+        if (method === "tools/call") {
+          const params = msg.params as { arguments?: Record<string, unknown> };
+          capturedArgs = params.arguments;
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: "ok" }] },
+          }) + "\n";
+        }
+        return null;
+      });
+      spawnMock.mockReturnValue(proc);
+
+      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      const defs = mcpClient.getMCPToolDefinitions();
+      await defs["mcp__docker__list_issues"].execute({ state: "open" });
+
+      expect(capturedArgs).toMatchObject({ owner: "acme", repo: "widgets", state: "open" });
+    });
+
+    it("hydrates missing query for search_issues from git remote", async () => {
+      execSyncMock.mockReturnValue("https://github.com/octo/sample-repo.git\n");
+
+      const tools = [{
+        name: "search_issues",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      }];
+
+      let capturedArgs: Record<string, unknown> | undefined;
+      const { proc } = makeMockProcess((written: string) => {
+        let msg: Record<string, unknown>;
+        try { msg = JSON.parse(written.trim()); } catch { return null; }
+        const method = msg.method as string;
+        const id = msg.id;
+        if (method === "initialize") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { serverInfo: {} } }) + "\n";
+        }
+        if (method === "notifications/initialized") return null;
+        if (method === "tools/list") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { tools } }) + "\n";
+        }
+        if (method === "tools/call") {
+          const params = msg.params as { arguments?: Record<string, unknown> };
+          capturedArgs = params.arguments;
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: "ok" }] },
+          }) + "\n";
+        }
+        return null;
+      });
+      spawnMock.mockReturnValue(proc);
+
+      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      const defs = mcpClient.getMCPToolDefinitions();
+      await defs["mcp__docker__search_issues"].execute({});
+
+      expect(capturedArgs).toMatchObject({
+        query: "repo:octo/sample-repo is:issue is:open",
+      });
+    });
+
+    it("does not override explicit owner/repo/query values", async () => {
+      execSyncMock.mockReturnValue("git@github.com:acme/widgets.git\n");
+
+      const tools = [
+        {
+          name: "list_issues",
+          inputSchema: {
+            type: "object",
+            properties: { owner: { type: "string" }, repo: { type: "string" } },
+          },
+        },
+        {
+          name: "search_issues",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+          },
+        },
+      ];
+
+      const capturedToolArgs: Record<string, Record<string, unknown>> = {};
+      const { proc } = makeMockProcess((written: string) => {
+        let msg: Record<string, unknown>;
+        try { msg = JSON.parse(written.trim()); } catch { return null; }
+        const method = msg.method as string;
+        const id = msg.id;
+        if (method === "initialize") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { serverInfo: {} } }) + "\n";
+        }
+        if (method === "notifications/initialized") return null;
+        if (method === "tools/list") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { tools } }) + "\n";
+        }
+        if (method === "tools/call") {
+          const params = msg.params as { name: string; arguments?: Record<string, unknown> };
+          capturedToolArgs[params.name] = params.arguments || {};
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: "ok" }] },
+          }) + "\n";
+        }
+        return null;
+      });
+      spawnMock.mockReturnValue(proc);
+
+      await mcpClient.startMCPServer("docker", { command: "mcp", args: [] });
+      const defs = mcpClient.getMCPToolDefinitions();
+
+      await defs["mcp__docker__list_issues"].execute({ owner: "other", repo: "repo2" });
+      await defs["mcp__docker__search_issues"].execute({ query: "repo:other/repo2 is:issue" });
+
+      expect(capturedToolArgs.list_issues).toMatchObject({ owner: "other", repo: "repo2" });
+      expect(capturedToolArgs.search_issues).toMatchObject({ query: "repo:other/repo2 is:issue" });
+    });
+
+    it("does not hydrate non-github server tools", async () => {
+      execSyncMock.mockReturnValue("git@github.com:acme/widgets.git\n");
+
+      const tools = [{
+        name: "list_issues",
+        inputSchema: {
+          type: "object",
+          properties: { owner: { type: "string" }, repo: { type: "string" } },
+        },
+      }];
+
+      let capturedArgs: Record<string, unknown> | undefined;
+      const { proc } = makeMockProcess((written: string) => {
+        let msg: Record<string, unknown>;
+        try { msg = JSON.parse(written.trim()); } catch { return null; }
+        const method = msg.method as string;
+        const id = msg.id;
+        if (method === "initialize") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { serverInfo: {} } }) + "\n";
+        }
+        if (method === "notifications/initialized") return null;
+        if (method === "tools/list") {
+          return JSON.stringify({ jsonrpc: "2.0", id, result: { tools } }) + "\n";
+        }
+        if (method === "tools/call") {
+          const params = msg.params as { arguments?: Record<string, unknown> };
+          capturedArgs = params.arguments;
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: "ok" }] },
+          }) + "\n";
+        }
+        return null;
+      });
+      spawnMock.mockReturnValue(proc);
+
+      await mcpClient.startMCPServer("tracker", { command: "mcp", args: [] });
+      const defs = mcpClient.getMCPToolDefinitions();
+      await defs["mcp__tracker__list_issues"].execute({ state: "open" });
+
+      expect(capturedArgs).toMatchObject({ state: "open" });
+      expect(capturedArgs).not.toHaveProperty("owner");
+      expect(capturedArgs).not.toHaveProperty("repo");
     });
   });
 

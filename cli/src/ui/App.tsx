@@ -81,6 +81,8 @@ function Spinner({ color }: { color: string }): React.ReactElement {
   return <Text color={color}>●</Text>;
 }
 
+const ORCHESTRATOR_CONFIRM_ACK_MS = 450;
+
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
     const millions = value / 1_000_000;
@@ -136,7 +138,7 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
     if (answered) return;
     const resolve = (label: string, yes: boolean, mode?: "always" | "trust") => {
       setAnswered(label);
-      setTimeout(() => request.resolve(yes, mode), 150);
+      setTimeout(() => request.resolve(yes, mode), ORCHESTRATOR_CONFIRM_ACK_MS);
     };
     if (key.escape) resolve("esc", false);
     else if (input === "y" || input === "Y") resolve("y", true);

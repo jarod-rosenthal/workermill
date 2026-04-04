@@ -10,7 +10,7 @@ import { loadPersona } from "./personas.js";
 import { formatProjectInstructions } from "./instructions.js";
 import { findModelInfo } from "./provider-registry.js";
 import * as logger from "./logger.js";
-import { CostTracker } from "./cost-tracker.js";
+import { CostTracker, type UsageSummary } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
@@ -118,6 +118,8 @@ export interface OrchestrationOutput {
   updateBranch?: (branch: string) => void;
   /** Update running cost in the UI (optional — noop if not provided) */
   updateCost?: (cost: number) => void;
+  /** Update usage summary in the UI (optional — noop if not provided) */
+  updateUsageSummary?: (summary: UsageSummary) => void;
   /** Update tokens-per-second for a model (optional — noop if not provided) */
   updateTokPerSec?: (providerModel: string, tokPerSec: number) => void;
 }
@@ -186,6 +188,7 @@ function needsDockerInstructions(story: Story, userTask: string): boolean {
 function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
   switch (provider) {
     case "openai":
+    case "xai":
       return { providerOptions: { openai: { reasoningSummary: "detailed" } } };
     case "google":
     case "gemini":
@@ -196,6 +199,160 @@ function buildReasoningOptions(provider: string, modelName: string): Record<stri
     default:
       return {};
   }
+}
+
+// ---------------------------------------------------------------------------
+// Planning Critic — ported from api/src/services/critic-agent-local.ts
+// Scores plans 0-100, approves at >=threshold, refines up to maxIterations.
+// ---------------------------------------------------------------------------
+
+interface CriticResult {
+  score: number;
+  approved: boolean;
+  risks: string[];
+  suggestions: string[];
+  reasoning: string;
+  storyFeedback?: Array<{ storyId: string; feedback: string; suggestedChanges?: string[] }>;
+}
+
+function buildCriticPrompt(stories: Story[], requirements: string, iteration: number): string {
+  const storyList = stories.map((s, i) =>
+    `### Story ${i + 1}: ${s.title} (${s.id})\n` +
+    `- **Persona:** ${s.persona}\n` +
+    `- **Dependencies:** ${s.dependsOn?.join(", ") || "None"}\n` +
+    `- **Description:** ${s.description}\n` +
+    (s.implementationNotes ? `- **Implementation Notes:** ${s.implementationNotes}\n` : "")
+  ).join("\n\n");
+
+  return `You are a senior technical reviewer (Tech Lead / Critic Agent).
+
+Your job is to review an execution plan and determine if it adequately addresses the requirements.
+
+## Original Requirements
+
+${requirements}
+
+## Execution Plan to Review
+
+**Stories:**
+${storyList}
+
+${iteration > 1 ? `\n**Note:** This is revision ${iteration}. Previous versions had issues that needed addressing.\n` : ""}
+
+## Review Criteria
+
+Score the plan from 1-10 based on:
+
+1. **Completeness (3 points):** Does the plan cover all requirements?
+2. **Feasibility (2 points):** Are the steps realistic and achievable?
+3. **Dependencies (2 points):** Are dependencies correctly ordered with no circular deps?
+4. **Focused Scope (1 point):** Each story should own a single concern.
+5. **Risk Management (2 points):** Are risks properly identified and mitigated?
+
+## Response Format
+
+Respond with a JSON object in this exact format:
+
+\`\`\`json
+{
+  "score": 8,
+  "approved": true,
+  "risks": ["Specific risk identified"],
+  "suggestions": ["Specific improvement suggestion"],
+  "reasoning": "Detailed explanation of the score",
+  "storyFeedback": [
+    { "storyId": "story-id", "feedback": "Specific feedback", "suggestedChanges": ["Change 1"] }
+  ]
+}
+\`\`\`
+
+Important:
+- Score is 1-10. Set "approved" to true if score >= threshold (default 8)
+- Be specific in feedback, not generic
+- If rejecting, explain exactly what needs to change
+- storyFeedback is optional, only include for stories that need changes`;
+}
+
+function parseCriticResult(output: string, threshold: number): CriticResult {
+  // Strategy 1: Find ```json fence
+  const jsonFenceStart = output.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = output.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJSON(output, braceStart);
+      if (extracted) {
+        return normalizeCriticResult(JSON.parse(extracted), threshold);
+      }
+    }
+  }
+  // Strategy 2: Find raw JSON from first {
+  const braceStart = output.indexOf("{");
+  if (braceStart !== -1) {
+    const extracted = extractBalancedJSON(output, braceStart);
+    if (extracted) {
+      return normalizeCriticResult(JSON.parse(extracted), threshold);
+    }
+  }
+  throw new Error("Could not find JSON critic result in output");
+}
+
+function normalizeCriticResult(parsed: Record<string, unknown>, threshold: number): CriticResult {
+  const score = typeof parsed.score === "number" ? parsed.score : 0;
+  return {
+    score,
+    approved: parsed.approved === true || score >= threshold,
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String) : [],
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String) : [],
+    reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    storyFeedback: Array.isArray(parsed.storyFeedback) ? parsed.storyFeedback : undefined,
+  };
+}
+
+function formatCriticFeedback(critic: CriticResult, stories: Story[]): string {
+  const lines: string[] = [
+    "## REVIEWER NOTES — Your plan needs revision",
+    "",
+    `Score: ${critic.score}/10 (needs ≥8 for approval)`,
+    "",
+    `**Reasoning:** ${critic.reasoning}`,
+    "",
+  ];
+
+  if (critic.risks.length > 0) {
+    lines.push("### Risks Identified:");
+    for (const risk of critic.risks) lines.push(`- ${risk}`);
+    lines.push("");
+  }
+
+  if (critic.suggestions.length > 0) {
+    lines.push("### Required Improvements:");
+    for (const suggestion of critic.suggestions) lines.push(`- ${suggestion}`);
+    lines.push("");
+  }
+
+  if (critic.storyFeedback && critic.storyFeedback.length > 0) {
+    lines.push("### Per-Story Notes:");
+    for (const fb of critic.storyFeedback) {
+      lines.push(`- **${fb.storyId}**: ${fb.feedback}`);
+      if (fb.suggestedChanges) {
+        for (const change of fb.suggestedChanges) lines.push(`  - ${change}`);
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "## YOUR CURRENT PLAN",
+    "",
+    "```json",
+    JSON.stringify({ stories: stories.map(s => ({ id: s.id, title: s.title, persona: s.persona, description: s.description, implementationNotes: s.implementationNotes, dependsOn: s.dependsOn })) }, null, 2),
+    "```",
+    "",
+    "**CRITICAL — OUTPUT FORMAT:** Output the revised plan as a ```json code block with the COMPLETE JSON object. Do NOT describe changes — output the full JSON.",
+    "**DO NOT re-explore the repository.** Go directly to outputting the revised ```json plan.",
+  );
+
+  return lines.join("\n");
 }
 
 /**
@@ -498,11 +655,10 @@ async function planStories(
     }
   }
 
-  // Add MCP tools to planner's read-only tools
-  const plannerMcpTools = getMCPToolDefinitions();
-  for (const [key, def] of Object.entries(plannerMcpTools)) {
-    readOnlyTools[key] = def;
-  }
+  // MCP tools are intentionally excluded from the planner — the planner
+  // only needs read-only codebase tools to understand the project.
+  // MCP schemas from external servers (e.g. Docker Desktop) can have
+  // malformed input_schema that Anthropic's API rejects.
 
   // Detect file references in the task and read them upfront so the planner has full context
   const fileRefPattern = /(?:^|\s)([\w./-]+\.(?:md|txt|yaml|yml|json|toml|ts|js|py|go|rs|spec|requirements|prd|plan))\b/gi;
@@ -700,10 +856,46 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
 
   logger.info("Planner completed", { storiesFound: stories.length, planTextLength: planText.length });
 
-  if (stories.length === 0) {
+  // If the planner produced text but no parseable JSON stories, do a single
+  // cheap follow-up to extract the plan as JSON. This mirrors the platform's
+  // critic refinement loop (critic-agent-local.ts) but without scoring overhead.
+  if (stories.length === 0 && planText.length > 200) {
+    output.log("planner", "Plan text produced but JSON was missing — extracting stories...");
+    logger.info("Planner JSON extraction retry", { planTextLength: planText.length });
+
+    try {
+      const { generateText } = await import("ai");
+      const extractionResult = await generateText({
+        model: plannerModel,
+        prompt: `You previously analyzed a codebase and produced the following plan:\n\n${planText}\n\n` +
+          `Convert your analysis into the required JSON format. Output ONLY a \`\`\`json code block:\n\n` +
+          "```json\n" +
+          `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
+          "```\n\n" +
+          "Valid personas: backend_developer, frontend_developer, fullstack_developer, qa_engineer, devops_engineer, tech_writer.\n" +
+          "Output ONLY the JSON block, no other text.",
+        maxOutputTokens: 4096,
+        abortSignal,
+      });
+
+      const retryStories = parseStoriesFromText(extractionResult.text, output);
+      if (retryStories.length > 0) {
+        output.log("planner", `Extracted ${retryStories.length} stories from plan text.`);
+        const retryUsage = extractionResult.usage;
+        return {
+          stories: retryStories,
+          provider: pProvider,
+          model: pModel,
+          inputTokens: (planUsage?.inputTokens || 0) + (retryUsage?.inputTokens || 0),
+          outputTokens: (planUsage?.outputTokens || 0) + (retryUsage?.outputTokens || 0),
+        };
+      }
+    } catch (extractErr) {
+      logger.error("JSON extraction retry failed", { error: extractErr instanceof Error ? extractErr.message : String(extractErr) });
+    }
+
     logger.error("Planner produced no stories", { planTextPreview: planText.slice(0, 500) });
-    output.error("Planner failed to produce a plan. This could be a rate limit, API error, or the task was too vague.");
-    output.log("system", "Check the planner provider is configured and has available quota. Use /setup to change providers.");
+    output.error("Planner failed to produce a parseable plan.");
     return {
       stories: [],
       provider: pProvider,
@@ -715,12 +907,111 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     };
   }
 
+  if (stories.length === 0) {
+    logger.error("Planner produced no output", { planTextLength: planText.length });
+    output.error("Planner failed to produce a plan. This could be a rate limit, API error, or the task was too vague.");
+    return {
+      stories: [],
+      provider: pProvider,
+      model: pModel,
+      inputTokens: planUsage?.inputTokens || 0,
+      outputTokens: planUsage?.outputTokens || 0,
+      rejected: true,
+      rejectionReason: "Planner produced no output",
+    };
+  }
+
+  // ── Planning Critic Loop ──
+  // Ported from api/src/services/critic-agent-local.ts.
+  // Scores the plan 0-100, refines up to maxIterations if below threshold.
+  const criticEnabled = config.review?.useCritic !== false; // enabled by default
+  const criticThreshold = config.review?.criticThreshold ?? 8;
+  const maxCriticIterations = 3;
+  let totalInputTokens = planUsage?.inputTokens || 0;
+  let totalOutputTokens = planUsage?.outputTokens || 0;
+
+  if (criticEnabled && stories.length > 0) {
+    let currentStories = stories;
+
+    for (let iteration = 1; iteration <= maxCriticIterations; iteration++) {
+      output.log("planner", `Critic pass ${iteration}/${maxCriticIterations} — scoring plan...`);
+      logger.info("Running critic", { iteration, storyCount: currentStories.length });
+
+      try {
+        const criticPrompt = buildCriticPrompt(currentStories, userTask, iteration);
+        const criticResponse = await generateText({
+          model: plannerModel,
+          prompt: criticPrompt,
+          maxOutputTokens: 4096,
+          abortSignal,
+        });
+
+        totalInputTokens += criticResponse.usage?.inputTokens || 0;
+        totalOutputTokens += criticResponse.usage?.outputTokens || 0;
+
+        const criticResult = parseCriticResult(criticResponse.text, criticThreshold);
+        logger.info("Critic result", { score: criticResult.score, approved: criticResult.approved, iteration });
+
+        if (criticResult.approved) {
+          output.log("planner", `Critic approved: ${criticResult.score}/10 — ${criticResult.reasoning.split("\n")[0].slice(0, 120)}`);
+          break;
+        }
+
+        output.log("planner", `Critic scored ${criticResult.score}/10 (needs ≥${criticThreshold}) — revising...`);
+        if (criticResult.suggestions.length > 0) {
+          output.log("planner", `  suggestions: ${criticResult.suggestions.slice(0, 3).join("; ")}`);
+        }
+
+        if (iteration >= maxCriticIterations) {
+          output.log("planner", `Max critic iterations reached — proceeding with score ${criticResult.score}/10`);
+          break;
+        }
+
+        // Revise: send feedback + current plan back to planner for refinement
+        const refinementPrompt = formatCriticFeedback(criticResult, currentStories);
+        const revisionStream = streamText({
+          model: plannerModel,
+          prompt: refinementPrompt,
+          tools: {} as ToolSet, // No tools for revision — just output JSON
+          stopWhen: stepCountIs(1),
+          abortSignal,
+          timeout: { chunkMs: 120_000 },
+        });
+
+        let revisionText = "";
+        for await (const chunk of revisionStream.textStream) {
+          if (abortSignal?.aborted) break;
+          revisionText += chunk;
+        }
+        revisionText = await revisionStream.text;
+        const revUsage = await revisionStream.totalUsage;
+        totalInputTokens += revUsage?.inputTokens || 0;
+        totalOutputTokens += revUsage?.outputTokens || 0;
+
+        const revisedStories = parseStoriesFromText(revisionText, output);
+        if (revisedStories.length > 0) {
+          currentStories = revisedStories;
+          output.log("planner", `Revised plan: ${revisedStories.length} stories`);
+        } else {
+          output.log("planner", "Revision produced no parseable stories — keeping current plan");
+          break;
+        }
+      } catch (criticErr) {
+        logger.error("Critic failed", { error: criticErr instanceof Error ? criticErr.message : String(criticErr), iteration });
+        output.log("planner", `Critic error — proceeding with current plan`);
+        break;
+      }
+    }
+
+    stories = currentStories;
+  }
+
   return {
     stories,
     provider: pProvider,
     model: pModel,
-    inputTokens: planUsage?.inputTokens || 0,
-    outputTokens: planUsage?.outputTokens || 0,
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
   };
 }
 
@@ -1113,6 +1404,7 @@ export async function runOrchestration(
     // Track planner cost
     costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
     output.updateCost?.(costTracker.getTotalCost());
+    output.updateUsageSummary?.(costTracker.getUsageSummary());
 
     // Handle planner rejection — still on original branch, nothing to clean up
     if (planResult.rejected) {
@@ -1133,16 +1425,8 @@ export async function runOrchestration(
     });
     output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
 
-    // [EXPERIMENTAL] Planning critic — not yet implemented.
-    // The platform has a battle-tested Planner-Critic loop in
-    // api/src/services/critic-agent.ts (cloud) and critic-agent-local.ts (local).
-    // It scores plans on completeness, feasibility, dependencies, quality, and risk
-    // (85/100 threshold, up to 3 refinement iterations). When we add full spec builds
-    // to the CLI, port the local critic (buildCriticPrompt, runLocalCriticAgent,
-    // runPlanCriticLoop) from critic-agent-local.ts — it already supports all providers.
-    if (config.review?.useCritic) {
-      output.log("planner", "Planning critic is experimental and not yet implemented — skipping.");
-    }
+    // Planning critic runs inside planStories() — scores 0-100, refines up to 3x.
+    // Disable with /settings review.critic false
 
     // Ensure every story has a unique ID (some planners output stories without IDs)
     const seenIds = new Set<string>();
@@ -1474,6 +1758,7 @@ Working directory: ${workingDir}
 ## Communication Style
 
 Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+Think out loud as you work: before major tool calls, briefly state your intent; after major tool calls, briefly report what changed and your next step.
 
 When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form.
 
@@ -1502,10 +1787,9 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       let textRepeatCount = 0;
       let textSuppressed = false;
 
-      // Summary rambling detection — model finishes work and keeps talking
-      let hadToolCalls = false;
-      let consecutiveTextOnlySteps = 0;
-      let expertSummary = ""; // Captures the expert's post-work summary for ticket comments
+      // Captures representative expert text for ticket comments.
+      let expertSummary = "";
+      let lastSyntheticThinkingSig = "";
 
       // Track tool calls for structured ticket update
       const storyActions: Array<{ tool: string; detail: string }> = [];
@@ -1522,10 +1806,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text, toolCalls }) {
-          // Once the model has used tools, text-only steps are just summaries — skip display, stop after 2
           if (toolCalls && toolCalls.length > 0) {
-            hadToolCalls = true;
-            consecutiveTextOnlySteps = 0;
             // Track actions for ticket update
             for (const tc of toolCalls) {
               const name = tc.toolName;
@@ -1544,19 +1825,20 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
                 storyActions.push({ tool: "verified", detail: String(input.command).slice(0, 80) });
               }
             }
-          } else if (text && hadToolCalls) {
-            consecutiveTextOnlySteps++;
-            // Capture first post-work summary for ticket comments (don't display — noise in CLI)
-            if (consecutiveTextOnlySteps === 1) expertSummary = text.slice(0, 2000);
-            logger.debug("Story output (summary, not displayed)", { persona: story.persona, text });
-            if (consecutiveTextOnlySteps >= 2) {
-              logger.info("Post-work summary detected — stopping stream", { persona: story.persona });
-              combinedAbort.abort();
+            if ((!text || !text.trim()) && toolCalls.length > 0) {
+              const first = toolCalls[0];
+              const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
+              const sig = `${first.toolName}:${detail}`;
+              if (sig !== lastSyntheticThinkingSig) {
+                output.log(story.persona, `(thinking) ${first.toolName}${detail ? ` ${detail}` : ""}`);
+                lastSyntheticThinkingSig = sig;
+              }
             }
-            return; // skip display for all post-tool text
           }
 
           if (text) {
+            // Keep a representative sample for ticket comments.
+            if (!expertSummary) expertSummary = text.slice(0, 2000);
             // Text loop detection
             // Normalize signature: trim, collapse whitespace, lowercase first 200 chars
             const textSig = text.trim().replace(/\s+/g, " ").substring(0, 200).toLowerCase();
@@ -1648,6 +1930,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
       output.updateCost?.(costTracker.getTotalCost());
+      output.updateUsageSummary?.(costTracker.getUsageSummary());
 
       // Track tok/s for worker model
       const storyElapsed = (Date.now() - storyStartMs) / 1000;
@@ -2147,6 +2430,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
           revInputTokens, revOutputTokens);
         output.updateCost?.(costTracker.getTotalCost());
+        output.updateUsageSummary?.(costTracker.getUsageSummary());
 
         // If approved or out of revision attempts, done
         if (approved) {
@@ -2353,13 +2637,20 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 **EFFICIENCY TIP: Go straight to the files mentioned in the feedback.**
 - You already built this code in the previous attempt
 - Skip re-reading files unless they're directly relevant to the feedback
-- Focus on the specific issues, not re-implementation`,
+- Focus on the specific issues, not re-implementation
+
+**Communication:** Think out loud with short progress updates. Before major tool calls, state intent; after tool calls, state what changed and next step.`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
-              onStepFinish({ text }) {
+              onStepFinish({ text, toolCalls }) {
+                if ((!text || !text.trim()) && toolCalls && toolCalls.length > 0) {
+                  const first = toolCalls[0];
+                  const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
+                  output.log(story.persona, `(thinking) ${first.toolName}${detail ? ` ${detail}` : ""}`);
+                }
                 if (text) {
                   const lines = text.split("\n").filter(l => l.trim());
                   for (const line of lines) {
@@ -2377,6 +2668,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
             output.updateCost?.(costTracker.getTotalCost());
+            output.updateUsageSummary?.(costTracker.getUsageSummary());
 
             // Track tok/s for revision worker model
             const revisionElapsed = (Date.now() - revisionStartMs) / 1000;
@@ -2532,6 +2824,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // Final cost update
   output.updateCost?.(costTracker.getTotalCost());
+  output.updateUsageSummary?.(costTracker.getUsageSummary());
 
   // On full success: clear retry state. Stay on the feature branch so the
   // developer can review, test, and push when ready.
@@ -2783,6 +3076,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     const costTracker = new CostTracker();
     costTracker.addUsage("Tech Lead Review", revProvider, revModel, revInputTokens, revOutputTokens);
     output.updateCost?.(costTracker.getTotalCost());
+    output.updateUsageSummary?.(costTracker.getUsageSummary());
     // Track tok/s for reviewer model
     const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
     if (revOutputTokens > 0 && reviewElapsed > 0) {

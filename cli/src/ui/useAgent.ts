@@ -59,6 +59,7 @@ const LOOP_THRESHOLD = 4;
 // Rate limit retry config
 const MAX_RATE_LIMIT_RETRIES = 3;
 const LONG_RESPONSE_RECEIPT_MIN_CHARS = 600;
+const TOOL_COUNT_FLUSH_MS = 5000;
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -212,6 +213,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const [cost, setCost] = useState(0);
   const [tokPerSec, setTokPerSecMap] = useState<Record<string, number>>({});
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
+  const pendingToolCountsRef = useRef<Record<string, number>>({});
+  const toolCountFlushTimerRef = useRef<NodeJS.Timeout | null>(null);
   const sessionStartRef = useRef(Date.now());
   const [trustAll, setTrustAllState] = useState(options.trustAll);
   const [planMode, setPlanModeState] = useState(options.planMode);
@@ -241,6 +244,52 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // Keep refs in sync with state so callbacks see fresh values.
   trustAllRef.current = trustAll;
   planModeRef.current = planMode;
+
+  const flushToolCounts = useCallback(() => {
+    if (toolCountFlushTimerRef.current) {
+      clearTimeout(toolCountFlushTimerRef.current);
+      toolCountFlushTimerRef.current = null;
+    }
+    const pending = pendingToolCountsRef.current;
+    const names = Object.keys(pending);
+    if (names.length === 0) return;
+    pendingToolCountsRef.current = {};
+
+    setToolCounts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const name of names) {
+        const inc = pending[name] || 0;
+        if (inc <= 0) continue;
+        const updated = (next[name] || 0) + inc;
+        if (updated !== next[name]) {
+          next[name] = updated;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const queueToolCountIncrement = useCallback((toolName: string) => {
+    pendingToolCountsRef.current[toolName] = (pendingToolCountsRef.current[toolName] || 0) + 1;
+    if (toolCountFlushTimerRef.current) return;
+    toolCountFlushTimerRef.current = setTimeout(() => {
+      flushToolCounts();
+    }, TOOL_COUNT_FLUSH_MS);
+  }, [flushToolCounts]);
+
+  useEffect(() => () => {
+    if (toolCountFlushTimerRef.current) {
+      clearTimeout(toolCountFlushTimerRef.current);
+      toolCountFlushTimerRef.current = null;
+    }
+  }, []);
+
+  // Ensure queued counts are committed when activity stops.
+  useEffect(() => {
+    if (status === "idle") flushToolCounts();
+  }, [status, flushToolCounts]);
 
   // ------- One-time initialisation -------- //
   if (!initDoneRef.current) {
@@ -768,7 +817,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               ...prev,
               { ...info, status: "done" as const, result: resultStr },
             ]);
-            setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+            queueToolCountIncrement(name);
             setStatus("streaming");
             return result;
           } catch (err) {
@@ -903,6 +952,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               aiProviderRef.current,
               activeContextLengthRef.current,
             ),
+            ...(["openai", "xai"].includes(aiProviderRef.current)
+              ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
+              : {}),
             onStepFinish({ text, toolCalls: calls }) {
               const stepStartMs = Date.now();
               const callCount = calls?.length ?? 0;
@@ -1358,8 +1410,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- Tool count helper (for orchestrator) -------- //
 
   const incrementToolCount = useCallback((toolName: string) => {
-    setToolCounts(prev => ({ ...prev, [toolName]: (prev[toolName] || 0) + 1 }));
-  }, []);
+    queueToolCountIncrement(toolName);
+  }, [queueToolCountIncrement]);
 
   // ------- Return -------- //
 

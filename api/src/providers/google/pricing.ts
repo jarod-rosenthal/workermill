@@ -60,7 +60,7 @@ const GOOGLE_MODELS: Record<string, ModelInfo> = {
     id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
     tier: "powerful",
-    inputRate: 0.00125, // $1.25 per 1M (≤200K)
+    inputRate: 0.001, // $1.00 per 1M
     outputRate: 0.01, // $10.00 per 1M (≤200K)
     contextWindow: 1048576,
     supportsStreaming: true,

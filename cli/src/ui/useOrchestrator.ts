@@ -9,12 +9,15 @@
  * components.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { OrchestrationOutput, RetryPlan } from "../orchestrator.js";
 import { resolveConfig, type CliConfig } from "../config.js";
 import { getRetryableRun } from "../ship-state.js";
 import { notifyIfEnabled } from "../notify.js";
 import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
+import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
+
+const PREVIEW_THROTTLE_MS = 120;
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -45,6 +48,149 @@ const PERSONA_EMOJIS: Record<string, string> = {
 
 function getEmoji(persona: string): string {
   return PERSONA_EMOJIS[persona] || "\u{1F916}"; // 🤖
+}
+
+function formatTokenCount(tokens: number): string {
+  return tokens.toLocaleString();
+}
+
+function formatCost(cost: number): string {
+  if (cost <= 0) return "$0.00";
+  if (cost < 0.01) return "<$0.01";
+  return `~$${cost.toFixed(2)}`;
+}
+
+function formatUsageSummary(summary: UsageSummary): string {
+  if (summary.total.inputTokens <= 0 && summary.total.outputTokens <= 0 && summary.total.cost <= 0) {
+    return "";
+  }
+
+  const lines: string[] = [
+    `**Usage:** ${formatTokenCount(summary.total.inputTokens)} in · ${formatTokenCount(summary.total.outputTokens)} out · ${formatCost(summary.total.cost)}`,
+  ];
+
+  const roleOrder: Array<"worker" | "planner" | "reviewer"> = ["worker", "planner", "reviewer"];
+  const rolesNeedingModelBreakdown: Array<"worker" | "planner" | "reviewer"> = [];
+  const roleLines = roleOrder
+    .map((role) => {
+      const data = summary.byRole[role];
+      const roleModels = summary.byModel.filter((model) => model.roles.includes(role));
+      const hasUsage = data.inputTokens > 0 || data.outputTokens > 0 || data.cost > 0;
+      if (!hasUsage) return null;
+      if (roleModels.length > 1) rolesNeedingModelBreakdown.push(role);
+      const modelSuffix = roleModels.length === 1 ? ` (${roleModels[0].provider}/${roleModels[0].model})` : "";
+      return `${role}${modelSuffix}: ${formatTokenCount(data.inputTokens)} in · ${formatTokenCount(data.outputTokens)} out · ${formatCost(data.cost)}`;
+    })
+    .filter((line): line is string => line !== null);
+  lines.push(...roleLines);
+
+  if (rolesNeedingModelBreakdown.length > 0) {
+    lines.push("model breakdown:");
+    for (const role of roleOrder) {
+      if (!rolesNeedingModelBreakdown.includes(role)) continue;
+      const roleModels = summary.byModel.filter((model) => model.roles.includes(role));
+      for (const model of roleModels) {
+        lines.push(`  ${role} · ${model.provider}/${model.model}: ${formatTokenCount(model.inputTokens)} in · ${formatTokenCount(model.outputTokens)} out · ${formatCost(model.cost)}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function countLines(text: string): number {
+  if (!text) return 0;
+  return text.split("\n").length;
+}
+
+function describeEditOperation(oldText: string, newText: string): "insert" | "delete" | "replace" | "noop" {
+  if (!oldText && newText) return "insert";
+  if (oldText && !newText) return "delete";
+  if (oldText === newText) return "noop";
+  return "replace";
+}
+
+function summarizePatch(patchText: string): { files: number; hunks: number; firstTarget: string } {
+  const hunks = (patchText.match(/^@@/gm) || []).length;
+  const targets = [...patchText.matchAll(/^\+\+\+\s+(?:[ab]\/)?(.+)$/gm)]
+    .map((m) => m[1].trim())
+    .filter((target) => target && target !== "/dev/null");
+  const uniqueTargets = [...new Set(targets)];
+  return {
+    files: uniqueTargets.length,
+    hunks,
+    firstTarget: uniqueTargets[0] || "",
+  };
+}
+
+/** Build a compact, differentiating tool detail so repeated edits are visibly distinct. */
+function formatToolCallDetail(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  nextFileSequence?: (path: string) => number,
+): string {
+  const filePath = asString(toolInput.file_path) || asString(toolInput.path);
+  const nextSeqFor = (path: string): string => {
+    if (!nextFileSequence) return "";
+    const n = nextFileSequence(path);
+    return n > 0 ? `#${n} ` : "";
+  };
+
+  if (toolName === "edit_file") {
+    const oldText = asString(toolInput.old_string);
+    const newText = asString(toolInput.new_string);
+    const replaceAll = toolInput.replaceAll === true ? " x*" : "";
+    if (oldText || newText) {
+      const seq = nextSeqFor(filePath);
+      const op = describeEditOperation(oldText, newText);
+      const bytes = `${oldText.length}->${newText.length}b`;
+      const lines = `${countLines(oldText)}->${countLines(newText)}l`;
+      return `${filePath}${filePath ? " " : ""}[${seq}${op} ${bytes} ${lines}${replaceAll}]`;
+    }
+    if (filePath) return filePath;
+  }
+
+  if (toolName === "write_file") {
+    const content = asString(toolInput.content);
+    if (content) {
+      const seq = nextSeqFor(filePath);
+      return `${filePath}${filePath ? " " : ""}[${seq}write ${content.length}b ${countLines(content)}l]`;
+    }
+    if (filePath) return filePath;
+  }
+
+  if (toolName === "patch") {
+    const patchText = asString(toolInput.patch_text);
+    if (patchText) {
+      const { files, hunks, firstTarget } = summarizePatch(patchText);
+      const target = firstTarget || filePath;
+      const seq = target ? nextSeqFor(target) : "";
+      return `${target}${target ? " " : ""}[${seq}${files || 1}f ${hunks}h patch]`;
+    }
+    if (filePath) return filePath;
+  }
+
+  // Generic display fallback across all tools.
+  if (filePath) return filePath;
+  if (toolInput.command) {
+    const cmd = String(toolInput.command);
+    return cmd.length > 120 ? cmd.slice(0, 117) + "..." : cmd;
+  }
+  if (toolInput.query) return String(toolInput.query).slice(0, 120);
+  if (toolInput.prompt) return String(toolInput.prompt).slice(0, 120);
+  if (toolInput.pattern) return `pattern: ${String(toolInput.pattern)}`;
+  if (toolInput.url) return String(toolInput.url);
+  if (toolInput.action) return String(toolInput.action);
+
+  const keys = Object.keys(toolInput).slice(0, 3);
+  if (keys.length > 0) {
+    return keys.map(k => `${k}: ${String(toolInput[k]).slice(0, 80)}`).join(", ");
+  }
+  return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -113,10 +259,67 @@ export function useOrchestrator(
     setStatusMessageRaw(msg);
   }, []);
   const [previewLine, setPreviewLine] = useState("");
+  const previewLineRef = useRef("");
+  const pendingPreviewLineRef = useRef<string | null>(null);
+  const lastPreviewUpdateRef = useRef(0);
+  const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const retryPlanRef = useRef<RetryPlan | null>(null);
+  const usageSummaryRef = useRef<UsageSummary>(createEmptyUsageSummary());
+
+  const resetUsageSummary = useCallback(() => {
+    usageSummaryRef.current = createEmptyUsageSummary();
+  }, []);
+
+  const commitUsageSummary = useCallback((summary: UsageSummary) => {
+    usageSummaryRef.current = summary;
+  }, []);
+
+  const commitPreviewLine = useCallback((line: string) => {
+    if (previewLineRef.current === line) return;
+    previewLineRef.current = line;
+    lastPreviewUpdateRef.current = Date.now();
+    setPreviewLine(line);
+  }, []);
+
+  const setPreviewLineThrottled = useCallback((line: string) => {
+    if (line === previewLineRef.current || line === pendingPreviewLineRef.current) return;
+    const now = Date.now();
+    const elapsed = now - lastPreviewUpdateRef.current;
+    if (elapsed >= PREVIEW_THROTTLE_MS) {
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+      pendingPreviewLineRef.current = null;
+      commitPreviewLine(line);
+      return;
+    }
+
+    pendingPreviewLineRef.current = line;
+    if (previewTimerRef.current) return;
+    previewTimerRef.current = setTimeout(() => {
+      previewTimerRef.current = null;
+      const pending = pendingPreviewLineRef.current;
+      pendingPreviewLineRef.current = null;
+      if (pending != null) commitPreviewLine(pending);
+    }, PREVIEW_THROTTLE_MS - elapsed);
+  }, [commitPreviewLine]);
+
+  const clearPreviewLine = useCallback(() => {
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    pendingPreviewLineRef.current = null;
+    commitPreviewLine("");
+  }, [commitPreviewLine]);
+
+  useEffect(() => () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+  }, []);
 
   // ------------------------------------------------------------------
   // cancel()
@@ -142,8 +345,9 @@ export function useOrchestrator(
 
       setRunning(true);
       setStatusMessage("");
-      setPreviewLine("");
+      clearPreviewLine();
       setConfirmRequest(null);
+      resetUsageSummary();
 
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
@@ -153,10 +357,10 @@ export function useOrchestrator(
         function emitLine(line: string): void {
           const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
           addMessage(normalized);
-          setPreviewLine(normalized);
+          setPreviewLineThrottled(normalized);
         }
         function flushLine(): void {
-          setPreviewLine("");
+          clearPreviewLine();
         }
 
         // ---- Config ------------------------------------------------
@@ -193,6 +397,13 @@ export function useOrchestrator(
           const seenPersonas = new Set<string>();
           let storiesCompleted = 0;
           const startTime = Date.now();
+          const fileSequences = new Map<string, number>();
+          const nextFileSequence = (path: string): number => {
+            if (!path) return 0;
+            const next = (fileSequences.get(path) || 0) + 1;
+            fileSequences.set(path, next);
+            return next;
+          };
 
           // ---- Build the OrchestrationOutput adapter -----------------
           const output: OrchestrationOutput = {
@@ -248,34 +459,7 @@ export function useOrchestrator(
               toolName: string,
               toolInput: Record<string, unknown>,
             ): void {
-              // Build a detail string showing what the tool is doing.
-              // Must handle ALL tool input shapes — especially web_search.query
-              // and sub_agent.prompt which were previously invisible.
-              let detail = "";
-              if (toolInput.file_path) {
-                detail = String(toolInput.file_path);
-              } else if (toolInput.path) {
-                detail = String(toolInput.path);
-              } else if (toolInput.command) {
-                const cmd = String(toolInput.command);
-                detail = cmd.length > 120 ? cmd.slice(0, 117) + "..." : cmd;
-              } else if (toolInput.query) {
-                detail = String(toolInput.query).slice(0, 120);
-              } else if (toolInput.prompt) {
-                detail = String(toolInput.prompt).slice(0, 120);
-              } else if (toolInput.pattern) {
-                detail = `pattern: ${String(toolInput.pattern)}`;
-              } else if (toolInput.url) {
-                detail = String(toolInput.url);
-              } else if (toolInput.action) {
-                detail = String(toolInput.action);
-              } else {
-                // Fallback: show first few key=value pairs
-                const keys = Object.keys(toolInput).slice(0, 3);
-                if (keys.length > 0) {
-                  detail = keys.map(k => `${k}: ${String(toolInput[k]).slice(0, 80)}`).join(", ");
-                }
-              }
+              const detail = formatToolCallDetail(toolName, toolInput, nextFileSequence);
 
               const emoji = getEmoji(persona);
               emitLine(
@@ -291,6 +475,10 @@ export function useOrchestrator(
 
             updateCost(cost: number): void {
               setCost?.(cost);
+            },
+
+            updateUsageSummary(summary: UsageSummary): void {
+              commitUsageSummary(summary);
             },
 
             updateTokPerSec(providerModel: string, tokPerSec: number): void {
@@ -316,6 +504,10 @@ export function useOrchestrator(
           if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
           parts.push(timeStr);
           addMessage(`**Shipped.** ${parts.join(" · ")}`);
+          const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
+          if (usageSummaryMessage) {
+            addMessage(usageSummaryMessage);
+          }
           notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
           flushLine();
@@ -329,12 +521,12 @@ export function useOrchestrator(
         } finally {
           setRunning(false);
           setStatusMessage("");
-          setPreviewLine("");
+          clearPreviewLine();
           setConfirmRequest(null);
         }
       })();
     },
-    [addMessage, cliConfig],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, resetUsageSummary, setCost, setGitBranch, setPreviewLineThrottled, setStatusMessage, setTokPerSec],
   );
 
   // ------------------------------------------------------------------
@@ -371,17 +563,19 @@ export function useOrchestrator(
       if (running) return;
       setRunning(true);
       setStatusMessage("Reviewing...");
+      resetUsageSummary();
 
       const controller = new AbortController();
       abortRef.current = controller;
 
       (async () => {
         function emitLine(line: string): void {
-          addMessage(line);
-          setPreviewLine(line);
+          const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+          addMessage(normalized);
+          setPreviewLineThrottled(normalized);
         }
         function flushLine(): void {
-          setPreviewLine("");
+          clearPreviewLine();
         }
 
         const freshReviewConfig = resolveConfig();
@@ -405,6 +599,13 @@ export function useOrchestrator(
 
           const seenPersonas = new Set<string>();
           const startTime = Date.now();
+          const fileSequences = new Map<string, number>();
+          const nextFileSequence = (path: string): number => {
+            if (!path) return 0;
+            const next = (fileSequences.get(path) || 0) + 1;
+            fileSequences.set(path, next);
+            return next;
+          };
 
           const output: OrchestrationOutput = {
             log(persona: string, message: string): void {
@@ -420,8 +621,8 @@ export function useOrchestrator(
             },
             toolCall(persona: string, toolName: string, input: Record<string, unknown>): void {
               const emoji = getEmoji(persona);
-              const detail = input.command || input.file_path || input.path || input.pattern || "";
-              emitLine(`[${emoji} ${persona}] ↓ ${toolName} ${detail}`);
+              const detail = formatToolCallDetail(toolName, input, nextFileSequence);
+              emitLine(`[${emoji} ${persona}] ↓ ${toolName}${detail ? ` ${detail}` : ""}`);
             },
             error(message: string): void { emitLine(`Error: ${message}`); },
             status(msg: string): void { setStatusMessage(msg); },
@@ -439,6 +640,9 @@ export function useOrchestrator(
             },
             updateCost(cost: number): void {
               setCost?.(cost);
+            },
+            updateUsageSummary(summary: UsageSummary): void {
+              commitUsageSummary(summary);
             },
             updateTokPerSec(providerModel: string, tokPerSec: number): void {
               setTokPerSec?.(providerModel, tokPerSec);
@@ -527,6 +731,10 @@ export function useOrchestrator(
                 }
               }
             }
+            const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
+            if (usageSummaryMessage) {
+              addMessage(usageSummaryMessage);
+            }
           }
         } catch (err: unknown) {
           flushLine();
@@ -539,12 +747,12 @@ export function useOrchestrator(
         } finally {
           setRunning(false);
           setStatusMessage("");
-          setPreviewLine("");
+          clearPreviewLine();
           setConfirmRequest(null);
         }
       })();
     },
-    [addMessage, cliConfig],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, resetUsageSummary, running, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start],
   );
 
   // ------------------------------------------------------------------

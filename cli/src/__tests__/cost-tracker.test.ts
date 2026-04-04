@@ -81,4 +81,24 @@ describe("CostTracker", () => {
     expect(summary).toContain("planner");
     expect(summary).toContain("tech_lead");
   });
+
+  it("getUsageSummary() aggregates totals by role and model", () => {
+    tracker.addUsage("planner", "google", "gemini-3.1-pro", 1000, 400);
+    tracker.addUsage("Reviewer (round 1)", "openai", "gpt-5.4", 2000, 1000);
+    tracker.addUsage("frontend_developer", "openai", "gpt-5.4", 3000, 600);
+
+    const summary = tracker.getUsageSummary();
+    expect(summary.total.inputTokens).toBe(6000);
+    expect(summary.total.outputTokens).toBe(2000);
+
+    expect(summary.byRole.planner.inputTokens).toBe(1000);
+    expect(summary.byRole.reviewer.inputTokens).toBe(2000);
+    expect(summary.byRole.worker.inputTokens).toBe(3000);
+
+    expect(summary.byModel).toHaveLength(2);
+    const openAiModel = summary.byModel.find((m) => m.key === "openai/gpt-5.4");
+    expect(openAiModel?.inputTokens).toBe(5000);
+    expect(openAiModel?.outputTokens).toBe(1600);
+    expect(openAiModel?.roles.sort()).toEqual(["reviewer", "worker"]);
+  });
 });

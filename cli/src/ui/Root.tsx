@@ -136,7 +136,14 @@ export function Root(props: RootProps): React.ReactElement {
   const handleTokPerSec = useCallback((providerModel: string, tps: number) => {
     setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
   }, []);
-  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount, setGitBranch, handleTokPerSec);
+  const orchestrator = useOrchestrator(
+    addOrchestratorMessage,
+    agent.setCost,
+    props.cliConfig,
+    agent.incrementToolCount,
+    setGitBranch,
+    handleTokPerSec,
+  );
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);

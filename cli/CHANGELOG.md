@@ -4,6 +4,12 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.99] - 2026-04-04
+
+### Fixed
+- **Modified Enter key handling in supporting terminals (WezTerm/kitty/ghostty)** — the CLI now enables enhanced keyboard reporting for the session so `Shift+Enter` / `Alt+Enter` can be disambiguated when the terminal supports it, and disables it on exit.
+- **Multiline compose reliability in flaky terminals** — improved fallback flow with `/multiline` mode plus explicit submit markers (`/submit` or `/send`) so users can always compose blank lines and submit reliably even when modifier keys collapse.
+
 ## [0.15.98] - 2026-04-04
 
 ### Fixed

@@ -82,6 +82,8 @@ function Spinner({ color }: { color: string }): React.ReactElement {
 }
 
 const ORCHESTRATOR_CONFIRM_ACK_MS = 450;
+const KITTY_KEYBOARD_ENABLE = "\x1b[>1u";
+const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
 
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
@@ -175,6 +177,20 @@ export function App(props: AppProps): React.ReactElement {
   const { stdout } = useStdout();
   const lastCtrlCRef = useRef(0);
   const lastEscRef = useRef(0);
+
+  // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
+  // input so modified Enter combos can be delivered distinctly.
+  useEffect(() => {
+    if (!process.stdout.isTTY) return;
+    process.stdout.write(KITTY_KEYBOARD_ENABLE);
+    return () => {
+      try {
+        process.stdout.write(KITTY_KEYBOARD_DISABLE);
+      } catch {
+        // Best-effort cleanup.
+      }
+    };
+  }, []);
 
   useInput((input, key) => {
     if (key.escape) {

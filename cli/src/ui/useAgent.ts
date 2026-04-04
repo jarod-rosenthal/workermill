@@ -993,11 +993,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           session.totalTokens += inputTokens + outputTokens;
           logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
 
-          // Cost tracking.
+          // Cost tracking — use active refs, not startup options (user may have switched via /model).
           costTrackerRef.current.addUsage(
             "agent",
-            options.provider,
-            options.model,
+            aiProviderRef.current,
+            activeModelNameRef.current,
             inputTokens,
             outputTokens,
           );

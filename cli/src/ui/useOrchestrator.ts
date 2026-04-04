@@ -65,8 +65,10 @@ function formatUsageSummary(summary: UsageSummary): string {
     return "";
   }
 
+  const divider = "────────────────────────";
   const lines: string[] = [
     `**Usage:** ${formatTokenCount(summary.total.inputTokens)} in · ${formatTokenCount(summary.total.outputTokens)} out · ${formatCost(summary.total.cost)}`,
+    divider,
   ];
 
   const roleOrder: Array<"worker" | "planner" | "reviewer"> = ["worker", "planner", "reviewer"];
@@ -85,6 +87,7 @@ function formatUsageSummary(summary: UsageSummary): string {
   lines.push(...roleLines);
 
   if (rolesNeedingModelBreakdown.length > 0) {
+    lines.push(divider);
     lines.push("model breakdown:");
     for (const role of roleOrder) {
       if (!rolesNeedingModelBreakdown.includes(role)) continue;

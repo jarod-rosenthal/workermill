@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { shouldCaptureInput } from "../ui/Input.tsx";
 
 // Replicate BUILTIN_COMMANDS from Input.tsx (full list)
 const BUILTIN_COMMANDS = [
@@ -229,6 +230,20 @@ describe("Input completion logic", () => {
     const help = results.find((r) => r.name === "/help");
     expect(help).toBeDefined();
     expect(help?.desc).toBe("All commands");
+  });
+});
+
+describe("queued input capture", () => {
+  it("captures when active", () => {
+    expect(shouldCaptureInput(true, false)).toBe(true);
+  });
+
+  it("captures when queued but not active", () => {
+    expect(shouldCaptureInput(false, true)).toBe(true);
+  });
+
+  it("does not capture when inactive and not queued", () => {
+    expect(shouldCaptureInput(false, false)).toBe(false);
   });
 });
 

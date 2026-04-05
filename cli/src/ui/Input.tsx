@@ -53,12 +53,20 @@ interface InputProps {
   isQueued?: boolean;
   /** Called when user presses Enter while queued. */
   onQueue?: (value: string) => void;
+  /** Pending queued message waiting for idle delivery (single-slot queue). */
+  queuedValue?: string | null;
+  /** Called when user recalls a queued message for editing (Up arrow). */
+  onEditQueue?: () => void;
+}
+
+export function shouldCaptureInput(isActive: boolean, isQueued?: boolean): boolean {
+  return isActive || !!isQueued;
 }
 
 /**
  * User text input component with history and slash command autocomplete.
  */
-export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputProps): React.ReactElement {
+export function Input({ onSubmit, isActive, history, isQueued, onQueue, queuedValue, onEditQueue }: InputProps): React.ReactElement {
   const { stdout } = useStdout();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -76,9 +84,12 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
     cursorPosRef.current = cursorPos;
   }, [cursorPos]);
 
-  // Blink cursor while input is active so the caret is visible before typing.
+  const captureInput = shouldCaptureInput(isActive, isQueued);
+  const hasQueuedValue = Boolean(isQueued && queuedValue && queuedValue.length > 0);
+
+  // Blink cursor whenever input capture is enabled so queued typing feels identical.
   useEffect(() => {
-    if (!isActive) {
+    if (!captureInput) {
       setCursorVisible(true);
       return;
     }
@@ -86,7 +97,7 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
       setCursorVisible((v) => !v);
     }, 650);
     return () => clearInterval(id);
-  }, [isActive]);
+  }, [captureInput]);
 
   // Fetch live and remote models once on mount (async)
   const [liveModels, setLiveModels] = useState<Array<{ provider: string; id: string; host: string; reachable: boolean }>>([]);
@@ -212,11 +223,26 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
     return BUILTIN_COMMANDS.filter((c) => c.name.startsWith(query) && c.name !== query);
   }, [value, modelChoices]);
 
-  const showCompletions = isActive && completions.length > 0;
+  const showCompletions = captureInput && !hasQueuedValue && completions.length > 0;
 
   useInput(
     (input, key) => {
       if (!isActive && !isQueued) return;
+
+      // Single-slot queued message is locked until recalled for edit.
+      if (hasQueuedValue) {
+        if (key.upArrow) {
+          const queued = queuedValue ?? "";
+          onEditQueue?.();
+          valueRef.current = queued;
+          cursorPosRef.current = queued.length;
+          setValue(queued);
+          setCursorPos(queued.length);
+          setHistoryIndex(-1);
+          setCompletionIndex(0);
+        }
+        return;
+      }
 
       // Tab: accept completion
       if (key.tab && showCompletions) {
@@ -460,7 +486,7 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
         setCompletionIndex(0);
       }
     },
-    { isActive },
+    { isActive: captureInput },
   );
 
   // Inline hint: show the best match after the cursor, no height change
@@ -469,30 +495,38 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
     : null;
 
   // Render width for the input content area (excluding 2-char prompt prefix).
+  const renderedValue = hasQueuedValue ? (queuedValue ?? "") : value;
+  const renderedCursorPos = hasQueuedValue ? renderedValue.length : cursorPos;
   const contentWidth = Math.max(10, (stdout?.columns ?? 80) - 2);
-  const isMultiline = value.includes("\n");
-  const isSoftWrappedSingleLine = !isMultiline && value.length > contentWidth;
+  const isMultiline = renderedValue.includes("\n");
+  const isSoftWrappedSingleLine = !isMultiline && renderedValue.length > contentWidth;
 
   if (!isMultiline && !isSoftWrappedSingleLine) {
-    const promptColor = isActive ? theme.brand : (isQueued ? theme.subtle : theme.inactive);
+    const promptColor = hasQueuedValue ? theme.inactive : (captureInput ? theme.brand : theme.inactive);
+    const textColor = hasQueuedValue ? theme.inactive : theme.text;
     return (
       <Box>
         <Text color={promptColor} bold>
-          {isActive ? "\u25C6 " : (isQueued ? "\u25C6 " : "\u25C7 ")}
+          {captureInput ? "\u25C6 " : "\u25C7 "}
         </Text>
-        <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
-                {isActive ? (
-                  cursorVisible ? (
-                    <Text color={theme.inactive}>{cursorPos < value.length ? value[cursorPos] : "▏"}</Text>
-                  ) : (
-                    <Text color={theme.text}>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
-                  )
-                ) : null}
-        <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
-        {isQueued ? <Text dimColor>[↵ queued]</Text> : null}
+        {hasQueuedValue ? (
+          <Text color={textColor} dimColor>{renderedValue}</Text>
+        ) : (
+          <>
+            <Text color={textColor}>{renderedValue.slice(0, renderedCursorPos)}</Text>
+            {captureInput ? (
+              cursorVisible ? (
+                <Text color={theme.inactive}>{renderedCursorPos < renderedValue.length ? renderedValue[renderedCursorPos] : "▏"}</Text>
+              ) : (
+                <Text color={textColor}>{renderedCursorPos < renderedValue.length ? renderedValue[renderedCursorPos] : " "}</Text>
+              )
+            ) : null}
+            <Text color={textColor}>{renderedValue.slice(renderedCursorPos + 1)}</Text>
+          </>
+        )}
         {hint ? (
           <Text color={theme.subtle} dimColor>
-            {hint.name.slice(value.length)}{" "}
+            {hint.name.slice(renderedValue.length)}{" "}
             <Text color={theme.inactive}>{hint.desc}</Text>
             {completions.length > 1 ? <Text color={theme.inactive}>{` (↑↓ ${completions.length} matches, tab)`}</Text> : <Text color={theme.inactive}>{" (tab)"}</Text>}
           </Text>
@@ -507,13 +541,13 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
   let col = 0;
   let cursorLine = 0;
   let cursorCol = 0;
-  for (let i = 0; i <= value.length; i++) {
-    if (i === cursorPos) {
+  for (let i = 0; i <= renderedValue.length; i++) {
+    if (i === renderedCursorPos) {
       cursorLine = lineIndex;
       cursorCol = col;
     }
-    if (i === value.length) break;
-    const ch = value[i];
+    if (i === renderedValue.length) break;
+    const ch = renderedValue[i];
     if (ch === "\n") {
       lines.push("");
       lineIndex++;
@@ -531,7 +565,8 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
 
 
 
-  const promptColor = isActive ? theme.brand : (isQueued ? theme.subtle : theme.inactive);
+  const promptColor = hasQueuedValue ? theme.inactive : (captureInput ? theme.brand : theme.inactive);
+  const textColor = hasQueuedValue ? theme.inactive : theme.text;
   return (
     <Box flexDirection="column">
       {lines.map((line, idx) => {
@@ -540,22 +575,22 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputP
         return (
           <Box key={idx}>
             <Text color={promptColor} bold>
-              {isFirst ? (isActive ? "\u25C6 " : (isQueued ? "\u25C6 " : "\u25C7 ")) : "  "}
+              {isFirst ? (captureInput ? "\u25C6 " : "\u25C7 ") : "  "}
             </Text>
-            {isCursorLine ? (
+            {isCursorLine && !hasQueuedValue ? (
               <>
-                <Text color={theme.text}>{line.slice(0, cursorCol)}</Text>
-                {isActive ? (
+                <Text color={textColor}>{line.slice(0, cursorCol)}</Text>
+                {captureInput ? (
                   cursorVisible ? (
                     <Text color={theme.inactive}>{cursorCol < line.length ? line[cursorCol] : "▏"}</Text>
                   ) : (
-                    <Text color={theme.text}>{cursorCol < line.length ? line[cursorCol] : " "}</Text>
+                    <Text color={textColor}>{cursorCol < line.length ? line[cursorCol] : " "}</Text>
                   )
                 ) : null}
-                <Text color={theme.text}>{line.slice(cursorCol + 1)}</Text>
+                <Text color={textColor}>{line.slice(cursorCol + 1)}</Text>
               </>
             ) : (
-              <Text color={theme.text}>{line || " "}</Text>
+              <Text color={textColor} dimColor={hasQueuedValue}>{line || " "}</Text>
             )}
           </Box>
         );

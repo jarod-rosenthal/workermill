@@ -234,7 +234,11 @@ export function App(props: AppProps): React.ReactElement {
   const [queuedInput, setQueuedInput] = useState<string | null>(null);
 
   const handleQueue = useCallback((value: string) => {
-    setQueuedInput(value);
+    setQueuedInput((prev) => prev ?? value);
+  }, []);
+
+  const handleEditQueue = useCallback(() => {
+    setQueuedInput(null);
   }, []);
 
   const exitNow = useCallback(() => {
@@ -348,6 +352,7 @@ export function App(props: AppProps): React.ReactElement {
     hasLiveToolActivity,
     hasLiveStatusActivity,
   );
+  const shouldAddQueuedInputSpacer = hasLiveToolActivity && queuedInput !== null;
 
   return (
     <Box flexDirection="column" width="100%">
@@ -432,13 +437,18 @@ export function App(props: AppProps): React.ReactElement {
       ) : props.orchestratorConfirm ? (
         <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
       ) : !props.permissionRequest && !props.orchestratorConfirm ? (
-        <Input
-          onSubmit={props.onSubmit}
-          isActive={props.status === "idle" && !props.orchestratorStatus}
-          isQueued={props.status !== "idle" || !!props.orchestratorStatus}
-          onQueue={handleQueue}
-          history={props.inputHistory}
-        />
+        <>
+          {shouldAddQueuedInputSpacer ? <Box height={1} /> : null}
+          <Input
+            onSubmit={props.onSubmit}
+            isActive={props.status === "idle" && !props.orchestratorStatus}
+            isQueued={props.status !== "idle" || !!props.orchestratorStatus}
+            onQueue={handleQueue}
+            onEditQueue={handleEditQueue}
+            queuedValue={queuedInput}
+            history={props.inputHistory}
+          />
+        </>
       ) : null
       }
 

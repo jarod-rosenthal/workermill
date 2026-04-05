@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleSlashCommand } from "../ui/slash-commands.js";
 
 vi.mock("../config.js", () => ({
@@ -28,6 +28,7 @@ describe("/model command persistence", () => {
   let mockConfig: any;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     mockConfig = {
       providers: {
         anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
@@ -38,6 +39,10 @@ describe("/model command persistence", () => {
     configModule.saveConfig.mockImplementation((config) => {
       mockConfig = config;
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   describe("same-provider switch", () => {
@@ -112,7 +117,7 @@ describe("/model command persistence", () => {
   });
 
   describe("role switch does not change default worker model", () => {
-    it("planner switch does not alter default", () => {
+    it("planner switch does not alter default (provider already exists)", () => {
       // Given config.default is "anthropic" with claude-sonnet-4-6
       expect(mockConfig.default).toBe("anthropic");
       mockConfig.providers.openai = { model: "gpt-5.4", apiKey: "sk-..." };
@@ -134,6 +139,55 @@ describe("/model command persistence", () => {
         routing: { planner: "openai_planner" },
         default: "anthropic",
       });
+    });
+
+    it("role switch for a brand-new provider does not set that provider as default", () => {
+      // Core bug: old code created providers[openai] = { model: roleModel }, polluting
+      // the base worker config. New code creates a model-free base entry for API key only.
+      expect(mockConfig.default).toBe("anthropic");
+      expect(mockConfig.providers.openai).toBeUndefined();
+
+      vi.stubEnv("OPENAI_API_KEY", "sk-env-key");
+
+      handleSlashCommand("/model reviewer openai/gpt-5.4", {
+        addSystemMessage: vi.fn(),
+        submit: vi.fn(),
+      } as any);
+
+      expect(configModule.saveConfig).toHaveBeenCalledTimes(1);
+      const saved = (configModule.saveConfig as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+      // config.default must still be "anthropic" — worker did not change
+      expect(saved.default).toBe("anthropic");
+
+      // The role entry is created correctly
+      expect(saved.providers.openai_tech_lead).toEqual({
+        model: "gpt-5.4",
+        apiKey: "{env:OPENAI_API_KEY}",
+      });
+
+      // The base openai entry must NOT carry the reviewer's model (that's the old bug)
+      expect(saved.providers.openai?.model).not.toBe("gpt-5.4");
+
+      // Routing points to the role entry
+      expect(saved.routing.tech_lead).toBe("openai_tech_lead");
+    });
+
+    it("reviewer switch does not alter the worker default", () => {
+      expect(mockConfig.default).toBe("anthropic");
+      mockConfig.providers.openai = { model: "gpt-5.4", apiKey: "sk-..." };
+
+      handleSlashCommand("/model reviewer openai/gpt-5.3-codex", {
+        addSystemMessage: vi.fn(),
+        submit: vi.fn(),
+      } as any);
+
+      expect(configModule.saveConfig).toHaveBeenCalledTimes(1);
+      const saved = (configModule.saveConfig as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(saved.default).toBe("anthropic");
+      expect(saved.providers.openai.model).toBe("gpt-5.4"); // worker model unchanged
+      expect(saved.providers.openai_tech_lead.model).toBe("gpt-5.3-codex");
+      expect(saved.routing.tech_lead).toBe("openai_tech_lead");
     });
   });
 

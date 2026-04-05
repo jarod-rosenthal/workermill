@@ -1562,6 +1562,36 @@ describe("extractBalancedJSON edge cases (via parseStoriesFromText)", () => {
 
     expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("planner prompt asks to verify issue is not already fixed before planning", async () => {
+    const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "s1", "title": "Validate", "persona": "backend_developer", "description": "Check behavior." }
+  ]
+}
+\`\`\``;
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+      const text = callCount === 1 ? planText : "done";
+      return {
+        textStream: (async function* () { yield text; })(),
+        text: Promise.resolve(text),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = createTestConfig();
+    const output = createMockOutput();
+
+    await runOrchestration(config, "Fix issue #123", true, false, output);
+
+    const plannerCall = mockStreamTextCalls[0] as Record<string, unknown>;
+    expect(String(plannerCall.prompt || "")).toContain("Is the reported gap already fixed?");
+  });
 });
 
 // ---- Additional coverage: parseAffectedStories ----
@@ -2530,6 +2560,75 @@ FEEDBACK: Missing everything.`;
     // Should complete without hanging
     const coordLogs = output.logs.filter(l => l.includes("[coordinator]")).join(" ");
     expect(coordLogs).toMatch(/max.?revision|proceeding/i);
+  });
+
+  it("pauses auto-revise when reviewer repeats the same blocker", async () => {
+    const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "s1", "title": "Feature", "persona": "backend_developer", "description": "Build it." }
+  ]
+}
+\`\`\``;
+
+    const repeatedReviewerText = `Still broken.
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 5
+AFFECTED_STORIES: [1]
+AFFECTED_REASONS: {"1":"Missing persistence update in slash command"}
+BLOCKING_EVIDENCE: restart CLI and model resets
+ACTIONABLE_FIX: persist model configuration`;
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+
+      if (callCount === 1) {
+        return {
+          textStream: (async function* () { yield planText; })(),
+          text: Promise.resolve(planText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+      if (callCount === 2) {
+        return {
+          textStream: (async function* () { yield "Initial implementation."; })(),
+          text: Promise.resolve("Initial implementation."),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+      if (callCount === 3 || callCount === 5) {
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+            text: repeatedReviewerText,
+            toolCalls: [],
+          });
+        }
+        return {
+          textStream: (async function* () { yield repeatedReviewerText; })(),
+          text: Promise.resolve(repeatedReviewerText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+      return {
+        textStream: (async function* () { yield "Revision attempt."; })(),
+        text: Promise.resolve("Revision attempt."),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 3, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    await runOrchestration(config, "Build feature", true, false, output);
+
+    expect(callCount).toBe(5); // planner, worker, reviewer, revision worker, reviewer (then stop)
+    const coordLogs = output.logs.filter(l => l.includes("[coordinator]")).join(" ");
+    expect(coordLogs).toContain("Loop guard: pausing auto-revise");
   });
 });
 

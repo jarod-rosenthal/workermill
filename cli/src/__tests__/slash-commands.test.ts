@@ -37,6 +37,10 @@ vi.mock("../config.js", () => ({
   })),
   saveConfig: vi.fn(),
   resolveConfig: vi.fn(),
+  loadProjectSettings: vi.fn(() => null),
+  loadLocalSettings: vi.fn(() => null),
+  saveProjectSettings: vi.fn(),
+  saveLocalSettings: vi.fn(),
 }));
 
 vi.mock("../custom-commands.js", () => ({

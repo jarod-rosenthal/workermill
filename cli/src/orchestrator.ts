@@ -855,6 +855,7 @@ Before producing a plan, evaluate whether this task should proceed:
 
 - **Is the spec clear enough?** If the task is too vague to produce specific file-level guidance, REJECT with a reason explaining what's missing.
 - **Does it conflict with the existing codebase?** If the task asks to build something that already exists, or contradicts the project's architecture, REJECT and explain why.
+- **Is the reported gap already fixed?** If the task comes from a ticket/issue, verify whether the behavior already exists in current code before planning changes. If already fixed, explicitly call that out and prefer validation-focused follow-up (tests/docs) over duplicate code changes.
 - **Is it achievable?** If the task requires external services/credentials that aren't configured, or depends on things outside the repo, note these as blockers.
 
 To REJECT a task, return:
@@ -1385,6 +1386,53 @@ function parseAffectedStories(text: string): { stories: number[]; reasons: Recor
   }
 
   return { stories, reasons };
+}
+
+function sanitizeAffectedStories(
+  affected: { stories: number[]; reasons: Record<number, string> } | null,
+  storyCount: number,
+): { stories: number[]; reasons: Record<number, string> } | null {
+  if (!affected) return null;
+
+  const stories = affected.stories.filter(n => n >= 1 && n <= storyCount);
+  if (stories.length === 0) return null;
+
+  const reasons: Record<number, string> = {};
+  for (const [key, value] of Object.entries(affected.reasons)) {
+    const n = parseInt(key, 10);
+    if (n >= 1 && n <= storyCount && typeof value === "string") {
+      reasons[n] = value;
+    }
+  }
+
+  return { stories, reasons };
+}
+
+function extractDetailedReviewText(reviewText: string): string {
+  const markerIdx = reviewText.search(/REVIEW_DECISION:|CODE_QUALITY_SCORE:/i);
+  return markerIdx > 0 ? reviewText.slice(0, markerIdx).trim() : "";
+}
+
+function buildReviewBlockerSignature(
+  reviewText: string,
+  affected: { stories: number[]; reasons: Record<number, string> } | null,
+): string {
+  if (affected && affected.stories.length > 0) {
+    const parts = affected.stories
+      .slice()
+      .sort((a, b) => a - b)
+      .map((n) => {
+        const reason = affected.reasons[n] || "";
+        return `${n}:${normalizeErrorSignature(reason || `story ${n}`)}`;
+      });
+    return parts.join("|");
+  }
+
+  const detail = extractDetailedReviewText(reviewText);
+  const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|```|$)/i);
+  const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+  const fallback = detail || feedback || reviewText;
+  return normalizeErrorSignature(fallback);
 }
 
 /** Result from a completed (or failed) orchestration — used by /retry. */
@@ -2461,6 +2509,8 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
     }
 
     let previousReviewFeedback = "";
+    let lastBlockerSignature = "";
+    let repeatedBlockerCount = 0;
     // Check if user cancelled before starting review
     if (abortSignal?.aborted) {
       output.coordinatorLog("Build cancelled.");
@@ -2558,6 +2608,16 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
         }
 
         const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+        const loopGuardSection = isRevision && repeatedBlockerCount >= 2
+          ? `## Loop Guard
+
+Recent review rounds repeated similar blockers. Re-verify the current code directly before blocking again.
+
+- Do NOT insist on a specific file path change unless that path is truly required for behavior correctness
+- If behavior already works, approve and mention optional follow-ups as non-blocking
+- If you still require revision, provide concrete failure evidence and the exact minimal fix needed
+`
+          : "";
         const reviewPrompt = `${previousFeedbackSection}${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Implementation Plan — THIS IS WHAT THE WORKERS WERE TOLD TO DO
 
 Review the code against this plan. The planner analyzed the codebase and gave each worker specific guidance.
@@ -2583,6 +2643,7 @@ ${userTask}
 ## Review Instructions
 
 Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed.
+${loopGuardSection ? `\n${loopGuardSection}` : ""}
 
 ## Feedback Guidelines
 
@@ -2590,6 +2651,7 @@ Review the actual code above. You also have tools (read_file, glob, grep) to exa
 - **Be constructive**: Suggest alternatives, not just problems
 - **Be balanced**: Acknowledge what's done well alongside improvements
 - **Be pragmatic**: Distinguish must-fix from nice-to-have issues
+- **Be evidence-based**: For blocking issues, cite concrete evidence (failing behavior, broken path, missing code, or reproducible command)
 
 ### APPROVE when:
 - Code correctly implements the requirements from the original spec
@@ -2602,6 +2664,7 @@ Review the actual code above. You also have tools (read_file, glob, grep) to exa
 - Security vulnerabilities that must be fixed
 - Missing required functionality from the task spec
 - Broken imports, missing dependencies, or code that won't run
+- You can provide concrete evidence of the failure from the current code state
 
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
@@ -2619,6 +2682,10 @@ You MUST write your detailed feedback FIRST, THEN add the decision markers at th
 REVIEW_DECISION: approved (or revision_needed or rejected)
 CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
 FEEDBACK: One-line summary of your decision
+
+For REVISION_NEEDED decisions, also include:
+BLOCKING_EVIDENCE: concrete proof from this code state (repro step, failing command, or exact missing/wrong implementation)
+ACTIONABLE_FIX: minimal specific change required to get approval
 
 **Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = good quality (approve), 10 = exceptional. A score of ${config.review?.approvalThreshold ?? 8}+ means the code is ready to ship. Below ${config.review?.approvalThreshold ?? 8} means there are real issues to address.
 
@@ -2683,6 +2750,20 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 8;
         const approved = score >= threshold;
+        const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
+        if (!approved) {
+          const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
+          if (blockerSignature && blockerSignature === lastBlockerSignature) {
+            repeatedBlockerCount += 1;
+          } else {
+            repeatedBlockerCount = 1;
+            lastBlockerSignature = blockerSignature;
+          }
+        } else {
+          repeatedBlockerCount = 0;
+          lastBlockerSignature = "";
+        }
+        const stuckOnSameBlocker = !approved && repeatedBlockerCount >= 2;
         const revInputTokens = reviewUsage?.inputTokens || 0;
         const revOutputTokens = reviewUsage?.outputTokens || 0;
         // Track tok/s for reviewer model
@@ -2700,12 +2781,14 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
         output.log("tech_lead", "\u2500".repeat(60));
         output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
+        if (stuckOnSameBlocker) {
+          output.coordinatorLog(`Loop guard: reviewer repeated the same blockers for ${repeatedBlockerCount} rounds.`);
+        }
 
         // Post review result to ticket — matches worker/epic/coordinator-review.ts
         if (ticketOps) {
           // Extract the full review — everything before the decision markers is the detailed analysis
-          const markerIdx = reviewText.search(/REVIEW_DECISION:|CODE_QUALITY_SCORE:/i);
-          const detailedReview = markerIdx > 0 ? reviewText.slice(0, markerIdx).trim() : "";
+          const detailedReview = extractDetailedReviewText(reviewText);
           const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|```|$)/i);
           const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
           const feedback = detailedReview || feedbackSummary;
@@ -2747,6 +2830,10 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Ask user or auto-revise
         let shouldRevise = autoRevise;
+        if (autoRevise && stuckOnSameBlocker) {
+          output.coordinatorLog("Loop guard: pausing auto-revise because reviewer feedback repeated without new signal.");
+          shouldRevise = false;
+        }
         if (!autoRevise) {
           try {
             const rv = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
@@ -2772,15 +2859,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Parse which stories need revision — send feedback back to the original workers
         // (selective revision from inline-reviewer.ts)
-        const affected = parseAffectedStories(reviewText);
-        // Filter out invalid story numbers — model may invent numbers beyond the plan
-        if (affected) {
-          affected.stories = affected.stories.filter(n => n >= 1 && n <= sorted.length);
-          for (const key of Object.keys(affected.reasons)) {
-            const n = parseInt(key, 10);
-            if (n < 1 || n > sorted.length) delete affected.reasons[n];
-          }
-        }
+        const affected = parsedAffected;
         const affectedSet = affected && affected.stories.length > 0 ? new Set(affected.stories) : null;
 
         if (affected && affected.stories.length > 0) {
@@ -2835,6 +2914,15 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           const storyFeedback = storyReason
             ? `Story ${i + 1} (${story.title}):\n${storyReason}`
             : fallbackReviewFeedback;
+          const loopGuardReminder = stuckOnSameBlocker
+            ? `
+
+## Loop Guard
+The reviewer has repeated similar blockers across rounds. Before changing code, verify whether the claimed gap is truly still present.
+- If behavior already works, prefer minimal clarifying changes (focused tests or explicit handling) instead of broad rewrites
+- If behavior is broken, fix only the smallest change needed and keep scope tight
+`
+            : "";
 
           output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
@@ -2900,6 +2988,7 @@ Working directory: ${workingDir}`;
 
 ### Your Story's Required Fix
 ${storyFeedback}
+${loopGuardReminder}
 ${whatYouDidLastTime}
 ## Your Story Scope
 Story ${i + 1}: "${story.title}" — ${story.description}

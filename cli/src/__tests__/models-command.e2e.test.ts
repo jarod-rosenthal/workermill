@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../provider-registry.js", () => ({
   listProviders: vi.fn(),
   fetchLiveModels: vi.fn(),
+  fetchRemoteModels: vi.fn().mockResolvedValue([]),
 }));
 
 // Lazy import after mock is set up

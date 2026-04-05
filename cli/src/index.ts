@@ -8,7 +8,7 @@ import React from "react";
 import { render } from "ink";
 import chalk from "chalk";
 import { Command } from "commander";
-import { loadConfig, getProviderForPersona, loadProjectSettings } from "./config.js";
+import { loadConfig, getProviderForPersona } from "./config.js";
 import { runSetup } from "./setup.js";
 import { Root } from "./ui/Root.js";
 import { checkForUpdate } from "./update-check.js";

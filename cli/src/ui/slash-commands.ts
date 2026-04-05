@@ -11,7 +11,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../session.js";
-import { loadConfig, saveConfig, loadProjectSettings, saveProjectSettings, loadLocalSettings } from "../config.js";
+import { loadConfig, saveConfig, loadProjectSettings, saveProjectSettings, loadLocalSettings, PermissionRuleConfig } from "../config.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
@@ -1186,22 +1186,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /init ----
     case "init": {
-      // Check and update .gitignore for .workermill/*.local.json
-      const gitignorePath = path.join(ctx.workingDir, ".gitignore");
-      let gitignoreUpdated = false;
-      if (fs.existsSync(gitignorePath)) {
-        const gitignoreContent = fs.readFileSync(gitignorePath, "utf-8");
-        if (!gitignoreContent.includes(".workermill/*.local.json")) {
-          fs.appendFileSync(gitignorePath, "\n.workermill/*.local.json\n");
-          gitignoreUpdated = true;
-        }
-      } else {
-        fs.writeFileSync(gitignorePath, ".workermill/*.local.json\n");
-        gitignoreUpdated = true;
-      }
-      if (gitignoreUpdated) {
-        ctx.addSystemMessage("**Updated .gitignore** to exclude `.workermill/*.local.json` (personal permission overrides).");
-      }
+      ctx.addSystemMessage("**Tip:** Add `.workermill/*.local.json` to your `.gitignore` to keep personal permission overrides out of version control.");
 
       const wmPath = path.join(ctx.workingDir, "WORKERMILL.md");
       const exists = fs.existsSync(wmPath);

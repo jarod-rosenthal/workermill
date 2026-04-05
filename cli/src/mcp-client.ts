@@ -17,6 +17,7 @@ interface MCPTool {
 
 interface MCPServer {
   name: string;
+  transport: "stdio" | "http" | "sse";
   process?: ChildProcess;
   client?: Client;
   tools: MCPTool[];
@@ -185,7 +186,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
       env: { ...process.env, ...(config.env || {}) },
     });
 
-    const server: MCPServer = { name, process: proc, tools: [], nextId: 1 };
+    const server: MCPServer = { name, transport: "stdio", process: proc, tools: [], nextId: 1 };
 
     // Log stderr
     proc.stderr?.on("data", (data: Buffer) => {
@@ -255,7 +256,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
 
     await client.connect(clientTransport!);
 
-    const server: MCPServer = { name, client, tools: [], nextId: 1 };
+    const server: MCPServer = { name, transport, client, tools: [], nextId: 1 };
 
     try {
       // List tools
@@ -509,7 +510,8 @@ export function stopAllMCPServers(): void {
       if (server.process) {
         server.process.kill();
       } else if (server.client) {
-        server.client.close();
+        // client.close() is async — fire-and-forget in exit paths
+        void server.client.close().catch(() => {});
       }
     } catch {
       // Already stopped — safe to ignore
@@ -517,4 +519,12 @@ export function stopAllMCPServers(): void {
     logger.info(`MCP ${name} stopped`);
   }
   activeServers.clear();
+}
+
+export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> {
+  return Array.from(activeServers.values()).map((s) => ({
+    name: s.name,
+    transport: s.transport,
+    toolCount: s.tools.length,
+  }));
 }

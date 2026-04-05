@@ -15,7 +15,7 @@ import { loadConfig, saveConfig } from "../config.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
-import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered, getMCPServerInfo } from "../mcp-client.js";
 import { getRetryableRun } from "../ship-state.js";
 import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
 import { cleanupStaleWorktrees } from "../../../packages/engine/src/tools/sub-agent.js";
@@ -1598,6 +1598,8 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
     case "mcp": {
       if (hasMCPServers()) {
         const tools = getMCPTools();
+        const serverInfo = getMCPServerInfo();
+        const transportByName = new Map(serverInfo.map((s) => [s.name, s.transport]));
         const byServer = new Map<string, string[]>();
         for (const { serverName, tool } of tools) {
           if (!byServer.has(serverName)) byServer.set(serverName, []);
@@ -1605,7 +1607,8 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
         }
         const lines: string[] = ["**MCP Servers (active)**\n"];
         for (const [name, toolNames] of byServer) {
-          lines.push(`- **${name}** — ${toolNames.length} tools: ${toolNames.join(", ")}`);
+          const transport = transportByName.get(name) || "stdio";
+          lines.push(`- **${name}** (${transport}) — ${toolNames.length} tools: ${toolNames.join(", ")}`);
         }
         ctx.addSystemMessage(lines.join("\n"));
       } else if (hasMCPRegistered()) {
@@ -1616,7 +1619,10 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
         ctx.addSystemMessage(
           "**No MCP servers configured.**\n\n" +
           "MCP servers are auto-detected from Docker Desktop, or add them to `~/.workermill/cli.json`:\n\n" +
+          "**stdio** (local process):\n" +
           "```json\n\"mcp\": {\n  \"my-server\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"my-mcp-server\"]\n  }\n}\n```\n\n" +
+          "**http** or **sse** (remote server):\n" +
+          "```json\n\"mcp\": {\n  \"my-server\": {\n    \"transport\": \"http\",\n    \"url\": \"https://my-mcp-server.example.com/mcp\",\n    \"headers\": { \"Authorization\": \"Bearer <token>\" }\n  }\n}\n```\n\n" +
           "Servers start on your first prompt."
         );
       }

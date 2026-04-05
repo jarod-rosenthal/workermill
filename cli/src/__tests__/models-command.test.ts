@@ -6,6 +6,7 @@ import { runModelsCommand } from "../models-command.js";
 vi.mock("../provider-registry.js", () => ({
   listProviders: vi.fn(),
   fetchLiveModels: vi.fn(),
+  fetchRemoteModels: vi.fn(),
 }));
 
 vi.mock("../config.js", () => ({
@@ -17,6 +18,7 @@ import { resolveConfig } from "../config.js";
 
 const mockListProviders = vi.mocked(providerRegistry.listProviders);
 const mockFetchLiveModels = vi.mocked(providerRegistry.fetchLiveModels);
+const mockFetchRemoteModels = vi.mocked(providerRegistry.fetchRemoteModels);
 const mockResolveConfig = vi.mocked(resolveConfig);
 
 let mockConsoleLog: any;
@@ -57,6 +59,9 @@ describe("models-command", () => {
 
     // Mock live models
     mockFetchLiveModels.mockResolvedValue([]);
+
+    // Mock remote models (empty by default — unit tests cover remote-models.ts separately)
+    mockFetchRemoteModels.mockResolvedValue([]);
   });
 
   afterEach(() => {

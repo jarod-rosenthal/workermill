@@ -20,7 +20,7 @@ export function normalizeUserContent(content: string): string {
   // Hard guard: if we detect suspicious prose wrapping artifacts
   // (mid-word splits, punctuation orphaning, lowercase paragraph break),
   // reflow to a single line so user input is never shown as "chopped up".
-  const hasMidWordSplit = /[A-Za-z]\n[A-Za-z]/.test(unix);
+  const hasMidWordSplit = /[A-Za-z]{2,}\n[A-Za-z]{1,2}(?=\n|[ \t]|$)/.test(unix);
   const hasOrphanPunctuation = /\n\s*[,.;:!?]/.test(unix);
   const hasLowercaseParagraphBreak = /\n\s*\n\s*[a-z]/.test(unix);
   const hasIndentedLowerContinuation = /[a-z0-9]\n[ \t]+[a-z]/.test(unix);
@@ -38,7 +38,9 @@ export function normalizeUserContent(content: string): string {
     hasLowercaseHardWrap;
   if (hasSuspiciousWrap && !hasStructuredMultiline) {
     const healedWords = unix
-      .replace(/([A-Za-z])\n([A-Za-z])/g, "$1$2")
+      // Join obvious chopped fragments like "onl\ny" -> "only",
+      // but keep normal hard wraps ("it's\nsupposed") as a word boundary.
+      .replace(/([A-Za-z]{2,})\n([A-Za-z]{1,2})(?=\n|[ \t]|$)/g, "$1$2")
       .replace(/\n\s*([,.;:!?])/g, "$1");
     return healedWords
       .replace(/\s*\n\s*/g, " ")

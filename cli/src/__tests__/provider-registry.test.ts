@@ -15,6 +15,10 @@ vi.mock("fs");
 vi.mock("path");
 vi.mock("os");
 
+// Set up mocks before module import
+vi.mocked(path.join).mockImplementation((...args) => args.join("/"));
+vi.mocked(os.homedir).mockReturnValue("/mock");
+
 describe("fetchRemoteModels", () => {
   it("function exists", () => {
     expect(typeof fetchRemoteModels).toBe("function");
@@ -48,10 +52,6 @@ describe("fetchRemoteModels", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Mock path and os
-    vi.mocked(path.join).mockImplementation((...args) => args.join("/"));
-    vi.mocked(os.homedir).mockReturnValue("/mock");
 
     // Mock fs.existsSync
     vi.mocked(fs.existsSync).mockReturnValue(false);
@@ -195,8 +195,12 @@ describe("fetchRemoteModels", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(cachedData));
 
-    // Mock fetch that doesn't resolve
-    mockFetch.mockImplementation(() => new Promise(() => {}));
+    // Mock fetch that rejects on abort
+    mockFetch.mockImplementation(({ signal }) => {
+      return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('Aborted')));
+      });
+    });
 
     const result = await fetchRemoteModels(mockConfig);
 

@@ -8,8 +8,6 @@ export interface RemoteModelInfo extends ModelInfo {
   provider: string;
 }
 
-const CONFIG_DIR = path.join(os.homedir(), ".workermill");
-const CACHE_FILE = path.join(CONFIG_DIR, "models-cache.json");
 const getModelsUrl = () => process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
 
 interface CacheData {
@@ -17,10 +15,19 @@ interface CacheData {
   etag?: string;
 }
 
+function getConfigDir(): string {
+  return path.join(os.homedir(), ".workermill");
+}
+
+function getCacheFile(): string {
+  return path.join(getConfigDir(), "models-cache.json");
+}
+
 function loadCache(): CacheData | null {
   try {
-    if (!fs.existsSync(CACHE_FILE)) return null;
-    const raw = fs.readFileSync(CACHE_FILE, "utf-8");
+    const cacheFile = getCacheFile();
+    if (!fs.existsSync(cacheFile)) return null;
+    const raw = fs.readFileSync(cacheFile, "utf-8");
     return JSON.parse(raw) as CacheData;
   } catch {
     return null;
@@ -28,10 +35,12 @@ function loadCache(): CacheData | null {
 }
 
 function saveCache(data: CacheData): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const configDir = getConfigDir();
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
   }
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  const cacheFile = getCacheFile();
+  fs.writeFileSync(cacheFile, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 /**

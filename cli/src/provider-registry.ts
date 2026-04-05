@@ -1,7 +1,5 @@
-// import type { CliConfig } from "./config.js";
-import type { ModelInfo } from "../../api/src/providers/types.js";
+import type { CliConfig } from "./config.js";
 import * as providersNamespace from "../../api/src/providers/index.js";
-import { fetchRemoteModels } from "./remote-models.js";
 
 type ProviderModule = typeof import("../../api/src/providers/index.js");
 
@@ -27,33 +25,6 @@ export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
   providers.findModelInfo(...args);
 
 export { fetchRemoteModels } from "./remote-models.js";
-
-type ProviderModule = typeof import("../../api/src/providers/index.js");
-
-// Cross-runtime compatibility:
-// - In some tsx/dev setups this module is seen as CJS (exports under `default`)
-// - In others it is native ESM (named exports)
-// const providers = (
-//   "getPricingEngine" in providersNamespace
-//     ? providersNamespace
-//     : (providersNamespace as unknown as { default: ProviderModule }).default
-// ) as ProviderModule;
-
-const CONFIG_DIR = path.join(os.homedir(), ".workermill");
-const CACHE_FILE = path.join(CONFIG_DIR, "models-cache.json");
-const MODELS_URL = process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
-
-// export const getPricingEngine: ProviderModule["getPricingEngine"] = (...args) =>
-//   providers.getPricingEngine(...args);
-
-// export const hasProvider: ProviderModule["hasProvider"] = (...args) =>
-//   providers.hasProvider(...args);
-
-// export const listProviders: ProviderModule["listProviders"] = (...args) =>
-//   providers.listProviders(...args);
-
-// export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
-//   providers.findModelInfo(...args);
 
 // Default ports for local providers — used by Input.tsx autocomplete to probe
 // servers the user hasn't explicitly configured but may have running locally.

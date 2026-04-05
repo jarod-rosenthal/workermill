@@ -4,6 +4,13 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **`/program` full-spec orchestration** — new command that reads a parent GitHub issue, parses epic-grouped child issues, and executes them in dependency order by reusing the existing `/ship` flow for each child issue.
+- **Program epic prompt setting** — added `program.epicPrompt` (`ask` or `always`) with `/settings program.epicPrompt <ask|always>`. Epic boundary prompts support `y/n/a`, and choosing `a` persists globally.
+- **PRD decomposition phase label lock** — added shared PRD decomposition phase labels plus a test lock to keep CLI wording aligned with the full platform decomposition phases.
+
 ## [0.15.101] - 2026-04-05
 
 ### Fixed

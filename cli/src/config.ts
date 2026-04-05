@@ -12,9 +12,12 @@ export interface ProviderConfig {
 }
 
 export interface MCPServerConfig {
-  command: string;
+  transport?: "stdio" | "http" | "sse";
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface ReviewConfig {

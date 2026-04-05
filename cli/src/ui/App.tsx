@@ -84,6 +84,7 @@ function Spinner({ color }: { color: string }): React.ReactElement {
 const ORCHESTRATOR_CONFIRM_ACK_MS = 450;
 const KITTY_KEYBOARD_ENABLE = "\x1b[>1u";
 const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
+const INTERRUPT_DUPLICATE_GUARD_MS = 500;
 
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
@@ -176,6 +177,8 @@ export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const lastEscRef = useRef(0);
+  const lastInterruptRef = useRef(0);
+  const lastInterruptEventRef = useRef(0);
 
   const exitNow = useCallback(() => {
     stopAllMCPServers();
@@ -186,11 +189,27 @@ export function App(props: AppProps): React.ReactElement {
   }, [exit]);
 
   const handleInterrupt = useCallback(() => {
+    const now = Date.now();
+    // Guard duplicate SIGINT emissions so one physical Ctrl+C counts once.
+    if (now - lastInterruptEventRef.current < INTERRUPT_DUPLICATE_GUARD_MS) {
+      return;
+    }
+    lastInterruptEventRef.current = now;
+
+    const repeatedInterrupt = now - lastInterruptRef.current < 1500;
+
+    if (repeatedInterrupt) {
+      lastInterruptRef.current = 0;
+      exitNow();
+      return;
+    }
+    lastInterruptRef.current = now;
+
     if (props.status !== "idle") {
       props.onCancel();
       return;
     }
-    exitNow();
+    // Idle first Ctrl+C mirrors single ESC: arm exit, wait for second press.
   }, [props.status, props.onCancel, exitNow]);
 
   // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
@@ -207,17 +226,7 @@ export function App(props: AppProps): React.ReactElement {
     };
   }, []);
 
-  // Fallback for terminals/shells that deliver Ctrl+C as SIGINT instead of a
-  // keypress event through Ink's input stream.
-  useEffect(() => {
-    const onSigint = () => {
-      handleInterrupt();
-    };
-    process.on("SIGINT", onSigint);
-    return () => {
-      process.off("SIGINT", onSigint);
-    };
-  }, [handleInterrupt]);
+
 
   useInput((input, key) => {
     if (key.escape) {
@@ -241,6 +250,12 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // Ctrl+C: interrupt like SIGINT fallback
+    if (key.ctrl && input === "c") {
+      handleInterrupt();
+      return;
+    }
+
     // Shift+Tab: cycle permission mode (ask → auto-edit → trust all)
     // Allow during any status except permission (where a prompt is active)
     if (key.tab && key.shift && props.status !== "permission") {
@@ -248,13 +263,6 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
-    // Ctrl+C:
-    // - while running: cancel current operation
-    // - while idle: exit immediately
-    if (key.ctrl && (input === "c" || input === "\u0003")) {
-      handleInterrupt();
-      return;
-    }
   }, { isActive: true });
 
   const mode = props.planMode

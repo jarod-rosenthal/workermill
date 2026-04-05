@@ -3,6 +3,7 @@ import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
 import { VERSION } from "./version.js";
+import { Client, HTTPClientTransport, SSEClientTransport } from "@modelcontextprotocol/sdk/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,7 +17,8 @@ interface MCPTool {
 
 interface MCPServer {
   name: string;
-  process: ChildProcess;
+  process?: ChildProcess;
+  client?: Client;
   tools: MCPTool[];
   nextId: number;
 }
@@ -123,41 +125,49 @@ function hydrateGitHubIssueToolArgs(
 // JSON-RPC transport over stdio
 // ---------------------------------------------------------------------------
 
-function sendRequest(server: MCPServer, method: string, params?: unknown): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const id = server.nextId++;
-    const request = JSON.stringify({ jsonrpc: "2.0", id, method, params: params || {} }) + "\n";
+async function sendRequest(server: MCPServer, method: string, params?: unknown): Promise<unknown> {
+  if (server.client) {
+    // Use MCP SDK client for HTTP/SSE
+    return server.client.request({ method, params: params || {} });
+  } else if (server.process) {
+    // Existing stdio logic
+    return new Promise((resolve, reject) => {
+      const id = server.nextId++;
+      const request = JSON.stringify({ jsonrpc: "2.0", id, method, params: params || {} }) + "\n";
 
-    let buffer = "";
-    const onData = (data: Buffer) => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id === id) {
-            server.process.stdout?.removeListener("data", onData);
-            clearTimeout(timer);
-            if (msg.error) reject(new Error(msg.error.message));
-            else resolve(msg.result);
+      let buffer = "";
+      const onData = (data: Buffer) => {
+        buffer += data.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id === id) {
+              server.process!.stdout?.removeListener("data", onData);
+              clearTimeout(timer);
+              if (msg.error) reject(new Error(msg.error.message));
+              else resolve(msg.result);
+            }
+          } catch {
+            // Partial JSON — still accumulating data, not an error
           }
-        } catch {
-          // Partial JSON — still accumulating data, not an error
         }
-      }
-    };
+      };
 
-    server.process.stdout?.on("data", onData);
-    server.process.stdin?.write(request);
+      server.process!.stdout?.on("data", onData);
+      server.process!.stdin?.write(request);
 
-    // Timeout after 30s
-    const timer = setTimeout(() => {
-      server.process.stdout?.removeListener("data", onData);
-      reject(new Error(`MCP request timed out: ${method}`));
-    }, 30_000);
-  });
+      // Timeout after 30s
+      const timer = setTimeout(() => {
+        server.process!.stdout?.removeListener("data", onData);
+        reject(new Error(`MCP request timed out: ${method}`));
+      }, 30_000);
+    });
+  } else {
+    throw new Error(`No transport available for server ${server.name}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -165,58 +175,106 @@ function sendRequest(server: MCPServer, method: string, params?: unknown): Promi
 // ---------------------------------------------------------------------------
 
 export async function startMCPServer(name: string, config: MCPServerConfig): Promise<MCPServer> {
-  logger.info(`Starting MCP server: ${name}`, { command: config.command, args: (config.args || []).join(" ") });
+  const transport = config.transport || "stdio";
 
-  const proc = spawn(config.command, config.args || [], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...(config.env || {}) },
-  });
+  if (transport === "stdio") {
+    logger.info(`Starting MCP server: ${name}`, { command: config.command, args: (config.args || []).join(" ") });
 
-  const server: MCPServer = { name, process: proc, tools: [], nextId: 1 };
-
-  // Log stderr
-  proc.stderr?.on("data", (data: Buffer) => {
-    logger.debug(`MCP ${name} stderr: ${data.toString().trim()}`);
-  });
-
-  proc.on("error", (err) => {
-    logger.error(`MCP ${name} error: ${err.message}`);
-  });
-
-  proc.on("exit", (code) => {
-    logger.info(`MCP ${name} exited with code ${code}`);
-    activeServers.delete(name);
-  });
-
-  // Initialize handshake
-  try {
-    await sendRequest(server, "initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "workermill-cli", version: VERSION },
+    const proc = spawn(config.command!, config.args || [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...(config.env || {}) },
     });
 
-    // Send initialized notification (no response expected)
-    server.process.stdin?.write(
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n",
+    const server: MCPServer = { name, process: proc, tools: [], nextId: 1 };
+
+    // Log stderr
+    proc.stderr?.on("data", (data: Buffer) => {
+      logger.debug(`MCP ${name} stderr: ${data.toString().trim()}`);
+    });
+
+    proc.on("error", (err) => {
+      logger.error(`MCP ${name} error: ${err.message}`);
+    });
+
+    proc.on("exit", (code) => {
+      logger.info(`MCP ${name} exited with code ${code}`);
+      activeServers.delete(name);
+    });
+
+    // Initialize handshake
+    try {
+      await sendRequest(server, "initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "workermill-cli", version: VERSION },
+      });
+
+      // Send initialized notification (no response expected)
+      server.process!.stdin?.write(
+        JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n",
+      );
+
+      // List tools
+      const toolsResult = (await sendRequest(server, "tools/list", {})) as {
+        tools: MCPTool[];
+      };
+      server.tools = toolsResult.tools || [];
+      logger.info(`MCP ${name}: ${server.tools.length} tools available`, {
+        tools: server.tools.map((t) => t.name).join(", "),
+      });
+    } catch (err) {
+      logger.error(`MCP ${name} init failed: ${err instanceof Error ? err.message : String(err)}`);
+      proc.kill();
+      throw err;
+    }
+
+    activeServers.set(name, server);
+    return server;
+  } else if (transport === "http" || transport === "sse") {
+    if (!config.url) {
+      throw new Error(`MCP server ${name}: URL required for ${transport} transport`);
+    }
+
+    logger.info(`Connecting to MCP server: ${name}`, { url: config.url, transport });
+
+    let clientTransport;
+    if (transport === "http") {
+      clientTransport = new HTTPClientTransport(new URL(config.url), {
+        headers: config.headers || {},
+      });
+    } else if (transport === "sse") {
+      clientTransport = new SSEClientTransport(new URL(config.url), {
+        headers: config.headers || {},
+      });
+    }
+
+    const client = new Client(
+      { name: "workermill-cli", version: VERSION },
+      { capabilities: {} }
     );
 
-    // List tools
-    const toolsResult = (await sendRequest(server, "tools/list", {})) as {
-      tools: MCPTool[];
-    };
-    server.tools = toolsResult.tools || [];
-    logger.info(`MCP ${name}: ${server.tools.length} tools available`, {
-      tools: server.tools.map((t) => t.name).join(", "),
-    });
-  } catch (err) {
-    logger.error(`MCP ${name} init failed: ${err instanceof Error ? err.message : String(err)}`);
-    proc.kill();
-    throw err;
-  }
+    await client.connect(clientTransport!);
 
-  activeServers.set(name, server);
-  return server;
+    const server: MCPServer = { name, client, tools: [], nextId: 1 };
+
+    try {
+      // List tools
+      const toolsResult = await client.listTools({});
+      server.tools = toolsResult.tools || [];
+      logger.info(`MCP ${name}: ${server.tools.length} tools available`, {
+        tools: server.tools.map((t) => t.name).join(", "),
+      });
+    } catch (err) {
+      logger.error(`MCP ${name} init failed: ${err instanceof Error ? err.message : String(err)}`);
+      await client.close();
+      throw err;
+    }
+
+    activeServers.set(name, server);
+    return server;
+  } else {
+    throw new Error(`Unsupported MCP transport: ${transport}`);
+  }
 }
 
 export async function startAllMCPServers(mcpConfig: Record<string, MCPServerConfig>): Promise<void> {
@@ -285,18 +343,29 @@ export async function callMCPTool(
   const server = activeServers.get(serverName);
   if (!server) throw new Error(`MCP server "${serverName}" not found`);
 
-  const result = (await sendRequest(server, "tools/call", {
-    name: toolName,
-    arguments: args,
-  })) as { content: Array<{ type: string; text?: string }> };
+  if (server.client) {
+    const result = await server.client.callTool({ name: toolName, arguments: args });
+    // Extract text from content blocks
+    return (
+      (result.content || [])
+        .filter((c: any) => c.type === "text" && c.text)
+        .map((c: any) => c.text)
+        .join("\n") || JSON.stringify(result)
+    );
+  } else {
+    const result = (await sendRequest(server, "tools/call", {
+      name: toolName,
+      arguments: args,
+    })) as { content: Array<{ type: string; text?: string }> };
 
-  // Extract text from content blocks
-  return (
-    (result.content || [])
-      .filter((c) => c.type === "text" && c.text)
-      .map((c) => c.text)
-      .join("\n") || JSON.stringify(result)
-  );
+    // Extract text from content blocks
+    return (
+      (result.content || [])
+        .filter((c: any) => c.type === "text" && c.text)
+        .map((c: any) => c.text)
+        .join("\n") || JSON.stringify(result)
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -437,9 +506,13 @@ export function autoDetectMCPServers(existing: Record<string, MCPServerConfig>):
 export function stopAllMCPServers(): void {
   for (const [name, server] of activeServers) {
     try {
-      server.process.kill();
+      if (server.process) {
+        server.process.kill();
+      } else if (server.client) {
+        server.client.close();
+      }
     } catch {
-      // Process already exited — safe to ignore
+      // Already stopped — safe to ignore
     }
     logger.info(`MCP ${name} stopped`);
   }

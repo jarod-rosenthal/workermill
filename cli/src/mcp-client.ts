@@ -5,6 +5,7 @@ import * as logger from "./logger.js";
 import { VERSION } from "./version.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,10 +129,7 @@ function hydrateGitHubIssueToolArgs(
 // ---------------------------------------------------------------------------
 
 async function sendRequest(server: MCPServer, method: string, params?: unknown): Promise<unknown> {
-  if (server.client) {
-    // Use MCP SDK client for HTTP/SSE
-    return server.client.request({ method, params: params || {} });
-  } else if (server.process) {
+  if (server.process) {
     // Existing stdio logic
     return new Promise((resolve, reject) => {
       const id = server.nextId++;
@@ -240,11 +238,17 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
     logger.info(`Connecting to MCP server: ${name}`, { url: config.url, transport });
 
     let clientTransport;
-    // Both "http" and "sse" use SSEClientTransport in SDK 0.5.x.
-    // HTTPClientTransport (streamable HTTP) is available in SDK 1.x+ if we upgrade later.
-    clientTransport = new SSEClientTransport(new URL(config.url), {
-      headers: config.headers || {},
-    });
+    if (transport === "http") {
+      // Streamable HTTP transport (SDK 1.x+)
+      clientTransport = new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: { headers: config.headers || {} },
+      });
+    } else {
+      // SSE transport
+      clientTransport = new SSEClientTransport(new URL(config.url), {
+        requestInit: { headers: config.headers || {} },
+      });
+    }
 
     const client = new Client(
       { name: "workermill-cli", version: VERSION },
@@ -344,10 +348,11 @@ export async function callMCPTool(
   if (server.client) {
     const result = await server.client.callTool({ name: toolName, arguments: args });
     // Extract text from content blocks
+    const content = Array.isArray(result.content) ? result.content as Array<{ type: string; text?: string }> : [];
     return (
-      (result.content || [])
-        .filter((c: any) => c.type === "text" && c.text)
-        .map((c: any) => c.text)
+      content
+        .filter((c) => c.type === "text" && c.text)
+        .map((c) => c.text)
         .join("\n") || JSON.stringify(result)
     );
   } else {

@@ -142,7 +142,7 @@ function extractToc(markdown: string): TocEntry[] {
 
     const level = match[1].length;
     const text = match[2].replace(/`/g, "").trim();
-    let id = text
+    const id = text
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, "")
       .trim()

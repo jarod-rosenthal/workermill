@@ -40,7 +40,8 @@ export function runLogsCommand(options: LogsOptions): void {
         console.log(JSON.stringify(parsed));
       } else {
         const entry = parsed as any;
-        console.log(`[${entry.timestamp}] ${entry.level}: ${entry.message}`);
+        const dataStr = entry.data ? ` ${JSON.stringify(entry.data)}` : "";
+        console.log(`[${entry.timestamp}] ${entry.level}: ${entry.message}${dataStr}`);
       }
     }
   }

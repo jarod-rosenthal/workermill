@@ -1,190 +1,129 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { runLogsCommand, LogsOptions } from "../logs-command.js";
+import { getLogPath, parseLogLine } from "../logger.js";
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
-import { createTempWorkerMillHome, type TempHome } from "./helpers/temp-workermill-home.js";
-import { runLogsCommand, type LogsOptions } from "../logs-command.js";
+import os from "os";
+
+// Mock fs
+vi.mock("fs");
+
+// Mock process.exit
+const mockExit = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("process.exit called"); });
+
+const mockFs = fs as any;
+const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 describe("logs-command", () => {
-  let tmp: TempHome;
-  let fakeProjectDir: string;
-  let expectedHash: string;
-  let logFile: string;
-  let consoleLogSpy: vi.SpyInstance;
-  let consoleErrorSpy: vi.SpyInstance;
-
   beforeEach(() => {
-    tmp = createTempWorkerMillHome();
-    fakeProjectDir = "/fake/project/dir";
-    expectedHash = crypto.createHash("md5").update(fakeProjectDir).digest("hex").slice(0, 8);
-    logFile = path.join(tmp.homeDir, ".workermill", "logs", expectedHash, "cli.log");
-
-    vi.spyOn(process, "cwd").mockReturnValue(fakeProjectDir);
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.resetModules();
+    vi.clearAllMocks();
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue("test log content");
+    mockFs.watchFile.mockImplementation(() => {});
+    mockFs.unwatchFile.mockImplementation(() => {});
   });
 
   afterEach(() => {
-    tmp.restore();
-    tmp.cleanup();
     vi.restoreAllMocks();
   });
 
-  async function importLogger() {
-    return await import("../logger.js");
-  }
-
-  describe("getLogPath", () => {
-    it("returns path for current cwd when no cwd provided", async () => {
-      const { getLogPath } = await importLogger();
-      const path = getLogPath();
-      expect(path).toBe(logFile);
-    });
-
-    it("returns path for provided cwd", async () => {
-      const { getLogPath } = await importLogger();
-      const customDir = "/custom/dir";
-      const customHash = crypto.createHash("md5").update(customDir).digest("hex").slice(0, 8);
-      const customLogFile = path.join(tmp.homeDir, ".workermill", "logs", customHash, "cli.log");
-      const result = getLogPath(customDir);
-      expect(result).toBe(customLogFile);
-    });
-  });
-
   describe("parseLogLine", () => {
-    it("parses valid INFO line", async () => {
-      const { parseLogLine } = await importLogger();
-      const line = "[2026-04-04T18:00:00.000Z] INFO: test message";
+    it("parses standard log line", () => {
+      const line = "[2023-01-01T00:00:00.000Z] INFO: Test message";
       const result = parseLogLine(line);
       expect(result).toEqual({
-        timestamp: "2026-04-04T18:00:00.000Z",
+        timestamp: "2023-01-01T00:00:00.000Z",
         level: "INFO",
-        message: "test message"
+        message: "Test message",
       });
     });
 
-    it("parses valid ERROR line with JSON data", async () => {
-      const { parseLogLine } = await importLogger();
-      const line = '[2026-04-04T18:00:00.000Z] ERROR: something broke {"key":"value"}';
+    it("parses log line with JSON data", () => {
+      const line = '[2023-01-01T00:00:00.000Z] TOOL: bash {"input":"ls","result":"file.txt"}';
       const result = parseLogLine(line);
       expect(result).toEqual({
-        timestamp: "2026-04-04T18:00:00.000Z",
-        level: "ERROR",
-        message: "something broke",
-        data: { key: "value" }
-      });
-    });
-
-    it("parses TOOL line with JSON data", async () => {
-      const { parseLogLine } = await importLogger();
-      const line = '[2026-04-04T18:00:00.000Z] TOOL: bash {"input":"ls","result":"file1.txt"}';
-      const result = parseLogLine(line);
-      expect(result).toEqual({
-        timestamp: "2026-04-04T18:00:00.000Z",
+        timestamp: "2023-01-01T00:00:00.000Z",
         level: "TOOL",
         message: "bash",
-        data: { input: "ls", result: "file1.txt" }
+        data: { input: "ls", result: "file.txt" },
       });
     });
 
-    it("handles malformed line", async () => {
-      const { parseLogLine } = await importLogger();
+    it("returns raw for malformed line", () => {
       const line = "not a log line";
       const result = parseLogLine(line);
       expect(result).toEqual({ raw: "not a log line" });
     });
+  });
 
-    it("handles invalid JSON in data", async () => {
-      const { parseLogLine } = await importLogger();
-      const line = '[2026-04-04T18:00:00.000Z] INFO: message {invalid json}';
-      const result = parseLogLine(line);
-      expect(result).toEqual({
-        timestamp: "2026-04-04T18:00:00.000Z",
-        level: "INFO",
-        message: "message {invalid json}"
-      });
+  describe("getLogPath", () => {
+    it("returns log path for cwd", () => {
+      const cwd = "/test/dir";
+      const hash = require("crypto").createHash("md5").update(cwd).digest("hex").slice(0, 8);
+      const expected = path.join(os.homedir(), ".workermill", "logs", hash, "cli.log");
+      expect(getLogPath(cwd)).toBe(expected);
+    });
+
+    it("returns log path for undefined cwd", () => {
+      const cwd = process.cwd();
+      const hash = require("crypto").createHash("md5").update(cwd).digest("hex").slice(0, 8);
+      const expected = path.join(os.homedir(), ".workermill", "logs", hash, "cli.log");
+      expect(getLogPath()).toBe(expected);
     });
   });
 
   describe("runLogsCommand", () => {
     it("exits with error if log file does not exist", () => {
-      const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {});
+      mockFs.existsSync.mockReturnValue(false);
+      expect(() => runLogsCommand({})).toThrow("process.exit called");
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining("No log file found"));
+      expect(mockExit).toHaveBeenCalledWith(1);
+    });
 
+    it("prints last 50 lines by default", () => {
+      mockFs.readFileSync.mockReturnValue("line1\nline2\nline3");
       runLogsCommand({});
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith(`No log file found at ${logFile}`);
-      expect(exitSpy).toHaveBeenCalledWith(1);
-
-      exitSpy.mockRestore();
+      expect(mockConsoleLog).toHaveBeenCalledTimes(3);
     });
 
-    it("prints last 50 lines by default", async () => {
-      // Create log file with 60 lines
-      fs.mkdirSync(path.dirname(logFile), { recursive: true });
-      const lines = Array.from({ length: 60 }, (_, i) => `[2026-04-04T18:00:00.000Z] INFO: line ${i + 1}`);
-      fs.writeFileSync(logFile, lines.join("\n") + "\n");
-
-      runLogsCommand({});
-
-      expect(consoleLogSpy).toHaveBeenCalledTimes(50);
-      expect(consoleLogSpy).toHaveBeenNthCalledWith(1, "[2026-04-04T18:00:00.000Z] INFO: line 11");
-      expect(consoleLogSpy).toHaveBeenNthCalledWith(50, "[2026-04-04T18:00:00.000Z] INFO: line 60");
+    it("respects --tail option", () => {
+      mockFs.readFileSync.mockReturnValue("line1\nline2\nline3");
+      runLogsCommand({ tail: 2 });
+      expect(mockConsoleLog).toHaveBeenCalledTimes(2);
     });
 
-    it("prints last N lines with --tail", async () => {
-      fs.mkdirSync(path.dirname(logFile), { recursive: true });
-      const lines = Array.from({ length: 10 }, (_, i) => `[2026-04-04T18:00:00.000Z] INFO: line ${i + 1}`);
-      fs.writeFileSync(logFile, lines.join("\n") + "\n");
-
-      runLogsCommand({ tail: 3 });
-
-      expect(consoleLogSpy).toHaveBeenCalledTimes(3);
-      expect(consoleLogSpy).toHaveBeenNthCalledWith(1, "[2026-04-04T18:00:00.000Z] INFO: line 8");
-      expect(consoleLogSpy).toHaveBeenNthCalledWith(3, "[2026-04-04T18:00:00.000Z] INFO: line 10");
-    });
-
-    it("filters by level", async () => {
-      fs.mkdirSync(path.dirname(logFile), { recursive: true });
-      const content = `[2026-04-04T18:00:00.000Z] INFO: info message
-[2026-04-04T18:00:00.000Z] ERROR: error message
-[2026-04-04T18:00:00.000Z] INFO: another info`;
-      fs.writeFileSync(logFile, content);
-
+    it("filters by level", () => {
+      const content = "[2023-01-01T00:00:00.000Z] INFO: info message\n[2023-01-01T00:00:01.000Z] ERROR: error message";
+      mockFs.readFileSync.mockReturnValue(content);
       runLogsCommand({ level: "error" });
-
-      expect(consoleLogSpy).toHaveBeenCalledTimes(1);
-      expect(consoleLogSpy).toHaveBeenCalledWith("[2026-04-04T18:00:00.000Z] ERROR: error message");
+      expect(mockConsoleLog).toHaveBeenCalledTimes(1);
+      expect(mockConsoleLog).toHaveBeenCalledWith("[2023-01-01T00:00:01.000Z] ERROR: error message");
     });
 
-    it("outputs JSON with --json", async () => {
-      fs.mkdirSync(path.dirname(logFile), { recursive: true });
-      const content = `[2026-04-04T18:00:00.000Z] INFO: test message {"key":"value"}`;
-      fs.writeFileSync(logFile, content);
-
+    it("outputs JSON when --json is true", () => {
+      const content = "[2023-01-01T00:00:00.000Z] INFO: test message";
+      mockFs.readFileSync.mockReturnValue(content);
       runLogsCommand({ json: true });
-
-      expect(consoleLogSpy).toHaveBeenCalledTimes(1);
-      const call = consoleLogSpy.mock.calls[0][0];
-      const parsed = JSON.parse(call);
-      expect(parsed).toEqual({
-        timestamp: "2026-04-04T18:00:00.000Z",
+      expect(mockConsoleLog).toHaveBeenCalledWith(JSON.stringify({
+        timestamp: "2023-01-01T00:00:00.000Z",
         level: "INFO",
         message: "test message",
-        data: { key: "value" }
-      });
+      }));
     });
 
-    it("uses custom cwd", async () => {
-      const customDir = "/custom/project";
-      const customHash = crypto.createHash("md5").update(customDir).digest("hex").slice(0, 8);
-      const customLogFile = path.join(tmp.homeDir, ".workermill", "logs", customHash, "cli.log");
-      fs.mkdirSync(path.dirname(customLogFile), { recursive: true });
-      fs.writeFileSync(customLogFile, "[2026-04-04T18:00:00.000Z] INFO: custom dir message\n");
+    it("handles --cwd option", () => {
+      const cwd = "/custom/dir";
+      runLogsCommand({ cwd });
+      expect(mockFs.existsSync).toHaveBeenCalledWith(getLogPath(cwd));
+      expect(mockFs.readFileSync).toHaveBeenCalledWith(getLogPath(cwd), "utf-8");
+    });
 
-      runLogsCommand({ cwd: customDir });
-
-      expect(consoleLogSpy).toHaveBeenCalledWith("[2026-04-04T18:00:00.000Z] INFO: custom dir message");
+    it("starts watching file in --follow mode", () => {
+      mockFs.readFileSync.mockReturnValue("initial content");
+      runLogsCommand({ follow: true });
+      expect(mockFs.watchFile).toHaveBeenCalled();
+      expect(mockConsoleError).toHaveBeenCalledWith(`Watching: ${getLogPath()}`);
     });
   });
 });

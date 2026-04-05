@@ -286,6 +286,7 @@ Show MCP (Model Context Protocol) server status and the tools each server expose
 | `/help` | `/h`, `/?` | List all commands |
 | `/quit` | `/exit`, `/q` | Exit the CLI |
 | `/log` | | Show recent log entries from `~/.workermill/logs/` |
+| `wm logs` | | Stream or tail CLI log entries for the current project |
 | `/update` | | Check for a newer CLI version on npm |
 | `/release-notes` | `/changelog` | Show the CHANGELOG for the current version |
 

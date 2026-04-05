@@ -1,13 +1,7 @@
-import type { CliConfig } from "./config.js";
+// import type { CliConfig } from "./config.js";
 import type { ModelInfo } from "../../api/src/providers/types.js";
 import * as providersNamespace from "../../api/src/providers/index.js";
-import fs from "fs";
-import path from "path";
-import os from "os";
-
-interface RemoteModelInfo extends ModelInfo {
-  provider: string;
-}
+import { fetchRemoteModels } from "./remote-models.js";
 
 type ProviderModule = typeof import("../../api/src/providers/index.js");
 
@@ -20,10 +14,6 @@ const providers = (
     : (providersNamespace as unknown as { default: ProviderModule }).default
 ) as ProviderModule;
 
-const CONFIG_DIR = path.join(os.homedir(), ".workermill");
-const CACHE_FILE = path.join(CONFIG_DIR, "models-cache.json");
-const MODELS_URL = process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
-
 export const getPricingEngine: ProviderModule["getPricingEngine"] = (...args) =>
   providers.getPricingEngine(...args);
 
@@ -35,6 +25,35 @@ export const listProviders: ProviderModule["listProviders"] = (...args) =>
 
 export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
   providers.findModelInfo(...args);
+
+export { fetchRemoteModels } from "./remote-models.js";
+
+type ProviderModule = typeof import("../../api/src/providers/index.js");
+
+// Cross-runtime compatibility:
+// - In some tsx/dev setups this module is seen as CJS (exports under `default`)
+// - In others it is native ESM (named exports)
+// const providers = (
+//   "getPricingEngine" in providersNamespace
+//     ? providersNamespace
+//     : (providersNamespace as unknown as { default: ProviderModule }).default
+// ) as ProviderModule;
+
+const CONFIG_DIR = path.join(os.homedir(), ".workermill");
+const CACHE_FILE = path.join(CONFIG_DIR, "models-cache.json");
+const MODELS_URL = process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
+
+// export const getPricingEngine: ProviderModule["getPricingEngine"] = (...args) =>
+//   providers.getPricingEngine(...args);
+
+// export const hasProvider: ProviderModule["hasProvider"] = (...args) =>
+//   providers.hasProvider(...args);
+
+// export const listProviders: ProviderModule["listProviders"] = (...args) =>
+//   providers.listProviders(...args);
+
+// export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
+//   providers.findModelInfo(...args);
 
 // Default ports for local providers — used by Input.tsx autocomplete to probe
 // servers the user hasn't explicitly configured but may have running locally.
@@ -164,13 +183,4 @@ async function fetchLMStudioModels(host: string): Promise<Array<{
     });
   }
   return results;
-}
-
-/**
- * Fetch remote model catalog from workermill.com/api/models.json
- * with ETag-based caching. Returns models or empty array on failure.
- * Non-blocking — start the fetch but don't await it at startup.
- */
-export async function fetchRemoteModels(config: CliConfig, forceRefresh = false): Promise<RemoteModelInfo[]> {
-  return [];
 }

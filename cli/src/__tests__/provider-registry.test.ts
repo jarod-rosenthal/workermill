@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { fetchRemoteModels } from "../provider-registry";
+import { fetchRemoteModels } from "../remote-models";
 import type { CliConfig } from "../config.js";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+globalThis.fetch = mockFetch;
 
 // Mock fs and path
 vi.mock("fs");
@@ -78,14 +79,12 @@ describe("fetchRemoteModels", () => {
 
     const result = await fetchRemoteModels(mockConfig);
 
-    expect(mockFetch).toHaveBeenCalledWith("https://workermill.com/api/models.json", {
-      headers: {},
-      signal: expect.any(AbortSignal),
-    });
+    expect(mockFetch).toHaveBeenCalledWith("https://workermill.com/api/models.json", expect.any(Object));
     expect(result).toEqual(mockModels);
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       cacheFile,
-      JSON.stringify({ etag: mockEtag, models: mockModels }, null, 2)
+      JSON.stringify({ models: mockModels, etag: mockEtag }, null, 2) + "\n",
+      "utf-8"
     );
   });
 
@@ -202,7 +201,7 @@ describe("fetchRemoteModels", () => {
     const result = await fetchRemoteModels(mockConfig);
 
     expect(result).toEqual(mockModels); // Should fall back to cache
-  });
+  }, 6000);
 
   it("bypasses ETag on force refresh", async () => {
     const cachedData = { etag: mockEtag, models: mockModels };

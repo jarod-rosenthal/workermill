@@ -147,7 +147,6 @@ export function getGitStatus(cwd: string): string {
 export const BUILTIN_COMMANDS = new Set([
   "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
   "cancel", "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
-  "fleet",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
   "memories", "memory", "model", "permissions", "personas", "q", "quit",
   "pause", "release-notes", "releasenotes", "remember", "reset", "retry", "review",
@@ -179,7 +178,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
-| \`/program <#issue>\` | Full-spec orchestration across epic sub-issues (alias: \`/fleet\`) |
+| \`/program <#issue>\` | Full-spec orchestration across epic sub-issues |
 | \`/pause\` | Pause or resume a running \`/ship\` orchestration |
 | \`/cancel\` | Cancel the current running operation (same as \`ESC\`) |
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
@@ -604,9 +603,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
-    // ---- /program (primary) and /fleet (alias) ----
-    case "program":
-    case "fleet": {
+    // ---- /program ----
+    case "program": {
       if (!arg) {
         ctx.addSystemMessage(
           "**Usage:** `/program #<parent-issue>`\n\n" +
@@ -614,7 +612,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "extracting epic-grouped child issues, then shipping each child in dependency order.\n\n" +
           "**Examples:**\n" +
           "- `/program #120`\n" +
-          "- `/fleet GH-120`\n\n" +
+          "- `/program GH-120`\n\n" +
           "Epic boundaries prompt with `y/n/a`:\n" +
           "- `y` continue once\n" +
           "- `n` pause\n" +

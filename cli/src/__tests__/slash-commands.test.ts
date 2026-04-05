@@ -381,7 +381,7 @@ describe("handleSlashCommand", () => {
     });
   });
 
-  // ---- /program and /fleet ----
+  // ---- /program ----
 
   describe("/program", () => {
     it("shows usage with no arg", () => {
@@ -398,13 +398,6 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/program #120", ctx);
       expect(ctx.addUserMessage).toHaveBeenCalledWith("/program #120");
       expect(ctx.startProgram).toHaveBeenCalledWith("#120", expect.any(Function), false);
-    });
-
-    it("/fleet is an alias for /program", () => {
-      const ctx = createContext();
-      handleSlashCommand("/fleet GH-120", ctx);
-      expect(ctx.addUserMessage).toHaveBeenCalledWith("/program GH-120");
-      expect(ctx.startProgram).toHaveBeenCalledWith("GH-120", expect.any(Function), false);
     });
 
     it("requires GitHub-style refs", () => {

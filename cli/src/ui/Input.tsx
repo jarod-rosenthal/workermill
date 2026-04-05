@@ -10,7 +10,6 @@ const BUILTIN_COMMANDS = [
   { name: "/ship", desc: "Multi-expert orchestration" },
   { name: "/build", desc: "Alias for /ship" },
   { name: "/program", desc: "Full-spec orchestration" },
-  { name: "/fleet", desc: "Alias for /program" },
   { name: "/retry", desc: "Re-run last build" },
   { name: "/init", desc: "Generate WORKERMILL.md" },
   { name: "/setup", desc: "Re-run provider setup wizard" },

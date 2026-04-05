@@ -8,7 +8,9 @@ export interface RemoteModelInfo extends ModelInfo {
   provider: string;
 }
 
-const getModelsUrl = () => process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
+const getModelsUrl = () =>
+  process.env.WM_MODELS_URL ||
+  "https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json";
 
 interface CacheData {
   models: RemoteModelInfo[];
@@ -44,7 +46,7 @@ function saveCache(data: CacheData): void {
 }
 
 /**
- * Fetch remote model catalog from workermill.com/api/models.json
+ * Fetch remote model catalog from GitHub (jarod-rosenthal/workermill)
  * with ETag-based caching. Returns models or empty array on failure.
  * Non-blocking — start the fetch but don't await it at startup.
  */

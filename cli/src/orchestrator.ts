@@ -2515,7 +2515,9 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
 
   if (allGates.length > 0 && completedStoryIds.length > 0) {
     output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
+    output.status(`Running quality gates (${allGates.length})...`);
     const gateResults = await Promise.all(allGates.map(g => runGate(g, workingDir)));
+    output.statusDone();
 
     const failed = gateResults.filter(r => !r.passed);
     const passed = gateResults.filter(r => r.passed);

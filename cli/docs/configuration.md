@@ -17,6 +17,7 @@ Both files are plain JSON. The CLI writes the global file when you run `/setting
   "default": "anthropic",
   "routing": { },
   "review": { },
+  "qualityGates": [ ],
   "permissions": { },
   "hooks": { },
   "mcp": { },
@@ -126,7 +127,9 @@ Controls the `/ship` review pipeline.
   "approvalThreshold": 8,
   "autoRevise": false,
   "useCritic": false,
-  "criticThreshold": 8
+  "criticThreshold": 8,
+  "specCheck": false,
+  "verifyEnabled": false
 }
 ```
 
@@ -138,6 +141,8 @@ Controls the `/ship` review pipeline.
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
 | `useCritic` | `false` | Run a planning critic before execution — scores the plan 1-10 and refines it before workers start |
 | `criticThreshold` | `8` | Plan score (1-10) at or above which the critic approves the plan |
+| `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
+| `verifyEnabled` | `false` | After workers finish: instructs the planner to generate `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. |
 
 ### Setting from the CLI
 
@@ -149,6 +154,51 @@ Controls the `/ship` review pipeline.
 /settings review.critic true
 /settings review.criticThreshold 8
 ```
+
+`specCheck` and `verifyEnabled` are not yet exposed via `/settings` — set them directly in `.workermill/config.json`:
+
+```json
+{
+  "review": {
+    "specCheck": true,
+    "verifyEnabled": true
+  }
+}
+```
+
+See [Quality Gates & Spec Check](quality-gates.md) for full documentation, examples, and guidance on writing effective verification commands.
+
+## `qualityGates`
+
+Static shell commands that run on every `/ship`, after all stories complete and before the tech lead reviewer sees the diff. Use these for project-wide invariants — things that must always hold regardless of what was built.
+
+**Off by default.** Add to `.workermill/config.json` to enable:
+
+```json
+{
+  "qualityGates": [
+    {
+      "name": "app starts",
+      "commands": ["timeout 5 node dist/index.js --help > /dev/null"]
+    },
+    {
+      "name": "config schema valid",
+      "commands": ["node dist/index.js config validate --config config/defaults.json"]
+    }
+  ]
+}
+```
+
+| Field | Purpose |
+|---|---|
+| `name` | Label shown in the TUI and injected into the reviewer's context |
+| `commands` | Shell commands run sequentially — first non-zero exit marks the gate as failed |
+
+All gates run in parallel. A gate fails on the first command that exits non-zero.
+
+**Do not use for:** `npm test`, `tsc`, `pytest`, `go build` — workers already run these. Use quality gates for black-box assertions on the *built artifact*, not the build process itself.
+
+See [Quality Gates & Spec Check](quality-gates.md) for examples across Node, Python, Go, and Ruby.
 
 ## `permissions`
 

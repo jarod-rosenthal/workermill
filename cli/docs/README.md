@@ -16,6 +16,7 @@ If you're just getting started, read the [project README](../README.md) first �
 
 ## Guides
 
+- **[Quality Gates & Spec Check](quality-gates.md)** — output assertions that run after workers finish and before the reviewer sees the diff. Includes spec check (pre-planning ambiguity detection). Both are off by default.
 - **[Recipes](recipes.md)** — concrete workflows combining features: mixed-provider teams, local-only setups, quality gates, custom personas, scheduled tasks.
 - **[Troubleshooting](troubleshooting.md)** — common issues, diagnostics, and fixes.
 

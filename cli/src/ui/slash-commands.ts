@@ -215,7 +215,21 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/release-notes\` | Show changelog |
 | \`/quit\` | Exit |
 
-**Shortcuts:** \`!command\` runs shell, \`ESC\` cancels, \`ESC ESC\` rolls back, \`Ctrl+P\` pause/resume \`/ship\`, \`Shift+Tab\` cycles permissions, \`Ctrl+C\` exits (or cancels while running), \`←/→\` cursor, \`Tab\` autocomplete.`;
+**Shortcuts:** \`!command\` runs shell, \`ESC\` cancels, \`ESC ESC\` rolls back, \`Ctrl+P\` pause/resume \`/ship\`, \`Shift+Tab\` cycles permissions, \`Ctrl+C\` exits (or cancels while running), \`←/→\` cursor, \`Tab\` autocomplete.
+
+---
+
+**Quality Gates & Spec Check** *(off by default — enable in \`.workermill/config.json\`)*
+
+| Option | What it does |
+|---|---|
+| \`review.specCheck: true\` | Before planning: prompts you to answer up to 3 ambiguities in your task description |
+| \`review.verifyEnabled: true\` | After workers finish: runs planner-generated output assertions before the reviewer sees the diff |
+| \`qualityGates: [{name, commands}]\` | Static project-wide assertions that run on every \`/ship\` — use for invariants like "app starts" |
+
+Gate failures are passed to the tech lead reviewer as context. No retry loop — failures are flagged as must-fix during review.
+
+See \`cli/docs/quality-gates.md\` for full documentation and examples.`;
 
 // ---------------------------------------------------------------------------
 // Context interface

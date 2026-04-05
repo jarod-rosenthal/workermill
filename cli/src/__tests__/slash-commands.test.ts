@@ -59,6 +59,7 @@ vi.mock("../mcp-client.js", () => ({
   hasMCPServers: vi.fn(() => false),
   hasMCPRegistered: vi.fn(() => false),
   getMCPTools: vi.fn(() => []),
+  getMCPServerInfo: vi.fn(() => []),
 }));
 
 vi.mock("../memory.js", () => ({
@@ -72,6 +73,7 @@ vi.mock("../logger.js", () => ({
   debug: vi.fn(),
   error: vi.fn(),
   warn: vi.fn(),
+  getLogPath: vi.fn(() => "/mock/path/cli.log"),
 }));
 
 // Mock dynamic imports used by /quit, /chrome, /voice, /schedule
@@ -86,6 +88,9 @@ vi.mock("../../../packages/engine/src/tools/lsp.js", () => ({
 }));
 
 vi.mock("../../../api/src/providers/index.js", () => ({
+  getPricingEngine: vi.fn(() => ({ getModelPricing: vi.fn(() => null) })),
+  hasProvider: vi.fn(() => false),
+  listProviders: vi.fn(() => []),
   findModelInfo: vi.fn(() => null),
 }));
 

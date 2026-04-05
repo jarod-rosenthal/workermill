@@ -207,11 +207,12 @@ describe("config", () => {
 
     it("maps provider with host to 'openai' (OpenAI-compatible)", async () => {
       const { getProviderForPersona } = await importConfig();
+      // Use an unknown provider name — known providers (lmstudio, ollama, etc.) are returned as-is
       const config = {
         providers: {
-          lmstudio: { model: "local-model", host: "http://localhost:1234", apiKey: "key" },
+          custom_endpoint: { model: "local-model", host: "http://localhost:1234", apiKey: "key" },
         },
-        default: "lmstudio",
+        default: "custom_endpoint",
       } as any;
 
       const result = getProviderForPersona(config);

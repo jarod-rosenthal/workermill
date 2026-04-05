@@ -22,3 +22,100 @@ export const listProviders: ProviderModule["listProviders"] = (...args) =>
 
 export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
   providers.findModelInfo(...args);
+
+import type { CliConfig } from "./config.js";
+
+/**
+ * Fetch live models from configured providers that support it.
+ * Only probes providers that the user has explicitly configured.
+ */
+export async function fetchLiveModels(config: CliConfig): Promise<Array<{
+  provider: string;
+  id: string;
+  host: string;
+  reachable: boolean;
+}>> {
+  const results: Array<{
+    provider: string;
+    id: string;
+    host: string;
+    reachable: boolean;
+  }> = [];
+
+  // Ollama
+  const ollamaHost = config?.providers?.ollama?.host;
+  if (ollamaHost) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await globalThis.fetch(`${ollamaHost}/api/tags`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = await res.json() as { models?: { name: string }[] };
+        const models = data.models || [];
+        for (const model of models) {
+          results.push({
+            provider: "ollama",
+            id: model.name,
+            host: ollamaHost,
+            reachable: true,
+          });
+        }
+      } else {
+        results.push({
+          provider: "ollama",
+          id: "",
+          host: ollamaHost,
+          reachable: false,
+        });
+      }
+    } catch {
+      results.push({
+        provider: "ollama",
+        id: "",
+        host: ollamaHost,
+        reachable: false,
+      });
+    }
+  }
+
+  // LM Studio
+  const lmHost = config?.providers?.lmstudio?.host;
+  if (lmHost) {
+    const cleanHost = lmHost.replace(/\/v1\/?$/, "");
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await globalThis.fetch(`${cleanHost}/v1/models`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = await res.json() as { data?: { id: string }[] };
+        const models = data.data || [];
+        for (const model of models) {
+          results.push({
+            provider: "lmstudio",
+            id: model.id,
+            host: cleanHost,
+            reachable: true,
+          });
+        }
+      } else {
+        results.push({
+          provider: "lmstudio",
+          id: "",
+          host: cleanHost,
+          reachable: false,
+        });
+      }
+    } catch {
+      results.push({
+        provider: "lmstudio",
+        id: "",
+        host: cleanHost,
+        reachable: false,
+      });
+    }
+  }
+
+  return results;
+}

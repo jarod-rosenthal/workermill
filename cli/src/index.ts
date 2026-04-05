@@ -368,6 +368,18 @@ program
     console.log();
   });
 
+// ── Models command: list available AI models ──
+program
+  .command("models [filter]")
+  .description("List available AI models with live provider discovery")
+  .option("--json", "Emit as JSON array")
+  .option("--provider <name>", "Filter to a single provider")
+  .option("--available", "Only show confirmed-reachable models")
+  .action(async (filter, options) => {
+    const { runModelsCommand } = await import("./models-command.js");
+    runModelsCommand(filter, options);
+  });
+
 // ── Logs command: stream or tail log entries ──
 program
   .command("logs")

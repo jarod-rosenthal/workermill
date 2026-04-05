@@ -64,3 +64,34 @@ export function flush(): void {
     logStream = null;
   }
 }
+
+export function getLogPath(cwd?: string): string {
+  const dir = cwd || process.cwd();
+  const hash = crypto.createHash("md5").update(dir).digest("hex").slice(0, 8);
+  const logDir = path.join(os.homedir(), ".workermill", "logs", hash);
+  return path.join(logDir, "cli.log");
+}
+
+export function parseLogLine(line: string): Record<string, unknown> {
+  const match = line.match(/^\[([^\]]+)\]\s+(\w+):\s+(.+)$/);
+  if (!match) {
+    return { raw: line };
+  }
+  const timestamp = match[1];
+  const level = match[2];
+  const rest = match[3];
+  // Check if rest ends with JSON
+  const jsonMatch = rest.match(/^(.+?)\s+(\{.+\})$/);
+  if (jsonMatch) {
+    const message = jsonMatch[1];
+    try {
+      const data = JSON.parse(jsonMatch[2]);
+      return { timestamp, level, message, data };
+    } catch {
+      // If JSON parse fails, treat as raw message
+      return { timestamp, level, message: rest };
+    }
+  } else {
+    return { timestamp, level, message: rest };
+  }
+}

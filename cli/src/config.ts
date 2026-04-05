@@ -48,6 +48,11 @@ export interface ReviewConfig {
   autoBranch?: boolean;
 }
 
+export interface ProgramConfig {
+  /** Prompt mode at epic boundaries for /program runs. */
+  epicPrompt?: "ask" | "always";
+}
+
 export interface HookConfig {
   /** Shell command to run (for "command" type, default) */
   command?: string;
@@ -119,6 +124,8 @@ export interface CliConfig {
   disableModelAutoUpdate?: boolean;
   /** Preferred terminal editor for /editor command: "vim", "nano", or "auto" (uses $EDITOR/$VISUAL/vi) */
   editor?: "vim" | "nano" | "auto";
+  /** /program orchestration preferences */
+  program?: ProgramConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -246,6 +253,7 @@ export function resolveConfig(): CliConfig {
     linear: project?.linear || global.linear,
     qualityGates: project?.qualityGates ?? global.qualityGates,
     disableModelAutoUpdate: project?.disableModelAutoUpdate ?? global.disableModelAutoUpdate ?? (process.env.WM_DISABLE_MODEL_AUTO_UPDATE === '1'),
+    program: { ...global.program, ...(project?.program || {}) },
   };
 }
 

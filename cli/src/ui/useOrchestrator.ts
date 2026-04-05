@@ -11,11 +11,14 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { OrchestrationOutput, RetryPlan } from "../orchestrator.js";
-import { resolveConfig, type CliConfig } from "../config.js";
+import { resolveConfig, loadConfig, saveConfig, type CliConfig } from "../config.js";
 import { getRetryableRun } from "../ship-state.js";
 import { notifyIfEnabled } from "../notify.js";
 import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
 import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
+import { execSync } from "child_process";
+import { TicketOps } from "../ticket-ops.js";
+import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
 
 const PREVIEW_THROTTLE_MS = 120;
 export const SESSION_SUMMARY_DIVIDER = "────────────────────────";
@@ -116,6 +119,41 @@ function asString(value: unknown): string {
 function countLines(text: string): number {
   if (!text) return 0;
   return text.split("\n").length;
+}
+
+function normalizeGithubIssueRef(input: string): string | null {
+  const trimmed = input.trim().replace(/\s+/g, "");
+  if (/^#\d+$/.test(trimmed)) return trimmed;
+  if (/^GH[-#]?\d+$/i.test(trimmed)) {
+    const n = trimmed.replace(/^GH[-#]?/i, "");
+    return `#${n}`;
+  }
+  return null;
+}
+
+function ensureGithubEnv(): void {
+  if (!process.env.GITHUB_TOKEN) {
+    try {
+      process.env.GITHUB_TOKEN = execSync("gh auth token 2>/dev/null", {
+        encoding: "utf-8",
+        stdio: "pipe",
+      }).trim();
+    } catch {
+      // best effort
+    }
+  }
+  if (!process.env.GITHUB_REPO) {
+    try {
+      const remote = execSync("git remote get-url origin 2>/dev/null", {
+        encoding: "utf-8",
+        stdio: "pipe",
+      }).trim();
+      const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+      if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
+    } catch {
+      // best effort
+    }
+  }
 }
 
 function describeEditOperation(oldText: string, newText: string): "insert" | "delete" | "replace" | "noop" {
@@ -228,6 +266,8 @@ export interface UseOrchestratorReturn {
   paused: boolean;
   /** Start orchestration for a task. */
   start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => void;
+  /** Start full-spec program orchestration from a parent issue. */
+  startProgram: (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
@@ -623,6 +663,292 @@ export function useOrchestrator(
   );
 
   // ------------------------------------------------------------------
+  // startProgram() — full-spec orchestration across epic child issues
+  // ------------------------------------------------------------------
+
+  const startProgram = useCallback(
+    (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => {
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      setRunning(true);
+      setPausedState(false);
+      setStatusMessage("");
+      clearPreviewLine();
+      setConfirmRequest(null);
+      resetUsageSummary();
+
+      void (async () => {
+        let hasOperationalOutput = false;
+        function emitLine(line: string): void {
+          const normalized = line.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+          hasOperationalOutput = true;
+          addMessage(normalized);
+          setPreviewLineThrottled(normalized);
+        }
+        function flushLine(): void {
+          clearPreviewLine();
+        }
+
+        const freshConfig = resolveConfig();
+        const config = freshConfig
+          ? {
+              ...freshConfig,
+              review: {
+                ...freshConfig.review,
+                ...(cliConfig?.review?.autoRevise ? { autoRevise: true } : {}),
+              },
+            }
+          : cliConfig ?? null;
+
+        try {
+          if (!config) {
+            addMessage("No provider configured. Run `workermill` (setup) first.");
+            setRunning(false);
+            return;
+          }
+
+          const normalizedParent = normalizeGithubIssueRef(parentIssueRef);
+          if (!normalizedParent) {
+            addMessage("`/program` expects a GitHub parent issue reference like `#123`.");
+            return;
+          }
+
+          ensureGithubEnv();
+          const parentOps = new TicketOps(normalizedParent, "github");
+          if (!parentOps.isAvailable()) {
+            addMessage("GitHub auth/repo not available. Run `gh auth login` and ensure git remote points to GitHub.");
+            return;
+          }
+
+          const parent = await parentOps.fetchTicket();
+          if (!parent) {
+            addMessage(`Could not fetch parent issue ${normalizedParent}.`);
+            return;
+          }
+
+          const epics = parseProgramEpicsFromIssueBody(parent.body || "");
+          if (epics.length === 0) {
+            addMessage(`No child issue references found in ${normalizedParent}. Add sub-issues like \`#45\` grouped under epic headings.`);
+            return;
+          }
+
+          const totalIssues = epics.reduce((sum, e) => sum + e.issueKeys.length, 0);
+          addMessage(`Starting /program from ${normalizedParent}: ${epics.length} epic(s), ${totalIssues} sub-issue(s).`);
+
+          const { runOrchestration } = await import("../orchestrator.js");
+
+          const seenPersonas = new Set<string>();
+          let storiesCompleted = 0;
+          let shippedIssues = 0;
+          const startTime = Date.now();
+          const fileSequences = new Map<string, number>();
+          const nextFileSequence = (path: string): number => {
+            if (!path) return 0;
+            const next = (fileSequences.get(path) || 0) + 1;
+            fileSequences.set(path, next);
+            return next;
+          };
+
+          const output: OrchestrationOutput = {
+            log(persona: string, message: string): void {
+              const emoji = getEmoji(persona);
+              const trimmed = message.trim();
+              if (trimmed) {
+                seenPersonas.add(persona);
+                if (trimmed.includes("— completed!")) storiesCompleted++;
+                emitLine(`[${emoji} ${persona}] ${trimmed}`);
+              }
+            },
+            coordinatorLog(message: string): void {
+              emitLine(`[${getEmoji("coordinator")} coordinator] ${message}`);
+            },
+            error(message: string): void {
+              emitLine(`**Error:** ${message}`);
+            },
+            status(message: string): void {
+              setStatusMessage(message);
+            },
+            statusDone(message?: string): void {
+              if (message) emitLine(message);
+              setStatusMessage("");
+            },
+            confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
+              return new Promise((resolve) => {
+                setConfirmRequest({
+                  prompt,
+                  resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    setConfirmRequest(null);
+                    if (mode) resolve({ allowed: yes, mode });
+                    else resolve(yes);
+                  },
+                });
+              });
+            },
+            askText(question: string, suggestion: string): Promise<string> {
+              return new Promise((resolve) => {
+                setPromptRequest({
+                  question,
+                  suggestion,
+                  resolve: (answer: string) => {
+                    setPromptRequest(null);
+                    resolve(answer || suggestion);
+                  },
+                });
+              });
+            },
+            toolCall(persona: string, toolName: string, toolInput: Record<string, unknown>): void {
+              const detail = formatToolCallDetail(toolName, toolInput, nextFileSequence);
+              const emoji = getEmoji(persona);
+              emitLine(`[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`);
+              incrementToolCount?.(toolName);
+            },
+            updateBranch(branch: string): void {
+              setGitBranch?.(branch);
+            },
+            updateCost(cost: number): void {
+              setCost?.(cost);
+            },
+            updateUsageSummary(summary: UsageSummary): void {
+              commitUsageSummary(summary);
+            },
+            updateTokPerSec(providerModel: string, tokPerSec: number): void {
+              setTokPerSec?.(providerModel, tokPerSec);
+            },
+            waitIfPaused: async (): Promise<void> => {
+              await waitIfPaused();
+            },
+            requestPause: async (): Promise<void> => {
+              pause();
+              await waitIfPaused();
+            },
+          };
+
+          let alwaysEpics = config.program?.epicPrompt === "always";
+
+          for (let e = 0; e < epics.length; e++) {
+            const epic = epics[e];
+            emitLine(`[${getEmoji("planner")} planner] Program epic ${e + 1}/${epics.length}: ${epic.title} (${epic.issueKeys.length} issues)`);
+
+            for (let i = 0; i < epic.issueKeys.length; i++) {
+              if (controller.signal.aborted) {
+                addMessage("Program cancelled.");
+                return;
+              }
+              const issueKey = epic.issueKeys[i];
+              emitLine(`[${getEmoji("coordinator")} coordinator] Program issue ${i + 1}/${epic.issueKeys.length}: /ship ${issueKey}`);
+
+              let result = await runOrchestration(
+                config,
+                issueKey,
+                trustAll,
+                sandboxed,
+                output,
+                controller.signal,
+                undefined,
+                issueKey,
+              );
+
+              const isComplete = () =>
+                result.stories.length > 0 &&
+                result.completedStoryIds.length === result.stories.length;
+
+              // Reuse /ship retry path once automatically when run is incomplete.
+              if (!isComplete() && result.featureBranch && result.mainBranch) {
+                const retryPlan: RetryPlan = {
+                  stories: result.stories,
+                  completedStoryIds: [...result.completedStoryIds],
+                  featureBranch: result.featureBranch,
+                  mainBranch: result.mainBranch,
+                };
+                emitLine(`[${getEmoji("system")} system] Program auto-retry: ${issueKey}`);
+                result = await runOrchestration(
+                  config,
+                  result.userTask,
+                  trustAll,
+                  sandboxed,
+                  output,
+                  controller.signal,
+                  retryPlan,
+                  issueKey,
+                );
+              }
+
+              if (!isComplete()) {
+                addMessage(`Program paused: ${issueKey} did not complete after retry. Resolve and re-run \`/program ${normalizedParent}\`.`);
+                return;
+              }
+
+              shippedIssues++;
+            }
+
+            if (e < epics.length - 1 && !alwaysEpics) {
+              const nextEpic = epics[e + 1];
+              const rv = await output.confirm(`Continue to next epic "${nextEpic.title}"?`);
+              let allowed = false;
+              if (typeof rv === "object") {
+                allowed = rv.allowed;
+                if (rv.mode === "always" && allowed) {
+                  alwaysEpics = true;
+                  try {
+                    const globalCfg = loadConfig();
+                    if (globalCfg) {
+                      globalCfg.program = { ...(globalCfg.program || {}), epicPrompt: "always" };
+                      saveConfig(globalCfg);
+                      emitLine(`[${getEmoji("system")} system] Saved globally: /settings program.epicPrompt always`);
+                    }
+                  } catch {
+                    // best effort
+                  }
+                }
+              } else {
+                allowed = rv;
+              }
+              if (!allowed) {
+                addMessage("Program paused at epic boundary.");
+                return;
+              }
+            }
+          }
+
+          flushLine();
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          const parts: string[] = [];
+          if (seenPersonas.size > 0) parts.push(`${seenPersonas.size} expert${seenPersonas.size === 1 ? "" : "s"}`);
+          if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
+          parts.push(`${shippedIssues} issue${shippedIssues === 1 ? "" : "s"}`);
+          parts.push(timeStr);
+          addSessionSummaryDivider(addMessage, hasOperationalOutput);
+          addMessage(`**Program complete.** ${parts.join(" · ")}`);
+          const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
+          if (usageSummaryMessage) addMessage(usageSummaryMessage);
+          notifyIfEnabled(config.bell, "WorkerMill", "Program complete");
+        } catch (err: unknown) {
+          flushLine();
+          if (controller.signal.aborted) {
+            addMessage("**Program cancelled.**");
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            addMessage(`**Program failed:** ${msg}`);
+          }
+        } finally {
+          setRunning(false);
+          setPausedState(false);
+          setStatusMessage("");
+          clearPreviewLine();
+          setConfirmRequest(null);
+          releasePauseWaiters();
+        }
+      })();
+    },
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+  );
+
+  // ------------------------------------------------------------------
   // retry() — read persisted state, resume from first incomplete story
   // ------------------------------------------------------------------
 
@@ -865,5 +1191,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, paused, start, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
+  return { running, paused, start, startProgram, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
 }

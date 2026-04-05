@@ -147,9 +147,11 @@ export function getGitStatus(cwd: string): string {
 export const BUILTIN_COMMANDS = new Set([
   "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
   "cancel", "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
+  "fleet",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
   "memories", "memory", "model", "permissions", "personas", "q", "quit",
   "pause", "release-notes", "releasenotes", "remember", "reset", "retry", "review",
+  "program",
   "route", "sandbox", "schedule", "sessions", "settings", "setup", "ship",
   "skills", "status", "trust", "undo", "update", "voice",
 ]);
@@ -177,6 +179,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
+| \`/program <#issue>\` | Full-spec orchestration across epic sub-issues (alias: \`/fleet\`) |
 | \`/pause\` | Pause or resume a running \`/ship\` orchestration |
 | \`/cancel\` | Cancel the current running operation (same as \`ESC\`) |
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
@@ -269,6 +272,7 @@ export interface SlashCommandContext {
   cancelCurrentOperation: () => void;
   isBusy: boolean;
   startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => void;
+  startProgram?: (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => void;
   retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => void;
   lastBuildTask: string | null;
@@ -600,6 +604,42 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
+    // ---- /program (primary) and /fleet (alias) ----
+    case "program":
+    case "fleet": {
+      if (!arg) {
+        ctx.addSystemMessage(
+          "**Usage:** `/program #<parent-issue>`\n\n" +
+          "Runs full-spec orchestration by reading the parent GitHub issue body, " +
+          "extracting epic-grouped child issues, then shipping each child in dependency order.\n\n" +
+          "**Examples:**\n" +
+          "- `/program #120`\n" +
+          "- `/fleet GH-120`\n\n" +
+          "Epic boundaries prompt with `y/n/a`:\n" +
+          "- `y` continue once\n" +
+          "- `n` pause\n" +
+          "- `a` continue all remaining epics (persisted globally)"
+        );
+        break;
+      }
+      if (ctx.orchestratorRunning) {
+        ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
+        break;
+      }
+      const parentRef = detectTicketRef(arg);
+      if (!parentRef || parentRef.system !== "github") {
+        ctx.addSystemMessage("`/program` currently supports GitHub parent issues only (use `#123` or `GH-123`).");
+        break;
+      }
+      if (!ctx.startProgram) {
+        ctx.addSystemMessage("`/program` is not available in this runtime.");
+        break;
+      }
+      ctx.addUserMessage(`/program ${parentRef.key}`);
+      ctx.startProgram(parentRef.key, ctx.isTrustAll, ctx.sandboxed ?? "os");
+      break;
+    }
+
     // ---- /pause ----
     case "pause": {
       if (!ctx.orchestratorRunning) {
@@ -841,6 +881,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const autoRevise = config.review?.autoRevise ?? false;
         const useCritic = config.review?.useCritic ?? false;
         const autoBranch = config.review?.autoBranch ?? false;
+        const epicPrompt = config.program?.epicPrompt || "ask";
         const editorSetting = config.editor || "auto";
         const sandboxEnabled = config.sandbox !== false;
         const bellEnabled = config.bell === true;
@@ -860,6 +901,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
           `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
           `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
+          `| Program epic prompt | ${epicPrompt} | \`/settings program.epicPrompt <ask/always>\` |\n` +
           `| Editor | ${editorSetting} | \`/settings editor <vim\\|nano\\|auto>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
@@ -934,6 +976,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           case "review.autoBranch": {
             config.review = { ...config.review, autoBranch: boolVal(value) };
+            break;
+          }
+          case "program.epicPrompt": {
+            const normalized = value.toLowerCase();
+            if (normalized !== "ask" && normalized !== "always") {
+              ctx.addSystemMessage("Invalid value for `program.epicPrompt`. Use `ask` or `always`.");
+              settingApplied = false;
+              break;
+            }
+            config.program = { ...(config.program || {}), epicPrompt: normalized as "ask" | "always" };
             break;
           }
           case "editor": {
@@ -1037,7 +1089,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "sandbox", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "review.autoBranch", "program.epicPrompt", "editor", "sandbox", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }

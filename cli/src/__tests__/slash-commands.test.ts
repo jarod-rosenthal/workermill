@@ -155,6 +155,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     cancelCurrentOperation: vi.fn(),
     isBusy: false,
     startOrchestrator: vi.fn(),
+    startProgram: vi.fn(),
     retryOrchestrator: vi.fn().mockReturnValue(false),
     startReview: vi.fn(),
     lastBuildTask: null,
@@ -377,6 +378,51 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/build add tests", ctx);
       expect(ctx.startOrchestrator).toHaveBeenCalledWith("add tests", expect.any(Function), false);
+    });
+  });
+
+  // ---- /program and /fleet ----
+
+  describe("/program", () => {
+    it("shows usage with no arg", () => {
+      const ctx = createContext();
+      handleSlashCommand("/program", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Usage")
+      );
+      expect(ctx.startProgram).not.toHaveBeenCalled();
+    });
+
+    it("starts program flow for a GitHub issue", () => {
+      const ctx = createContext();
+      handleSlashCommand("/program #120", ctx);
+      expect(ctx.addUserMessage).toHaveBeenCalledWith("/program #120");
+      expect(ctx.startProgram).toHaveBeenCalledWith("#120", expect.any(Function), false);
+    });
+
+    it("/fleet is an alias for /program", () => {
+      const ctx = createContext();
+      handleSlashCommand("/fleet GH-120", ctx);
+      expect(ctx.addUserMessage).toHaveBeenCalledWith("/program GH-120");
+      expect(ctx.startProgram).toHaveBeenCalledWith("GH-120", expect.any(Function), false);
+    });
+
+    it("requires GitHub-style refs", () => {
+      const ctx = createContext();
+      handleSlashCommand("/program PROJ-123", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub parent issues only")
+      );
+      expect(ctx.startProgram).not.toHaveBeenCalled();
+    });
+
+    it("blocks when orchestrator is running", () => {
+      const ctx = createContext({ orchestratorRunning: true });
+      handleSlashCommand("/program #120", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("already running")
+      );
+      expect(ctx.startProgram).not.toHaveBeenCalled();
     });
   });
 
@@ -1410,6 +1456,25 @@ describe("handleSlashCommand", () => {
           review: expect.objectContaining({ useCritic: true }),
         }),
       );
+    });
+
+    it("updates program.epicPrompt", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings program.epicPrompt always", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          program: expect.objectContaining({ epicPrompt: "always" }),
+        }),
+      );
+    });
+
+    it("rejects invalid program.epicPrompt", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings program.epicPrompt maybe", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid value for `program.epicPrompt`")
+      );
+      expect(saveConfig).not.toHaveBeenCalled();
     });
 
     it("updates sandbox true/false", () => {

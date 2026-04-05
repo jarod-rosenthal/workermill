@@ -208,6 +208,8 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
   // Non-tool prompts (plan approval, revision confirm, PR push) — simple y/a/n
   const [answered, setAnswered] = React.useState<string>("");
   const isRevisionPrompt = request.prompt.startsWith("Revise ");
+  const isEpicBoundaryPrompt = /continue to next epic/i.test(request.prompt);
+  const allowsAlways = isRevisionPrompt || isEpicBoundaryPrompt;
   useInput((input, key) => {
     if (answered) return;
     const resolve = (label: string, yes: boolean, mode?: "always" | "trust") => {
@@ -217,10 +219,10 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
     if (isEscapeInput(input, key)) resolve("esc", false);
     else if (input === "y" || input === "Y") resolve("y", true);
     else if (input === "n" || input === "N") resolve("n", false);
-    else if (isRevisionPrompt && (input === "a" || input === "A")) resolve("a", true, "always");
+    else if (allowsAlways && (input === "a" || input === "A")) resolve("a", true, "always");
   }, { isActive: !answered });
 
-  const hint = isRevisionPrompt ? "(y)es (a)lways (n)o" : "(y/n)";
+  const hint = allowsAlways ? "(y)es (a)lways (n)o" : "(y/n)";
 
   return (
     <Box marginLeft={2} marginY={1}>

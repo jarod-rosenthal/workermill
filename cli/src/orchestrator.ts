@@ -1470,6 +1470,7 @@ export interface OrchestrationResult {
   completedStoryIds: string[];
   featureBranch: string | null;
   userTask: string;
+  mainBranch?: string;
 }
 
 /** Retry plan — skips planning, resumes from first incomplete story. */
@@ -2949,6 +2950,20 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
                 // Switch to auto-revise for remaining rounds
                 autoRevise = true;
                 output.coordinatorLog("Auto-revise enabled for remaining rounds.");
+                // Persist globally so future /ship runs behave consistently.
+                // Users can revert with: /settings review.autoRevise false
+                try {
+                  const globalCfg = loadConfig();
+                  if (globalCfg) {
+                    globalCfg.review = { ...globalCfg.review, autoRevise: true };
+                    saveConfig(globalCfg);
+                    output.coordinatorLog("Saved globally: /settings review.autoRevise true");
+                  }
+                } catch (persistErr) {
+                  logger.warn("Failed to persist review.autoRevise", {
+                    error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+                  });
+                }
               }
             } else {
               shouldRevise = rv;
@@ -3425,7 +3440,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
   shutdownLSP();
 
-  return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
 }
 
 // ---------------------------------------------------------------------------

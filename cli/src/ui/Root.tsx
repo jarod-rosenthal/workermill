@@ -193,6 +193,7 @@ export function Root(props: RootProps): React.ReactElement {
         cancelCurrentOperation: orchestrator.running ? orchestrator.cancel : agent.cancel,
         isBusy: orchestrator.running || agent.status !== "idle",
         startOrchestrator: orchestrator.start,
+        startProgram: orchestrator.startProgram,
         retryOrchestrator: orchestrator.retry,
         startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => orchestrator.review(trustAll, sandboxed, target),
         lastBuildTask: lastBuildTask.current,

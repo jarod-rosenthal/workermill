@@ -79,7 +79,7 @@ describe("fetchRemoteModels", () => {
 
     const result = await fetchRemoteModels(mockConfig);
 
-    expect(mockFetch).toHaveBeenCalledWith("https://workermill.com/api/models.json", expect.any(Object));
+    expect(mockFetch).toHaveBeenCalledWith("https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json", expect.any(Object));
     expect(result).toEqual(mockModels);
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       cacheFile,
@@ -103,7 +103,7 @@ describe("fetchRemoteModels", () => {
 
     const result = await fetchRemoteModels(mockConfig);
 
-    expect(mockFetch).toHaveBeenCalledWith("https://workermill.com/api/models.json", {
+    expect(mockFetch).toHaveBeenCalledWith("https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json", {
       headers: { "If-None-Match": mockEtag },
       signal: expect.any(AbortSignal),
     });
@@ -223,7 +223,7 @@ describe("fetchRemoteModels", () => {
 
     await fetchRemoteModels(mockConfig, true);
 
-    expect(mockFetch).toHaveBeenCalledWith("https://workermill.com/api/models.json", {
+    expect(mockFetch).toHaveBeenCalledWith("https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json", {
       headers: {}, // No If-None-Match header
       signal: expect.any(AbortSignal),
     });

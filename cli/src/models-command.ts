@@ -42,20 +42,10 @@ export async function runModelsCommand(
       .map(lm => ({
         provider: lm.provider,
         id: lm.id,
-        displayName: lm.id + " (local)", // live models use id as display name
+        displayName: lm.id, // display name same as id; "(local)" added at render time
         source: "live" as const,
         host: lm.host,
         reachable: lm.reachable,
-      })),
-    ...liveModels
-      .filter(lm => !lm.id) // unreachable providers
-      .map(lm => ({
-        provider: lm.provider,
-        id: "(not reachable)",
-        displayName: "(not reachable)",
-        source: "live" as const,
-        host: lm.host,
-        reachable: false,
       })),
   ];
 
@@ -93,41 +83,65 @@ export async function runModelsCommand(
   // Sort providers alphabetically
   const sortedProviders = Array.from(byProvider.keys()).sort();
 
+  // Track which live providers are configured but unreachable (for text output)
+  const unreachableProviders = new Set<string>();
+  for (const lm of liveModels) {
+    if (!lm.id) unreachableProviders.add(lm.provider);
+  }
+
   if (json) {
-    // JSON output
-    const jsonModels = filteredModels.map(m => ({
-      provider: m.provider,
-      id: m.id,
-      displayName: m.displayName,
-      source: m.source,
-      ...(m.source === "live" && { host: m.host }),
-    }));
+    // JSON output — exclude unreachable sentinel entries; only real model IDs
+    const jsonModels = filteredModels
+      .filter(m => m.reachable)
+      .map(m => ({
+        provider: m.provider,
+        id: m.id,
+        displayName: m.displayName,
+        source: m.source,
+        ...(m.source === "live" && { host: m.host }),
+      }));
     console.log(JSON.stringify(jsonModels, null, 2));
     return;
   }
 
   // Text output
-  if (filteredModels.length === 0) {
+  if (filteredModels.length === 0 && unreachableProviders.size === 0) {
     console.log("No models found matching the criteria.");
     return;
   }
 
   for (const providerId of sortedProviders) {
     const models = byProvider.get(providerId)!;
-    const providerConfig = staticProviders.find(p => p.id === providerId);
 
-    // Header
-    const isLive = models.some(m => m.source === "live");
-    const host = isLive ? models.find(m => m.host)?.host : "";
-    const header = host ? `${providerId} (${host}):` : `${providerId}:`;
+    // Header — include host URL for live providers (static models have host: "")
+    const liveHost = models.find(m => m.host)?.host;
+    const header = liveHost ? `${providerId} (${liveHost}):` : `${providerId}:`;
     console.log(`${header}`);
 
     // List models sorted alphabetically
-    const sortedModels = models.sort((a, b) => a.id.localeCompare(b.id));
+    const sortedModels = [...models].sort((a, b) => a.id.localeCompare(b.id));
     for (const model of sortedModels) {
-      const display = model.displayName !== model.id ? `${model.id} (${model.displayName})` : model.id;
+      const display = model.source === "live" ? `${model.id} (local)` : model.id;
       console.log(`  ${display}`);
     }
+
+    // Show unreachable indicator for this provider if configured but unreachable
+    if (unreachableProviders.has(providerId) && !models.some(m => m.reachable && m.source === "live")) {
+      console.log(`  (not reachable)`);
+    }
   }
+
+  // Show unreachable live providers that had no reachable models (may not appear in filteredModels)
+  // Skip when --available is set, as we only show reachable models in that mode
+  for (const lm of liveModels) {
+    if (!lm.id && !byProvider.has(lm.provider) && !available) {
+      if (!filterProvider || filterProvider === lm.provider) {
+        const header = `${lm.provider} (${lm.host}):`;
+        console.log(`${header}`);
+        console.log(`  (not reachable)`);
+      }
+    }
+  }
+
   console.log();
 }

@@ -88,7 +88,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   const [liveModels, setLiveModels] = useState<Array<{ provider: string; id: string; host: string; reachable: boolean }>>([]);
   useEffect(() => {
     const config = resolveConfig();
-    fetchLiveModels(config).then(setLiveModels).catch(() => {
+    fetchLiveModels(config, { probeDefaults: true }).then(setLiveModels).catch(() => {
       // Ignore errors, just leave liveModels empty
     });
   }, []);

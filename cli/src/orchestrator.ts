@@ -24,6 +24,7 @@ import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt 
 import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "./safety.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
+import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
@@ -1340,10 +1341,11 @@ export async function runOrchestration(
 
   // Create a reusable TicketOps instance for posting updates throughout the run
   let ticketOps: InstanceType<typeof import("./ticket-ops.js").TicketOps> | null = null;
+  let resolvedTicketSystem: string = config.ticketSystem || "github";
   if (ticketKey) {
     try {
       const { TicketOps } = await import("./ticket-ops.js");
-      const ticketSystem = config.ticketSystem || "github";
+      const ticketSystem = resolvedTicketSystem;
       const ops = new TicketOps(ticketKey, ticketSystem);
       logger.info("TicketOps availability check", {
         ticketKey, ticketSystem, isAvailable: ops.isAvailable(),
@@ -1444,6 +1446,18 @@ export async function runOrchestration(
     // ── Normal mode: plan on current branch, create feature branch after acceptance ──
     const originalBranch = getCurrentBranch(workingDir);
     mainBranch = originalBranch || "main";
+
+    // Warn if starting from a non-trunk branch — new work will stack on top of it
+    const trunkBranches = ["main", "master", "develop", "trunk"];
+    if (originalBranch && !trunkBranches.includes(originalBranch)) {
+      output.log("system", `You're on \`${originalBranch}\`, not a trunk branch. New work will stack on top of it and the PR will target \`${originalBranch}\` as its base.`);
+      output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/ship\` again.`);
+      const r = await output.confirm("Continue and stack on this branch?");
+      const confirmed = typeof r === "object" ? r.allowed : r;
+      if (!confirmed) {
+        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      }
+    }
 
     // Planner runs on the current branch — no branch created yet
     const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
@@ -2820,6 +2834,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                   prParts.push(feedback);
                 }
               }
+              // Link PR to source issue in body (GitHub auto-closes on merge; we also close explicitly below)
+              if (ticketKey && resolvedTicketSystem === "github") {
+                const issueNum = extractGithubIssueNumber(ticketKey);
+                prParts.push(`\nCloses #${issueNum}`);
+              }
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
               const prUrl = execSync(
@@ -2828,6 +2847,16 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               ).trim();
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
+
+              // Close the source ticket — work is done, review approved, PR open
+              if (ticketOps) {
+                try {
+                  await ticketOps.transitionTo("done");
+                  output.log("system", `Closed ${ticketKey}`);
+                } catch {
+                  // Non-critical — don't block on ticket system errors
+                }
+              }
 
               // Post the tech lead review as a proper GitHub PR review
               // Matches worker/epic/coordinator-review.ts ensureGitHubReviewPosted()

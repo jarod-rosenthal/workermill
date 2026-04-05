@@ -11,6 +11,7 @@ import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
 import * as fetchTool from "./fetch.js";
+import * as gitTool from "./git.js";
 import * as patchTool from "./patch.js";
 import * as subAgentTool from "./sub-agent.js";
 import * as webSearchTool from "./web-search.js";
@@ -19,7 +20,7 @@ import * as verifyTool from "./verify.js";
 import * as lspTool from "./lsp.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -334,6 +335,22 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const result = await fetchTool.execute({ url, format, timeout });
         if (result.success) {
           return `Content from ${result.url} (${result.contentType || "unknown"}):\n\n${result.content}`;
+        }
+        return `Error: ${result.error}`;
+      },
+    }),
+
+    git: tool({
+      description: gitTool.description,
+      inputSchema: z.object({
+        action: z.enum(["status", "diff", "log", "add", "commit", "branch", "checkout", "stash"])
+          .describe("The git action to perform"),
+        args: z.string().optional().describe("Additional arguments (e.g., file paths, branch name, commit message)"),
+      }),
+      execute: async ({ action, args }) => {
+        const result = await gitTool.execute({ action, args, cwd: workingDir });
+        if (result.success) {
+          return result.output || "(no output)";
         }
         return `Error: ${result.error}`;
       },

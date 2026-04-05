@@ -3,7 +3,9 @@ import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
 import { VERSION } from "./version.js";
-import { Client, HTTPClientTransport, SSEClientTransport } from "@modelcontextprotocol/sdk/client";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +19,7 @@ interface MCPTool {
 
 interface MCPServer {
   name: string;
+  transport: "stdio" | "http" | "sse";
   process?: ChildProcess;
   client?: Client;
   tools: MCPTool[];
@@ -126,10 +129,7 @@ function hydrateGitHubIssueToolArgs(
 // ---------------------------------------------------------------------------
 
 async function sendRequest(server: MCPServer, method: string, params?: unknown): Promise<unknown> {
-  if (server.client) {
-    // Use MCP SDK client for HTTP/SSE
-    return server.client.request({ method, params: params || {} });
-  } else if (server.process) {
+  if (server.process) {
     // Existing stdio logic
     return new Promise((resolve, reject) => {
       const id = server.nextId++;
@@ -185,7 +185,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
       env: { ...process.env, ...(config.env || {}) },
     });
 
-    const server: MCPServer = { name, process: proc, tools: [], nextId: 1 };
+    const server: MCPServer = { name, transport: "stdio", process: proc, tools: [], nextId: 1 };
 
     // Log stderr
     proc.stderr?.on("data", (data: Buffer) => {
@@ -239,12 +239,14 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
 
     let clientTransport;
     if (transport === "http") {
-      clientTransport = new HTTPClientTransport(new URL(config.url), {
-        headers: config.headers || {},
+      // Streamable HTTP transport (SDK 1.x+)
+      clientTransport = new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: { headers: config.headers || {} },
       });
-    } else if (transport === "sse") {
+    } else {
+      // SSE transport
       clientTransport = new SSEClientTransport(new URL(config.url), {
-        headers: config.headers || {},
+        requestInit: { headers: config.headers || {} },
       });
     }
 
@@ -255,7 +257,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
 
     await client.connect(clientTransport!);
 
-    const server: MCPServer = { name, client, tools: [], nextId: 1 };
+    const server: MCPServer = { name, transport, client, tools: [], nextId: 1 };
 
     try {
       // List tools
@@ -346,10 +348,11 @@ export async function callMCPTool(
   if (server.client) {
     const result = await server.client.callTool({ name: toolName, arguments: args });
     // Extract text from content blocks
+    const content = Array.isArray(result.content) ? result.content as Array<{ type: string; text?: string }> : [];
     return (
-      (result.content || [])
-        .filter((c: any) => c.type === "text" && c.text)
-        .map((c: any) => c.text)
+      content
+        .filter((c) => c.type === "text" && c.text)
+        .map((c) => c.text)
         .join("\n") || JSON.stringify(result)
     );
   } else {
@@ -509,7 +512,8 @@ export function stopAllMCPServers(): void {
       if (server.process) {
         server.process.kill();
       } else if (server.client) {
-        server.client.close();
+        // client.close() is async — fire-and-forget in exit paths
+        void server.client.close().catch(() => {});
       }
     } catch {
       // Already stopped — safe to ignore
@@ -517,4 +521,12 @@ export function stopAllMCPServers(): void {
     logger.info(`MCP ${name} stopped`);
   }
   activeServers.clear();
+}
+
+export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> {
+  return Array.from(activeServers.values()).map((s) => ({
+    name: s.name,
+    transport: s.transport,
+    toolCount: s.tools.length,
+  }));
 }

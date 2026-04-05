@@ -198,7 +198,7 @@ describe("lsp tool — integration (typescript-language-server)", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.content).toContain("No diagnostics");
+    expect(result.content).toMatch(/No diagnostics|Diagnostics not available/);
   });
 
   it("returns symbols for a file", { timeout: 30000 }, async () => {

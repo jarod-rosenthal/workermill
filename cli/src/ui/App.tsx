@@ -9,6 +9,7 @@ import { theme } from "./theme.js";
 import {
   getAssistantMarginTop,
   normalizeAssistantContent,
+  shouldSeparateLiveActivityFromPrompt,
   shouldRenderUserDivider,
 } from "./transcript-layout.js";
 import { stopAllMCPServers } from "../mcp-client.js";
@@ -272,6 +273,16 @@ export function App(props: AppProps): React.ReactElement {
   // marginLeft={2} on assistant boxes consumes 2 cols; cap at a sane max
   const markdownWidth = Math.max(40, (stdout?.columns ?? 80) - 2);
   const turnDivider = "\u2500".repeat(Math.max(24, Math.min(markdownWidth - 2, 72)));
+  const hasLiveToolActivity = (props.streamingToolCalls?.length ?? 0) > 0;
+  const hasLiveStatusActivity =
+    Boolean(props.orchestratorStatus) ||
+    props.status !== "idle" ||
+    Boolean(props.buildPreviewLine);
+  const shouldAddLiveActivitySpacer = shouldSeparateLiveActivityFromPrompt(
+    props.messages,
+    hasLiveToolActivity,
+    hasLiveStatusActivity,
+  );
 
   return (
     <Box flexDirection="column" width="100%">
@@ -320,6 +331,7 @@ export function App(props: AppProps): React.ReactElement {
 
       {/* Tool call/activity — fixed region above prompts and status bar */}
       <Box flexDirection="column" minHeight={2}>
+        {shouldAddLiveActivitySpacer ? <Box height={1} /> : null}
         {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
           <Box marginLeft={2}>
             <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />

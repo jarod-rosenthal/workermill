@@ -4,6 +4,7 @@ import {
   getAssistantMarginTop,
   normalizeAssistantContent,
   normalizeUserContent,
+  shouldSeparateLiveActivityFromPrompt,
   shouldRenderUserDivider,
 } from "../ui/transcript-layout.js";
 
@@ -116,5 +117,35 @@ describe("transcript layout contract", () => {
     expect(shouldRenderUserDivider(0)).toBe(false);
     expect(shouldRenderUserDivider(1)).toBe(true);
     expect(shouldRenderUserDivider(8)).toBe(true);
+  });
+
+  it("adds live-activity spacer when the last visible message is user input", () => {
+    const messages: Message[] = [
+      msg("assistant", "Prior response"),
+      msg("user", "can you describe the open issues for this repo?"),
+    ];
+    expect(shouldSeparateLiveActivityFromPrompt(messages, true, true)).toBe(true);
+  });
+
+  it("does not add live-activity spacer when the last visible message is assistant output", () => {
+    const messages: Message[] = [
+      msg("user", "question"),
+      msg("assistant", "answer"),
+    ];
+    expect(shouldSeparateLiveActivityFromPrompt(messages, true, true)).toBe(false);
+  });
+
+  it("ignores hidden empty assistant placeholders when deciding live-activity spacing", () => {
+    const messages: Message[] = [
+      msg("assistant", "setup"),
+      msg("user", "run a command"),
+      msg("assistant", "", false), // hidden by App
+    ];
+    expect(shouldSeparateLiveActivityFromPrompt(messages, true, false)).toBe(true);
+  });
+
+  it("skips live-activity spacer when there is no live activity", () => {
+    const messages: Message[] = [msg("user", "hello")];
+    expect(shouldSeparateLiveActivityFromPrompt(messages, false, false)).toBe(false);
   });
 });

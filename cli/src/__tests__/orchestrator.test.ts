@@ -162,7 +162,7 @@ import {
   classifyComplexity,
   shouldTransitionTicketOnPrOpen,
   type OrchestrationOutput,
-} from "../orchestrator.js";
+} from "../orchestrator.ts";
 import { streamText, generateText } from "ai";
 
 // ---- Helpers ----
@@ -1921,6 +1921,42 @@ describe("classifyError categories (via story execution errors)", () => {
 
     const errLogs = output.errors.join(" ");
     expect(errLogs).toMatch(/auth|api.?key|credential/i);
+  });
+
+  it("auto-pauses on balance/quota exhaustion and resumes cleanly", async () => {
+    const planText = makePlanWithOneStory();
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+      if (callCount === 1) {
+        return {
+          textStream: (async function* () { yield planText; })(),
+          text: Promise.resolve(planText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+      if (callCount === 2) {
+        throw new Error("insufficient_quota: credit balance too low");
+      }
+      return {
+        textStream: (async function* () { yield "Implemented the story."; })(),
+        text: Promise.resolve("Implemented the story."),
+        totalUsage: Promise.resolve({ inputTokens: 120, outputTokens: 60 }),
+      };
+    });
+
+    const config = createTestConfig();
+    const output = createMockOutput();
+    output.requestPause = vi.fn().mockResolvedValue(undefined);
+
+    await runOrchestration(config, "Build feature", true, false, output);
+
+    expect(output.requestPause).toHaveBeenCalledTimes(1);
+    const allLogs = [...output.logs, ...output.errors].join(" ").toLowerCase();
+    expect(allLogs).toContain("paused");
+    expect(allLogs).toContain("quota");
+    expect(allLogs).toContain("resuming");
   });
 
   it("retries story on transient 503 error (up to 3 times)", async () => {

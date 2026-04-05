@@ -111,7 +111,7 @@ vi.mock("../checkpoints.js", () => ({
 
 // ---- Imports ----
 
-import { handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.js";
+import { handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.ts";
 import { execSync } from "child_process";
 import fs from "fs";
 import { listSessions, saveSession } from "../session.js";
@@ -149,6 +149,11 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     allowTool: vi.fn(),
     denyTool: vi.fn(),
     orchestratorRunning: false,
+    orchestratorPaused: false,
+    pauseOrchestrator: vi.fn(),
+    resumeOrchestrator: vi.fn(),
+    cancelCurrentOperation: vi.fn(),
+    isBusy: false,
     startOrchestrator: vi.fn(),
     retryOrchestrator: vi.fn().mockReturnValue(false),
     startReview: vi.fn(),
@@ -372,6 +377,61 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/build add tests", ctx);
       expect(ctx.startOrchestrator).toHaveBeenCalledWith("add tests", expect.any(Function), false);
+    });
+  });
+
+  // ---- /pause ----
+
+  describe("/pause", () => {
+    it("pauses a running orchestration", () => {
+      const ctx = createContext({ orchestratorRunning: true, orchestratorPaused: false });
+      handleSlashCommand("/pause", ctx);
+      expect(ctx.pauseOrchestrator).toHaveBeenCalledTimes(1);
+      expect(ctx.resumeOrchestrator).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Paused orchestration")
+      );
+    });
+
+    it("resumes when already paused", () => {
+      const ctx = createContext({ orchestratorRunning: true, orchestratorPaused: true });
+      handleSlashCommand("/pause", ctx);
+      expect(ctx.resumeOrchestrator).toHaveBeenCalledTimes(1);
+      expect(ctx.pauseOrchestrator).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Resumed orchestration")
+      );
+    });
+
+    it("reports when no orchestration is running", () => {
+      const ctx = createContext({ orchestratorRunning: false });
+      handleSlashCommand("/pause", ctx);
+      expect(ctx.pauseOrchestrator).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No `/ship` orchestration is running")
+      );
+    });
+  });
+
+  // ---- /cancel ----
+
+  describe("/cancel", () => {
+    it("cancels when an operation is active", () => {
+      const ctx = createContext({ isBusy: true });
+      handleSlashCommand("/cancel", ctx);
+      expect(ctx.cancelCurrentOperation).toHaveBeenCalledTimes(1);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Cancelling current operation")
+      );
+    });
+
+    it("reports when nothing is running", () => {
+      const ctx = createContext({ isBusy: false });
+      handleSlashCommand("/cancel", ctx);
+      expect(ctx.cancelCurrentOperation).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Nothing is currently running")
+      );
     });
   });
 

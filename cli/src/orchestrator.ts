@@ -55,6 +55,13 @@ function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
   return { retryAfterMs: 30_000 };
 }
 
+function isBalanceOrQuotaError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return /insufficient[_\s-]?quota|insufficient[_\s-]?credit|credit balance|billing|payment required|402|exceeded your current quota|quota.*exhausted|balance.*low|usage limit reached|tokens?.*(expired|exhausted)/i.test(
+    message,
+  );
+}
+
 const MAX_RATE_LIMIT_RETRIES = 3;
 
 /** Get context window for a model — from pricing registry or configured override.
@@ -163,6 +170,10 @@ export interface OrchestrationOutput {
   confirm: (prompt: string) => Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }>;
   /** Ask the user a free-text question with a suggested answer. Returns the user's answer or the suggestion on timeout/skip. */
   askText?: (question: string, suggestion: string) => Promise<string>;
+  /** Wait while orchestration is paused. */
+  waitIfPaused?: () => Promise<void>;
+  /** Pause orchestration and wait until resumed. */
+  requestPause?: () => Promise<void>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
   /** Update the git branch displayed in the status bar */
@@ -437,6 +448,9 @@ function classifyError(errMsg: string): { category: string; fixable: boolean; fi
   }
   if (/status code (502|503|504)|socket hang up|ECONNRESET|ETIMEDOUT|ECONNREFUSED/i.test(errMsg)) {
     return { category: "transient", fixable: false, fixHint: "" };
+  }
+  if (isBalanceOrQuotaError(errMsg)) {
+    return { category: "billing", fixable: false, fixHint: "" };
   }
   if (/auth|unauthorized|forbidden|401|403|api.?key/i.test(errMsg)) {
     return { category: "auth", fixable: false, fixHint: "" };
@@ -996,6 +1010,20 @@ Rules:
       logger.info("Planner cancelled by user");
       output.coordinatorLog("Build cancelled by user.");
       return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+    }
+    if (isBalanceOrQuotaError(planErr) && output.requestPause) {
+      output.coordinatorLog("Planner paused: provider quota/balance appears exhausted.");
+      output.log(
+        "system",
+        "Paused: your provider credits/quota appear low. Top up your balance or switch providers with `/model <provider>/<model>`, then run `/pause` to resume.",
+      );
+      await output.requestPause();
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled by user.");
+        return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+      }
+      output.coordinatorLog("Resuming planner after provider/account update...");
+      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
     }
     // TODO: Rate limit retry for planner — requires extracting planner into a separate function
     // to enable clean retry. For now, the error message surfaces the rate limit to the user.
@@ -1777,6 +1805,41 @@ export async function runOrchestration(
     }
   }
 
+  async function waitWhilePaused(): Promise<boolean> {
+    await output.waitIfPaused?.();
+    if (!abortSignal?.aborted) return false;
+    output.coordinatorLog("Build cancelled.");
+    logger.info("Build cancelled while paused");
+    logRetryHint();
+    return true;
+  }
+
+  async function pauseForBalanceIssue(scope: string): Promise<boolean> {
+    output.coordinatorLog(`${scope} paused: provider quota/balance appears exhausted.`);
+    output.log(
+      "system",
+      "Paused: your provider credits/quota appear low. Top up your balance or switch providers with `/model <provider>/<model>`, then run `/pause` to resume.",
+    );
+    if (output.requestPause) {
+      await output.requestPause();
+    } else {
+      const proceedResult = await output.confirm(
+        "Provider balance/quota issue detected. Continue after updating provider credentials or balance?",
+      );
+      const proceed = typeof proceedResult === "object" ? proceedResult.allowed : proceedResult;
+      if (!proceed) {
+        return true;
+      }
+    }
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled.");
+      logRetryHint();
+      return true;
+    }
+    output.coordinatorLog("Resuming after provider/account update...");
+    return false;
+  }
+
   // Persist the plan so /retry works even if the first story fails
   if (featureBranch) {
     saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
@@ -1787,6 +1850,10 @@ export async function runOrchestration(
   const skippedStories = new Set<string>();
 
   for (let i = 0; i < sorted.length; i++) {
+    if (await waitWhilePaused()) {
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+
     // Check if user cancelled (ESC) before starting next story
     if (abortSignal?.aborted) {
       output.coordinatorLog("Build cancelled.");
@@ -2330,6 +2397,15 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
 
+      if (isBalanceOrQuotaError(errMsg)) {
+        const shouldStop = await pauseForBalanceIssue(`Story ${i + 1}`);
+        if (shouldStop) {
+          return { stories: sorted, completedStoryIds, featureBranch, userTask };
+        }
+        // Retry same revision after user tops up or switches provider.
+        continue;
+      }
+
       // Rate limit retry with backoff — retry in-place before falling through to error classification
       const rl = isRateLimitError(err);
       if (rl && storyRateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
@@ -2520,6 +2596,9 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
     for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
+      if (await waitWhilePaused()) {
+        return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      }
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
@@ -2882,6 +2961,9 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         }
 
         for (let i = 0; i < sorted.length; i++) {
+          if (await waitWhilePaused()) {
+            return { stories: sorted, completedStoryIds, featureBranch, userTask };
+          }
           const story = sorted[i];
 
           // Skip stories not affected by the review (selective revision)
@@ -3056,6 +3138,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             }
           } catch (err) {
             output.statusDone();
+            if (isBalanceOrQuotaError(err)) {
+              const shouldStop = await pauseForBalanceIssue(`Revision story ${i + 1}`);
+              if (shouldStop) {
+                return { stories: sorted, completedStoryIds, featureBranch, userTask };
+              }
+              continue;
+            }
             const revRl = isRateLimitError(err);
             if (revRl) {
               const waitSec = Math.ceil(revRl.retryAfterMs / 1000);
@@ -3073,6 +3162,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               // Loop back to review again
       } catch (err) {
         output.statusDone();
+        if (isBalanceOrQuotaError(err)) {
+          const shouldStop = await pauseForBalanceIssue("Tech Lead review");
+          if (shouldStop) {
+            return { stories: sorted, completedStoryIds, featureBranch, userTask };
+          }
+          continue;
+        }
         output.log("system", `Review skipped: ${err instanceof Error ? err.message : String(err)}`);
               break;
       }

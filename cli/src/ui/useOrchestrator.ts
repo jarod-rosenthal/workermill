@@ -224,12 +224,18 @@ export interface OrchestratorPromptRequest {
 export interface UseOrchestratorReturn {
   /** Whether orchestration is currently running. */
   running: boolean;
+  /** Whether orchestration is currently paused. */
+  paused: boolean;
   /** Start orchestration for a task. */
   start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
   review: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
+  /** Pause a running orchestration. */
+  pause: () => void;
+  /** Resume a paused orchestration. */
+  resume: () => void;
   /** Cancel the running orchestration. */
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
@@ -267,6 +273,9 @@ export function useOrchestrator(
   setTokPerSec?: (providerModel: string, tokPerSec: number) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  const pauseWaitersRef = useRef<Array<() => void>>([]);
   const [statusMessage, setStatusMessageRaw] = useState("");
   const statusMessageRef = useRef("");
   const lastStatusUpdate = useRef(0);
@@ -290,6 +299,38 @@ export function useOrchestrator(
   const abortRef = useRef<AbortController | null>(null);
   const retryPlanRef = useRef<RetryPlan | null>(null);
   const usageSummaryRef = useRef<UsageSummary>(createEmptyUsageSummary());
+
+  const releasePauseWaiters = useCallback(() => {
+    if (pauseWaitersRef.current.length === 0) return;
+    const waiters = pauseWaitersRef.current.splice(0, pauseWaitersRef.current.length);
+    for (const resolve of waiters) resolve();
+  }, []);
+
+  const setPausedState = useCallback((next: boolean) => {
+    pausedRef.current = next;
+    setPaused(next);
+  }, []);
+
+  const pause = useCallback(() => {
+    if (pausedRef.current) return;
+    setPausedState(true);
+    setStatusMessage("Paused — run /pause to resume");
+  }, [setPausedState, setStatusMessage]);
+
+  const resume = useCallback(() => {
+    if (!pausedRef.current) return;
+    setPausedState(false);
+    setStatusMessage("");
+    releasePauseWaiters();
+  }, [releasePauseWaiters, setPausedState, setStatusMessage]);
+
+  const waitIfPaused = useCallback(async () => {
+    while (pausedRef.current) {
+      await new Promise<void>((resolve) => {
+        pauseWaitersRef.current.push(resolve);
+      });
+    }
+  }, []);
 
   const resetUsageSummary = useCallback(() => {
     usageSummaryRef.current = createEmptyUsageSummary();
@@ -352,7 +393,9 @@ export function useOrchestrator(
       abortRef.current.abort();
       abortRef.current = null;
     }
-  }, []);
+    setPausedState(false);
+    releasePauseWaiters();
+  }, [releasePauseWaiters, setPausedState]);
 
   // ------------------------------------------------------------------
   // start()
@@ -366,6 +409,7 @@ export function useOrchestrator(
       abortRef.current = controller;
 
       setRunning(true);
+      setPausedState(false);
       setStatusMessage("");
       clearPreviewLine();
       setConfirmRequest(null);
@@ -521,6 +565,15 @@ export function useOrchestrator(
             updateTokPerSec(providerModel: string, tokPerSec: number): void {
               setTokPerSec?.(providerModel, tokPerSec);
             },
+
+            waitIfPaused: async (): Promise<void> => {
+              await waitIfPaused();
+            },
+
+            requestPause: async (): Promise<void> => {
+              pause();
+              await waitIfPaused();
+            },
           };
 
           // Skip classification — user explicitly invoked /build, so go
@@ -558,13 +611,15 @@ export function useOrchestrator(
           }
         } finally {
           setRunning(false);
+          setPausedState(false);
           setStatusMessage("");
           clearPreviewLine();
           setConfirmRequest(null);
+          releasePauseWaiters();
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, resetUsageSummary, setCost, setGitBranch, setPreviewLineThrottled, setStatusMessage, setTokPerSec],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
@@ -600,6 +655,7 @@ export function useOrchestrator(
     (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => {
       if (running) return;
       setRunning(true);
+      setPausedState(false);
       setStatusMessage("Reviewing...");
       resetUsageSummary();
 
@@ -688,6 +744,13 @@ export function useOrchestrator(
               setTokPerSec?.(providerModel, tokPerSec);
             },
             updateBranch: undefined,
+            waitIfPaused: async (): Promise<void> => {
+              await waitIfPaused();
+            },
+            requestPause: async (): Promise<void> => {
+              pause();
+              await waitIfPaused();
+            },
           };
 
           const result = await runStandaloneReview(config, output, target, controller.signal);
@@ -787,18 +850,20 @@ export function useOrchestrator(
           }
         } finally {
           setRunning(false);
+          setPausedState(false);
           setStatusMessage("");
           clearPreviewLine();
           setConfirmRequest(null);
+          releasePauseWaiters();
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, resetUsageSummary, running, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, retry, review, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
+  return { running, paused, start, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
 }

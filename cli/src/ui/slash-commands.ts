@@ -146,10 +146,10 @@ export function getGitStatus(cwd: string): string {
 
 export const BUILTIN_COMMANDS = new Set([
   "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
-  "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
+  "cancel", "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
   "memories", "memory", "model", "permissions", "personas", "q", "quit",
-  "release-notes", "releasenotes", "remember", "reset", "retry", "review",
+  "pause", "release-notes", "releasenotes", "remember", "reset", "retry", "review",
   "route", "sandbox", "schedule", "sessions", "settings", "setup", "ship",
   "skills", "status", "trust", "undo", "update", "voice",
 ]);
@@ -177,6 +177,8 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
+| \`/pause\` | Pause or resume a running \`/ship\` orchestration |
+| \`/cancel\` | Cancel the current running operation (same as \`ESC\`) |
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
 | \`/review [task]\` | Code review using the tech lead (defaults to recent changes) |
 | \`/retry\` | Re-plan and re-run the last task |
@@ -247,6 +249,11 @@ export interface SlashCommandContext {
   allowTool: (name: string) => void;
   denyTool: (name: string) => void;
   orchestratorRunning: boolean;
+  orchestratorPaused: boolean;
+  pauseOrchestrator: () => void;
+  resumeOrchestrator: () => void;
+  cancelCurrentOperation: () => void;
+  isBusy: boolean;
   startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
   retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
@@ -576,6 +583,33 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? false);
         }
       }
+      break;
+    }
+
+    // ---- /pause ----
+    case "pause": {
+      if (!ctx.orchestratorRunning) {
+        ctx.addSystemMessage("No `/ship` orchestration is running.");
+        break;
+      }
+      if (ctx.orchestratorPaused) {
+        ctx.resumeOrchestrator();
+        ctx.addSystemMessage("Resumed orchestration.");
+      } else {
+        ctx.pauseOrchestrator();
+        ctx.addSystemMessage("Paused orchestration. Run `/pause` again to resume.");
+      }
+      break;
+    }
+
+    // ---- /cancel ----
+    case "cancel": {
+      if (!ctx.isBusy) {
+        ctx.addSystemMessage("Nothing is currently running.");
+        break;
+      }
+      ctx.cancelCurrentOperation();
+      ctx.addSystemMessage("Cancelling current operation...");
       break;
     }
 

@@ -380,6 +380,18 @@ program
     await runModelsCommand(filter, options);
   });
 
+// ── Models refresh subcommand ──
+program
+  .command("models refresh")
+  .description("Refresh and list models, bypassing any cache")
+  .option("--json", "Emit results as a JSON array")
+  .option("--provider <name>", "Filter to a specific provider")
+  .option("--available", "Only show models that are confirmed reachable")
+  .action(async (options) => {
+    const { runModelsCommand } = await import("./models-command.js");
+    await runModelsCommand(null, { ...options, refresh: true });
+  });
+
 // ── Logs command: stream or tail log entries ──
 program
   .command("logs")

@@ -1,7 +1,7 @@
 import { loadConfig } from "./config.js";
 import { listProviders, fetchLiveModels } from "./provider-registry.js";
 
-export async function runModelsCommand(filter: string | undefined, options: { json: boolean; provider?: string; available?: boolean }) {
+export async function runModelsCommand(filter: string | undefined, options: { json: boolean; provider?: string; available?: boolean; refresh?: boolean }) {
   const config = loadConfig();
   if (!config) {
     console.error("No config found. Run `workermill` to set up.");

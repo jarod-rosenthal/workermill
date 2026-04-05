@@ -34,11 +34,10 @@ export async function fetchLiveModels(config: import("../config.js").CliConfig):
 
   // Ollama
   const ollamaHost = config?.providers?.ollama?.host || "http://localhost:11434";
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 2000);
   try {
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 2000);
     const res = await globalThis.fetch(`${ollamaHost}/api/tags`, { signal: ctrl.signal });
-    clearTimeout(timeout);
     if (res.ok) {
       const data = await res.json();
       if (data?.models) {
@@ -49,15 +48,16 @@ export async function fetchLiveModels(config: import("../config.js").CliConfig):
     }
   } catch {
     results.push({ provider: "ollama", id: "(not reachable)", displayName: "(not reachable)", host: ollamaHost, source: "live" });
+  } finally {
+    clearTimeout(timeout);
   }
 
   // LM Studio
   const lmHost = (config?.providers?.lmstudio?.host?.replace(/\/v1\/?$/, "") || "http://localhost:1234");
+  const ctrl2 = new AbortController();
+  const timeout2 = setTimeout(() => ctrl2.abort(), 2000);
   try {
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 2000);
-    const res = await globalThis.fetch(`${lmHost}/v1/models`, { signal: ctrl.signal });
-    clearTimeout(timeout);
+    const res = await globalThis.fetch(`${lmHost}/v1/models`, { signal: ctrl2.signal });
     if (res.ok) {
       const data = await res.json();
       if (data?.data) {
@@ -68,6 +68,8 @@ export async function fetchLiveModels(config: import("../config.js").CliConfig):
     }
   } catch {
     results.push({ provider: "lmstudio", id: "(not reachable)", displayName: "(not reachable)", host: lmHost, source: "live" });
+  } finally {
+    clearTimeout(timeout2);
   }
 
   return results;

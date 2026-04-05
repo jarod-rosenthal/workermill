@@ -49,12 +49,16 @@ interface InputProps {
   isActive: boolean;
   /** Past inputs for up/down arrow history navigation, newest first. */
   history: string[];
+  /** When true, input is shown but dimmed, and Enter queues the message. */
+  isQueued?: boolean;
+  /** Called when user presses Enter while queued. */
+  onQueue?: (value: string) => void;
 }
 
 /**
  * User text input component with history and slash command autocomplete.
  */
-export function Input({ onSubmit, isActive, history }: InputProps): React.ReactElement {
+export function Input({ onSubmit, isActive, history, isQueued, onQueue }: InputProps): React.ReactElement {
   const { stdout } = useStdout();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -212,7 +216,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
   useInput(
     (input, key) => {
-      if (!isActive) return;
+      if (!isActive && !isQueued) return;
 
       // Tab: accept completion
       if (key.tab && showCompletions) {
@@ -297,7 +301,11 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         }
         const trimmed = valueRef.current.trim();
         if (trimmed) {
-          onSubmit(trimmed.replace(/\r\n?/g, "\n"));
+          if (isQueued && onQueue) {
+            onQueue(trimmed.replace(/\r\n?/g, "\n"));
+          } else {
+            onSubmit(trimmed.replace(/\r\n?/g, "\n"));
+          }
           valueRef.current = "";
           cursorPosRef.current = 0;
           setValue("");
@@ -466,10 +474,11 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   const isSoftWrappedSingleLine = !isMultiline && value.length > contentWidth;
 
   if (!isMultiline && !isSoftWrappedSingleLine) {
+    const promptColor = isActive ? theme.brand : (isQueued ? theme.subtle : theme.inactive);
     return (
       <Box>
-        <Text color={isActive ? theme.brand : theme.inactive} bold>
-          {isActive ? "\u25C6 " : "\u25C7 "}
+        <Text color={promptColor} bold>
+          {isActive ? "\u25C6 " : (isQueued ? "\u25C6 " : "\u25C7 ")}
         </Text>
         <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
                 {isActive ? (
@@ -480,6 +489,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
                   )
                 ) : null}
         <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
+        {isQueued ? <Text dimColor>[↵ queued]</Text> : null}
         {hint ? (
           <Text color={theme.subtle} dimColor>
             {hint.name.slice(value.length)}{" "}
@@ -521,6 +531,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
 
 
 
+  const promptColor = isActive ? theme.brand : (isQueued ? theme.subtle : theme.inactive);
   return (
     <Box flexDirection="column">
       {lines.map((line, idx) => {
@@ -528,8 +539,8 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         const isCursorLine = idx === cursorLine;
         return (
           <Box key={idx}>
-            <Text color={isActive ? theme.brand : theme.inactive} bold>
-              {isFirst ? (isActive ? "\u25C6 " : "\u25C7 ") : "  "}
+            <Text color={promptColor} bold>
+              {isFirst ? (isActive ? "\u25C6 " : (isQueued ? "\u25C6 " : "\u25C7 ")) : "  "}
             </Text>
             {isCursorLine ? (
               <>

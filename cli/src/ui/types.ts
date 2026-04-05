@@ -29,6 +29,13 @@ export interface Message {
   timestamp: string;
 }
 
+/** Result from rolling back the last exchange. */
+export interface RollbackResult {
+  rolledBack: boolean;
+  /** Last user prompt restored for editing (Claude-style rewind). */
+  restoredInput?: string;
+}
+
 /** A permission request that the UI must present to the user. */
 export interface PermissionRequest {
   toolName: string;

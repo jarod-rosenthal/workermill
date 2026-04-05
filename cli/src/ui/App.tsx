@@ -20,6 +20,7 @@ import type {
   ToolCallInfo,
   PermissionRequest,
   AgentStatus,
+  RollbackResult,
 } from "./types.js";
 
 interface AppProps {
@@ -34,7 +35,7 @@ interface AppProps {
   /** Called when the user presses ESC to cancel the running agent. */
   onCancel: () => void;
   /** Called on double-ESC to roll back the last exchange. */
-  onRollback: () => boolean;
+  onRollback: () => RollbackResult;
   /** Called when user cycles permission mode with Shift+Tab. */
   onCyclePermissionMode: () => void;
   /** Current permission mode label for status bar. */
@@ -94,6 +95,67 @@ const ORCHESTRATOR_CONFIRM_ACK_MS = 450;
 const KITTY_KEYBOARD_ENABLE = "\x1b[>1u";
 const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
 const INTERRUPT_DUPLICATE_GUARD_MS = 500;
+const ESC_DOUBLE_PRESS_WINDOW_MS = 1500;
+
+function isEscapeInput(input: string, key: { escape?: boolean }): boolean {
+  return Boolean(key.escape) || input === "\u001b";
+}
+
+export interface EscDecision {
+  nextLastEscAt: number;
+  shouldCancel: boolean;
+  shouldOfferRollback: boolean;
+  queueDeferredRollbackOffer: boolean;
+  clearDeferredRollback: boolean;
+}
+
+export function decideEscapeAction(
+  now: number,
+  lastEscAt: number,
+  isIdle: boolean,
+): EscDecision {
+  const repeatedEsc = now - lastEscAt < ESC_DOUBLE_PRESS_WINDOW_MS;
+
+  if (!isIdle) {
+    return {
+      nextLastEscAt: now,
+      shouldCancel: true,
+      shouldOfferRollback: false,
+      queueDeferredRollbackOffer: repeatedEsc,
+      clearDeferredRollback: false,
+    };
+  }
+
+  if (repeatedEsc) {
+    return {
+      nextLastEscAt: 0,
+      shouldCancel: false,
+      shouldOfferRollback: true,
+      queueDeferredRollbackOffer: false,
+      clearDeferredRollback: true,
+    };
+  }
+
+  return {
+    nextLastEscAt: now,
+    shouldCancel: false,
+    shouldOfferRollback: false,
+    queueDeferredRollbackOffer: false,
+    clearDeferredRollback: true,
+  };
+}
+
+export function shouldRunDeferredRollback(
+  status: AgentStatus,
+  orchestratorStatus: string,
+  pendingRollbackOffer: boolean,
+  lastEscAt: number,
+  now: number,
+): boolean {
+  if (status !== "idle" || orchestratorStatus) return false;
+  if (!pendingRollbackOffer) return false;
+  return now - lastEscAt <= ESC_DOUBLE_PRESS_WINDOW_MS;
+}
 
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
@@ -152,7 +214,7 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
       setAnswered(label);
       setTimeout(() => request.resolve(yes, mode), ORCHESTRATOR_CONFIRM_ACK_MS);
     };
-    if (key.escape) resolve("esc", false);
+    if (isEscapeInput(input, key)) resolve("esc", false);
     else if (input === "y" || input === "Y") resolve("y", true);
     else if (input === "n" || input === "N") resolve("n", false);
     else if (isRevisionPrompt && (input === "a" || input === "A")) resolve("a", true, "always");
@@ -187,7 +249,7 @@ function OrchestratorPrompt({ request }: {
       setTimeout(() => request.resolve(answer), 100);
       return;
     }
-    if (key.escape) {
+    if (isEscapeInput(input, key)) {
       setSubmitted(request.suggestion);
       setTimeout(() => request.resolve(request.suggestion), 100);
       return;
@@ -235,9 +297,13 @@ export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const lastEscRef = useRef(0);
+  const pendingRollbackAfterCancelRef = useRef(false);
+  const rollbackPrefillSeqRef = useRef(0);
   const lastInterruptRef = useRef(0);
   const lastInterruptEventRef = useRef(0);
   const [queuedInput, setQueuedInput] = useState<string | null>(null);
+  const [rollbackPrefill, setRollbackPrefill] = useState<{ value: string; seq: number } | null>(null);
+  const [rollbackOfferVisible, setRollbackOfferVisible] = useState(false);
 
   const handleQueue = useCallback((value: string) => {
     setQueuedInput((prev) => prev ?? value);
@@ -245,6 +311,22 @@ export function App(props: AppProps): React.ReactElement {
 
   const handleEditQueue = useCallback(() => {
     setQueuedInput(null);
+  }, []);
+
+  const handleRollbackResult = useCallback((result: RollbackResult) => {
+    if (!result.rolledBack) return;
+    setQueuedInput(null);
+    if (typeof result.restoredInput === "string") {
+      rollbackPrefillSeqRef.current += 1;
+      setRollbackPrefill({
+        value: result.restoredInput,
+        seq: rollbackPrefillSeqRef.current,
+      });
+    }
+  }, []);
+
+  const handlePrefillApplied = useCallback(() => {
+    setRollbackPrefill(null);
   }, []);
 
   const exitNow = useCallback(() => {
@@ -287,6 +369,23 @@ export function App(props: AppProps): React.ReactElement {
     }
   }, [props.status, props.orchestratorStatus, queuedInput, props.onSubmit]);
 
+  // If user pressed ESC twice while we were still winding down, apply rollback
+  // immediately once the UI reaches a stable idle state.
+  useEffect(() => {
+    const now = Date.now();
+    if (!pendingRollbackAfterCancelRef.current) return;
+    if (shouldRunDeferredRollback(props.status, props.orchestratorStatus, true, lastEscRef.current, now)) {
+      setRollbackOfferVisible(true);
+      pendingRollbackAfterCancelRef.current = false;
+      lastEscRef.current = 0;
+      return;
+    }
+    if (props.status !== "idle" || props.orchestratorStatus) return;
+    if (now - lastEscRef.current > ESC_DOUBLE_PRESS_WINDOW_MS) {
+      pendingRollbackAfterCancelRef.current = false;
+    }
+  }, [props.status, props.orchestratorStatus, props.onRollback, handleRollbackResult]);
+
   // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
   // input so modified Enter combos can be delivered distinctly.
   useEffect(() => {
@@ -300,29 +399,54 @@ export function App(props: AppProps): React.ReactElement {
       }
     };
   }, []);
+  const handleGlobalInput = useCallback((input: string, key: {
+    upArrow?: boolean;
+    downArrow?: boolean;
+    leftArrow?: boolean;
+    rightArrow?: boolean;
+    return?: boolean;
+    escape?: boolean;
+    ctrl?: boolean;
+    shift?: boolean;
+    tab?: boolean;
+  }) => {
+    if (rollbackOfferVisible) {
+      if (key.return || input === "y" || input === "Y") {
+        handleRollbackResult(props.onRollback());
+        setRollbackOfferVisible(false);
+        return;
+      }
+      if (isEscapeInput(input, key) || input === "n" || input === "N") {
+        setRollbackOfferVisible(false);
+        return;
+      }
+      return;
+    }
 
-
-
-  useInput((input, key) => {
-    if (key.escape) {
+    if (isEscapeInput(input, key)) {
       const now = Date.now();
+      const isIdle = props.status === "idle" && !props.orchestratorStatus;
+      const decision = decideEscapeAction(now, lastEscRef.current, isIdle);
 
-      if (props.status !== "idle") {
-        // First ESC while running — cancel the current operation
+      if (decision.queueDeferredRollbackOffer) {
+        pendingRollbackAfterCancelRef.current = true;
+      }
+      if (decision.clearDeferredRollback) {
+        pendingRollbackAfterCancelRef.current = false;
+      }
+      lastEscRef.current = decision.nextLastEscAt;
+
+      if (decision.shouldCancel) {
         props.onCancel();
         setQueuedInput(null);
-        lastEscRef.current = now;
+        setRollbackOfferVisible(false);
         return;
       }
 
-      // Double ESC while idle — roll back last exchange
-      if (props.status === "idle" && now - lastEscRef.current < 1500) {
-        props.onRollback();
-        lastEscRef.current = 0; // reset so triple ESC doesn't keep rolling back
+      if (decision.shouldOfferRollback) {
+        setRollbackOfferVisible(true);
         return;
       }
-
-      lastEscRef.current = now;
       return;
     }
 
@@ -349,7 +473,8 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
-  }, { isActive: true });
+  }, [rollbackOfferVisible, props.status, props.orchestratorStatus, props.onCancel, props.onRollback, props.onCyclePermissionMode, props.orchestratorPaused, props.onResumeOrchestrator, props.onPauseOrchestrator, handleRollbackResult, handleInterrupt]);
+  useInput(handleGlobalInput, { isActive: true });
 
   const mode = props.planMode
     ? "PLAN"
@@ -455,6 +580,12 @@ export function App(props: AppProps): React.ReactElement {
       ) : !props.permissionRequest && !props.orchestratorConfirm ? (
         <>
           {shouldAddQueuedInputSpacer ? <Box height={1} /> : null}
+          {rollbackOfferVisible ? (
+            <Box marginLeft={2} marginBottom={1}>
+              <Text color={theme.warning}>Roll back last exchange and restore your previous prompt? </Text>
+              <Text dimColor>(Enter/y = yes, n/Esc = no)</Text>
+            </Box>
+          ) : null}
           <Input
             onSubmit={props.onSubmit}
             isActive={props.status === "idle" && !props.orchestratorStatus}
@@ -462,6 +593,9 @@ export function App(props: AppProps): React.ReactElement {
             onQueue={handleQueue}
             onEditQueue={handleEditQueue}
             queuedValue={queuedInput}
+            prefillValue={rollbackPrefill?.value ?? null}
+            prefillSeq={rollbackPrefill?.seq ?? 0}
+            onPrefillApplied={handlePrefillApplied}
             history={props.inputHistory}
           />
         </>

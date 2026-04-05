@@ -57,6 +57,12 @@ interface InputProps {
   queuedValue?: string | null;
   /** Called when user recalls a queued message for editing (Up arrow). */
   onEditQueue?: () => void;
+  /** Prefill input text (used for rollback/rewind restore). */
+  prefillValue?: string | null;
+  /** Monotonic sequence used to apply prefill once per event. */
+  prefillSeq?: number;
+  /** Called after prefill is applied. */
+  onPrefillApplied?: () => void;
 }
 
 export function shouldCaptureInput(isActive: boolean, isQueued?: boolean): boolean {
@@ -66,7 +72,18 @@ export function shouldCaptureInput(isActive: boolean, isQueued?: boolean): boole
 /**
  * User text input component with history and slash command autocomplete.
  */
-export function Input({ onSubmit, isActive, history, isQueued, onQueue, queuedValue, onEditQueue }: InputProps): React.ReactElement {
+export function Input({
+  onSubmit,
+  isActive,
+  history,
+  isQueued,
+  onQueue,
+  queuedValue,
+  onEditQueue,
+  prefillValue,
+  prefillSeq,
+  onPrefillApplied,
+}: InputProps): React.ReactElement {
   const { stdout } = useStdout();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -83,6 +100,18 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue, queuedVa
   useEffect(() => {
     cursorPosRef.current = cursorPos;
   }, [cursorPos]);
+
+  useEffect(() => {
+    if (prefillValue == null) return;
+    const nextValue = prefillValue;
+    valueRef.current = nextValue;
+    cursorPosRef.current = nextValue.length;
+    setValue(nextValue);
+    setCursorPos(nextValue.length);
+    setHistoryIndex(-1);
+    setCompletionIndex(0);
+    onPrefillApplied?.();
+  }, [prefillSeq, prefillValue, onPrefillApplied]);
 
   const captureInput = shouldCaptureInput(isActive, isQueued);
   const hasQueuedValue = Boolean(isQueued && queuedValue && queuedValue.length > 0);
@@ -228,6 +257,7 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue, queuedVa
   useInput(
     (input, key) => {
       if (!isActive && !isQueued) return;
+      const isEscape = key.escape || input === "\u001b";
 
       // Single-slot queued message is locked until recalled for edit.
       if (hasQueuedValue) {
@@ -423,7 +453,7 @@ export function Input({ onSubmit, isActive, history, isQueued, onQueue, queuedVa
       }
 
       // Escape: clear completions / clear input
-      if (key.escape) {
+      if (isEscape) {
         if (showCompletions) {
           setCompletionIndex(0);
         }

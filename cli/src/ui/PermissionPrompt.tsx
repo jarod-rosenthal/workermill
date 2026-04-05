@@ -64,9 +64,10 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
   useInput(
     (input, key) => {
       if (resolved) return;
+      const isEscape = key.escape || input === "\u001b";
 
       // ESC denies the permission request
-      if (key.escape) {
+      if (isEscape) {
         setResolved(true);
         request.resolve(false);
         return;

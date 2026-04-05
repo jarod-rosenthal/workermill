@@ -42,6 +42,7 @@ import type {
   ToolCallInfo,
   PermissionRequest,
   AgentStatus,
+  RollbackResult,
 } from "./types.js";
 
 const TRACE_DISPATCH = process.env.WM_TRACE_DISPATCH === "1";
@@ -138,8 +139,8 @@ export interface UseAgentReturn {
   submit: (input: string, displayText?: string) => void;
   /** Cancel the running stream / tool execution. */
   cancel: () => void;
-  /** Roll back the last user+assistant exchange from the conversation. */
-  rollback: () => boolean;
+  /** Roll back the last user+assistant exchange and restore prior user input. */
+  rollback: () => RollbackResult;
   /** Toggle trust-all mode at runtime. */
   setTrustAll: (v: boolean) => void;
   /** Toggle plan (read-only) mode at runtime. */
@@ -1227,17 +1228,19 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setPermissionRequest(null);
   }, []);
 
-  /** Remove the last user+assistant exchange from the session. Returns true if rolled back. */
-  const rollback = useCallback((): boolean => {
+  /** Remove the last user+assistant exchange from the session and return restored user input. */
+  const rollback = useCallback((): RollbackResult => {
     const session = sessionRef.current;
-    if (session.messages.length < 2) return false;
+    if (session.messages.length < 2) return { rolledBack: false };
 
     // Remove trailing assistant message(s) and the last user message
     while (session.messages.length > 0 && session.messages[session.messages.length - 1].role === "assistant") {
       session.messages.pop();
     }
+    let restoredInput: string | undefined;
     if (session.messages.length > 0 && session.messages[session.messages.length - 1].role === "user") {
-      session.messages.pop();
+      const popped = session.messages.pop();
+      restoredInput = popped?.content ?? undefined;
     }
     saveSession(session);
 
@@ -1252,7 +1255,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       return prev;
     });
 
-    return true;
+    return { rolledBack: true, restoredInput };
   }, []);
 
   // ------- Setters exposed to the UI -------- //

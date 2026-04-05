@@ -412,17 +412,22 @@ describe("rollback logic", () => {
     timestamp: string;
   }
 
-  function rollbackSession(messages: SessionMessage[]): { rolled: boolean; remaining: SessionMessage[] } {
-    if (messages.length < 2) return { rolled: false, remaining: messages };
+  function rollbackSession(messages: SessionMessage[]): {
+    rolledBack: boolean;
+    restoredInput?: string;
+    remaining: SessionMessage[];
+  } {
+    if (messages.length < 2) return { rolledBack: false, remaining: messages };
 
     // Remove trailing assistant message(s) then last user message
     while (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
       messages.pop();
     }
+    let restoredInput: string | undefined;
     if (messages.length > 0 && messages[messages.length - 1].role === "user") {
-      messages.pop();
+      restoredInput = messages.pop()?.content;
     }
-    return { rolled: true, remaining: messages };
+    return { rolledBack: true, restoredInput, remaining: messages };
   }
 
   it("removes the last user + assistant exchange", () => {
@@ -435,7 +440,8 @@ describe("rollback logic", () => {
 
     const result = rollbackSession(msgs);
 
-    expect(result.rolled).toBe(true);
+    expect(result.rolledBack).toBe(true);
+    expect(result.restoredInput).toBe("second question");
     expect(result.remaining).toHaveLength(2);
     expect(result.remaining[0].content).toBe("first question");
     expect(result.remaining[1].content).toBe("first answer");
@@ -450,7 +456,8 @@ describe("rollback logic", () => {
 
     const result = rollbackSession(msgs);
 
-    expect(result.rolled).toBe(true);
+    expect(result.rolledBack).toBe(true);
+    expect(result.restoredInput).toBe("question");
     expect(result.remaining).toHaveLength(0);
   });
 
@@ -461,14 +468,14 @@ describe("rollback logic", () => {
 
     const result = rollbackSession(msgs);
 
-    expect(result.rolled).toBe(false);
+    expect(result.rolledBack).toBe(false);
     expect(result.remaining).toHaveLength(1);
   });
 
   it("returns false for empty session", () => {
     const result = rollbackSession([]);
 
-    expect(result.rolled).toBe(false);
+    expect(result.rolledBack).toBe(false);
     expect(result.remaining).toHaveLength(0);
   });
 
@@ -480,8 +487,9 @@ describe("rollback logic", () => {
 
     const result = rollbackSession(msgs);
 
-    // 2 messages, so rolled = true, pops both assistants, no user to pop
-    expect(result.rolled).toBe(true);
+    // 2 messages, so rolledBack = true, pops both assistants, no user to pop
+    expect(result.rolledBack).toBe(true);
+    expect(result.restoredInput).toBeUndefined();
     expect(result.remaining).toHaveLength(0);
   });
 });

@@ -325,6 +325,9 @@ export function Root(props: RootProps): React.ReactElement {
       toolCounts={agent.toolCounts}
       sessionStart={agent.sessionStart}
       tokPerSec={{ ...agent.tokPerSec, ...tokPerSec }}
+      orchestratorPaused={orchestrator.paused}
+      onPauseOrchestrator={orchestrator.pause}
+      onResumeOrchestrator={orchestrator.resume}
     />
   );
 }

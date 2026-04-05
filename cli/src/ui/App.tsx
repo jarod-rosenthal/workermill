@@ -77,6 +77,12 @@ interface AppProps {
   streamingToolCalls?: ToolCallInfo[];
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec?: Record<string, number>;
+  /** Whether the orchestrator is currently paused. */
+  orchestratorPaused?: boolean;
+  /** Called when Ctrl+P is pressed to pause the orchestrator. */
+  onPauseOrchestrator?: () => void;
+  /** Called when Ctrl+P is pressed to resume the orchestrator. */
+  onResumeOrchestrator?: () => void;
 }
 
 /** Static activity dot — no animation, no re-renders. */
@@ -330,6 +336,16 @@ export function App(props: AppProps): React.ReactElement {
     // Allow during any status except permission (where a prompt is active)
     if (key.tab && key.shift && props.status !== "permission") {
       props.onCyclePermissionMode();
+      return;
+    }
+
+    // Ctrl+P: pause/resume orchestrator
+    if (key.ctrl && input === "p") {
+      if (props.orchestratorPaused) {
+        props.onResumeOrchestrator?.();
+      } else {
+        props.onPauseOrchestrator?.();
+      }
       return;
     }
 

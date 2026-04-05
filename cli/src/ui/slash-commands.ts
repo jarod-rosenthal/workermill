@@ -376,29 +376,30 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         // Update config
         if (modelConfig) {
-          if (!existingProviderConfig && !targetRole) {
-            const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
-            modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
+          if (!targetRole) {
+            // Worker switch — ensure provider entry exists with correct model, always set as default
+            if (!modelConfig.providers[newProvider]) {
+              const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
+              modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
+            } else {
+              modelConfig.providers[newProvider].model = newModel;
+              if (contextOverride) modelConfig.providers[newProvider].contextLength = contextOverride;
+            }
             modelConfig.default = newProvider;
-          } else if (!existingProviderConfig && targetRole) {
-            const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
-            modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
-          } else if (!targetRole && existingProviderConfig) {
-            // Worker switch — update the provider's default model
-            existingProviderConfig.model = newModel;
-            if (contextOverride) existingProviderConfig.contextLength = contextOverride;
-            modelConfig.default = newProvider;
-          }
-
-          if (targetRole) {
-            // Role switch — create a dedicated provider entry for this role
-            // e.g. "openai_reviewer" with the specific model, sharing the API key
+          } else {
+            // Role switch — create base provider entry for API key storage only (no model, to avoid
+            // polluting the worker config with the role's model). Create a dedicated role entry.
+            if (!modelConfig.providers[newProvider]) {
+              const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
+              modelConfig.providers[newProvider] = { model: "", ...(keyRef ? { apiKey: keyRef } : {}) };
+            }
             const roleProviderKey = `${newProvider}_${targetRole}`;
-            const apiKey = existingProviderConfig?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
+            const baseEntry = modelConfig.providers[newProvider];
+            const apiKey = baseEntry?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
             modelConfig.providers[roleProviderKey] = {
               model: newModel,
               ...(apiKey ? { apiKey } : {}),
-              ...(existingProviderConfig?.host ? { host: existingProviderConfig.host } : {}),
+              ...(baseEntry?.host ? { host: baseEntry.host } : {}),
               ...(contextOverride ? { contextLength: contextOverride } : {}),
             };
             modelConfig.routing = { ...modelConfig.routing, [targetRole]: roleProviderKey };

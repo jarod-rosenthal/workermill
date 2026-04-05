@@ -194,6 +194,26 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
  *
  * Returns the commit hash, or empty string if nothing to commit.
  */
+/**
+ * Remove untracked nested git repositories from the working directory.
+ * Experts sometimes create temporary test repos (e.g. `git init test-repo/`)
+ * which cause `git add .` to fail with "does not have a commit checked out".
+ */
+function removeNestedGitRepos(workingDir: string): void {
+  try {
+    const dirs = execSync("git ls-files --others --exclude-standard --directory", {
+      cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+    });
+    for (const dir of dirs.split("\n").filter(Boolean)) {
+      const fullPath = path.join(workingDir, dir.replace(/\/$/, ""));
+      if (fs.existsSync(path.join(fullPath, ".git"))) {
+        logger.info("Removing nested git repo before commit", { path: dir.trim() });
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      }
+    }
+  } catch { /* non-fatal */ }
+}
+
 export function commitStoryChanges(
   workingDir: string,
   storyIndex: number,
@@ -203,6 +223,10 @@ export function commitStoryChanges(
   try {
     // Safety: ensure .gitignore blocks build artifacts
     ensureGitignoreSafety(workingDir);
+
+    // Remove any nested git repos left by expert test setup (e.g. `git init test-repo/`)
+    // These cause `git add .` to fail with "does not have a commit checked out"
+    removeNestedGitRepos(workingDir);
 
     // Stage all changes (respects .gitignore)
     execSync("git add .", { cwd: workingDir, stdio: "pipe" });
@@ -224,7 +248,7 @@ export function commitStoryChanges(
     logger.info("Committed story changes", { storyIndex, persona, hash });
     return hash;
   } catch (err) {
-    logger.debug("Commit failed", { storyIndex, error: err instanceof Error ? err.message : String(err) });
+    logger.error("Commit failed", { storyIndex, error: err instanceof Error ? err.message : String(err) });
     return "";
   }
 }
@@ -241,6 +265,7 @@ export function commitRevisionChanges(
 ): string {
   try {
     ensureGitignoreSafety(workingDir);
+    removeNestedGitRepos(workingDir);
     execSync("git add .", { cwd: workingDir, stdio: "pipe" });
 
     const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
@@ -255,7 +280,7 @@ export function commitRevisionChanges(
     logger.info("Committed revision changes", { storyIndex, persona, revisionRound, hash });
     return hash;
   } catch (err) {
-    logger.debug("Revision commit failed", { storyIndex, error: err instanceof Error ? err.message : String(err) });
+    logger.error("Revision commit failed", { storyIndex, error: err instanceof Error ? err.message : String(err) });
     return "";
   }
 }

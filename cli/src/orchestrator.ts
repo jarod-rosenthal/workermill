@@ -24,6 +24,7 @@ import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt 
 import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "./safety.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
+import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
@@ -1340,10 +1341,11 @@ export async function runOrchestration(
 
   // Create a reusable TicketOps instance for posting updates throughout the run
   let ticketOps: InstanceType<typeof import("./ticket-ops.js").TicketOps> | null = null;
+  let resolvedTicketSystem: string = config.ticketSystem || "github";
   if (ticketKey) {
     try {
       const { TicketOps } = await import("./ticket-ops.js");
-      const ticketSystem = config.ticketSystem || "github";
+      const ticketSystem = resolvedTicketSystem;
       const ops = new TicketOps(ticketKey, ticketSystem);
       logger.info("TicketOps availability check", {
         ticketKey, ticketSystem, isAvailable: ops.isAvailable(),
@@ -2832,6 +2834,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                   prParts.push(feedback);
                 }
               }
+              // Link PR to source issue in body (GitHub auto-closes on merge; we also close explicitly below)
+              if (ticketKey && resolvedTicketSystem === "github") {
+                const issueNum = extractGithubIssueNumber(ticketKey);
+                prParts.push(`\nCloses #${issueNum}`);
+              }
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
               const prUrl = execSync(
@@ -2840,6 +2847,16 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               ).trim();
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
+
+              // Close the source ticket — work is done, review approved, PR open
+              if (ticketOps) {
+                try {
+                  await ticketOps.transitionTo("done");
+                  output.log("system", `Closed ${ticketKey}`);
+                } catch {
+                  // Non-critical — don't block on ticket system errors
+                }
+              }
 
               // Post the tech lead review as a proper GitHub PR review
               // Matches worker/epic/coordinator-review.ts ensureGitHubReviewPosted()

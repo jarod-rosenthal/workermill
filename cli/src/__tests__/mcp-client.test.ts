@@ -23,22 +23,22 @@ vi.mock("ai", () => ({
 // Mock MCP SDK
 const mockClient = {
   connect: vi.fn(),
-  initialize: vi.fn(),
-  request: vi.fn(),
+  listTools: vi.fn(),
+  callTool: vi.fn(),
   close: vi.fn(),
 };
-const mockHTTPTransport = {};
+const mockStreamableHTTPTransport = {};
 const mockSSETransport = {};
 
-const MockClient = vi.fn(() => mockClient);
-const MockHTTPClientTransport = vi.fn(function() { return mockHTTPTransport; });
+const MockClient = vi.fn(function() { return mockClient; });
+const MockStreamableHTTPClientTransport = vi.fn(function() { return mockStreamableHTTPTransport; });
 const MockSSEClientTransport = vi.fn(function() { return mockSSETransport; });
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: MockClient,
 }));
-vi.mock("@modelcontextprotocol/sdk/client/http.js", () => ({
-  HTTPClientTransport: MockHTTPClientTransport,
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+  StreamableHTTPClientTransport: MockStreamableHTTPClientTransport,
 }));
 vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport: MockSSEClientTransport,
@@ -173,9 +173,11 @@ describe("mcp-client", () => {
 
     // Reset MCP SDK mocks
     mockClient.connect.mockReset();
-    mockClient.initialize.mockReset();
-    mockClient.request.mockReset();
+    mockClient.listTools.mockReset();
+    mockClient.callTool.mockReset();
     mockClient.close.mockReset();
+    MockStreamableHTTPClientTransport.mockClear();
+    MockSSEClientTransport.mockClear();
 
     mcpClient = await import("../mcp-client.js");
   });
@@ -624,8 +626,7 @@ describe("mcp-client", () => {
     });
 
     it("calls client.close for HTTP/SSE servers", async () => {
-      mockClient.initialize.mockResolvedValue({});
-      mockClient.request.mockResolvedValue({ tools: [] });
+      mockClient.listTools.mockResolvedValue({ tools: [] });
 
       await mcpClient.startMCPServer("http-srv", {
         transport: "http",
@@ -743,9 +744,9 @@ describe("mcp-client", () => {
       expect(result).toContain("image");
     });
 
-    it("calls client.request for HTTP/SSE servers", async () => {
-      mockClient.initialize.mockResolvedValue({});
-      mockClient.request.mockResolvedValueOnce({ tools: [] }).mockResolvedValueOnce({
+    it("calls client.callTool for HTTP/SSE servers", async () => {
+      mockClient.listTools.mockResolvedValue({ tools: [] });
+      mockClient.callTool.mockResolvedValue({
         content: [{ type: "text", text: "response from http server" }],
       });
 
@@ -756,7 +757,7 @@ describe("mcp-client", () => {
 
       const result = await mcpClient.callMCPTool("http-srv", "some_tool", { arg: "value" });
 
-      expect(mockClient.request).toHaveBeenCalledWith("tools/call", {
+      expect(mockClient.callTool).toHaveBeenCalledWith({
         name: "some_tool",
         arguments: { arg: "value" },
       });
@@ -962,9 +963,8 @@ describe("mcp-client", () => {
       ).resolves.not.toThrow();
     });
 
-    it("creates HTTP client transport for http transport", async () => {
-      mockClient.initialize.mockResolvedValue({});
-      mockClient.request.mockResolvedValue({ tools: [] });
+    it("creates StreamableHTTP client transport for http transport", async () => {
+      mockClient.listTools.mockResolvedValue({ tools: [] });
 
       await mcpClient.startMCPServer("http-srv", {
         transport: "http",
@@ -972,20 +972,26 @@ describe("mcp-client", () => {
         headers: { Authorization: "Bearer token" },
       });
 
+      expect(MockStreamableHTTPClientTransport).toHaveBeenCalledWith(
+        new URL("http://localhost:3000/mcp"),
+        { requestInit: { headers: { Authorization: "Bearer token" } } },
+      );
       expect(mockClient.connect).toHaveBeenCalled();
-      expect(mockClient.initialize).toHaveBeenCalled();
-      expect(mockClient.request).toHaveBeenCalledWith("tools/list", {});
+      expect(mockClient.listTools).toHaveBeenCalled();
     });
 
     it("creates SSE client transport for sse transport", async () => {
-      mockClient.initialize.mockResolvedValue({});
-      mockClient.request.mockResolvedValue({ tools: [] });
+      mockClient.listTools.mockResolvedValue({ tools: [] });
 
       await mcpClient.startMCPServer("sse-srv", {
         transport: "sse",
         url: "http://localhost:3000/sse",
       });
 
+      expect(MockSSEClientTransport).toHaveBeenCalledWith(
+        new URL("http://localhost:3000/sse"),
+        { requestInit: { headers: {} } },
+      );
       expect(mockClient.connect).toHaveBeenCalled();
     });
 

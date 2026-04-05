@@ -3022,11 +3022,44 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         if (confirmed) {
           try {
             output.status("Pushing branch...");
-            const pushOutput = execSync(`git push -u origin "${featureBranch}" 2>&1`, {
-              cwd: workingDir,
-              encoding: "utf-8",
-              stdio: "pipe",
-            }).trim();
+            let pushOutput = "";
+            try {
+              pushOutput = execSync(`git push -u origin "${featureBranch}" 2>&1`, {
+                cwd: workingDir,
+                encoding: "utf-8",
+                stdio: "pipe",
+              }).trim();
+            } catch (pushErr) {
+              const msg = String(pushErr);
+              const isDiverged = msg.includes("non-fast-forward") || msg.includes("Updates were rejected");
+              if (isDiverged) {
+                output.statusDone();
+                output.log("system", `Push failed — remote branch \`${featureBranch}\` has divergent history from a previous run.`);
+                const force = await output.confirm("Force-push with --force-with-lease? (safe if you reset the branch yourself)");
+                const confirmed = typeof force === "object" ? force.allowed : force;
+                if (confirmed) {
+                  try {
+                    pushOutput = execSync(`git push --force-with-lease -u origin "${featureBranch}" 2>&1`, {
+                      cwd: workingDir,
+                      encoding: "utf-8",
+                      stdio: "pipe",
+                    }).trim();
+                    output.statusDone();
+                  } catch (forceErr) {
+                    output.statusDone();
+                    output.log("system", `Force-push also failed: ${String(forceErr)}`);
+                    output.log("system", `Push manually: \`git push --force-with-lease -u origin ${featureBranch}\``);
+                    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+                  }
+                } else {
+                  output.statusDone();
+                  output.log("system", `Branch is local. Push manually: \`git push --force-with-lease -u origin ${featureBranch}\``);
+                  return { stories: sorted, completedStoryIds, featureBranch, userTask };
+                }
+              } else {
+                throw pushErr;
+              }
+            }
             logger.info("Branch push completed", {
               featureBranch,
               output: clipLogText(pushOutput),

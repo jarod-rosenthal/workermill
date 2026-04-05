@@ -150,13 +150,77 @@ export function loadProjectConfig(): Partial<CliConfig> | null {
   }
 }
 
+export function loadProjectSettings(): PermissionRuleConfig | null {
+  try {
+    const projectSettings = path.join(process.cwd(), ".workermill", "settings.json");
+    if (!fs.existsSync(projectSettings)) return null;
+    const raw = fs.readFileSync(projectSettings, "utf-8");
+    return JSON.parse(raw) as PermissionRuleConfig;
+  } catch (err) {
+    logger.error("Failed to load project settings", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+export function saveProjectSettings(rules: PermissionRuleConfig, cwd = process.cwd()): void {
+  const workermillDir = path.join(cwd, ".workermill");
+  if (!fs.existsSync(workermillDir)) {
+    fs.mkdirSync(workermillDir, { recursive: true });
+  }
+  const settingsPath = path.join(workermillDir, "settings.json");
+  fs.writeFileSync(settingsPath, JSON.stringify(rules, null, 2) + "\n", "utf-8");
+}
+
+export function loadLocalSettings(): PermissionRuleConfig | null {
+  try {
+    const localSettings = path.join(process.cwd(), ".workermill", "settings.local.json");
+    if (!fs.existsSync(localSettings)) return null;
+    const raw = fs.readFileSync(localSettings, "utf-8");
+    return JSON.parse(raw) as PermissionRuleConfig;
+  } catch (err) {
+    logger.error("Failed to load local settings", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+export function saveLocalSettings(rules: PermissionRuleConfig, cwd = process.cwd()): void {
+  const workermillDir = path.join(cwd, ".workermill");
+  if (!fs.existsSync(workermillDir)) {
+    fs.mkdirSync(workermillDir, { recursive: true });
+  }
+  const localSettingsPath = path.join(workermillDir, "settings.local.json");
+  fs.writeFileSync(localSettingsPath, JSON.stringify(rules, null, 2) + "\n", "utf-8");
+}
+
+// Updated resolveConfig with new settings loading
 export function resolveConfig(): CliConfig {
   const global = loadConfig();
   const project = loadProjectConfig();
+  const pSettings = loadProjectSettings();
+  const lSettings = loadLocalSettings();
 
   if (!global) {
     throw new Error("No configuration found. Run `workermill` to set up a provider.");
   }
+
+  // Merge permissions: global → project settings → local settings
+  const mergedPermissions: PermissionRuleConfig = {
+    allow: [
+      ...(global.permissions?.allow || []),
+      ...(pSettings?.allow || []),
+      ...(lSettings?.allow || []),
+    ],
+    ask: [
+      ...(global.permissions?.ask || []),
+      ...(pSettings?.ask || []),
+      ...(lSettings?.ask || []),
+    ],
+    deny: [
+      ...(global.permissions?.deny || []),
+      ...(pSettings?.deny || []),
+      ...(lSettings?.deny || []),
+    ],
+  };
 
   // Project config overrides global
   return {
@@ -172,11 +236,7 @@ export function resolveConfig(): CliConfig {
     git: { ...global.git, ...(project?.git || {}) },
     sandbox: project?.sandbox ?? global.sandbox,
     bell: project?.bell ?? global.bell,
-    permissions: {
-      allow: [...(global.permissions?.allow || []), ...(project?.permissions?.allow || [])],
-      ask: [...(global.permissions?.ask || []), ...(project?.permissions?.ask || [])],
-      deny: [...(global.permissions?.deny || []), ...(project?.permissions?.deny || [])],
-    },
+    permissions: mergedPermissions,
     ticketSystem: project?.ticketSystem || global.ticketSystem,
     jira: project?.jira || global.jira,
     linear: project?.linear || global.linear,

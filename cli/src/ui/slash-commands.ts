@@ -11,7 +11,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../session.js";
-import { loadConfig, saveConfig } from "../config.js";
+import { loadConfig, saveConfig, loadProjectSettings, saveProjectSettings, loadLocalSettings } from "../config.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
@@ -1021,24 +1021,37 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "permissions": {
       if (!arg) {
         const modeLabel = ctx.permissionMode || "default";
-        const cfg = loadConfig();
-        const allowRules = cfg?.permissions?.allow || [];
-        const askRules = cfg?.permissions?.ask || [];
-        const denyRules = cfg?.permissions?.deny || [];
-        const rulesInfo = (allowRules.length + askRules.length + denyRules.length) > 0
-          ? `\n\n**Saved rules:**\n` +
-            (denyRules.length ? `Deny: ${denyRules.map(r => `\`${r}\``).join(", ")}\n` : "") +
-            (askRules.length ? `Ask: ${askRules.map(r => `\`${r}\``).join(", ")}\n` : "") +
-            (allowRules.length ? `Allow: ${allowRules.map(r => `\`${r}\``).join(", ")}` : "")
+        const global = loadConfig();
+        const pSettings = loadProjectSettings();
+        const lSettings = loadLocalSettings();
+
+        // Collect rules with sources
+        const rules: Array<{ rule: string; type: "allow" | "ask" | "deny"; source: "global" | "project" | "local" }> = [];
+
+        const addRules = (config: PermissionRuleConfig | null | undefined, source: "global" | "project" | "local") => {
+          if (!config) return;
+          config.allow?.forEach(rule => rules.push({ rule, type: "allow", source }));
+          config.ask?.forEach(rule => rules.push({ rule, type: "ask", source }));
+          config.deny?.forEach(rule => rules.push({ rule, type: "deny", source }));
+        };
+
+        addRules(global?.permissions, "global");
+        addRules(pSettings, "project");
+        addRules(lSettings, "local");
+
+        const rulesInfo = rules.length > 0
+          ? `\n\n**Rules (${rules.length}):**\n` +
+            rules.map(r => `[${r.source}] ${r.type === "allow" ? "Allow" : r.type === "deny" ? "Deny" : "Ask"}: \`${r.rule}\``).join("\n")
           : "";
+
         ctx.addSystemMessage(
           `**Permission mode:** ${modeLabel} *(shift+tab to cycle)*\n\n` +
           "**Modes:** default → acceptEdits → plan → bypassPermissions\n\n" +
           "Commands:\n" +
-          "- `/permissions allow <tool>` — allow a tool for this session\n" +
-          "- `/permissions deny <tool>` — deny a tool for this session\n" +
+          "- `/permissions allow <tool>` — allow a tool permanently (saved to project settings)\n" +
+          "- `/permissions deny <tool>` — deny a tool permanently (saved to project settings)\n" +
           "- `/permissions reset` — reset to default mode\n\n" +
-          "Approving a bash command with **Yes, don't ask again** saves a permanent rule." +
+          "Approving a bash command with **Yes, don't ask again** saves a permanent rule (saved to local settings)." +
           rulesInfo
         );
       } else {
@@ -1061,19 +1074,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             if (!toolName) {
               ctx.addSystemMessage("Usage: `/permissions allow <tool or pattern>`\n\nExamples:\n- `/permissions allow bash` — allow all bash\n- `/permissions allow bash(npm run *)` — allow npm run commands\n- `/permissions allow edit_file` — allow all file edits");
             } else {
-              // Save permanently to config
-              const cfg = loadConfig();
-              if (cfg) {
-                cfg.permissions = cfg.permissions || {};
-                cfg.permissions.allow = cfg.permissions.allow || [];
-                if (!cfg.permissions.allow.includes(toolName)) {
-                  cfg.permissions.allow.push(toolName);
-                  saveConfig(cfg);
-                }
+              // Save to project settings
+              const pSettings = loadProjectSettings() || {};
+              pSettings.allow = pSettings.allow || [];
+              if (!pSettings.allow.includes(toolName)) {
+                pSettings.allow.push(toolName);
+                saveProjectSettings(pSettings);
               }
               // Also add to session for immediate effect
               ctx.allowTool(toolName.split("(")[0]); // session set uses bare tool name
-              ctx.addSystemMessage(`**Allowed** \`${toolName}\` — saved permanently.`);
+              ctx.addSystemMessage(`**Allowed** \`${toolName}\` — saved to project settings.`);
             }
             break;
           }
@@ -1081,18 +1091,15 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             if (!toolName) {
               ctx.addSystemMessage("Usage: `/permissions deny <tool or pattern>`");
             } else {
-              // Save permanently to config
-              const cfg = loadConfig();
-              if (cfg) {
-                cfg.permissions = cfg.permissions || {};
-                cfg.permissions.deny = cfg.permissions.deny || [];
-                if (!cfg.permissions.deny.includes(toolName)) {
-                  cfg.permissions.deny.push(toolName);
-                  saveConfig(cfg);
-                }
+              // Save to project settings
+              const pSettings = loadProjectSettings() || {};
+              pSettings.deny = pSettings.deny || [];
+              if (!pSettings.deny.includes(toolName)) {
+                pSettings.deny.push(toolName);
+                saveProjectSettings(pSettings);
               }
               ctx.denyTool(toolName.split("(")[0]);
-              ctx.addSystemMessage(`**Denied** \`${toolName}\` — saved permanently.`);
+              ctx.addSystemMessage(`**Denied** \`${toolName}\` — saved to project settings.`);
             }
             break;
           }
@@ -1179,6 +1186,23 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /init ----
     case "init": {
+      // Check and update .gitignore for .workermill/*.local.json
+      const gitignorePath = path.join(ctx.workingDir, ".gitignore");
+      let gitignoreUpdated = false;
+      if (fs.existsSync(gitignorePath)) {
+        const gitignoreContent = fs.readFileSync(gitignorePath, "utf-8");
+        if (!gitignoreContent.includes(".workermill/*.local.json")) {
+          fs.appendFileSync(gitignorePath, "\n.workermill/*.local.json\n");
+          gitignoreUpdated = true;
+        }
+      } else {
+        fs.writeFileSync(gitignorePath, ".workermill/*.local.json\n");
+        gitignoreUpdated = true;
+      }
+      if (gitignoreUpdated) {
+        ctx.addSystemMessage("**Updated .gitignore** to exclude `.workermill/*.local.json` (personal permission overrides).");
+      }
+
       const wmPath = path.join(ctx.workingDir, "WORKERMILL.md");
       const exists = fs.existsSync(wmPath);
       const isForce = arg?.includes("--force");

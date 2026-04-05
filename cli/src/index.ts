@@ -368,6 +368,18 @@ program
     console.log();
   });
 
+// ── Models command: list available models ──
+program
+  .command("models [filter]")
+  .description("List available models across all configured providers")
+  .option("--json", "Emit results as a JSON array")
+  .option("--provider <name>", "Filter to a specific provider")
+  .option("--available", "Only show models that are confirmed reachable")
+  .action(async (filter, options) => {
+    const { runModelsCommand } = await import("./models-command.js");
+    await runModelsCommand(filter, options);
+  });
+
 // ── Logs command: stream or tail log entries ──
 program
   .command("logs")

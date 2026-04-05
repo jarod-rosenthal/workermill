@@ -336,6 +336,54 @@ These work but the UX is rough — expect sharp edges.
 
 ---
 
+## CLI Subcommands
+
+### `wm models [filter]`
+
+List all available AI models across configured providers, including live Ollama and LM Studio models.
+
+```
+wm models                    # List all models
+wm models sonnet             # Filter by substring in ID or display name
+wm models --provider openai  # Show only OpenAI models
+wm models --json             # Output as JSON array
+wm models refresh            # Re-fetch live providers and print
+```
+
+**Options:**
+
+- `--json` — Emit results as a JSON array instead of human-readable text
+- `--provider <name>` — Filter to a specific provider (anthropic, openai, ollama, etc.)
+- `--available` — Only show models that are confirmed reachable (static cloud models always pass)
+
+**Output format (human-readable):**
+
+```
+anthropic
+    claude-sonnet-4-6          Claude Sonnet 4.6
+    claude-opus-4-6            Claude Opus 4.6
+
+ollama  (http://localhost:11434)
+    qwen3-coder:latest         local
+```
+
+**Output format (--json):**
+
+```json
+[
+  {
+    "provider": "anthropic",
+    "id": "claude-sonnet-4-6",
+    "displayName": "Claude Sonnet 4.6",
+    "source": "static"
+  }
+]
+```
+
+**Live providers:** Ollama and LM Studio models are fetched from the configured host URLs. If unreachable, prints `(not reachable)` and continues. Timeout: 2000ms per provider.
+
+---
+
 ## CLI Launch Flags
 
 Flags passed when starting the CLI from the shell.
@@ -347,6 +395,7 @@ wm --plan                   # Start in plan mode (read-only tools)
 wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
 wm --auto-revise            # Auto-revise after a failed review without prompting
+wm models                   # List all available models across providers
 wm doctor                   # Health check
 wm logs                     # Stream or tail CLI log entries for the current project
 wm --version                # Print CLI version

@@ -3,7 +3,8 @@ import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
 import { VERSION } from "./version.js";
-import { Client, HTTPClientTransport, SSEClientTransport } from "@modelcontextprotocol/sdk/client";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -239,15 +240,11 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
     logger.info(`Connecting to MCP server: ${name}`, { url: config.url, transport });
 
     let clientTransport;
-    if (transport === "http") {
-      clientTransport = new HTTPClientTransport(new URL(config.url), {
-        headers: config.headers || {},
-      });
-    } else if (transport === "sse") {
-      clientTransport = new SSEClientTransport(new URL(config.url), {
-        headers: config.headers || {},
-      });
-    }
+    // Both "http" and "sse" use SSEClientTransport in SDK 0.5.x.
+    // HTTPClientTransport (streamable HTTP) is available in SDK 1.x+ if we upgrade later.
+    clientTransport = new SSEClientTransport(new URL(config.url), {
+      headers: config.headers || {},
+    });
 
     const client = new Client(
       { name: "workermill-cli", version: VERSION },

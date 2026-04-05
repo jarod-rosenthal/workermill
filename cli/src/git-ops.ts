@@ -74,11 +74,72 @@ export function getCurrentBranch(workingDir: string): string | null {
 }
 
 /**
+ * Derive the feature branch name that /ship would use, without creating it.
+ * Useful for checking existence before prompting the user.
+ */
+export function deriveFeatureBranchName(workingDir: string, taskDescription?: string, branchPrefix?: string): string | null {
+  if (!isGitRepo(workingDir)) return null;
+
+  try {
+    let slug: string;
+    if (taskDescription) {
+      slug = taskDescription
+        .replace(/\.md$/i, "")
+        .replace(/[^a-zA-Z0-9\s-]/g, "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 3)
+        .join("-")
+        .toLowerCase()
+        .replace(/-+/g, "-");
+    } else {
+      return null; // timestamp-based names are always unique
+    }
+
+    let prefix = branchPrefix;
+    if (!prefix) {
+      try {
+        const remote = execSync("git remote get-url origin 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+        const match = remote.match(/[/:]([^/]+?)(?:\.git)?$/);
+        if (match) prefix = match[1];
+      } catch { /* no remote */ }
+      if (!prefix) prefix = path.basename(workingDir);
+    }
+
+    return `${prefix}/${slug}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a local branch exists.
+ */
+export function localBranchExists(workingDir: string, branchName: string): boolean {
+  try {
+    execSync(`git rev-parse --verify "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete a local branch (must not be the current branch).
+ */
+export function deleteLocalBranch(workingDir: string, branchName: string): void {
+  execSync(`git branch -D "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+}
+
+/**
  * Create a feature branch for the /ship session.
  *
  * Branch format: workermill/{slugified-task-description}
  * Falls back to workermill/ship-{short-hash} if no task provided.
  * From worker/epic/git-ops.ts:createStoryBranch() — simplified for CLI.
+ *
+ * Callers should use deriveFeatureBranchName + localBranchExists to check
+ * for existing branches and prompt the user before calling this.
  */
 export function createFeatureBranch(workingDir: string, taskDescription?: string, branchPrefix?: string): string | null {
   if (!isGitRepo(workingDir)) return null;
@@ -86,7 +147,6 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
   try {
     let slug: string;
     if (taskDescription) {
-      // Derive branch name from task: strip file extensions, take first 3 words, slugify
       slug = taskDescription
         .replace(/\.md$/i, "")
         .replace(/[^a-zA-Z0-9\s-]/g, "")
@@ -111,12 +171,11 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
     }
     const branchName = `${prefix}/${slug}`;
 
-    // Create and checkout the feature branch — reuse if it already exists
     try {
       execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
       logger.info("Created feature branch", { branch: branchName });
     } catch {
-      // Branch already exists — checkout it
+      // Branch already exists (user chose "Continue") — just check it out
       execSync(`git checkout "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
       logger.info("Checked out existing feature branch", { branch: branchName });
     }

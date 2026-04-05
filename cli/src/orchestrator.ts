@@ -16,6 +16,7 @@ import { getProviderForPersona } from "./config.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
 import {
   isGitRepo, getCurrentBranch, createFeatureBranch,
+  deriveFeatureBranchName, localBranchExists, deleteLocalBranch,
   commitStoryChanges, commitRevisionChanges,
   captureStoryPriorWork, getDiffForReview, getDiffSinceCommit,
   getHeadHash, returnToOriginalBranch,
@@ -1534,6 +1535,32 @@ export async function runOrchestration(
       const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
       branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
     }
+    // Warn if the branch already exists from a previous run
+    const derivedBranch = deriveFeatureBranchName(workingDir, branchLabel, branchPrefix);
+    if (derivedBranch && localBranchExists(workingDir, derivedBranch)) {
+      output.log("system", `Branch \`${derivedBranch}\` already exists from a previous run.`);
+      output.log("system", `- **Yes** → delete it and start fresh from \`${mainBranch}\``);
+      output.log("system", `- **No** → continue on the existing branch`);
+      const resetR = await output.confirm(`Reset \`${derivedBranch}\` and start fresh?`);
+      const reset = typeof resetR === "object" ? resetR.allowed : resetR;
+      if (reset) {
+        try {
+          deleteLocalBranch(workingDir, derivedBranch);
+          output.coordinatorLog(`Deleted \`${derivedBranch}\` — starting fresh from \`${mainBranch}\``);
+        } catch {
+          output.error(`Could not delete \`${derivedBranch}\` — it may be checked out elsewhere.`);
+          return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        }
+      } else {
+        const continueR = await output.confirm(`Continue on existing \`${derivedBranch}\`?`);
+        const cont = typeof continueR === "object" ? continueR.allowed : continueR;
+        if (!cont) {
+          output.log("system", "Cancelled. Run `/ship` again after resolving the branch.");
+          return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        }
+      }
+    }
+
     featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix);
     if (featureBranch) {
       output.coordinatorLog(`Working on branch: ${featureBranch}`);

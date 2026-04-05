@@ -226,17 +226,7 @@ export function App(props: AppProps): React.ReactElement {
     };
   }, []);
 
-  // Fallback for terminals/shells that deliver Ctrl+C as SIGINT instead of a
-  // keypress event through Ink's input stream.
-  useEffect(() => {
-    const onSigint = () => {
-      handleInterrupt();
-    };
-    process.on("SIGINT", onSigint);
-    return () => {
-      process.off("SIGINT", onSigint);
-    };
-  }, [handleInterrupt]);
+
 
   useInput((input, key) => {
     if (key.escape) {
@@ -257,6 +247,12 @@ export function App(props: AppProps): React.ReactElement {
       }
 
       lastEscRef.current = now;
+      return;
+    }
+
+    // Ctrl+C: interrupt like SIGINT fallback
+    if (key.ctrl && input === "c") {
+      handleInterrupt();
       return;
     }
 

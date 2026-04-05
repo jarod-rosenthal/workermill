@@ -3,12 +3,7 @@ import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
 import { VERSION } from "./version.js";
-// @ts-ignore
-import { Client } from "@modelcontextprotocol/sdk/dist/client/index.js";
-// @ts-ignore
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/dist/client/sse.js";
-// @ts-ignore
-import { HTTPClientTransport } from "@modelcontextprotocol/sdk/dist/client/http.js";
+import { Client, HTTPClientTransport, SSEClientTransport } from "@modelcontextprotocol/sdk/client";
 
 // ---------------------------------------------------------------------------
 // Types

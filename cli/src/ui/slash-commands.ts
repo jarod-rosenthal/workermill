@@ -205,6 +205,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/hooks\` | View pre/post tool hooks |
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
+| \`wm logs\` | Stream or tail CLI logs for this project |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
@@ -1302,8 +1303,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
 
     // ---- /log ----
     case "log": {
-      const projectHash = crypto.createHash("md5").update(ctx.workingDir).digest("hex").slice(0, 8);
-      const logPath = path.join(os.homedir(), ".workermill", "logs", projectHash, "cli.log");
+      const logPath = logger.getLogPath(ctx.workingDir);
       try {
         if (!fs.existsSync(logPath)) {
           ctx.addSystemMessage("No log file found. Logs are stored in `~/.workermill/logs/`");
@@ -1312,7 +1312,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
         const content = fs.readFileSync(logPath, "utf-8");
         const lines = content.trim().split("\n");
         const tail = lines.slice(-20).join("\n");
-        ctx.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\``);
+        ctx.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\`\n\nTip: use \`wm logs --follow\` outside the session for live streaming, or \`wm logs --json | jq\` for scripting.`);
       } catch (err) {
         ctx.addSystemMessage(`Failed to read log: ${err instanceof Error ? err.message : String(err)}`);
       }

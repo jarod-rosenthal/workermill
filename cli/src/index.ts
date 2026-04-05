@@ -368,4 +368,18 @@ program
     console.log();
   });
 
+// ── Logs command: stream or tail log entries ──
+program
+  .command("logs")
+  .description("Stream or tail CLI log entries for the current project")
+  .option("--tail <n>", "Show last N log entries", parseInt, 50)
+  .option("--follow", "Stream new entries as they are appended")
+  .option("--cwd <path>", "Resolve log file for a specific project directory instead of cwd")
+  .option("--level <level>", "Filter by log level")
+  .option("--json", "Emit each entry as a parsed JSON object, one per line")
+  .action(async (options) => {
+    const { runLogsCommand } = await import("./logs-command.js");
+    runLogsCommand(options);
+  });
+
 program.parse();

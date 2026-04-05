@@ -347,6 +347,7 @@ wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
 wm --auto-revise            # Auto-revise after a failed review without prompting
 wm doctor                   # Health check
+wm logs                     # Stream or tail CLI log entries for the current project
 wm --version                # Print CLI version
 wm --help                   # Show launch flags
 ```

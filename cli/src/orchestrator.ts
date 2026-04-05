@@ -1445,6 +1445,18 @@ export async function runOrchestration(
     const originalBranch = getCurrentBranch(workingDir);
     mainBranch = originalBranch || "main";
 
+    // Warn if starting from a non-trunk branch — new work will stack on top of it
+    const trunkBranches = ["main", "master", "develop", "trunk"];
+    if (originalBranch && !trunkBranches.includes(originalBranch)) {
+      output.log("system", `You're on \`${originalBranch}\`, not a trunk branch. New work will stack on top of it and the PR will target \`${originalBranch}\` as its base.`);
+      output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/ship\` again.`);
+      const r = await output.confirm("Continue and stack on this branch?");
+      const confirmed = typeof r === "object" ? r.allowed : r;
+      if (!confirmed) {
+        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      }
+    }
+
     // Planner runs on the current branch — no branch created yet
     const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
 

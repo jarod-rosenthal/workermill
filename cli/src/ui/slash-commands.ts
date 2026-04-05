@@ -837,6 +837,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const criticThreshold = config.review?.criticThreshold ?? 8;
         const autoRevise = config.review?.autoRevise ?? false;
         const useCritic = config.review?.useCritic ?? false;
+        const autoBranch = config.review?.autoBranch ?? false;
         const sandboxEnabled = config.sandbox !== false;
         const bellEnabled = config.bell === true;
         const allowRules = config.permissions?.allow || [];
@@ -854,6 +855,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Critic threshold | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
           `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
+          `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
@@ -923,6 +925,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           case "review.critic": {
             config.review = { ...config.review, useCritic: boolVal(value) };
+            break;
+          }
+          case "review.autoBranch": {
+            config.review = { ...config.review, autoBranch: boolVal(value) };
             break;
           }
           case "sandbox": {

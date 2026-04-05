@@ -13,7 +13,7 @@ import * as logger from "./logger.js";
 import { runGate } from "./gate-runner.js";
 import { CostTracker, type UsageSummary } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
-import { getProviderForPersona } from "./config.js";
+import { getProviderForPersona, loadConfig, saveConfig } from "./config.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
 import {
   isGitRepo, getCurrentBranch, createFeatureBranch,
@@ -28,6 +28,7 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
+import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -617,7 +618,7 @@ export async function runSpecCheck(
   let gaps: Array<{ question: string; suggestion: string }> = [];
 
   try {
-    output.status("Checking spec...");
+    output.status(getPrdDecompositionPhaseLabel("validating_spec"));
     const result = await generateObject({
       model,
       abortSignal,
@@ -812,6 +813,7 @@ async function planStories(
   const fileRefPattern = /(?:^|\s)([\w./-]+\.(?:md|txt|yaml|yml|json|toml|ts|js|py|go|rs|spec|requirements|prd|plan))\b/gi;
   const referencedFiles = [...new Set([...userTask.matchAll(fileRefPattern)].map(m => m[1]))];
   let inlinedFileContext = "";
+  output.status(getPrdDecompositionPhaseLabel("resolving_content"));
   if (referencedFiles.length > 0) {
     const fs = await import("fs");
     const path = await import("path");
@@ -950,14 +952,9 @@ Rules:
 
   logger.info("Planner started", { provider: pProvider, model: pModel });
   output.log("planner", `Planning with \x1b[36m${pProvider}/${pModel}\x1b[0m (${formatContext(getModelContext(pModel, pCtx))} context)`);
-  output.status("Planner reading repository...");
+  output.status(getPrdDecompositionPhaseLabel("calling_llm"));
 
-  // Heartbeat — show elapsed time so users know it's still working
   const planStart = Date.now();
-  const heartbeat = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - planStart) / 1000);
-    output.status(`Planner working... (${elapsed}s)`);
-  }, 5_000);
 
   // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
   const planStream = streamText({
@@ -971,7 +968,7 @@ Rules:
     ...buildOllamaOptions(pProvider as AIProvider, pCtx),
     onStepFinish() {
       // Text already streamed line-by-line below — just update status between steps
-      output.status("planner: thinking...");
+      output.status(getPrdDecompositionPhaseLabel("streaming"));
     },
   });
   // Stream planner output line-by-line as it arrives
@@ -1004,7 +1001,6 @@ Rules:
       logger.info("Model performance", { provider: pProvider, model: pModel, tokPerSec: planTokPerSec });
     }
   } catch (planErr) {
-    clearInterval(heartbeat);
     output.statusDone();
     if (abortSignal?.aborted) {
       logger.info("Planner cancelled by user");
@@ -1040,7 +1036,7 @@ Rules:
       rejectionReason: msg,
     };
   }
-  clearInterval(heartbeat);
+  output.status(getPrdDecompositionPhaseLabel("parsing"));
 
   // Check for planner rejection before parsing stories
   const rejectionMatch = planText.match(/"rejected"\s*:\s*true[\s\S]*?"reason"\s*:\s*"([^"]+)"/);
@@ -1049,6 +1045,7 @@ Rules:
     logger.info("Planner rejected task", { reason });
     output.coordinatorLog(`Planner rejected: ${reason}`);
     output.error(`Task rejected by planner: ${reason}`);
+    output.statusDone();
     return {
       stories: [],
       provider: pProvider,
@@ -1091,6 +1088,7 @@ Rules:
       if (retryStories.length > 0) {
         output.log("planner", `Extracted ${retryStories.length} stories from plan text.`);
         const retryUsage = extractionResult.usage;
+        output.statusDone();
         return {
           stories: retryStories,
           provider: pProvider,
@@ -1105,6 +1103,7 @@ Rules:
 
     logger.error("Planner produced no stories", { planTextPreview: planText.slice(0, 500) });
     output.error("Planner failed to produce a parseable plan.");
+    output.statusDone();
     return {
       stories: [],
       provider: pProvider,
@@ -1119,6 +1118,7 @@ Rules:
   if (stories.length === 0) {
     logger.error("Planner produced no output", { planTextLength: planText.length });
     output.error("Planner failed to produce a plan. This could be a rate limit, API error, or the task was too vague.");
+    output.statusDone();
     return {
       stories: [],
       provider: pProvider,
@@ -1215,6 +1215,7 @@ Rules:
     stories = currentStories;
   }
 
+  output.statusDone();
   return {
     stories,
     provider: pProvider,
@@ -1757,7 +1758,10 @@ export async function runOrchestration(
     }
     // Warn if the branch already exists from a previous run
     const derivedBranch = deriveFeatureBranchName(workingDir, branchLabel, branchPrefix);
+    let branchAlreadyAcknowledged = false;
     if (derivedBranch && localBranchExists(workingDir, derivedBranch)) {
+      // User will engage with a branch dialog below — no need for a second prompt afterward
+      branchAlreadyAcknowledged = true;
       output.log("system", `Branch \`${derivedBranch}\` already exists from a previous run.`);
       output.log("system", `- **Yes** → delete it and start fresh from \`${mainBranch}\``);
       output.log("system", `- **No** → continue on the existing branch`);
@@ -1781,9 +1785,30 @@ export async function runOrchestration(
       }
     }
 
+    // Branch creation prompt — makes the branch name visible before workers start.
+    // Skipped if the user already acknowledged the branch (via the existing-branch dialog above)
+    // or if they have previously selected "always" (autoBranch: true in config).
+    if (!branchAlreadyAcknowledged && config.review?.autoBranch !== true) {
+      const branchName = derivedBranch ?? "a feature branch";
+      const r = await output.confirm(`About to create and check out \`${branchName}\`. Continue?`);
+      const result = typeof r === "object" ? r : { allowed: r, mode: undefined };
+      if (!result.allowed) {
+        output.coordinatorLog("Cancelled.");
+        return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+      }
+      if (result.mode === "always") {
+        // Persist to global config so this survives across sessions
+        const globalCfg = loadConfig() ?? { providers: {}, default: "anthropic" };
+        globalCfg.review = { ...globalCfg.review, autoBranch: true };
+        saveConfig(globalCfg);
+        config.review = { ...config.review, autoBranch: true };
+        output.coordinatorLog("Got it — branch prompt disabled. Use `/settings review.autoBranch false` to re-enable.");
+      }
+    }
+
     featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix);
     if (featureBranch) {
-      output.coordinatorLog(`Working on branch: ${featureBranch}`);
+      output.coordinatorLog(`Created and checked out branch: \`${featureBranch}\``);
       output.updateBranch?.(featureBranch);
       // Yield to let Ink render the branch update
       await new Promise(r => setTimeout(r, 0));

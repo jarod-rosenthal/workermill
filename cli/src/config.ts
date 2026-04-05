@@ -44,6 +44,8 @@ export interface ReviewConfig {
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
   specCheck?: boolean;
+  /** Automatically proceed when /ship creates a feature branch without prompting (default: false) */
+  autoBranch?: boolean;
 }
 
 export interface HookConfig {

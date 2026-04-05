@@ -25,7 +25,7 @@ describe("logs-command", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   describe("parseLogLine", () => {
@@ -76,7 +76,7 @@ describe("logs-command", () => {
   describe("runLogsCommand", () => {
     it("exits with error if log file does not exist", () => {
       mockFs.existsSync.mockReturnValue(false);
-      expect(() => runLogsCommand({})).toThrow("process.exit called");
+      expect(() => runLogsCommand({})).toThrow(/process\.exit/);
       expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining("No log file found"));
       expect(mockExit).toHaveBeenCalledWith(1);
     });

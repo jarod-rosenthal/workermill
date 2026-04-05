@@ -1403,6 +1403,10 @@ export interface RetryPlan {
   mainBranch: string;
 }
 
+export function shouldTransitionTicketOnPrOpen(ticketSystem: string | undefined): boolean {
+  return (ticketSystem || "").toLowerCase() !== "github";
+}
+
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
@@ -3050,7 +3054,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                   prParts.push(feedback);
                 }
               }
-              // Link PR to source issue in body (GitHub auto-closes on merge; we also close explicitly below)
+              // Link PR to source issue in body so GitHub can auto-close on merge.
               if (ticketKey && resolvedTicketSystem === "github") {
                 const issueNum = extractGithubIssueNumber(ticketKey);
                 prParts.push(`\nCloses #${issueNum}`);
@@ -3064,8 +3068,9 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
 
-              // Close the source ticket — work is done, review approved, PR open
-              if (ticketOps) {
+              // Close source ticket for non-GitHub trackers. GitHub issues should
+              // close on merge via PR keywords (e.g. "Closes #123"), not on PR open.
+              if (ticketOps && shouldTransitionTicketOnPrOpen(resolvedTicketSystem)) {
                 try {
                   await ticketOps.transitionTo("done");
                   output.log("system", `Closed ${ticketKey}`);

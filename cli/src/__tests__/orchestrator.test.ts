@@ -157,7 +157,12 @@ vi.mock("../safety.js", () => ({
 }));
 
 // Now import the functions under test
-import { runOrchestration, classifyComplexity, type OrchestrationOutput } from "../orchestrator.js";
+import {
+  runOrchestration,
+  classifyComplexity,
+  shouldTransitionTicketOnPrOpen,
+  type OrchestrationOutput,
+} from "../orchestrator.js";
 import { streamText, generateText } from "ai";
 
 // ---- Helpers ----
@@ -249,6 +254,23 @@ function restoreDefaultStreamTextMock() {
 }
 
 // ---- Tests ----
+
+describe("shouldTransitionTicketOnPrOpen", () => {
+  it("returns false for github", () => {
+    expect(shouldTransitionTicketOnPrOpen("github")).toBe(false);
+    expect(shouldTransitionTicketOnPrOpen("GitHub")).toBe(false);
+  });
+
+  it("returns true for non-github trackers", () => {
+    expect(shouldTransitionTicketOnPrOpen("jira")).toBe(true);
+    expect(shouldTransitionTicketOnPrOpen("linear")).toBe(true);
+    expect(shouldTransitionTicketOnPrOpen("internal")).toBe(true);
+  });
+
+  it("defaults to true when ticket system is missing", () => {
+    expect(shouldTransitionTicketOnPrOpen(undefined)).toBe(true);
+  });
+});
 
 describe("orchestrator", () => {
   let repoDir: string;

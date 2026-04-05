@@ -719,18 +719,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               const subcommands = splitCompoundCommand(cmd);
               const rules = subcommands.map(commandToRule);
               try {
-                const cfg = (await import("../config.js")).loadConfig();
-                if (cfg) {
-                  cfg.permissions = cfg.permissions || {};
-                  cfg.permissions.allow = cfg.permissions.allow || [];
-                  for (const rule of rules) {
-                    if (!cfg.permissions.allow.includes(rule)) {
-                      cfg.permissions.allow.push(rule);
-                    }
+                const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+                const lSettings = loadLocalSettings() || {};
+                lSettings.allow = lSettings.allow || [];
+                for (const rule of rules) {
+                  if (!lSettings.allow.includes(rule)) {
+                    lSettings.allow.push(rule);
                   }
-                  (await import("../config.js")).saveConfig(cfg);
-                  permissionRulesRef.current = cfg.permissions;
                 }
+                saveLocalSettings(lSettings);
+                // Update the merged permissions
+                const config = resolveConfig();
+                permissionRulesRef.current = config.permissions;
               } catch {
                 sessionAllowRef.current.add(name);
               }

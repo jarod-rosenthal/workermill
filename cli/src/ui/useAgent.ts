@@ -107,7 +107,7 @@ export interface UseAgentOptions {
   contextLength?: number;
   trustAll: boolean;
   planMode: boolean;
-  sandboxed: boolean;
+  sandboxed: boolean | "os";
   resume: boolean;
   fork: boolean;
   maxTokens?: number;

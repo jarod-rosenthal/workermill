@@ -140,7 +140,7 @@ const defaultCmd = program
       }
 
       const aiModel = createModel(provider as any, model, host, contextLength);
-      const sandboxed = options.fullDisk ? false : config.sandbox !== false;
+      const sandboxed = options.fullDisk ? false : (config.sandbox ?? "os");
       const baseTools = createToolDefinitions(workingDir, aiModel, sandboxed);
       const mcpToolDefs = getMCPToolDefinitions();
       const tools = { ...baseTools, ...mcpToolDefs };
@@ -214,7 +214,7 @@ const defaultCmd = program
         contextLength,
         trustAll: options.trust || false,
         planMode: options.plan || false,
-        sandboxed: options.fullDisk ? false : config.sandbox !== false,
+        sandboxed: options.fullDisk ? false : (config.sandbox ?? "os"),
         resume: options.resume || false,
         fork: options.fork || false,
         maxTokens: options.maxTokens,

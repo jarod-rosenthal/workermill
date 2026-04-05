@@ -227,11 +227,11 @@ export interface UseOrchestratorReturn {
   /** Whether orchestration is currently paused. */
   paused: boolean;
   /** Start orchestration for a task. */
-  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
+  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
-  retry: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
+  retry: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
-  review: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
+  review: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => void;
   /** Pause a running orchestration. */
   pause: () => void;
   /** Resume a paused orchestration. */
@@ -402,7 +402,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const start = useCallback(
-    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => {
+    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => {
       // Abort any previous run
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
@@ -627,7 +627,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const retry = useCallback(
-    (trustAll: boolean | (() => boolean), sandboxed: boolean): boolean => {
+    (trustAll: boolean | (() => boolean), sandboxed: boolean | "os"): boolean => {
       const run = getRetryableRun(process.cwd());
       if (!run) return false;
 
@@ -652,7 +652,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const review = useCallback(
-    (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => {
+    (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => {
       if (running) return;
       setRunning(true);
       setPausedState(false);

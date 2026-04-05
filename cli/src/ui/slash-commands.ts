@@ -254,12 +254,12 @@ export interface SlashCommandContext {
   resumeOrchestrator: () => void;
   cancelCurrentOperation: () => void;
   isBusy: boolean;
-  startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean, ticketKey?: string) => void;
-  retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
-  startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean, target?: string) => void;
+  startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => void;
+  retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
+  startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => void;
   lastBuildTask: string | null;
   setLastBuildTask: (task: string) => void;
-  sandboxed?: boolean;
+  sandboxed?: boolean | "os";
   exit?: () => void;
   switchModel?: (provider: string, model: string) => void;
   updateRoleModels?: () => void;
@@ -528,7 +528,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         break;
       }
       ctx.addUserMessage(`/review ${arg}`);
-      ctx.startReview(ctx.isTrustAll, ctx.sandboxed ?? false, arg);
+      ctx.startReview(ctx.isTrustAll, ctx.sandboxed ?? "os", arg);
       break;
     }
 
@@ -576,11 +576,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         if (ticketRef) {
           ctx.setLastBuildTask(arg);
           ctx.addUserMessage(`/ship ${ticketRef.key}`);
-          ctx.startOrchestrator(ticketRef.key, ctx.isTrustAll, ctx.sandboxed ?? false, ticketRef.key);
+          ctx.startOrchestrator(ticketRef.key, ctx.isTrustAll, ctx.sandboxed ?? "os", ticketRef.key);
         } else {
           ctx.setLastBuildTask(arg);
           ctx.addUserMessage(`/ship ${arg}`);
-          ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? false);
+          ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? "os");
         }
       }
       break;
@@ -619,7 +619,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
       } else {
         ctx.addUserMessage("/retry");
-        const started = ctx.retryOrchestrator(ctx.isTrustAll, ctx.sandboxed ?? false);
+        const started = ctx.retryOrchestrator(ctx.isTrustAll, ctx.sandboxed ?? "os");
         if (!started) {
           ctx.addSystemMessage("Nothing to retry. No incomplete `/ship` runs found for this project.");
         }

@@ -61,8 +61,8 @@ export function runLogsCommand(options: LogsOptions): void {
     if (lines.length > 0) {
       const tailLines = lines.slice(-tailCount);
       processLines(tailLines.join("\n"));
-      lastByteOffset = Buffer.byteLength(tailLines.join("\n") + "\n", "utf-8");
     }
+    lastByteOffset = Buffer.byteLength(content, "utf-8");
 
     // Watch for changes
     fs.watchFile(logPath, { interval: 250 }, (curr, prev) => {

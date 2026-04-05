@@ -214,6 +214,13 @@ export interface OrchestratorConfirmRequest {
   resolve: (yes: boolean, mode?: "always" | "trust") => void;
 }
 
+/** Pending free-text prompt request surfaced to the UI layer. */
+export interface OrchestratorPromptRequest {
+  question: string;
+  suggestion: string;
+  resolve: (answer: string) => void;
+}
+
 export interface UseOrchestratorReturn {
   /** Whether orchestration is currently running. */
   running: boolean;
@@ -231,6 +238,8 @@ export interface UseOrchestratorReturn {
   previewLine: string;
   /** Non-null when the orchestrator is waiting for user confirmation. */
   confirmRequest: OrchestratorConfirmRequest | null;
+  /** Non-null when the orchestrator is waiting for a free-text answer. */
+  promptRequest: OrchestratorPromptRequest | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +285,8 @@ export function useOrchestrator(
   const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
+  const [promptRequest, setPromptRequest] =
+    useState<OrchestratorPromptRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const retryPlanRef = useRef<RetryPlan | null>(null);
   const usageSummaryRef = useRef<UsageSummary>(createEmptyUsageSummary());
@@ -462,6 +473,19 @@ export function useOrchestrator(
                     } else {
                       resolve(yes);
                     }
+                  },
+                });
+              });
+            },
+
+            askText(question: string, suggestion: string): Promise<string> {
+              return new Promise((resolve) => {
+                setPromptRequest({
+                  question,
+                  suggestion,
+                  resolve: (answer: string) => {
+                    setPromptRequest(null);
+                    resolve(answer || suggestion);
                   },
                 });
               });
@@ -776,5 +800,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, retry, review, cancel, statusMessage, previewLine, confirmRequest };
+  return { running, start, retry, review, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
 }

@@ -10,6 +10,7 @@ import { loadPersona } from "./personas.js";
 import { formatProjectInstructions } from "./instructions.js";
 import { findModelInfo } from "./provider-registry.js";
 import * as logger from "./logger.js";
+import { runGate } from "./gate-runner.js";
 import { CostTracker, type UsageSummary } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
@@ -160,6 +161,8 @@ export interface OrchestrationOutput {
   statusDone: (message?: string) => void;
   /** Ask the user a yes/no question. Returns true for yes. */
   confirm: (prompt: string) => Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }>;
+  /** Ask the user a free-text question with a suggested answer. Returns the user's answer or the suggestion on timeout/skip. */
+  askText?: (question: string, suggestion: string) => Promise<string>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
   /** Update the git branch displayed in the status bar */
@@ -458,6 +461,8 @@ export interface Story {
   targetFiles?: string[];      // Files to create or modify
   referenceFiles?: string[];   // Existing files to read for patterns
   implementationNotes?: string; // Planner's architectural guidance
+  // Shell commands to verify acceptance criteria post-execution (verifyEnabled only)
+  verificationCommands?: string[];
 }
 
 interface SharedContext {
@@ -569,6 +574,87 @@ function formatToolCallDisplay(toolName: string, toolInput: Record<string, unkno
     return cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd;
   }
   return "";
+}
+
+/**
+ * Pre-planning spec check — identifies HIGH-severity gaps in the user's task
+ * spec that would likely cause a reviewer revision cycle. Prompts the user to
+ * fill each gap, then returns the enriched task string. If askText is not
+ * provided (CI / unattended), applies suggestions silently.
+ *
+ * Only runs when config.review.specCheck is true. Off by default.
+ */
+export async function runSpecCheck(
+  config: CliConfig,
+  userTask: string,
+  output: OrchestrationOutput,
+  abortSignal?: AbortSignal,
+): Promise<string> {
+  const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
+
+  if (apiKey) {
+    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+    const envVar = envMap[provider];
+    if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
+  }
+
+  const model = createModel(provider as AIProvider, modelName, host, contextLength);
+
+  let gaps: Array<{ question: string; suggestion: string }> = [];
+
+  try {
+    output.status("Checking spec...");
+    const result = await generateObject({
+      model,
+      abortSignal,
+      schema: z.object({
+        gaps: z.array(z.object({
+          question: z.string().describe("The specific question to ask the user"),
+          suggestion: z.string().describe("The most reasonable default answer"),
+        })).max(3),
+      }),
+      prompt: `You are reviewing a coding task spec before it goes to an AI planning agent. Identify CRITICAL ambiguities — things where the expert will have to guess, and guessing wrong means a revision cycle.
+
+Task spec:
+${userTask}
+
+Flag ONLY gaps that are:
+- High severity: the wrong assumption causes real rework
+- Observable: the gap affects the output the user will see or test
+- Not obvious: a reasonable developer could go either way
+
+Do NOT flag:
+- Implementation details (framework choice, naming, code style)
+- Things any reasonable developer would handle correctly (error handling, logging)
+- Minor preferences that don't affect acceptance criteria
+
+Return up to 3 gaps, or an empty array if the spec is clear enough. When in doubt, return fewer gaps — interrupting the user for minor gaps wastes more time than proceeding.`,
+    });
+    gaps = result.object.gaps;
+    output.statusDone();
+  } catch {
+    output.statusDone();
+    return userTask; // spec check failure is non-fatal
+  }
+
+  if (gaps.length === 0) return userTask;
+
+  // Prompt for each gap — use askText if available, otherwise apply suggestions silently
+  const clarifications: string[] = [];
+  for (const gap of gaps) {
+    if (abortSignal?.aborted) break;
+    if (output.askText) {
+      const answer = await output.askText(gap.question, gap.suggestion);
+      clarifications.push(`${gap.question} → ${answer}`);
+    } else {
+      // Unattended: log what we assumed and proceed
+      output.coordinatorLog(`Spec gap (using suggestion): ${gap.question} → ${gap.suggestion}`);
+      clarifications.push(`${gap.question} → ${gap.suggestion}`);
+    }
+  }
+
+  if (clarifications.length === 0) return userTask;
+  return `${userTask}\n\n## Spec Clarifications\n${clarifications.map(c => `- ${c}`).join("\n")}`;
 }
 
 export async function classifyComplexity(
@@ -816,7 +902,36 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 
 **Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
 
-Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
+Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead${config.review?.verifyEnabled ? `
+
+## Verification Commands
+
+Verification gates are enabled for this run. For each story, include a \`verificationCommands\` array — shell commands that confirm the story's acceptance criteria from the outside after the code is written. These run automatically before the tech lead reviewer sees the code.
+
+**What belongs here:** Black-box assertions an observer can run from the project root. The command must exit non-zero if the acceptance criteria aren't met.
+
+**What does NOT belong here:** Full test suite runs (\`npm test\`, \`pytest\`), commands that start servers, or commands that require external services.
+
+Examples by stack:
+
+Node/TypeScript CLI:
+\`"verificationCommands": ["node dist/index.js models | grep -E 'http://localhost'", "node dist/index.js models --json | node -e \\"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); if(!Array.isArray(d)) process.exit(1)\\""] \`
+
+Python/FastAPI:
+\`"verificationCommands": ["python3 -m pytest tests/test_webhooks.py::test_create_webhook -x -q"] \`
+
+Go:
+\`"verificationCommands": ["go build ./cmd/... && echo OK", "go test ./internal/webhooks/... -run TestWebhookOutput -count=1"] \`
+
+Ruby:
+\`"verificationCommands": ["bundle exec rspec spec/commands/models_spec.rb --format progress"] \`
+
+Rules:
+- 1–3 commands per story maximum
+- Scoped to THIS story's deliverable only
+- Runnable from the project root with no setup
+- Omit \`verificationCommands\` entirely for infrastructure-only stories (migrations, config changes) with no observable output` : ""}`;
+
 
   logger.info("Planner started", { provider: pProvider, model: pModel });
   output.log("planner", `Planning with \x1b[36m${pProvider}/${pModel}\x1b[0m (${formatContext(getModelContext(pModel, pCtx))} context)`);
@@ -1127,15 +1242,19 @@ function parseStoriesFromText(text: string, output: OrchestrationOutput): Story[
 
 /** Try to parse text as a stories array or object containing stories */
 function normalizeStory(raw: Record<string, unknown>, index: number): Story {
+  const toStringArray = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.map(String).filter(Boolean) : undefined;
+
   return {
     id: String(raw.id || raw.index || raw.step || raw.number || index + 1),
     title: String(raw.title || raw.name || raw.summary || ""),
     persona: String(raw.persona || raw.role || raw.agent || "backend_developer"),
     description: String(raw.description || raw.details || raw.task || raw.title || ""),
-    dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String)
-      : Array.isArray(raw.depends_on) ? raw.depends_on.map(String)
-      : Array.isArray(raw.dependencies) ? raw.dependencies.map(String)
-      : undefined,
+    dependsOn: toStringArray(raw.dependsOn) ?? toStringArray(raw.depends_on) ?? toStringArray(raw.dependencies),
+    targetFiles: toStringArray(raw.targetFiles) ?? toStringArray(raw.target_files),
+    referenceFiles: toStringArray(raw.referenceFiles) ?? toStringArray(raw.reference_files),
+    implementationNotes: raw.implementationNotes ? String(raw.implementationNotes) : undefined,
+    verificationCommands: toStringArray(raw.verificationCommands) ?? toStringArray(raw.verification_commands),
   };
 }
 
@@ -1474,6 +1593,11 @@ export async function runOrchestration(
       if (!confirmed) {
         return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
+    }
+
+    // Spec check — identify ambiguities before the planner runs (off by default)
+    if (config.review?.specCheck) {
+      userTask = await runSpecCheck(config, userTask, output, abortSignal);
     }
 
     // Planner runs on the current branch — no branch created yet
@@ -2242,6 +2366,55 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
     }
   }
 
+  // --- Post-execution quality gates ---
+  // Runs after ALL stories complete, before tech lead review.
+  // Failures go to reviewer as context — no retry loop, no extra AI calls.
+  //
+  // Two sources of gates:
+  //   1. config.qualityGates — static commands defined in .workermill/config.json
+  //   2. story.verificationCommands — dynamic commands generated by the planner
+  //      per story (only when config.review.verifyEnabled is true)
+  let gateResultsSection = "";
+  const verifyEnabled = config.review?.verifyEnabled === true;
+
+  const staticGates = config.qualityGates ?? [];
+  const dynamicGates = verifyEnabled
+    ? sorted
+        .filter(s => completedStoryIds.includes(s.id) && s.verificationCommands?.length)
+        .map(s => ({ name: `verify: ${s.title}`, commands: s.verificationCommands! }))
+    : [];
+  const allGates = [...staticGates, ...dynamicGates];
+
+  if (allGates.length > 0 && completedStoryIds.length > 0) {
+    output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
+    const gateResults = await Promise.all(allGates.map(g => runGate(g, workingDir)));
+
+    const failed = gateResults.filter(r => !r.passed);
+    const passed = gateResults.filter(r => r.passed);
+
+    for (const r of passed) output.coordinatorLog(`  ✓ ${r.name}`);
+    for (const r of failed) output.coordinatorLog(`  ✗ ${r.name} — failed`);
+
+    logger.info("Quality gates complete", {
+      total: gateResults.length,
+      passed: passed.length,
+      failed: failed.length,
+    });
+
+    if (failed.length > 0) {
+      gateResultsSection =
+        `\n\n## Quality Gate Results — ${failed.length} FAILED\n\n` +
+        failed.map(r =>
+          `### ${r.name} — FAILED\n\`\`\`\n${r.output.slice(0, 2000)}\n\`\`\``
+        ).join("\n\n") +
+        "\n\nThese failures are informational — factor them into your review score and flag as must-fix if they represent acceptance criteria gaps.";
+    } else {
+      gateResultsSection =
+        "\n\n## Quality Gate Results — ALL PASSED\n\n" +
+        passed.map(r => `- ✓ ${r.name}`).join("\n");
+    }
+  }
+
   // Review config
   const reviewEnabled = config.review?.enabled !== false; // default: true
   const maxRevisions = config.review?.maxRevisions ?? 3;
@@ -2395,7 +2568,7 @@ Files created: ${context.filesCreated.join(", ") || "none"}
 Files modified: ${context.filesModified.join(", ") || "none"}
 ${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
 
-${codeDiff || "(no code changes detected)"}
+${codeDiff || "(no code changes detected)"}${gateResultsSection}
 
 ## Original Spec (reference)
 

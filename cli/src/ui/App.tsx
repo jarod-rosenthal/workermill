@@ -49,6 +49,8 @@ interface AppProps {
   permissionRequest: PermissionRequest | null;
   /** Orchestrator confirm request (yes/no) */
   orchestratorConfirm: { prompt: string; resolve: (yes: boolean) => void } | null;
+  /** Orchestrator free-text prompt request */
+  orchestratorPrompt: { question: string; suggestion: string; resolve: (answer: string) => void } | null;
   /** Orchestrator status message (spinner replacement) */
   orchestratorStatus: string;
   /** Total tokens used in the session. */
@@ -160,6 +162,55 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
       ) : (
         <Text dimColor>{hint}</Text>
       )}
+    </Box>
+  );
+}
+
+/** Free-text prompt for spec check gaps — shown before planning starts. */
+function OrchestratorPrompt({ request }: {
+  request: { question: string; suggestion: string; resolve: (answer: string) => void };
+}): React.ReactElement {
+  const [value, setValue] = React.useState("");
+  const [submitted, setSubmitted] = React.useState<string | null>(null);
+
+  useInput((input, key) => {
+    if (submitted !== null) return;
+    if (key.return) {
+      const answer = value.trim() || request.suggestion;
+      setSubmitted(answer);
+      setTimeout(() => request.resolve(answer), 100);
+      return;
+    }
+    if (key.escape) {
+      setSubmitted(request.suggestion);
+      setTimeout(() => request.resolve(request.suggestion), 100);
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setValue(v => v.slice(0, -1));
+      return;
+    }
+    if (input && !key.ctrl && !key.meta) {
+      setValue(v => v + input);
+    }
+  }, { isActive: submitted === null });
+
+  return (
+    <Box flexDirection="column" marginLeft={2} marginY={1}>
+      <Text color={theme.permission}>Spec check: {request.question}</Text>
+      <Box>
+        <Text dimColor>Suggestion: </Text>
+        <Text color={theme.subtle}>{request.suggestion}</Text>
+        <Text dimColor>  (Enter to accept, or type your answer)</Text>
+      </Box>
+      <Box>
+        <Text color={theme.brand}>◆ </Text>
+        {submitted !== null ? (
+          <Text color={theme.success} bold>{submitted}</Text>
+        ) : (
+          <Text>{value || " "}</Text>
+        )}
+      </Box>
     </Box>
   );
 }
@@ -362,6 +413,8 @@ export function App(props: AppProps): React.ReactElement {
       {/* Permission/confirm prompts — shown above status bar when active */}
       {props.permissionRequest ? (
         <PermissionPrompt request={props.permissionRequest} />
+      ) : props.orchestratorPrompt ? (
+        <OrchestratorPrompt key={props.orchestratorPrompt.question} request={props.orchestratorPrompt} />
       ) : props.orchestratorConfirm ? (
         <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
       ) : props.status === "idle" && !props.orchestratorStatus ? (

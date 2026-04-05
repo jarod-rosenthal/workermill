@@ -308,6 +308,7 @@ export function Root(props: RootProps): React.ReactElement {
       statusDetail={orchestrator.running ? orchestrator.statusMessage : agent.statusDetail}
       permissionRequest={agent.permissionRequest}
       orchestratorConfirm={orchestrator.confirmRequest}
+      orchestratorPrompt={orchestrator.promptRequest}
       orchestratorStatus={orchestrator.statusMessage}
       buildPreviewLine={orchestrator.previewLine}
       streamingToolCalls={agent.streamingToolCalls}

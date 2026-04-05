@@ -20,6 +20,13 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
+export interface QualityGateCommand {
+  /** Human-readable name shown in output (e.g. "models e2e") */
+  name: string;
+  /** Shell commands to run in sequence — stops at first failure */
+  commands: string[];
+}
+
 export interface ReviewConfig {
   /** Enable tech lead review after build (default: true) */
   enabled?: boolean;
@@ -33,6 +40,10 @@ export interface ReviewConfig {
   criticThreshold?: number;
   /** Enable critic pass on the plan before execution (default: false) */
   useCritic?: boolean;
+  /** Have the planner generate verification commands per story, run them before review (default: false) */
+  verifyEnabled?: boolean;
+  /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
+  specCheck?: boolean;
 }
 
 export interface HookConfig {
@@ -100,6 +111,8 @@ export interface CliConfig {
   jira?: JiraConfig;
   /** Linear credentials (only when ticketSystem === "linear") */
   linear?: LinearConfig;
+  /** Shell commands to run after all stories complete, before tech lead review */
+  qualityGates?: QualityGateCommand[];
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -165,6 +178,7 @@ export function resolveConfig(): CliConfig {
     ticketSystem: project?.ticketSystem || global.ticketSystem,
     jira: project?.jira || global.jira,
     linear: project?.linear || global.linear,
+    qualityGates: project?.qualityGates ?? global.qualityGates,
   };
 }
 

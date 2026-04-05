@@ -227,7 +227,7 @@ describe("Tool Metadata", () => {
       expect(ae.has(t)).toBe(true);
     }
     // Must contain write/edit tools
-    for (const t of ["write_file", "edit_file", "patch", "todo", "fetch", "git", "web_search"]) {
+    for (const t of ["write_file", "edit_file", "patch", "todo", "fetch", "web_search"]) {
       expect(ae.has(t)).toBe(true);
     }
     // Must not contain bash

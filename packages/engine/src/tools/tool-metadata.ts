@@ -31,6 +31,7 @@ export const TOOL_METADATA: Record<string, ToolMeta> = {
   patch:       { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: false },
   todo:        { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
   fetch:       { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
+  git:         { isReadOnly: false, isDestructive: false, acceptEditsApproved: false, concurrencySafe: false },
   web_search:  { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
 
   // Execution tools — need explicit permission

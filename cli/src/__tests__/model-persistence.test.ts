@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as configModule from "../config.js";
 import { handleSlashCommand } from "../ui/slash-commands.js";
+
+vi.mock("../config.js", () => ({
+  loadConfig: vi.fn(),
+  saveConfig: vi.fn(),
+}));
 
 vi.mock("../models-command.js", () => ({
   findModelInfo: vi.fn(() => ({ contextWindow: 256000 })),
@@ -18,18 +22,20 @@ vi.mock("../models-command.js", () => ({
   }),
 }));
 
+import * as configModule from "../config.js";
+
 describe("/model command persistence", () => {
   let mockConfig: any;
 
   beforeEach(() => {
     mockConfig = {
       providers: {
-        anthropic: { model: "claude-sonnet-4-6" },
+        anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
       },
       default: "anthropic",
     };
-    vi.spyOn(configModule, "loadConfig").mockReturnValue(mockConfig);
-    vi.spyOn(configModule, "saveConfig").mockImplementation((config) => {
+    configModule.loadConfig.mockReturnValue(mockConfig);
+    configModule.saveConfig.mockImplementation((config) => {
       mockConfig = config;
     });
   });
@@ -41,7 +47,7 @@ describe("/model command persistence", () => {
       expect(mockConfig.providers.anthropic.model).toBe("claude-sonnet-4-6");
 
       // When the user runs /model anthropic/claude-haiku-4-5-20251001
-      handleSlashCommand("model anthropic/claude-haiku-4-5-20251001", {
+      handleSlashCommand("/model anthropic/claude-haiku-4-5-20251001", {
         addSystemMessage: vi.fn(),
         submit: vi.fn(),
       } as any);
@@ -53,7 +59,7 @@ describe("/model command persistence", () => {
       expect(configModule.saveConfig).toHaveBeenCalledWith({
         ...mockConfig,
         providers: {
-          anthropic: { model: "claude-haiku-4-5-20251001" },
+          anthropic: { model: "claude-haiku-4-5-20251001", apiKey: "sk-ant-..." },
         },
         default: "anthropic",
       });
@@ -67,7 +73,7 @@ describe("/model command persistence", () => {
       expect(mockConfig.default).toBe("anthropic");
 
       // When the user runs /model openai/gpt-5.4
-      handleSlashCommand("model openai/gpt-5.4", {
+      handleSlashCommand("/model openai/gpt-5.4", {
         addSystemMessage: vi.fn(),
         submit: vi.fn(),
       } as any);
@@ -76,7 +82,7 @@ describe("/model command persistence", () => {
       expect(configModule.saveConfig).toHaveBeenCalledWith({
         ...mockConfig,
         providers: {
-          anthropic: { model: "claude-sonnet-4-6" },
+          anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
           openai: { model: "gpt-5.4", apiKey: "sk-..." },
         },
         default: "openai",
@@ -88,7 +94,7 @@ describe("/model command persistence", () => {
       mockConfig.providers.ollama = { model: "qwen3-coder:30b", host: "http://localhost:11434" };
 
       // When the user runs /model ollama/llama3.3-70b
-      handleSlashCommand("model ollama/llama3.3-70b", {
+      handleSlashCommand("/model ollama/llama3.3-70b", {
         addSystemMessage: vi.fn(),
         submit: vi.fn(),
       } as any);
@@ -97,7 +103,7 @@ describe("/model command persistence", () => {
       expect(configModule.saveConfig).toHaveBeenCalledWith({
         ...mockConfig,
         providers: {
-          anthropic: { model: "claude-sonnet-4-6" },
+          anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
           ollama: { model: "llama3.3-70b", host: "http://localhost:11434" },
         },
         default: "ollama",
@@ -112,7 +118,7 @@ describe("/model command persistence", () => {
       mockConfig.providers.openai = { model: "gpt-5.4", apiKey: "sk-..." };
 
       // When the user runs /model planner openai/gpt-5.4
-      handleSlashCommand("model planner openai/gpt-5.4", {
+      handleSlashCommand("/model planner openai/gpt-5.4", {
         addSystemMessage: vi.fn(),
         submit: vi.fn(),
       } as any);
@@ -121,7 +127,7 @@ describe("/model command persistence", () => {
       expect(configModule.saveConfig).toHaveBeenCalledWith({
         ...mockConfig,
         providers: {
-          anthropic: { model: "claude-sonnet-4-6" },
+          anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
           openai: { model: "gpt-5.4", apiKey: "sk-..." },
           openai_planner: { model: "gpt-5.4", apiKey: "sk-..." },
         },
@@ -139,7 +145,7 @@ describe("/model command persistence", () => {
       mockConfig.routing = { planner: "openai_planner" };
 
       // When the user runs /model openai/gpt-5.4-mini (worker switch)
-      handleSlashCommand("model openai/gpt-5.4-mini", {
+      handleSlashCommand("/model openai/gpt-5.4-mini", {
         addSystemMessage: vi.fn(),
         submit: vi.fn(),
       } as any);
@@ -148,13 +154,33 @@ describe("/model command persistence", () => {
       expect(configModule.saveConfig).toHaveBeenCalledWith({
         ...mockConfig,
         providers: {
-          anthropic: { model: "claude-sonnet-4-6" },
+          anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-ant-..." },
           openai: { model: "gpt-5.4-mini", apiKey: "sk-..." },
           openai_planner: { model: "gpt-5.4", apiKey: "sk-..." },
         },
         routing: { planner: "openai_planner" },
         default: "openai",
       });
+    });
+  });
+
+  describe("no-args /model shows persisted model", () => {
+    it("displays the current persisted worker model", () => {
+      const mockAddSystemMessage = vi.fn();
+      const mockCtx = {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        addSystemMessage: mockAddSystemMessage,
+        submit: vi.fn(),
+      } as any;
+
+      // When the user runs /model with no arguments
+      handleSlashCommand("/model", mockCtx);
+
+      // Then it shows the current model from context (which is persisted)
+      expect(mockAddSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("**Current model:** anthropic/claude-sonnet-4-6")
+      );
     });
   });
 });

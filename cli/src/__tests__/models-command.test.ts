@@ -19,11 +19,12 @@ const mockListProviders = vi.mocked(providerRegistry.listProviders);
 const mockFetchLiveModels = vi.mocked(providerRegistry.fetchLiveModels);
 const mockResolveConfig = vi.mocked(resolveConfig);
 
-const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+let mockConsoleLog: any;
 
 describe("models-command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConsoleLog = vi.spyOn(console, 'log');
 
     // Mock config resolution
     mockResolveConfig.mockReturnValue({
@@ -60,6 +61,7 @@ describe("models-command", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    mockConsoleLog.mockRestore();
   });
 
   describe("runModelsCommand", () => {
@@ -94,7 +96,7 @@ describe("models-command", () => {
         { provider: "ollama", id: "llama3.1:8b", host: "http://localhost:11434", reachable: true },
       ]);
       await runModelsCommand();
-      expect(mockConsoleLog).toHaveBeenCalledWith("ollama:");
+      expect(mockConsoleLog).toHaveBeenCalledWith("ollama (http://localhost:11434):");
       expect(mockConsoleLog).toHaveBeenCalledWith("  llama3.1:8b (local)");
     });
 
@@ -103,8 +105,8 @@ describe("models-command", () => {
         { provider: "ollama", id: "", host: "http://localhost:11434", reachable: false },
       ]);
       await runModelsCommand();
-      expect(mockConsoleLog).toHaveBeenCalledWith("ollama:");
-      expect(mockConsoleLog).toHaveBeenCalledWith("  (not reachable) (local)");
+      expect(mockConsoleLog).toHaveBeenCalledWith("ollama (http://localhost:11434):");
+      expect(mockConsoleLog).toHaveBeenCalledWith("  (not reachable)");
     });
 
     it("outputs JSON", async () => {
@@ -127,9 +129,9 @@ describe("models-command", () => {
         { provider: "lmstudio", id: "", host: "http://localhost:1234", reachable: false },
       ]);
       await runModelsCommand(undefined, { available: true });
-      expect(mockConsoleLog).toHaveBeenCalledWith("ollama:");
+      expect(mockConsoleLog).toHaveBeenCalledWith("ollama (http://localhost:11434):");
       expect(mockConsoleLog).toHaveBeenCalledWith("  llama3.1:8b (local)");
-      expect(mockConsoleLog).not.toHaveBeenCalledWith("lmstudio:");
+      expect(mockConsoleLog).not.toHaveBeenCalledWith("lmstudio (http://localhost:1234):");
     });
 
     it("handles refresh filter", async () => {

@@ -35,87 +35,120 @@ export async function fetchLiveModels(config: CliConfig): Promise<Array<{
   host: string;
   reachable: boolean;
 }>> {
-  const results: Array<{
+  const promises: Promise<Array<{
     provider: string;
     id: string;
     host: string;
     reachable: boolean;
-  }> = [];
+  }>>[] = [];
 
   // Ollama
   const ollamaHost = config?.providers?.ollama?.host;
   if (ollamaHost) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await globalThis.fetch(`${ollamaHost}/api/tags`, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (res.ok) {
-        const data = await res.json() as { models?: { name: string }[] };
-        const models = data.models || [];
-        for (const model of models) {
-          results.push({
-            provider: "ollama",
-            id: model.name,
-            host: ollamaHost,
-            reachable: true,
-          });
-        }
-      } else {
-        results.push({
-          provider: "ollama",
-          id: "",
-          host: ollamaHost,
-          reachable: false,
-        });
-      }
-    } catch {
-      results.push({
-        provider: "ollama",
-        id: "",
-        host: ollamaHost,
-        reachable: false,
-      });
-    }
+    promises.push(fetchOllamaModels(ollamaHost));
   }
 
   // LM Studio
   const lmHost = config?.providers?.lmstudio?.host;
   if (lmHost) {
     const cleanHost = lmHost.replace(/\/v1\/?$/, "");
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await globalThis.fetch(`${cleanHost}/v1/models`, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (res.ok) {
-        const data = await res.json() as { data?: { id: string }[] };
-        const models = data.data || [];
-        for (const model of models) {
-          results.push({
-            provider: "lmstudio",
-            id: model.id,
-            host: cleanHost,
-            reachable: true,
-          });
-        }
-      } else {
+    promises.push(fetchLMStudioModels(cleanHost));
+  }
+
+  const resultArrays = await Promise.all(promises);
+  return resultArrays.flat();
+}
+
+async function fetchOllamaModels(host: string): Promise<Array<{
+  provider: string;
+  id: string;
+  host: string;
+  reachable: boolean;
+}>> {
+  const results: Array<{
+    provider: string;
+    id: string;
+    host: string;
+    reachable: boolean;
+  }> = [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await globalThis.fetch(`${host}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data = await res.json() as { models?: { name: string }[] };
+      const models = data.models || [];
+      for (const model of models) {
         results.push({
-          provider: "lmstudio",
-          id: "",
-          host: cleanHost,
-          reachable: false,
+          provider: "ollama",
+          id: model.name,
+          host,
+          reachable: true,
         });
       }
-    } catch {
+    } else {
       results.push({
-        provider: "lmstudio",
+        provider: "ollama",
         id: "",
-        host: cleanHost,
+        host,
         reachable: false,
       });
     }
+  } catch {
+    results.push({
+      provider: "ollama",
+      id: "",
+      host,
+      reachable: false,
+    });
   }
+  return results;
+}
 
+async function fetchLMStudioModels(host: string): Promise<Array<{
+  provider: string;
+  id: string;
+  host: string;
+  reachable: boolean;
+}>> {
+  const results: Array<{
+    provider: string;
+    id: string;
+    host: string;
+    reachable: boolean;
+  }> = [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await globalThis.fetch(`${host}/v1/models`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data = await res.json() as { data?: { id: string }[] };
+      const models = data.data || [];
+      for (const model of models) {
+        results.push({
+          provider: "lmstudio",
+          id: model.id,
+          host,
+          reachable: true,
+        });
+      }
+    } else {
+      results.push({
+        provider: "lmstudio",
+        id: "",
+        host,
+        reachable: false,
+      });
+    }
+  } catch {
+    results.push({
+      provider: "lmstudio",
+      id: "",
+      host,
+      reachable: false,
+    });
+  }
   return results;
 }

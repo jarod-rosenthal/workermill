@@ -377,7 +377,7 @@ program
   .option("--available", "Only show confirmed-reachable models")
   .action(async (filter, options) => {
     const { runModelsCommand } = await import("./models-command.js");
-    runModelsCommand(filter, options);
+    await runModelsCommand(filter, options);
   });
 
 // ── Logs command: stream or tail log entries ──

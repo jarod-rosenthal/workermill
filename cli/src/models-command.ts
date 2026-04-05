@@ -26,10 +26,6 @@ export async function runModelsCommand(
 
   // Wait for live models
   const liveModels = await liveModelsPromise;
-  const liveModelMap = new Map<string, { id: string; host: string; reachable: boolean }>();
-  for (const lm of liveModels) {
-    liveModelMap.set(`${lm.provider}:${lm.id}`, lm);
-  }
 
   // Combine static and live models
   const allModels = [
@@ -56,7 +52,7 @@ export async function runModelsCommand(
       .map(lm => ({
         provider: lm.provider,
         id: "(not reachable)",
-        displayName: "(not reachable) (local)",
+        displayName: "(not reachable)",
         source: "live" as const,
         host: lm.host,
         reachable: false,
@@ -121,14 +117,10 @@ export async function runModelsCommand(
     const providerConfig = staticProviders.find(p => p.id === providerId);
 
     // Header
-    console.log(`\n${providerId}:`);
-
-    // Check if any models are unreachable
-    const unreachableModels = models.filter(m => m.source === "live" && !m.reachable);
-    if (unreachableModels.length > 0) {
-      console.log("  (not reachable)");
-      continue;
-    }
+    const isLive = models.some(m => m.source === "live");
+    const host = isLive ? models.find(m => m.host)?.host : "";
+    const header = host ? `${providerId} (${host}):` : `${providerId}:`;
+    console.log(`${header}`);
 
     // List models sorted alphabetically
     const sortedModels = models.sort((a, b) => a.id.localeCompare(b.id));

@@ -20,6 +20,30 @@ vi.mock("ai", () => ({
   jsonSchema: vi.fn((schema: unknown) => ({ __jsonSchema: schema })),
 }));
 
+// Mock MCP SDK
+const mockClient = {
+  connect: vi.fn(),
+  initialize: vi.fn(),
+  request: vi.fn(),
+  close: vi.fn(),
+};
+const mockHTTPTransport = {};
+const mockSSETransport = {};
+
+const MockClient = vi.fn(() => mockClient);
+const MockHTTPClientTransport = vi.fn(function() { return mockHTTPTransport; });
+const MockSSEClientTransport = vi.fn(function() { return mockSSETransport; });
+
+vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+  Client: MockClient,
+}));
+vi.mock("@modelcontextprotocol/sdk/client/http.js", () => ({
+  HTTPClientTransport: MockHTTPClientTransport,
+}));
+vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+  SSEClientTransport: MockSSEClientTransport,
+}));
+
 // ---------------------------------------------------------------------------
 // Mock ChildProcess factory
 // ---------------------------------------------------------------------------
@@ -146,6 +170,12 @@ describe("mcp-client", () => {
     spawnMock = vi.fn();
     execSyncMock = vi.fn();
     vi.doMock("child_process", () => ({ spawn: spawnMock, execSync: execSyncMock }));
+
+    // Reset MCP SDK mocks
+    mockClient.connect.mockReset();
+    mockClient.initialize.mockReset();
+    mockClient.request.mockReset();
+    mockClient.close.mockReset();
 
     mcpClient = await import("../mcp-client.js");
   });
@@ -593,6 +623,20 @@ describe("mcp-client", () => {
       expect(procB.kill).toHaveBeenCalledOnce();
     });
 
+    it("calls client.close for HTTP/SSE servers", async () => {
+      mockClient.initialize.mockResolvedValue({});
+      mockClient.request.mockResolvedValue({ tools: [] });
+
+      await mcpClient.startMCPServer("http-srv", {
+        transport: "http",
+        url: "http://example.com",
+      });
+
+      mcpClient.stopAllMCPServers();
+
+      expect(mockClient.close).toHaveBeenCalled();
+    });
+
     it("getMCPToolDefinitions returns empty after stopAllMCPServers", async () => {
       const tools = [{ name: "tool1", inputSchema: {} }];
       const { proc } = makeMockProcess(makeHandshakeResponder(tools));
@@ -697,6 +741,26 @@ describe("mcp-client", () => {
 
       // No text blocks → JSON.stringify(result)
       expect(result).toContain("image");
+    });
+
+    it("calls client.request for HTTP/SSE servers", async () => {
+      mockClient.initialize.mockResolvedValue({});
+      mockClient.request.mockResolvedValueOnce({ tools: [] }).mockResolvedValueOnce({
+        content: [{ type: "text", text: "response from http server" }],
+      });
+
+      await mcpClient.startMCPServer("http-srv", {
+        transport: "http",
+        url: "http://example.com/mcp",
+      });
+
+      const result = await mcpClient.callMCPTool("http-srv", "some_tool", { arg: "value" });
+
+      expect(mockClient.request).toHaveBeenCalledWith("tools/call", {
+        name: "some_tool",
+        arguments: { arg: "value" },
+      });
+      expect(result).toBe("response from http server");
     });
   });
 
@@ -896,6 +960,48 @@ describe("mcp-client", () => {
       await expect(
         mcpClient.startMCPServer("chunk-srv", { command: "mcp", args: [] }),
       ).resolves.not.toThrow();
+    });
+
+    it("creates HTTP client transport for http transport", async () => {
+      mockClient.initialize.mockResolvedValue({});
+      mockClient.request.mockResolvedValue({ tools: [] });
+
+      await mcpClient.startMCPServer("http-srv", {
+        transport: "http",
+        url: "http://localhost:3000/mcp",
+        headers: { Authorization: "Bearer token" },
+      });
+
+      expect(mockClient.connect).toHaveBeenCalled();
+      expect(mockClient.initialize).toHaveBeenCalled();
+      expect(mockClient.request).toHaveBeenCalledWith("tools/list", {});
+    });
+
+    it("creates SSE client transport for sse transport", async () => {
+      mockClient.initialize.mockResolvedValue({});
+      mockClient.request.mockResolvedValue({ tools: [] });
+
+      await mcpClient.startMCPServer("sse-srv", {
+        transport: "sse",
+        url: "http://localhost:3000/sse",
+      });
+
+      expect(mockClient.connect).toHaveBeenCalled();
+    });
+
+    it("throws error for unsupported transport", async () => {
+      await expect(
+        mcpClient.startMCPServer("bad-transport", {
+          transport: "websocket" as any,
+          url: "ws://example.com",
+        }),
+      ).rejects.toThrow("Unsupported MCP transport: websocket");
+    });
+
+    it("throws error when url is missing for http/sse transport", async () => {
+      await expect(
+        mcpClient.startMCPServer("no-url", { transport: "http" }),
+      ).rejects.toThrow("MCP server no-url: URL required for http transport");
     });
   });
 

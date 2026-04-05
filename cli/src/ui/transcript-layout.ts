@@ -86,3 +86,21 @@ export function getAssistantMarginTop(messages: Message[], index: number): numbe
 export function shouldRenderUserDivider(index: number): boolean {
   return index > 0;
 }
+
+/**
+ * Add a blank spacer before live tool/status activity when it appears directly
+ * after a user prompt, so the live region doesn't visually stick to user text.
+ */
+export function shouldSeparateLiveActivityFromPrompt(
+  messages: Message[],
+  hasLiveToolActivity: boolean,
+  hasLiveStatusActivity: boolean,
+): boolean {
+  if (!hasLiveToolActivity && !hasLiveStatusActivity) return false;
+
+  const lastVisibleMessage = [...messages]
+    .reverse()
+    .find((m) => !(m.role === "assistant" && !m.content.trim()));
+
+  return lastVisibleMessage?.role === "user";
+}

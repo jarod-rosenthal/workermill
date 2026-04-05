@@ -4,6 +4,13 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.100] - 2026-04-05
+
+### Added
+- **`wm models` command** — new CLI subcommand that lists all available AI models grouped by provider. Combines the static registry (Anthropic, OpenAI, Google, xAI, Groq, DeepSeek, Mistral, Ollama, LM Studio, OpenRouter, Bedrock, Azure) with live discovery of local providers. Flags: `--provider <name>` to restrict to one provider, `--available` to hide unreachable local providers, `--json` for scripting. The `/model` autocomplete inside a session also probes default Ollama (`localhost:11434`) and LM Studio (`localhost:1234`) ports so tab-completion works without explicit config.
+- **Branch pre-flight check in `/ship`** — if the feature branch for a ticket already exists locally (e.g. from a previous aborted run), `/ship` now detects it before creating any files and prompts: **reset** (delete and start fresh from main) or **continue** (resume on the existing branch). Previously the branch was silently reused, which could sweep up uncommitted changes into the worker's first commit.
+- **Phase 0 spec assessment in the planner** — the planner now reads the task description first and decides how much codebase analysis it actually needs before touching any tools. Well-specified tickets with explicit file paths and implementation constraints enter targeted mode (3–5 file reads). Vague tickets proceed with full codebase analysis. Eliminates the multi-million-token deep-read that well-specified tickets were triggering.
+
 ## [0.15.99] - 2026-04-04
 
 ### Fixed

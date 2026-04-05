@@ -337,6 +337,58 @@ These work but the UX is rough — expect sharp edges.
 
 ---
 
+## CLI Subcommands
+
+These run outside the interactive session — from a normal terminal prompt.
+
+### `wm models [filter]`
+
+List all available AI models across every configured provider. Combines the static model registry with live discovery of local providers (Ollama, LM Studio).
+
+```bash
+wm models                          # All models, grouped by provider
+wm models sonnet                   # Filter by substring
+wm models --provider anthropic     # Single provider
+wm models --available              # Only reachable models (skips unreachable local providers)
+wm models --json                   # Machine-readable JSON array
+```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--provider <name>` | Restrict output to one provider |
+| `--available` | Hide unreachable local providers |
+| `--json` | Emit a JSON array instead of text |
+
+**Model sources:**
+
+- **Cloud models** — baked into the CLI from the provider registry (Anthropic, OpenAI, Google, xAI, Groq, DeepSeek, Mistral, etc.)
+- **Local models** — discovered at runtime by querying configured Ollama and LM Studio hosts
+
+**How it relates to `/model` autocomplete:** `wm models` probes only explicitly configured hosts (safe for scripting). The `/model` input autocomplete inside a session also probes the default Ollama (`localhost:11434`) and LM Studio (`localhost:1234`) ports even when they're not in config, so tab-completion works out of the box for users running local models without explicit configuration.
+
+### `wm logs`
+
+Stream or tail the CLI log file for the current project.
+
+```bash
+wm logs                        # Tail last 50 entries
+wm logs --tail 100             # Tail last N entries
+wm logs --follow               # Stream new entries as they arrive (like tail -f)
+wm logs --level debug          # Filter by level
+wm logs --json                 # One parsed JSON object per line (for jq, etc.)
+wm logs --cwd /path/to/repo    # Read log for a specific project directory
+```
+
+**Note:** `/log` inside a session shows a quick tail of recent entries. `wm logs --follow` from a separate terminal gives a live stream while a session is running.
+
+### `wm doctor`
+
+Health check: Node version, git, config file validity, API key status, Ollama connectivity, project instructions, and saved learnings.
+
+---
+
 ## CLI Launch Flags
 
 Flags passed when starting the CLI from the shell.
@@ -348,9 +400,6 @@ wm --plan                   # Start in plan mode (read-only tools)
 wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
 wm --auto-revise            # Auto-revise after a failed review without prompting
-wm doctor                   # Health check
-wm logs                     # Stream or tail CLI log entries for the current project
-wm models                   # List available AI models with live provider discovery
 wm --version                # Print CLI version
 wm --help                   # Show launch flags
 ```

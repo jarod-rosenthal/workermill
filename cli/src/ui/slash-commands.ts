@@ -206,6 +206,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
 | \`wm logs\` | Stream or tail CLI logs for this project |
+| \`wm models\` | List available AI models |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
@@ -309,7 +310,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "**Context window:** Add size after model name for local models:\n" +
           "`/model ollama/qwen3-coder:30b 64k` or `/model lmstudio/deepseek-r1 128k`\n" +
           "Local models default to 128k if not specified.\n\n" +
-          "**Supported providers:** ollama, lmstudio, anthropic, openai, google"
+          "**Supported providers:** ollama, lmstudio, anthropic, openai, google\n\n" +
+          "**Tip:** For a full catalog of available models, run \`wm models\` outside a session."
         );
       } else {
         // Detect role prefix: /model planner|reviewer <provider>/<model>

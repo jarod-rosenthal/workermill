@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
-import { listProviders } from "../provider-registry.js";
+import { listProviders, fetchLiveModels } from "../provider-registry.js";
 import { resolveConfig } from "../config.js";
 
 const BUILTIN_COMMANDS = [
@@ -84,53 +84,27 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     return () => clearInterval(id);
   }, [isActive]);
 
-  // Fetch Ollama models once on mount (async)
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
+  // Fetch live models once on mount (async)
+  const [liveModels, setLiveModels] = useState<Array<{ provider: string; id: string; host: string; reachable: boolean }>>([]);
   useEffect(() => {
     const config = resolveConfig();
-    // Ollama
-    const ollamaHost = config?.providers?.ollama?.host || "http://localhost:11434";
-    const ollamaCtrl = new AbortController();
-    const ollamaTimeout = setTimeout(() => ollamaCtrl.abort(), 3000);
-    globalThis.fetch(`${ollamaHost}/api/tags`, { signal: ollamaCtrl.signal })
-      .then(res => res.ok ? res.json() : null)
-      .then((data: any) => {
-        clearTimeout(ollamaTimeout);
-        if (data?.models) {
-          setOllamaModels(data.models.map((m: any) => m.name));
-        }
-      })
-      .catch(() => { clearTimeout(ollamaTimeout); });
-    // LM Studio
-    const lmHost = config?.providers?.lmstudio?.host?.replace(/\/v1\/?$/, "") || "http://localhost:1234";
-    const lmCtrl = new AbortController();
-    const lmTimeout = setTimeout(() => lmCtrl.abort(), 3000);
-    globalThis.fetch(`${lmHost}/v1/models`, { signal: lmCtrl.signal })
-      .then(res => res.ok ? res.json() : null)
-      .then((data: any) => {
-        clearTimeout(lmTimeout);
-        if (data?.data) {
-          setLmStudioModels(data.data.map((m: any) => m.id));
-        }
-      })
-      .catch(() => { clearTimeout(lmTimeout); });
+    fetchLiveModels(config, { probeDefaults: true }).then(setLiveModels).catch(() => {
+      // Ignore errors, just leave liveModels empty
+    });
   }, []);
 
-  // Build model list from provider registry + Ollama + LM Studio for /model completions
+  // Build model list from provider registry + live models for /model completions
   const modelChoices = useMemo(() => {
     const choices: { name: string; desc: string }[] = [];
-    // Ollama models from live API
-    for (const m of ollamaModels) {
-      choices.push({ name: `/model ollama/${m}`, desc: "local" });
-    }
-    // LM Studio models from live API
-    for (const m of lmStudioModels) {
-      choices.push({ name: `/model lmstudio/${m}`, desc: "local" });
+    // Live models from configured providers
+    for (const m of liveModels) {
+      if (m.reachable) {
+        choices.push({ name: `/model ${m.provider}/${m.id}`, desc: "local" });
+      }
     }
     // Cloud models from pricing registry
     for (const provider of listProviders()) {
-      if (provider.id === "ollama") continue;
+      if (provider.id === "ollama" || provider.id === "lmstudio") continue;
       for (const model of provider.pricingEngine.getModels()) {
         choices.push({
           name: `/model ${provider.id}/${model.id}`,
@@ -139,7 +113,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       }
     }
     return choices;
-  }, [ollamaModels, lmStudioModels]);
+  }, [liveModels]);
 
   // Filter matching commands when input starts with /
   // After "/ship " or "/build ", complete with .md files from cwd

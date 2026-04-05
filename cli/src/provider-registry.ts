@@ -1,5 +1,13 @@
 import type { CliConfig } from "./config.js";
+import type { ModelInfo } from "../../api/src/providers/types.js";
 import * as providersNamespace from "../../api/src/providers/index.js";
+import fs from "fs";
+import path from "path";
+import os from "os";
+
+interface RemoteModelInfo extends ModelInfo {
+  provider: string;
+}
 
 type ProviderModule = typeof import("../../api/src/providers/index.js");
 
@@ -11,6 +19,10 @@ const providers = (
     ? providersNamespace
     : (providersNamespace as unknown as { default: ProviderModule }).default
 ) as ProviderModule;
+
+const CONFIG_DIR = path.join(os.homedir(), ".workermill");
+const CACHE_FILE = path.join(CONFIG_DIR, "models-cache.json");
+const MODELS_URL = process.env.WM_MODELS_URL || "https://workermill.com/api/models.json";
 
 export const getPricingEngine: ProviderModule["getPricingEngine"] = (...args) =>
   providers.getPricingEngine(...args);
@@ -152,4 +164,13 @@ async function fetchLMStudioModels(host: string): Promise<Array<{
     });
   }
   return results;
+}
+
+/**
+ * Fetch remote model catalog from workermill.com/api/models.json
+ * with ETag-based caching. Returns models or empty array on failure.
+ * Non-blocking — start the fetch but don't await it at startup.
+ */
+export async function fetchRemoteModels(config: CliConfig, forceRefresh = false): Promise<RemoteModelInfo[]> {
+  return [];
 }

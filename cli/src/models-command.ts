@@ -1,4 +1,13 @@
-import { listProviders, fetchLiveModels } from "./provider-registry.js";
+import { listProviders, fetchLiveModels, fetchRemoteModels } from "./provider-registry.js";
+
+interface ModelEntry {
+  provider: string;
+  id: string;
+  displayName: string;
+  source: "cloud" | "live";
+  host?: string;
+  reachable?: boolean;
+}
 
 /**
  * Run the `wm models` command.
@@ -10,30 +19,63 @@ export async function runModelsCommand(
   const { json = false, provider: filterProvider, available = false } = options ?? {};
   const config = (await import("./config.js")).resolveConfig();
 
-  // Fetch live models in parallel
-  const liveModelsPromise = fetchLiveModels(config);
+  // Handle refresh command
+  const isRefresh = filter === "refresh";
+
+  // Fetch models in parallel: live, remote, and static
+  const [liveModels, remoteModels] = await Promise.all([
+    fetchLiveModels(config),
+    fetchRemoteModels(config, isRefresh),
+  ]);
 
   // Get static models from providers
   const staticProviders = listProviders();
-  const staticModels = staticProviders.flatMap(p =>
+  const staticModels: ModelEntry[] = staticProviders.flatMap(p =>
     p.pricingEngine.getModels().map(m => ({
       provider: p.id,
       id: m.id,
       displayName: m.displayName,
-      source: "cloud",
+      source: "cloud" as const,
     }))
   );
 
-  // Wait for live models
-  const liveModels = await liveModelsPromise;
+  // Merge remote models into static models (remote takes precedence for same provider/id)
+  const remoteModelMap = new Map<string, ModelEntry>();
+  for (const remoteModel of remoteModels) {
+    const key = `${remoteModel.provider}/${remoteModel.id}`;
+    remoteModelMap.set(key, {
+      provider: remoteModel.provider,
+      id: remoteModel.id,
+      displayName: remoteModel.displayName,
+      source: "cloud",
+    });
+  }
 
-  // Combine static and live models
+  const mergedStaticModels: ModelEntry[] = staticModels.map(staticModel => {
+    const key = `${staticModel.provider}/${staticModel.id}`;
+    return remoteModelMap.get(key) || staticModel;
+  });
+
+  // Add any remote models not in static registry
+  for (const remoteModel of remoteModels) {
+    const key = `${remoteModel.provider}/${remoteModel.id}`;
+    if (!mergedStaticModels.some(m => `${m.provider}/${m.id}` === key)) {
+      mergedStaticModels.push({
+        provider: remoteModel.provider,
+        id: remoteModel.id,
+        displayName: remoteModel.displayName,
+        source: "cloud",
+      });
+    }
+  }
+
+  // Combine merged static and live models
   const allModels = [
-    ...staticModels.map(m => ({
+    ...mergedStaticModels.map(m => ({
       provider: m.provider,
       id: m.id,
       displayName: m.displayName,
-      source: m.source as "cloud" | "live",
+      source: m.source,
       host: "",
       reachable: true,
     })),
@@ -63,8 +105,9 @@ export async function runModelsCommand(
   }
 
   // Filter by substring in id or displayName
-  if (filter && filter !== "refresh") {
-    const lowerFilter = filter.toLowerCase();
+  const searchFilter = isRefresh ? undefined : filter;
+  if (searchFilter) {
+    const lowerFilter = searchFilter.toLowerCase();
     filteredModels = filteredModels.filter(m =>
       m.id.toLowerCase().includes(lowerFilter) ||
       m.displayName.toLowerCase().includes(lowerFilter)

@@ -113,6 +113,8 @@ export interface CliConfig {
   linear?: LinearConfig;
   /** Shell commands to run after all stories complete, before tech lead review */
   qualityGates?: QualityGateCommand[];
+  /** Disable automatic fetching of remote model catalog (default: false) */
+  disableModelAutoUpdate?: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");

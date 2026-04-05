@@ -207,7 +207,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/hooks\` | View pre/post tool hooks |
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
-| \`/editor\` | Open \\$EDITOR for longer input |
+| \`/editor\` | Open editor for longer input (vim/nano — set with \`/settings editor\`) |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
 | \`/schedule\` | Scheduled tasks *(experimental)* |
@@ -793,7 +793,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /editor ----
     case "editor": {
-      const editor = process.env.EDITOR || process.env.VISUAL || "vi";
+      const editorPref = loadConfig()?.editor;
+      const editor = (editorPref && editorPref !== "auto")
+        ? editorPref
+        : (process.env.EDITOR || process.env.VISUAL || "vi");
       const tmpFile = path.join(os.tmpdir(), `workermill-${Date.now()}.md`);
       try {
         fs.writeFileSync(tmpFile, "", "utf-8");
@@ -838,6 +841,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const autoRevise = config.review?.autoRevise ?? false;
         const useCritic = config.review?.useCritic ?? false;
         const autoBranch = config.review?.autoBranch ?? false;
+        const editorSetting = config.editor || "auto";
         const sandboxEnabled = config.sandbox !== false;
         const bellEnabled = config.bell === true;
         const allowRules = config.permissions?.allow || [];
@@ -856,6 +860,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
           `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
           `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
+          `| Editor | ${editorSetting} | \`/settings editor <vim\\|nano\\|auto>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
@@ -929,6 +934,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           case "review.autoBranch": {
             config.review = { ...config.review, autoBranch: boolVal(value) };
+            break;
+          }
+          case "editor": {
+            const validEditors = ["vim", "nano", "auto"];
+            if (!validEditors.includes(value)) {
+              ctx.addSystemMessage(`Invalid editor: \`${value}\`. Use one of: ${validEditors.join(", ")}`);
+              settingApplied = false;
+              break;
+            }
+            config.editor = value as "vim" | "nano" | "auto";
             break;
           }
           case "sandbox": {

@@ -4,6 +4,15 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.101] - 2026-04-05
+
+### Fixed
+- **Stale review-loop churn in `/ship` and `/review`** — review rounds now include a loop guard. When the reviewer repeats the same blockers across rounds, auto-revise pauses instead of burning more cycles. Reviewer instructions now require concrete blocking evidence and a minimal actionable fix when requesting revision.
+- **Planner over-trusting stale tickets/issues** — planning guidance now explicitly tells the planner to verify whether the reported gap is already fixed in the current code before proposing duplicate production changes.
+- **`/model` default persistence regression** — switching models now reliably persists the active default model/provider for future sessions, including coverage for local/project settings interactions.
+- **Diverged branch push failure flow in `/ship`** — when `git push -u origin <branch>` is rejected as non-fast-forward, the CLI now detects divergence, explains why, and offers a safe `--force-with-lease` confirmation path instead of failing opaquely.
+- **GitHub issue auto-close timing** — opening a PR from `/ship` no longer force-transitions GitHub tickets to done on PR creation. PRs still include close keywords so the issue closes at merge time in the normal GitHub flow.
+
 ## [0.15.100] - 2026-04-05
 
 ### Added

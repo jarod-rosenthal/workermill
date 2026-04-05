@@ -231,6 +231,11 @@ export function App(props: AppProps): React.ReactElement {
   const lastEscRef = useRef(0);
   const lastInterruptRef = useRef(0);
   const lastInterruptEventRef = useRef(0);
+  const [queuedInput, setQueuedInput] = useState<string | null>(null);
+
+  const handleQueue = useCallback((value: string) => {
+    setQueuedInput(value);
+  }, []);
 
   const exitNow = useCallback(() => {
     stopAllMCPServers();
@@ -264,6 +269,14 @@ export function App(props: AppProps): React.ReactElement {
     // Idle first Ctrl+C mirrors single ESC: arm exit, wait for second press.
   }, [props.status, props.onCancel, exitNow]);
 
+  // Deliver queued input when agent goes idle
+  useEffect(() => {
+    if (props.status === "idle" && !props.orchestratorStatus && queuedInput !== null) {
+      props.onSubmit(queuedInput);
+      setQueuedInput(null);
+    }
+  }, [props.status, props.orchestratorStatus, queuedInput, props.onSubmit]);
+
   // Ask supporting terminals (wezterm/kitty/ghostty/etc.) to disambiguate key
   // input so modified Enter combos can be delivered distinctly.
   useEffect(() => {
@@ -287,6 +300,7 @@ export function App(props: AppProps): React.ReactElement {
       if (props.status !== "idle") {
         // First ESC while running — cancel the current operation
         props.onCancel();
+        setQueuedInput(null);
         lastEscRef.current = now;
         return;
       }
@@ -417,10 +431,12 @@ export function App(props: AppProps): React.ReactElement {
         <OrchestratorPrompt key={props.orchestratorPrompt.question} request={props.orchestratorPrompt} />
       ) : props.orchestratorConfirm ? (
         <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
-      ) : props.status === "idle" && !props.orchestratorStatus ? (
+      ) : !props.permissionRequest && !props.orchestratorConfirm ? (
         <Input
           onSubmit={props.onSubmit}
-          isActive={true}
+          isActive={props.status === "idle" && !props.orchestratorStatus}
+          isQueued={props.status !== "idle" || !!props.orchestratorStatus}
+          onQueue={handleQueue}
           history={props.inputHistory}
         />
       ) : null

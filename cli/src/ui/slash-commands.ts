@@ -206,14 +206,6 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
 | \`/editor\` | Open \\$EDITOR for longer input |
-
-**External CLI commands** (run from your terminal, outside the session):
-
-| Command | What it does |
-|---|---|
-| \`wm models\` | List all available AI models with live local discovery |
-| \`wm logs\` | Stream or tail CLI logs (\`--follow\`, \`--json\`, \`--tail N\`) |
-| \`wm doctor\` | Health check — config, API keys, git, Ollama connectivity |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
 | \`/schedule\` | Scheduled tasks *(experimental)* |

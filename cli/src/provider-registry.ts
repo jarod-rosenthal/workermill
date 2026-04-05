@@ -24,6 +24,8 @@ export const listProviders: ProviderModule["listProviders"] = (...args) =>
 export const findModelInfo: ProviderModule["findModelInfo"] = (...args) =>
   providers.findModelInfo(...args);
 
+export { fetchRemoteModels } from "./remote-models.js";
+
 // Default ports for local providers — used by Input.tsx autocomplete to probe
 // servers the user hasn't explicitly configured but may have running locally.
 const OLLAMA_DEFAULT_HOST = "http://localhost:11434";

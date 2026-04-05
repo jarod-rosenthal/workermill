@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
-import { listProviders, fetchLiveModels } from "../provider-registry.js";
+import { listProviders, fetchLiveModels, fetchRemoteModels } from "../provider-registry.js";
 import { resolveConfig } from "../config.js";
 
 const BUILTIN_COMMANDS = [
@@ -84,36 +84,73 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     return () => clearInterval(id);
   }, [isActive]);
 
-  // Fetch live models once on mount (async)
+  // Fetch live and remote models once on mount (async)
   const [liveModels, setLiveModels] = useState<Array<{ provider: string; id: string; host: string; reachable: boolean }>>([]);
+  const [remoteModels, setRemoteModels] = useState<Array<any>>([]);
   useEffect(() => {
     const config = resolveConfig();
-    fetchLiveModels(config, { probeDefaults: true }).then(setLiveModels).catch(() => {
-      // Ignore errors, just leave liveModels empty
+    Promise.all([
+      fetchLiveModels(config, { probeDefaults: true }),
+      fetchRemoteModels(config),
+    ]).then(([live, remote]) => {
+      setLiveModels(live);
+      setRemoteModels(remote);
+    }).catch(() => {
+      // Ignore errors, just leave models empty
     });
   }, []);
 
-  // Build model list from provider registry + live models for /model completions
+  // Build model list from provider registry + remote + live models for /model completions
   const modelChoices = useMemo(() => {
     const choices: { name: string; desc: string }[] = [];
+
+    // Merge remote models into static registry (remote takes precedence)
+    const staticProviders = listProviders();
+    const staticModels = staticProviders.flatMap(p =>
+      p.pricingEngine.getModels().map(m => ({
+        provider: p.id,
+        id: m.id,
+        displayName: m.displayName,
+      }))
+    );
+
+    const remoteModelMap = new Map<string, any>();
+    for (const remoteModel of remoteModels) {
+      const key = `${remoteModel.provider}/${remoteModel.id}`;
+      remoteModelMap.set(key, remoteModel);
+    }
+
+    const mergedStaticModels = staticModels.map(staticModel => {
+      const key = `${staticModel.provider}/${staticModel.id}`;
+      return remoteModelMap.get(key) || staticModel;
+    });
+
+    // Add any remote models not in static registry
+    for (const remoteModel of remoteModels) {
+      const key = `${remoteModel.provider}/${remoteModel.id}`;
+      if (!mergedStaticModels.some((m: any) => `${m.provider}/${m.id}` === key)) {
+        mergedStaticModels.push(remoteModel);
+      }
+    }
+
+    // Cloud models from merged registry
+    for (const model of mergedStaticModels) {
+      if (model.provider === "ollama" || model.provider === "lmstudio") continue;
+      choices.push({
+        name: `/model ${model.provider}/${model.id}`,
+        desc: model.displayName,
+      });
+    }
+
     // Live models from configured providers
     for (const m of liveModels) {
       if (m.reachable) {
         choices.push({ name: `/model ${m.provider}/${m.id}`, desc: "local" });
       }
     }
-    // Cloud models from pricing registry
-    for (const provider of listProviders()) {
-      if (provider.id === "ollama" || provider.id === "lmstudio") continue;
-      for (const model of provider.pricingEngine.getModels()) {
-        choices.push({
-          name: `/model ${provider.id}/${model.id}`,
-          desc: model.displayName,
-        });
-      }
-    }
+
     return choices;
-  }, [liveModels]);
+  }, [liveModels, remoteModels]);
 
   // Filter matching commands when input starts with /
   // After "/ship " or "/build ", complete with .md files from cwd

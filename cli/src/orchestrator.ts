@@ -1493,13 +1493,15 @@ export async function runOrchestration(
   trustAll: boolean | (() => boolean),
   sandboxed: boolean | "os",
   output: OrchestrationOutput,
-  abortSignal?: AbortSignal,
+  abortController?: AbortController,
   retryPlan?: RetryPlan,
   ticketKey?: string,
   liveViewServer?: import("./live-view-server.js").LiveViewServer,
 ): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
+
+  const abortSignal = abortController?.signal;
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
   if (ticketKey) {
@@ -1591,6 +1593,11 @@ export async function runOrchestration(
     if (ctx) {
       await ensureLmStudioContext(host, defaultProvider.model, ctx);
     }
+  }
+
+  // Set abort controller on live view server
+  if (liveViewServer && abortController) {
+    (liveViewServer as any).setAbortController(abortController);
   }
 
   // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
@@ -1934,7 +1941,7 @@ export async function runOrchestration(
 
     // Emit live view events
     if (liveViewServer) {
-      liveViewServer.emitStoryStart(i + 1, story.title, story.persona, sorted.length);
+      liveViewServer.emitStoryStart(i, story.title, story.persona, sorted.length);
     }
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -2195,10 +2202,10 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
               const input = tc.input as Record<string, unknown>;
               if (name === "write_file" && input.file_path) {
                 storyActions.push({ tool: "created", detail: String(input.file_path) });
-                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, String(input.file_path), "created");
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i, story.title, String(input.file_path), "created");
               } else if ((name === "edit_file" || name === "patch") && input.file_path) {
                 storyActions.push({ tool: "edited", detail: String(input.file_path) });
-                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, String(input.file_path), "edited");
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i, story.title, String(input.file_path), "edited");
               } else if (name === "bash" && input.command) {
                 const cmd = String(input.command);
                 // Only track meaningful commands, not reads
@@ -2417,6 +2424,9 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
         if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
       }
+
+      const storyElapsed = (Date.now() - storyStartMs) / 1000;
+      if (liveViewServer) liveViewServer.emitStoryComplete(i, storyElapsed);
 
           break; // Story succeeded, exit revision loop
     } catch (err) {
@@ -3182,6 +3192,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
+          }
+        }
 
             // Commit revision changes — checkpoint on the feature branch
             if (featureBranch) {
@@ -3455,6 +3467,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   stopAllMCPServers();
   const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
   shutdownLSP();
+
+  // Stop live view server
+  if (liveViewServer) {
+    liveViewServer.stop();
+  }
 
   return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
 }

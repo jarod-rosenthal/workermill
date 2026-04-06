@@ -21,6 +21,7 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
   const server = createServer();
   const clients = new Set<{ res: any; replay: LiveViewEvent[] }>();
   const fileDiffs = new Map<string, string>();
+  const allEvents: LiveViewEvent[] = [];
 
   let abortController: AbortController | null = null;
 
@@ -39,7 +40,7 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
         "Access-Control-Allow-Headers": "Cache-Control",
       });
 
-      const client = { res, replay: Array.from(fileDiffs.values()).map(diff => JSON.parse(diff)) as LiveViewEvent[] };
+      const client = { res, replay: allEvents.slice() };
       clients.add(client);
 
       // Send replay of current state
@@ -70,6 +71,7 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
   const port = (server.address() as any).port;
 
   function broadcast(event: LiveViewEvent): void {
+    allEvents.push(event);
     const data = `data: ${JSON.stringify(event)}\n\n`;
     for (const client of clients) {
       client.res.write(data);

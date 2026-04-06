@@ -652,10 +652,7 @@ export function useOrchestrator(
           // ---- Run full orchestration --------------------------------
           const retryPlan = retryPlanRef.current;
           retryPlanRef.current = null;
-          if (liveViewServer) {
-            (liveViewServer as any).setAbortController(controller);
-          }
-          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined, ticketKey, liveViewServer);
+          await runOrchestration(config, task, trustAll, sandboxed, output, controller, retryPlan ?? undefined, ticketKey, liveViewServer);
 
           flushLine();
           const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -878,7 +875,7 @@ export function useOrchestrator(
                 trustAll,
                 sandboxed,
                 output,
-                controller.signal,
+                controller,
                 undefined,
                 issueKey,
               );
@@ -902,7 +899,7 @@ export function useOrchestrator(
                   trustAll,
                   sandboxed,
                   output,
-                  controller.signal,
+                  controller,
                   retryPlan,
                   issueKey,
                 );

@@ -6,7 +6,7 @@
  * executing and release it after. Concurrent-safe tools skip the lock entirely.
  */
 
-import { getToolMeta } from "../../packages/engine/src/tools/tool-metadata.js";
+import { getToolMeta } from "./engine/tools/tool-metadata.js";
 
 /** Simple async mutex for serializing non-concurrent tool calls */
 class ToolMutex {

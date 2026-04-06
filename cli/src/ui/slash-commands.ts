@@ -17,8 +17,8 @@ import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered, getMCPServerInfo } from "../mcp-client.js";
 import { getRetryableRun } from "../ship-state.js";
-import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
-import { cleanupStaleWorktrees } from "../../../packages/engine/src/tools/sub-agent.js";
+import { shutdown as shutdownLSP } from "../engine/tools/lsp.js";
+import { cleanupStaleWorktrees } from "../engine/tools/sub-agent.js";
 import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
@@ -1553,7 +1553,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const routing = config.routing;
         const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
         const routingRows = [
-          `| default (all workers) | ${config.default} |`,
+          `| default | ${config.default} |`,
           ...validEntries.map(([persona, provider]) => `| ${persona} | ${provider} |`),
         ];
         ctx.addSystemMessage(

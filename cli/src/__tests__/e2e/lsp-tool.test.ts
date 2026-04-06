@@ -3,7 +3,7 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { execute, shutdown } from "../../../../packages/engine/src/tools/lsp.js";
+import { execute, shutdown } from "../../engine/tools/lsp.js";
 
 let tempDir: string;
 let lsAvailable = true;

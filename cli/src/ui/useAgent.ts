@@ -8,9 +8,9 @@ import {
   buildOllamaOptions,
   ensureOllamaContext,
   ensureLmStudioContext,
-} from "../../../packages/engine/src/model-factory.js";
-import { createToolDefinitions } from "../../../packages/engine/src/tools/index.js";
-import type { AIProvider } from "../../../packages/engine/src/types.js";
+} from "../engine/model-factory.js";
+import { createToolDefinitions } from "../engine/tools/index.js";
+import type { AIProvider } from "../engine/types.js";
 import {
   createSession,
   saveSession,
@@ -21,7 +21,7 @@ import {
 } from "../session.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
-import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
+import { killActiveProcess } from "../engine/tools/bash.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";

@@ -1,34 +1,18 @@
 # Compiled TypeScript output in source directories
-api/src/**/*.js
-api/src/**/*.d.ts
-!api/src/types/**/*.d.ts
 cli/src/**/*.js
 cli/src/**/*.d.ts
-packages/engine/src/**/*.js
-packages/engine/src/**/*.d.ts
-worker/lib/**/*.js
-worker/lib/**/*.d.ts
-worker/lib/dist/
-worker/multi-expert/**/*.js
-worker/multi-expert/**/*.d.ts
 
 # Dependencies
 node_modules/
-.pnp
-.pnp.js
 
 # Build outputs
 dist/
 build/
-.next/
-out/
 
 # Environment
 .env
 .env.local
 .env.*.local
-.env.production
-frontend/.env
 
 # IDE
 .idea/
@@ -43,8 +27,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # Test coverage
 coverage/
@@ -52,46 +34,18 @@ coverage/
 # TypeScript
 *.tsbuildinfo
 
-# Terraform
-**/.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-tfplan
-*.tfplan
-crash.log
-crash.*.log
-infrastructure/terraform/modules/cognito-presignup/lambda/layer/
-infrastructure/terraform/modules/cognito-presignup/lambda/*.zip
-
-# Docker
-.docker/
-
 # Local WorkerMill development
-.local-workermill/
 .workermill/
-data/dumps/
-
-# Remote Agent
-.env.remote
 
 # MCP config (contains API tokens)
 .mcp.json
-.terraform.lock.hcl
-__pycache__/
-
-# VSIX build artifacts
-*.vsix
 
 # Playwright MCP
 .playwright-mcp/
 
 # Internal docs, plans, and Claude config (not public)
 /private/
-/worker/docs/
-/agent/docs/
-/packages/docs/
-# Note: /cli/docs/ is public — user-facing CLI documentation
+/docs/
 
 # cli/README.md is generated at publish time from the root README.md
 # via the prepublishOnly script. Never edit it directly.
@@ -101,25 +55,15 @@ __pycache__/
 CLAUDE.md
 .claude/
 
-# E2E test fixture repo (cloned from GitHub, not needed locally)
+# E2E test fixture repo
 e2e-cli-tests/
 cli/e2e-cli-tests/
 
-# Operations scripts (local only)
-bin/bastion
-scripts/diagnose-tenant.ts
-
-# Misc artifacts
+# Misc
 *.png
-!mobile/assets/*.png
-swebench_predictions.jsonl
-
 .workermill-message.md
 .workermill-response.md
 .workermill-answer.md
-.nuxt
-.output
-.svelte-kit
 
 # Scratch scripts
 scripts/*.py

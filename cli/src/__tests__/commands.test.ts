@@ -22,7 +22,7 @@ import { compactMessages } from "../compaction.js";
 import { listSessions, loadSessionById, deleteSession } from "../session.js";
 
 // Mock the pricing engine for CostTracker
-vi.mock("../../../api/src/providers/index.js", () => ({
+vi.mock("../providers/index.js", () => ({
   getPricingEngine: vi.fn(() => ({
     calculateTokenCost: vi.fn(() => 0),
   })),
@@ -38,7 +38,7 @@ vi.mock("../compaction.js", () => ({
 }));
 
 // Mock model factory
-vi.mock("../../../packages/engine/src/model-factory.js", () => ({
+vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({})),
 }));
 

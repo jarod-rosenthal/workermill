@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the pricing engine before importing CostTracker
-vi.mock("../../../api/src/providers/index.js", () => ({
+vi.mock("../providers/index.js", () => ({
   getPricingEngine: vi.fn(() => ({
     calculateTokenCost: vi.fn(
       (usage: { inputTokens: number; outputTokens: number }) =>

@@ -1,9 +1,9 @@
 import { streamText } from "ai";
 import { z } from "zod";
 import fs from "fs";
-import { createModel } from "../../packages/engine/src/model-factory.js";
-import type { AIProvider } from "../../packages/engine/src/types.js";
-import { SYSTEM_PROMPT_WITH_STORIES } from "../../api/src/services/prd-prompts.js";
+import { createModel } from "./engine/model-factory.js";
+import type { AIProvider } from "./engine/types.js";
+import { SYSTEM_PROMPT_WITH_STORIES } from "./prompts/prd-prompts.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { extractGithubIssueNumber } from "./ticket-ops.js";

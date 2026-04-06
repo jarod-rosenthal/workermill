@@ -204,12 +204,12 @@ describe("Dangerous File Protection (isDangerousFile)", () => {
 // ---------------------------------------------------------------------------
 
 describe("Tool Metadata", () => {
-  let getReadOnlyTools: typeof import("../../../packages/engine/src/tools/tool-metadata.js")["getReadOnlyTools"];
-  let getAcceptEditsTools: typeof import("../../../packages/engine/src/tools/tool-metadata.js")["getAcceptEditsTools"];
-  let getToolMeta: typeof import("../../../packages/engine/src/tools/tool-metadata.js")["getToolMeta"];
+  let getReadOnlyTools: typeof import("../engine/tools/tool-metadata.js")["getReadOnlyTools"];
+  let getAcceptEditsTools: typeof import("../engine/tools/tool-metadata.js")["getAcceptEditsTools"];
+  let getToolMeta: typeof import("../engine/tools/tool-metadata.js")["getToolMeta"];
 
   beforeEach(async () => {
-    const mod = await import("../../../packages/engine/src/tools/tool-metadata.js");
+    const mod = await import("../engine/tools/tool-metadata.js");
     getReadOnlyTools = mod.getReadOnlyTools;
     getAcceptEditsTools = mod.getAcceptEditsTools;
     getToolMeta = mod.getToolMeta;

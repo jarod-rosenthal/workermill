@@ -13,7 +13,7 @@ import {
   shouldRenderUserDivider,
 } from "./transcript-layout.js";
 import { stopAllMCPServers } from "../mcp-client.js";
-import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
+import { shutdown as shutdownLSP } from "../engine/tools/lsp.js";
 import { browserClose } from "../browser.js";
 import type {
   Message,

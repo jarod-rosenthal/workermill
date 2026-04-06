@@ -117,14 +117,14 @@ Done.`;
 });
 
 // Mock model factory
-vi.mock("../../../packages/engine/src/model-factory.js", () => ({
+vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({ modelId: "test-model", provider: "ollama" })),
   buildOllamaOptions: vi.fn(() => ({})),
   ensureOllamaContext: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock tool definitions — return a minimal set of tools
-vi.mock("../../../packages/engine/src/tools/index.js", () => ({
+vi.mock("../engine/tools/index.js", () => ({
   createToolDefinitions: vi.fn(() => ({
     bash: {
       description: "Run a bash command",

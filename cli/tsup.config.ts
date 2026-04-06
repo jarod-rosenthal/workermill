@@ -6,7 +6,6 @@ export default defineConfig({
   target: "node20",
   clean: true,
   shims: true,
-  // Bundle the monorepo imports (../../packages/engine/) into dist.
   // Keep npm dependencies external — users install them.
   external: [
     "@ai-sdk/anthropic",

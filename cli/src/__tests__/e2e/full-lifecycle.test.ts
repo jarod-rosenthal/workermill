@@ -9,8 +9,8 @@ import { loadConfig, saveConfig } from "../../config.js";
 import type { OrchestrationOutput } from "../../orchestrator.js";
 import { handleSlashCommand } from "../../ui/slash-commands.js";
 import type { SlashCommandContext } from "../../ui/slash-commands.js";
-import { EngineAIClient } from "../../../../packages/engine/src/ai-client.js";
-import type { StreamMessage, TokenUsage } from "../../../../packages/engine/src/types.js";
+import { EngineAIClient } from "../../engine/ai-client.js";
+import type { StreamMessage, TokenUsage } from "../../engine/types.js";
 import { detectOllamaHost } from "../helpers/ollama-host.js";
 
 // ---------------------------------------------------------------------------

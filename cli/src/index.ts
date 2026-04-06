@@ -141,8 +141,8 @@ const defaultCmd = program
     if (options.prompt) {
       // Headless mode — run single prompt, print result, exit
       const { streamText, stepCountIs } = await import("ai");
-      const { createModel, buildOllamaOptions } = await import("../../packages/engine/src/model-factory.js");
-      const { createToolDefinitions } = await import("../../packages/engine/src/tools/index.js");
+      const { createModel, buildOllamaOptions } = await import("./engine/model-factory.js");
+      const { createToolDefinitions } = await import("./engine/tools/index.js");
       const { formatProjectInstructions } = await import("./instructions.js");
       const { loadLearnings } = await import("./learnings.js");
       const { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } = await import("./mcp-client.js");
@@ -196,7 +196,7 @@ const defaultCmd = program
       }
       console.log(); // newline at end
       stopAllMCPServers();
-      const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
+      const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
       shutdownLSP();
       process.exit(0);
     }

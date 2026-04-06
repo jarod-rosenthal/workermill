@@ -5,8 +5,8 @@
  * READ_TOOLS, or AUTO_EDIT_TOOLS anywhere else in the codebase.
  */
 
-import { getReadOnlyTools, getAcceptEditsTools } from "../../packages/engine/src/tools/tool-metadata.js";
-export { getToolMeta } from "../../packages/engine/src/tools/tool-metadata.js";
+import { getReadOnlyTools, getAcceptEditsTools } from "./engine/tools/tool-metadata.js";
+export { getToolMeta } from "./engine/tools/tool-metadata.js";
 
 /** Command patterns that require explicit confirmation even under trust-all mode. */
 export const DANGEROUS_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [

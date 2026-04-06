@@ -1,7 +1,7 @@
 import type { CliConfig } from "./config.js";
-import * as providersNamespace from "../../api/src/providers/index.js";
+import * as providersNamespace from "./providers/index.js";
 
-type ProviderModule = typeof import("../../api/src/providers/index.js");
+type ProviderModule = typeof import("./providers/index.js");
 
 // Cross-runtime compatibility:
 // - In some tsx/dev setups this module is seen as CJS (exports under `default`)

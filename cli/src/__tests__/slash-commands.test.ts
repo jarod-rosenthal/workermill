@@ -87,18 +87,18 @@ vi.mock("../browser.js", () => ({
   isBrowserOpen: vi.fn(() => false),
 }));
 
-vi.mock("../../../packages/engine/src/tools/lsp.js", () => ({
+vi.mock("../engine/tools/lsp.js", () => ({
   shutdown: vi.fn(),
 }));
 
-vi.mock("../../../api/src/providers/index.js", () => ({
+vi.mock("../providers/index.js", () => ({
   getPricingEngine: vi.fn(() => ({ getModelPricing: vi.fn(() => null) })),
   hasProvider: vi.fn(() => false),
   listProviders: vi.fn(() => []),
   findModelInfo: vi.fn(() => null),
 }));
 
-vi.mock("../../../packages/engine/src/tools/sub-agent.js", () => ({
+vi.mock("../engine/tools/sub-agent.js", () => ({
   cleanupStaleWorktrees: vi.fn(),
 }));
 

@@ -1,6 +1,0 @@
-# Semgrep ignore patterns for WorkerMill
-node_modules/
-dist/
-*.test.*
-*.spec.*
-__tests__/

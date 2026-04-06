@@ -1,8 +1,8 @@
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
-import { createModel, buildOllamaOptions, ensureOllamaContext, ensureLmStudioContext } from "../../packages/engine/src/model-factory.js";
-import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
-import type { AIProvider } from "../../packages/engine/src/types.js";
+import { createModel, buildOllamaOptions, ensureOllamaContext, ensureLmStudioContext } from "./engine/model-factory.js";
+import { createToolDefinitions } from "./engine/tools/index.js";
+import type { AIProvider } from "./engine/types.js";
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
@@ -3293,7 +3293,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // Stop MCP servers and language server
   stopAllMCPServers();
-  const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
+  const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
   shutdownLSP();
 
   // Keep live view server alive for the current CLI session so users can

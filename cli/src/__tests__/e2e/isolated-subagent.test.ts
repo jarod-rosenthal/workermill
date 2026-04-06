@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
-import { cleanupStaleWorktrees } from "../../../../packages/engine/src/tools/sub-agent.js";
+import { cleanupStaleWorktrees } from "../../engine/tools/sub-agent.js";
 
 describe("isolated sub-agent worktree", () => {
   let tempDir: string;

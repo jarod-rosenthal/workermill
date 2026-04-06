@@ -3,11 +3,7 @@ name: Notify on Workflow Failure
 on:
   workflow_run:
     workflows:
-      - "CI/CD Pipeline"
-      - "Docker Images"
       - "CI"
-      - "Agent Release"
-      - "VS Code Extension Release"
     types:
       - completed
 

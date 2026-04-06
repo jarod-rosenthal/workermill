@@ -2,8 +2,8 @@ import { describe, it, beforeAll, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { EngineAIClient } from "../../../../packages/engine/src/ai-client.js";
-import type { StreamMessage } from "../../../../packages/engine/src/types.js";
+import { EngineAIClient } from "../../engine/ai-client.js";
+import type { StreamMessage } from "../../engine/types.js";
 import { detectOllamaHost } from "../helpers/ollama-host.js";
 
 let OLLAMA_HOST = "";

@@ -2,16 +2,13 @@
   "name": "workermill",
   "version": "0.1.0",
   "private": true,
-  "description": "Mission control for autonomous AI coding agents",
-  "workspaces": [
-    "packages/*"
-  ],
+  "description": "The open-source AI coding agent with multi-expert orchestration",
   "scripts": {
-    "build": "npm run build --workspaces",
-    "dev": "npm run dev --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "build": "cd cli && npm run build",
+    "dev": "cd cli && npm run dev",
+    "lint": "cd cli && npm run lint",
+    "test": "cd cli && npm run test",
+    "typecheck": "cd cli && npm run typecheck"
   },
   "repository": {
     "type": "git",
@@ -20,9 +17,10 @@
   "keywords": [
     "ai",
     "agents",
+    "coding-agent",
+    "multi-expert",
     "orchestration",
-    "monitoring",
-    "devops",
+    "cli",
     "workermill"
   ],
   "author": "Jarod Rosenthal",

@@ -1,5 +1,5 @@
 import type { CliConfig } from "./config.js";
-import type { ModelInfo } from "../../api/src/providers/types.js";
+import type { ModelInfo } from "./providers/types.js";
 import fs from "fs";
 import path from "path";
 import os from "os";

@@ -266,160 +266,6 @@ function buildReasoningOptions(provider: string, modelName: string): Record<stri
   }
 }
 
-// ---------------------------------------------------------------------------
-// Planning Critic — ported from api/src/services/critic-agent-local.ts
-// Scores plans 1-10, approves at >=threshold, refines up to maxIterations.
-// ---------------------------------------------------------------------------
-
-interface CriticResult {
-  score: number;
-  approved: boolean;
-  risks: string[];
-  suggestions: string[];
-  reasoning: string;
-  storyFeedback?: Array<{ storyId: string; feedback: string; suggestedChanges?: string[] }>;
-}
-
-function buildCriticPrompt(stories: Story[], requirements: string, iteration: number): string {
-  const storyList = stories.map((s, i) =>
-    `### Story ${i + 1}: ${s.title} (${s.id})\n` +
-    `- **Persona:** ${s.persona}\n` +
-    `- **Dependencies:** ${s.dependsOn?.join(", ") || "None"}\n` +
-    `- **Description:** ${s.description}\n` +
-    (s.implementationNotes ? `- **Implementation Notes:** ${s.implementationNotes}\n` : "")
-  ).join("\n\n");
-
-  return `You are a senior technical reviewer (Tech Lead / Critic Agent).
-
-Your job is to review an execution plan and determine if it adequately addresses the requirements.
-
-## Original Requirements
-
-${requirements}
-
-## Execution Plan to Review
-
-**Stories:**
-${storyList}
-
-${iteration > 1 ? `\n**Note:** This is revision ${iteration}. Previous versions had issues that needed addressing.\n` : ""}
-
-## Review Criteria
-
-Score the plan from 1-10 based on:
-
-1. **Completeness (3 points):** Does the plan cover all requirements?
-2. **Feasibility (2 points):** Are the steps realistic and achievable?
-3. **Dependencies (2 points):** Are dependencies correctly ordered with no circular deps?
-4. **Focused Scope (1 point):** Each story should own a single concern.
-5. **Risk Management (2 points):** Are risks properly identified and mitigated?
-
-## Response Format
-
-Respond with a JSON object in this exact format:
-
-\`\`\`json
-{
-  "score": 8,
-  "approved": true,
-  "risks": ["Specific risk identified"],
-  "suggestions": ["Specific improvement suggestion"],
-  "reasoning": "Detailed explanation of the score",
-  "storyFeedback": [
-    { "storyId": "story-id", "feedback": "Specific feedback", "suggestedChanges": ["Change 1"] }
-  ]
-}
-\`\`\`
-
-Important:
-- Score is 1-10. Set "approved" to true if score >= threshold (default 8)
-- Be specific in feedback, not generic
-- If rejecting, explain exactly what needs to change
-- storyFeedback is optional, only include for stories that need changes`;
-}
-
-function parseCriticResult(output: string, threshold: number): CriticResult {
-  // Strategy 1: Find ```json fence
-  const jsonFenceStart = output.indexOf("```json");
-  if (jsonFenceStart !== -1) {
-    const braceStart = output.indexOf("{", jsonFenceStart + 7);
-    if (braceStart !== -1) {
-      const extracted = extractBalancedJSON(output, braceStart);
-      if (extracted) {
-        return normalizeCriticResult(JSON.parse(extracted), threshold);
-      }
-    }
-  }
-  // Strategy 2: Find raw JSON from first {
-  const braceStart = output.indexOf("{");
-  if (braceStart !== -1) {
-    const extracted = extractBalancedJSON(output, braceStart);
-    if (extracted) {
-      return normalizeCriticResult(JSON.parse(extracted), threshold);
-    }
-  }
-  throw new Error("Could not find JSON critic result in output");
-}
-
-function normalizeCriticResult(parsed: Record<string, unknown>, threshold: number): CriticResult {
-  const score = typeof parsed.score === "number" ? parsed.score : 0;
-  return {
-    score,
-    approved: parsed.approved === true || score >= threshold,
-    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String) : [],
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String) : [],
-    reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
-    storyFeedback: Array.isArray(parsed.storyFeedback) ? parsed.storyFeedback : undefined,
-  };
-}
-
-function formatCriticFeedback(critic: CriticResult, stories: Story[]): string {
-  const lines: string[] = [
-    "## REVIEWER NOTES — Your plan needs revision",
-    "",
-    `Score: ${critic.score}/10 (needs ≥8 for approval)`,
-    "",
-    `**Reasoning:** ${critic.reasoning}`,
-    "",
-  ];
-
-  if (critic.risks.length > 0) {
-    lines.push("### Risks Identified:");
-    for (const risk of critic.risks) lines.push(`- ${risk}`);
-    lines.push("");
-  }
-
-  if (critic.suggestions.length > 0) {
-    lines.push("### Required Improvements:");
-    for (const suggestion of critic.suggestions) lines.push(`- ${suggestion}`);
-    lines.push("");
-  }
-
-  if (critic.storyFeedback && critic.storyFeedback.length > 0) {
-    lines.push("### Per-Story Notes:");
-    for (const fb of critic.storyFeedback) {
-      lines.push(`- **${fb.storyId}**: ${fb.feedback}`);
-      if (fb.suggestedChanges) {
-        for (const change of fb.suggestedChanges) lines.push(`  - ${change}`);
-      }
-    }
-    lines.push("");
-  }
-
-  lines.push(
-    "## YOUR CURRENT PLAN",
-    "",
-    "```json",
-    JSON.stringify({ stories: stories.map(s => ({ id: s.id, title: s.title, persona: s.persona, description: s.description, implementationNotes: s.implementationNotes, dependsOn: s.dependsOn })) }, null, 2),
-    "```",
-    "",
-    "**CRITICAL — OUTPUT FORMAT:** Output the revised plan as a ```json code block with the COMPLETE JSON object. Do NOT describe changes — output the full JSON.",
-    "**DO NOT re-explore the repository.** Go directly to outputting the revised ```json plan.",
-  );
-
-  return lines.join("\n");
-}
-
 /**
  * Check if an error is transient/retryable — from worker/epic/coordinator-utils.ts lines 45-66.
  */
@@ -1153,98 +999,13 @@ Rules:
     };
   }
 
-  // ── Planning Critic Loop ──
-  // Ported from api/src/services/critic-agent-local.ts.
-  // Scores the plan 1-10, refines up to maxIterations if below threshold.
-  const criticEnabled = config.review?.useCritic === true; // off by default, enable with /settings review.critic true
-  const criticThreshold = config.review?.criticThreshold ?? 8;
-  const maxCriticIterations = 3;
-  let totalInputTokens = planUsage?.inputTokens || 0;
-  let totalOutputTokens = planUsage?.outputTokens || 0;
-
-  if (criticEnabled && stories.length > 0) {
-    let currentStories = stories;
-
-    for (let iteration = 1; iteration <= maxCriticIterations; iteration++) {
-      output.log("planner", `Critic pass ${iteration}/${maxCriticIterations} — scoring plan...`);
-      logger.info("Running critic", { iteration, storyCount: currentStories.length });
-
-      try {
-        const criticPrompt = buildCriticPrompt(currentStories, userTask, iteration);
-        const criticResponse = await generateText({
-          model: plannerModel,
-          prompt: criticPrompt,
-          maxOutputTokens: 4096,
-          abortSignal,
-        });
-
-        totalInputTokens += criticResponse.usage?.inputTokens || 0;
-        totalOutputTokens += criticResponse.usage?.outputTokens || 0;
-
-        const criticResult = parseCriticResult(criticResponse.text, criticThreshold);
-        logger.info("Critic result", { score: criticResult.score, approved: criticResult.approved, iteration });
-
-        if (criticResult.approved) {
-          output.log("planner", `Critic approved: ${criticResult.score}/10 — ${criticResult.reasoning.split("\n")[0].slice(0, 120)}`);
-          break;
-        }
-
-        output.log("planner", `Critic scored ${criticResult.score}/10 (needs ≥${criticThreshold}) — revising...`);
-        if (criticResult.suggestions.length > 0) {
-          output.log("planner", `  suggestions: ${criticResult.suggestions.slice(0, 3).join("; ")}`);
-        }
-
-        if (iteration >= maxCriticIterations) {
-          output.log("planner", `Max critic iterations reached — proceeding with score ${criticResult.score}/10`);
-          break;
-        }
-
-        // Revise: send feedback + current plan back to planner for refinement
-        const refinementPrompt = formatCriticFeedback(criticResult, currentStories);
-        const revisionStream = streamText({
-          model: plannerModel,
-          prompt: refinementPrompt,
-          tools: {} as ToolSet, // No tools for revision — just output JSON
-          stopWhen: stepCountIs(1),
-          abortSignal,
-          timeout: { chunkMs: 120_000 },
-        });
-
-        let revisionText = "";
-        for await (const chunk of revisionStream.textStream) {
-          if (abortSignal?.aborted) break;
-          revisionText += chunk;
-        }
-        revisionText = await revisionStream.text;
-        const revUsage = await revisionStream.totalUsage;
-        totalInputTokens += revUsage?.inputTokens || 0;
-        totalOutputTokens += revUsage?.outputTokens || 0;
-
-        const revisedStories = parseStoriesFromText(revisionText, output);
-        if (revisedStories.length > 0) {
-          currentStories = revisedStories;
-          output.log("planner", `Revised plan: ${revisedStories.length} stories`);
-        } else {
-          output.log("planner", "Revision produced no parseable stories — keeping current plan");
-          break;
-        }
-      } catch (criticErr) {
-        logger.error("Critic failed", { error: criticErr instanceof Error ? criticErr.message : String(criticErr), iteration });
-        output.log("planner", `Critic error — proceeding with current plan`);
-        break;
-      }
-    }
-
-    stories = currentStories;
-  }
-
   output.statusDone();
   return {
     stories,
     provider: pProvider,
     model: pModel,
-    inputTokens: totalInputTokens,
-    outputTokens: totalOutputTokens,
+    inputTokens: planUsage?.inputTokens || 0,
+    outputTokens: planUsage?.outputTokens || 0,
   };
 }
 
@@ -1767,8 +1528,6 @@ export async function runOrchestration(
     });
     output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
 
-    // Planning critic runs inside planStories() — scores 1-10, refines up to 3x.
-    // Disable with /settings review.critic false
 
     // Ensure every story has a unique ID (some planners output stories without IDs)
     const seenIds = new Set<string>();

@@ -36,10 +36,6 @@ export interface ReviewConfig {
   autoRevise?: boolean;
   /** Score threshold for auto-approval, 1-10 scale (default: 8) */
   approvalThreshold?: number;
-  /** Score threshold for critic plan approval, 1-10 scale (default: 8) */
-  criticThreshold?: number;
-  /** Enable critic pass on the plan before execution (default: false) */
-  useCritic?: boolean;
   /** Have the planner generate verification commands per story, run them before review (default: false) */
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
@@ -49,8 +45,43 @@ export interface ReviewConfig {
 }
 
 export interface ProgramConfig {
-  /** Prompt mode at epic boundaries for /program runs. */
+  /** Maximum number of sub-issues allowed in a single /program run (default: 25). */
+  maxIssues?: number;
+  /** Automatic retries per sub-issue before pausing the program run (default: 1). */
+  maxAutoRetries?: number;
+  /** Program-level gate enforcement mode (default: advisory). */
+  gateMode?: "required" | "advisory";
+  /**
+   * Optional shell gates run at epic milestones.
+   * Example: ["npm run lint", "npm test -- --runInBand"]
+   */
+  gates?: string[];
+  // Legacy fields kept for backwards compat when reading old configs
+  /** @deprecated Use maxIssues instead */
+  minSubIssues?: number;
+  /** @deprecated Use maxIssues instead */
+  maxSubIssues?: number;
+  /** @deprecated Use maxIssues instead */
+  maxEpics?: number;
+  /** @deprecated Always asks now */
   epicPrompt?: "ask" | "always";
+}
+
+export interface DoctorConfig {
+  /** Number of top high-risk modules to surface (default: 5) */
+  maxHighRiskModules?: number;
+  /** Risk score threshold where zero-coverage modules are considered trouble (default: 55) */
+  riskTroubleThreshold?: number;
+  /** Health score threshold to classify a module as functioning (default: 72) */
+  healthFunctioningThreshold?: number;
+  /** Health score threshold to classify a module as trouble (default: 45) */
+  healthTroubleThreshold?: number;
+  /** Enable dead-code candidate detection (default: true) */
+  deadCodeEnabled?: boolean;
+  /** Minimum stale age (days) for dead-code candidates (default: 45) */
+  deadCodeMinDays?: number;
+  /** Maximum number of dead-code candidates to report (default: 6) */
+  deadCodeMaxCandidates?: number;
 }
 
 export interface HookConfig {
@@ -126,6 +157,8 @@ export interface CliConfig {
   editor?: "vim" | "nano" | "auto";
   /** /program orchestration preferences */
   program?: ProgramConfig;
+  /** /doctor triage thresholds */
+  doctor?: DoctorConfig;
   /** Enable live browser diff view during /ship runs ("auto", true, or false) */
   liveView?: boolean | "auto";
 }
@@ -256,6 +289,8 @@ export function resolveConfig(): CliConfig {
     qualityGates: project?.qualityGates ?? global.qualityGates,
     disableModelAutoUpdate: project?.disableModelAutoUpdate ?? global.disableModelAutoUpdate ?? (process.env.WM_DISABLE_MODEL_AUTO_UPDATE === '1'),
     program: { ...global.program, ...(project?.program || {}) },
+    doctor: { ...global.doctor, ...(project?.doctor || {}) },
+    liveView: project?.liveView ?? global.liveView,
   };
 }
 

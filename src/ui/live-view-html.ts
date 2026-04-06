@@ -427,9 +427,10 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       return escapeHtml(code);
     }
 
-    /* ── SSE / Polling (unchanged from current) ── */
-    var eventSource = new EventSource('/events');
+    /* ── SSE / Polling (polling-first fail-safe) ── */
+    var eventSource = null;
     var sseConnected = false;
+    var pollingStarted = false;
     var pollingInterval = null;
     var lastPolledIndex = 0;
 
@@ -438,34 +439,59 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       statusEl.style.color = '#b4f3be';
     }
 
-    eventSource.onopen = function() { sseConnected = true; markConnected('Connected'); };
+    function startPolling() {
+      if (pollingStarted) return;
+      pollingStarted = true;
+      markConnected('Connected (polling)');
+      pollingInterval = setInterval(function() {
+        fetch('/events-snapshot')
+          .then(function(r) { return r.json(); })
+          .then(function(events) {
+            for (var i = lastPolledIndex; i < events.length; i++) handleEvent(events[i]);
+            lastPolledIndex = events.length;
+          })
+          .catch(function() {});
+      }, 2000);
+    }
 
-    eventSource.onerror = function() {
-      if (sseConnected) {
-        statusEl.textContent = 'Disconnected — reconnecting...';
-        statusEl.style.color = '#ffdca3';
-        setTimeout(function() { location.reload(); }, 1000);
-      }
-    };
+    // Never remain in a perpetual "Connecting..." state.
+    // Polling starts immediately; SSE is best-effort for lower latency.
+    startPolling();
 
-    eventSource.onmessage = function(e) {
-      sseConnected = true;
-      handleEvent(JSON.parse(e.data));
-    };
+    try {
+      eventSource = new EventSource('/events');
+    } catch (e) {
+      // Keep polling-only mode.
+    }
 
+    if (eventSource) {
+      eventSource.onopen = function() { sseConnected = true; markConnected('Connected'); };
+
+      eventSource.onerror = function() {
+        if (sseConnected) {
+          statusEl.textContent = 'Disconnected — reconnecting...';
+          statusEl.style.color = '#ffdca3';
+          setTimeout(function() { location.reload(); }, 1000);
+        } else {
+          try { eventSource.close(); } catch (e) {}
+        }
+      };
+
+      eventSource.onmessage = function(e) {
+        sseConnected = true;
+        try {
+          handleEvent(JSON.parse(e.data));
+        } catch (err) {
+          // Ignore malformed frames instead of freezing the live view.
+        }
+      };
+    }
+
+    // If SSE still hasn't opened after startup, stick to polling.
+    // (No-op because polling is already active.)
     setTimeout(function() {
-      if (!sseConnected) {
-        eventSource.close();
-        markConnected('Connected');
-        pollingInterval = setInterval(function() {
-          fetch('/events-snapshot')
-            .then(function(r) { return r.json(); })
-            .then(function(events) {
-              for (var i = lastPolledIndex; i < events.length; i++) handleEvent(events[i]);
-              lastPolledIndex = events.length;
-            })
-            .catch(function() {});
-        }, 2000);
+      if (!sseConnected && eventSource) {
+        try { eventSource.close(); } catch (e) {}
       }
     }, 3000);
 

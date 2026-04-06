@@ -126,6 +126,8 @@ export interface CliConfig {
   editor?: "vim" | "nano" | "auto";
   /** /program orchestration preferences */
   program?: ProgramConfig;
+  /** Enable live browser diff view during /ship runs ("auto", true, or false) */
+  liveView?: boolean | "auto";
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");

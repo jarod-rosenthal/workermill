@@ -81,7 +81,9 @@ function addSharedOptions(cmd: Command): Command {
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
-    .option("--fork", "Fork the resumed session (use with --resume)");
+    .option("--fork", "Fork the resumed session (use with --resume)")
+    .option("--live-view", "Force open live browser diff view during /ship")
+    .option("--no-live-view", "Suppress live browser diff view during /ship");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -103,6 +105,13 @@ async function resolveConfig(options: Record<string, unknown>) {
   }
   if (options.autoRevise) {
     config.review = { ...config.review, autoRevise: true };
+  }
+  if (options.liveView) {
+    config.liveView = true;
+  } else if (options.noLiveView) {
+    config.liveView = false;
+  } else if (config.liveView === undefined) {
+    config.liveView = "auto";
   }
   return { config, isFirstRun };
 }

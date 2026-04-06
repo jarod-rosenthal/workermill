@@ -185,6 +185,8 @@ export interface OrchestrationOutput {
   updateUsageSummary?: (summary: UsageSummary) => void;
   /** Update tokens-per-second for a model (optional — noop if not provided) */
   updateTokPerSec?: (providerModel: string, tokPerSec: number) => void;
+  /** Notify live view of file changes (optional — noop if not provided) */
+  onFileChange?: (persona: string, storyIndex: number, storyTitle: string, filePath: string, tool: "created" | "edited") => void;
 }
 
 /**
@@ -1494,6 +1496,7 @@ export async function runOrchestration(
   abortSignal?: AbortSignal,
   retryPlan?: RetryPlan,
   ticketKey?: string,
+  liveViewServer?: import("./live-view-server.js").LiveViewServer,
 ): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
@@ -1929,6 +1932,11 @@ export async function runOrchestration(
     output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m, ${formatContext(getModelContext(modelName, contextLength))} context)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
+    // Emit live view events
+    if (liveViewServer) {
+      liveViewServer.emitStoryStart(i + 1, story.title, story.persona, sorted.length);
+    }
+
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
 
     const model = createModel(provider as AIProvider, modelName, host, contextLength);
@@ -2187,8 +2195,10 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
               const input = tc.input as Record<string, unknown>;
               if (name === "write_file" && input.file_path) {
                 storyActions.push({ tool: "created", detail: String(input.file_path) });
+                output.onFileChange?.(story.persona, i + 1, story.title, String(input.file_path), "created");
               } else if ((name === "edit_file" || name === "patch") && input.file_path) {
                 storyActions.push({ tool: "edited", detail: String(input.file_path) });
+                output.onFileChange?.(story.persona, i + 1, story.title, String(input.file_path), "edited");
               } else if (name === "bash" && input.command) {
                 const cmd = String(input.command);
                 // Only track meaningful commands, not reads
@@ -3434,6 +3444,12 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // Clean up temp review diff file
   try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
+
+  // Emit run complete event
+  if (liveViewServer) {
+    const commitCount = featureBranch ? parseInt(execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim()) : 0;
+    liveViewServer.emitRunComplete(featureBranch || "main", commitCount);
+  }
 
   // Stop MCP servers and language server
   stopAllMCPServers();

@@ -19,6 +19,7 @@ import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
 import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
+import { getCurrentBranch } from "../git-ops.js";
 
 const PREVIEW_THROTTLE_MS = 120;
 export const SESSION_SUMMARY_DIVIDER = "────────────────────────";
@@ -496,6 +497,35 @@ export function useOrchestrator(
             return;
           }
 
+          // ---- Create live view server if enabled -------------------
+          let liveViewServer: import("../live-view-server.js").LiveViewServer | undefined;
+          if (config.liveView === true || config.liveView === "auto") {
+            const { createLiveViewServer } = await import("../live-view-server.js");
+            const mainBranch = getCurrentBranch(process.cwd()); // from git-ops
+            liveViewServer = createLiveViewServer(process.cwd(), mainBranch || "main");
+            if (config.liveView === "auto") {
+              // Check if display is available
+              const hasDisplay = process.env.DISPLAY || process.env.WAYLAND_DISPLAY || process.platform === "darwin";
+              if (hasDisplay) {
+                // Auto-open browser
+                const { exec } = await import("child_process");
+                const url = `http://localhost:${liveViewServer.port}`;
+                exec(`open "${url}" 2>/dev/null || xdg-open "${url}" 2>/dev/null || start "${url}" 2>/dev/null || echo "Open: ${url}"`, (err) => {
+                  if (err) emitLine(`Live view: ${url}`);
+                });
+                emitLine(`Live view → ${url}`);
+              }
+            } else {
+              // Force open
+              const { exec } = await import("child_process");
+              const url = `http://localhost:${liveViewServer.port}`;
+              exec(`open "${url}" 2>/dev/null || xdg-open "${url}" 2>/dev/null || start "${url}" 2>/dev/null || echo "Open: ${url}"`, (err) => {
+                if (err) emitLine(`Live view: ${url}`);
+              });
+              emitLine(`Live view → ${url}`);
+            }
+          }
+
           // ---- Dynamic import to avoid circular deps -----------------
           const { runOrchestration } = await import(
             "../orchestrator.js"
@@ -622,7 +652,10 @@ export function useOrchestrator(
           // ---- Run full orchestration --------------------------------
           const retryPlan = retryPlanRef.current;
           retryPlanRef.current = null;
-          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined, ticketKey);
+          if (liveViewServer) {
+            (liveViewServer as any).setAbortController(controller);
+          }
+          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal, retryPlan ?? undefined, ticketKey, liveViewServer);
 
           flushLine();
           const elapsed = Math.round((Date.now() - startTime) / 1000);

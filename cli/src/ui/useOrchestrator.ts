@@ -19,7 +19,10 @@ import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
 import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
+import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state.js";
 import { getCurrentBranch } from "../git-ops.js";
+import { formatLiveViewUrlMessage } from "../live-view-url.js";
+import { runGateCommand } from "../gate-runner.js";
 
 const PREVIEW_THROTTLE_MS = 120;
 export const SESSION_SUMMARY_DIVIDER = "────────────────────────";
@@ -157,6 +160,27 @@ function ensureGithubEnv(): void {
   }
 }
 
+function flattenEpicIssueKeys(epics: { issueKeys: string[] }[]): string[] {
+  return epics.flatMap((epic) => epic.issueKeys);
+}
+
+function isBalanceOrQuotaErrorMessage(message: string): boolean {
+  return /quota|insufficient|credit|balance|billing|rate\s*limit|429/i.test(message);
+}
+
+function sameProgramPlan(
+  left: { issueKeys: string[] }[],
+  right: { issueKeys: string[] }[],
+): boolean {
+  const a = flattenEpicIssueKeys(left);
+  const b = flattenEpicIssueKeys(right);
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function describeEditOperation(oldText: string, newText: string): "insert" | "delete" | "replace" | "noop" {
   if (!oldText && newText) return "insert";
   if (oldText && !newText) return "delete";
@@ -260,15 +284,33 @@ export interface OrchestratorPromptRequest {
   resolve: (answer: string) => void;
 }
 
+export interface OrchestratorRunCompletion {
+  success: boolean;
+  cancelled?: boolean;
+  error?: string;
+}
+
+export interface OrchestratorStartOptions {
+  onComplete?: (result: OrchestratorRunCompletion) => void;
+}
+
 export interface UseOrchestratorReturn {
   /** Whether orchestration is currently running. */
   running: boolean;
   /** Whether orchestration is currently paused. */
   paused: boolean;
   /** Start orchestration for a task. */
-  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => void;
+  start: (
+    task: string,
+    trustAll: boolean | (() => boolean),
+    sandboxed: boolean | "os",
+    ticketKey?: string,
+    options?: OrchestratorStartOptions,
+  ) => void;
   /** Start full-spec program orchestration from a parent issue. */
   startProgram: (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => void;
+  /** Run doctor analysis and emit a diagnosis + prescriptions. */
+  startDoctor: (issueRef?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
@@ -443,7 +485,13 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const start = useCallback(
-    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os", ticketKey?: string) => {
+    (
+      task: string,
+      trustAll: boolean | (() => boolean),
+      sandboxed: boolean | "os",
+      ticketKey?: string,
+      options?: OrchestratorStartOptions,
+    ) => {
       // Abort any previous run
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
@@ -459,6 +507,7 @@ export function useOrchestrator(
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
         let hasOperationalOutput = false;
+        let completion: OrchestratorRunCompletion = { success: false };
         // emitLine: commit each line to Static immediately so it renders
         // once and never re-renders. Only the latest line stays in the
         // dynamic area as a preview.
@@ -485,6 +534,8 @@ export function useOrchestrator(
                 // Preserve --auto-revise CLI flag if it was set at startup
                 ...(cliConfig?.review?.autoRevise ? { autoRevise: true } : {}),
               },
+              // Preserve --live-view / --no-live-view CLI flag if it was set at startup
+              ...(cliConfig?.liveView !== undefined ? { liveView: cliConfig.liveView } : {}),
             }
           : cliConfig ?? null;
 
@@ -503,27 +554,7 @@ export function useOrchestrator(
             const { createLiveViewServer } = await import("../live-view-server.js");
             const mainBranch = getCurrentBranch(process.cwd()); // from git-ops
             liveViewServer = createLiveViewServer(process.cwd(), mainBranch || "main");
-            if (config.liveView === "auto") {
-              // Check if display is available
-              const hasDisplay = process.env.DISPLAY || process.env.WAYLAND_DISPLAY || process.platform === "darwin";
-              if (hasDisplay) {
-                // Auto-open browser
-                const { exec } = await import("child_process");
-                const url = `http://localhost:${liveViewServer.port}`;
-                exec(`open "${url}" 2>/dev/null || xdg-open "${url}" 2>/dev/null || start "${url}" 2>/dev/null || echo "Open: ${url}"`, (err) => {
-                  if (err) emitLine(`Live view: ${url}`);
-                });
-                emitLine(`Live view → ${url}`);
-              }
-            } else {
-              // Force open
-              const { exec } = await import("child_process");
-              const url = `http://localhost:${liveViewServer.port}`;
-              exec(`open "${url}" 2>/dev/null || xdg-open "${url}" 2>/dev/null || start "${url}" 2>/dev/null || echo "Open: ${url}"`, (err) => {
-                if (err) emitLine(`Live view: ${url}`);
-              });
-              emitLine(`Live view → ${url}`);
-            }
+            emitLine(formatLiveViewUrlMessage(liveViewServer.port));
           }
 
           // ---- Dynamic import to avoid circular deps -----------------
@@ -652,7 +683,27 @@ export function useOrchestrator(
           // ---- Run full orchestration --------------------------------
           const retryPlan = retryPlanRef.current;
           retryPlanRef.current = null;
-          await runOrchestration(config, task, trustAll, sandboxed, output, controller, retryPlan ?? undefined, ticketKey, liveViewServer);
+          const result = await runOrchestration(
+            config,
+            task,
+            trustAll,
+            sandboxed,
+            output,
+            controller,
+            retryPlan ?? undefined,
+            ticketKey,
+            liveViewServer,
+          );
+          completion = {
+            success:
+              result.stories.length > 0 &&
+              result.completedStoryIds.length === result.stories.length,
+            error:
+              result.stories.length > 0 &&
+              result.completedStoryIds.length !== result.stories.length
+                ? "build_incomplete"
+                : undefined,
+          };
 
           flushLine();
           const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -674,9 +725,11 @@ export function useOrchestrator(
           flushLine();
           if (controller.signal.aborted) {
             addMessage("**Build cancelled.**");
+            completion = { success: false, cancelled: true, error: "cancelled" };
           } else {
             const msg = err instanceof Error ? err.message : String(err);
             addMessage(`**Orchestration failed:** ${msg}`);
+            completion = { success: false, error: msg };
             notifyIfEnabled(config?.bell, "WorkerMill", "Ship failed");
           }
         } finally {
@@ -686,6 +739,11 @@ export function useOrchestrator(
           clearPreviewLine();
           setConfirmRequest(null);
           releasePauseWaiters();
+          try {
+            options?.onComplete?.(completion);
+          } catch {
+            // Completion callbacks are best-effort and should never crash the orchestrator.
+          }
         }
       })();
     },
@@ -741,7 +799,7 @@ export function useOrchestrator(
 
           const normalizedParent = normalizeGithubIssueRef(parentIssueRef);
           if (!normalizedParent) {
-            addMessage("`/program` expects a GitHub parent issue reference like `#123`.");
+            addMessage("`/orchestrate` expects a GitHub parent issue reference like `#123`.");
             return;
           }
 
@@ -758,20 +816,75 @@ export function useOrchestrator(
             return;
           }
 
-          const epics = parseProgramEpicsFromIssueBody(parent.body || "");
+          const workingDir = process.cwd();
+          const maxIssues = Math.max(1, config.program?.maxIssues ?? config.program?.maxSubIssues ?? 25);
+          const maxAutoRetries = Math.max(0, config.program?.maxAutoRetries ?? 1);
+          const gateMode = config.program?.gateMode ?? "advisory";
+          const programGates = (config.program?.gates || []).map((g) => g.trim()).filter(Boolean);
+
+          let epics = parseProgramEpicsFromIssueBody(parent.body || "");
           if (epics.length === 0) {
-            addMessage(`No child issue references found in ${normalizedParent}. Add sub-issues like \`#45\` grouped under epic headings.`);
-            return;
+            emitLine(`[${getEmoji("planner")} planner] No child issues found in ${normalizedParent} — decomposing parent issue into sub-issues...`);
+            const { decomposeParentIssue, materializeProgramSubIssues } = await import("../program-bootstrap.js");
+            const decomposition = await decomposeParentIssue(
+              config,
+              parent,
+              (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
+            );
+
+            const decomposedCount = decomposition.cards.length;
+            if (decomposedCount > maxIssues) {
+              addMessage(`Program aborted: decomposition produced ${decomposedCount} issues (max ${maxIssues}). Raise \`program.maxIssues\` or narrow the parent issue scope.`);
+              return;
+            }
+            const generated = await materializeProgramSubIssues(
+              config,
+              normalizedParent,
+              parent,
+              (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
+              decomposition,
+            );
+            epics = generated.epics;
+            if (epics.length === 0) {
+              addMessage(`Program decomposition did not produce child issues for ${normalizedParent}.`);
+              return;
+            }
+            addMessage(`Generated ${generated.createdIssueKeys.length} child issue(s): ${generated.createdIssueKeys.join(", ")}`);
           }
 
           const totalIssues = epics.reduce((sum, e) => sum + e.issueKeys.length, 0);
-          addMessage(`Starting /program from ${normalizedParent}: ${epics.length} epic(s), ${totalIssues} sub-issue(s).`);
+          if (totalIssues <= 0) {
+            addMessage(`Program aborted: no executable issues were found for ${normalizedParent}.`);
+            return;
+          }
+          if (totalIssues > maxIssues) {
+            addMessage(`Program aborted: ${totalIssues} sub-issues exceeds \`program.maxIssues=${maxIssues}\`.`);
+            return;
+          }
+
+          let completedIssueKeys: string[] = [];
+          const existingRun = getProgramRun(workingDir, normalizedParent);
+          if (existingRun && existingRun.status !== "complete") {
+            if (sameProgramPlan(existingRun.epics, epics)) {
+              completedIssueKeys = [...existingRun.completedIssueKeys];
+              if (completedIssueKeys.length > 0) {
+                emitLine(`[${getEmoji("system")} system] Resuming /orchestrate: ${completedIssueKeys.length}/${totalIssues} issue(s) already complete.`);
+              }
+            } else {
+              emitLine(`[${getEmoji("system")} system] Existing program state did not match current plan; resetting saved state.`);
+              clearProgramRun(workingDir, normalizedParent);
+            }
+          }
+
+          addMessage(`Starting /orchestrate from ${normalizedParent}: ${epics.length} epic(s), ${totalIssues} sub-issue(s).`);
 
           const { runOrchestration } = await import("../orchestrator.js");
 
           const seenPersonas = new Set<string>();
           let storiesCompleted = 0;
-          let shippedIssues = 0;
+          let shippedIssues = completedIssueKeys.length;
+          let cursorEpicIndex = 0;
+          let cursorIssueIndex = 0;
           const startTime = Date.now();
           const fileSequences = new Map<string, number>();
           const nextFileSequence = (path: string): number => {
@@ -855,19 +968,67 @@ export function useOrchestrator(
             },
           };
 
-          let alwaysEpics = config.program?.epicPrompt === "always";
+          let alwaysEpics = false;
+
+          const persistProgramState = (
+            status: "running" | "paused" | "complete",
+            failureCode?: string,
+            failureMessage?: string,
+          ): void => {
+            saveProgramRun({
+              workingDir,
+              parentIssueRef: normalizedParent,
+              parentTitle: parent.title,
+              epics,
+              completedIssueKeys,
+              currentEpicIndex: cursorEpicIndex,
+              currentIssueIndex: cursorIssueIndex,
+              status,
+              lastFailureCode: failureCode,
+              lastFailureMessage: failureMessage,
+              updatedAt: "",
+            });
+          };
+
+          const runProgramGatesForEpic = async (epicTitle: string): Promise<boolean> => {
+            if (programGates.length === 0) return true;
+            emitLine(`[${getEmoji("system")} system] Running program gates after epic "${epicTitle}" (${gateMode})...`);
+            for (const gate of programGates) {
+              try {
+                await runGateCommand(gate, workingDir, 300_000);
+                emitLine(`[${getEmoji("system")} system] Gate passed: \`${gate}\``);
+              } catch (error: unknown) {
+                const raw = error as { stdout?: string; stderr?: string; message?: string };
+                const detail = [raw.stdout, raw.stderr, raw.message].filter(Boolean).join("\n").trim();
+                const condensed = detail ? detail.slice(0, 280) : "no output";
+                emitLine(`[${getEmoji("system")} system] Gate failed: \`${gate}\` (${condensed})`);
+                if (gateMode === "required") return false;
+              }
+            }
+            return true;
+          };
+
+          persistProgramState("running");
 
           for (let e = 0; e < epics.length; e++) {
             const epic = epics[e];
             emitLine(`[${getEmoji("planner")} planner] Program epic ${e + 1}/${epics.length}: ${epic.title} (${epic.issueKeys.length} issues)`);
 
             for (let i = 0; i < epic.issueKeys.length; i++) {
+              cursorEpicIndex = e;
+              cursorIssueIndex = i;
               if (controller.signal.aborted) {
                 addMessage("Program cancelled.");
                 return;
               }
               const issueKey = epic.issueKeys[i];
-              emitLine(`[${getEmoji("coordinator")} coordinator] Program issue ${i + 1}/${epic.issueKeys.length}: /ship ${issueKey}`);
+              if (completedIssueKeys.includes(issueKey)) {
+                emitLine(`[${getEmoji("system")} system] Skipping completed issue: ${issueKey}`);
+                continue;
+              }
+
+              persistProgramState("running");
+              emitLine(`[${getEmoji("coordinator")} coordinator] Program issue ${i + 1}/${epic.issueKeys.length}: /build ${issueKey}`);
 
               let result = await runOrchestration(
                 config,
@@ -884,15 +1045,22 @@ export function useOrchestrator(
                 result.stories.length > 0 &&
                 result.completedStoryIds.length === result.stories.length;
 
-              // Reuse /ship retry path once automatically when run is incomplete.
-              if (!isComplete() && result.featureBranch && result.mainBranch) {
+              // Program retry delegates to /build's retry path via RetryPlan.
+              let retryAttempt = 0;
+              while (
+                !isComplete() &&
+                retryAttempt < maxAutoRetries &&
+                result.featureBranch &&
+                result.mainBranch
+              ) {
+                retryAttempt += 1;
                 const retryPlan: RetryPlan = {
                   stories: result.stories,
                   completedStoryIds: [...result.completedStoryIds],
                   featureBranch: result.featureBranch,
                   mainBranch: result.mainBranch,
                 };
-                emitLine(`[${getEmoji("system")} system] Program auto-retry: ${issueKey}`);
+                emitLine(`[${getEmoji("system")} system] Program auto-retry ${retryAttempt}/${maxAutoRetries}: ${issueKey}`);
                 result = await runOrchestration(
                   config,
                   result.userTask,
@@ -906,11 +1074,21 @@ export function useOrchestrator(
               }
 
               if (!isComplete()) {
-                addMessage(`Program paused: ${issueKey} did not complete after retry. Resolve and re-run \`/program ${normalizedParent}\`.`);
+                persistProgramState("paused", "build_incomplete", `Issue ${issueKey} incomplete after ${maxAutoRetries} auto-retr${maxAutoRetries === 1 ? "y" : "ies"}.`);
+                addMessage(`Program paused: ${issueKey} did not complete after retry. Resolve and re-run \`/orchestrate ${normalizedParent}\`.`);
                 return;
               }
 
+              completedIssueKeys.push(issueKey);
               shippedIssues++;
+              persistProgramState("running");
+            }
+
+            const gatesPassed = await runProgramGatesForEpic(epic.title);
+            if (!gatesPassed) {
+              persistProgramState("paused", "gate_failed", `Program gate failed after epic "${epic.title}".`);
+              addMessage(`Program paused: required program gate failed after epic "${epic.title}".`);
+              return;
             }
 
             if (e < epics.length - 1 && !alwaysEpics) {
@@ -921,26 +1099,19 @@ export function useOrchestrator(
                 allowed = rv.allowed;
                 if (rv.mode === "always" && allowed) {
                   alwaysEpics = true;
-                  try {
-                    const globalCfg = loadConfig();
-                    if (globalCfg) {
-                      globalCfg.program = { ...(globalCfg.program || {}), epicPrompt: "always" };
-                      saveConfig(globalCfg);
-                      emitLine(`[${getEmoji("system")} system] Saved globally: /settings program.epicPrompt always`);
-                    }
-                  } catch {
-                    // best effort
-                  }
                 }
               } else {
                 allowed = rv;
               }
               if (!allowed) {
+                persistProgramState("paused", "epic_prompt_declined", `Paused before epic "${nextEpic.title}".`);
                 addMessage("Program paused at epic boundary.");
                 return;
               }
             }
           }
+
+          clearProgramRun(workingDir, normalizedParent);
 
           flushLine();
           const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -963,6 +1134,24 @@ export function useOrchestrator(
             addMessage("**Program cancelled.**");
           } else {
             const msg = err instanceof Error ? err.message : String(err);
+            const failureCode = isBalanceOrQuotaErrorMessage(msg) ? "quota_or_balance" : "program_error";
+            try {
+              saveProgramRun({
+                workingDir: process.cwd(),
+                parentIssueRef: normalizeGithubIssueRef(parentIssueRef) || parentIssueRef,
+                parentTitle: parentIssueRef,
+                epics: [],
+                completedIssueKeys: [],
+                currentEpicIndex: 0,
+                currentIssueIndex: 0,
+                status: "paused",
+                lastFailureCode: failureCode,
+                lastFailureMessage: msg,
+                updatedAt: "",
+              });
+            } catch {
+              // best effort persistence
+            }
             addMessage(`**Program failed:** ${msg}`);
           }
         } finally {
@@ -976,6 +1165,107 @@ export function useOrchestrator(
       })();
     },
     [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+  );
+
+  // ------------------------------------------------------------------
+  // startDoctor() — analyze repo test health and generate prescriptions
+  // ------------------------------------------------------------------
+
+  const startDoctor = useCallback(
+    (issueRef?: string) => {
+      if (running) return;
+
+      setRunning(true);
+      setPausedState(false);
+      setStatusMessage("Doctor analyzing repository...");
+      clearPreviewLine();
+      setConfirmRequest(null);
+
+      void (async () => {
+        try {
+          const { runDoctorAssessment } = await import("../doctor.js");
+          const report = await runDoctorAssessment(process.cwd(), issueRef);
+
+          addSessionSummaryDivider(addMessage, true);
+          addMessage(`**Doctor report${issueRef ? ` for ${issueRef}` : ""}**`);
+          for (const line of report.summary) addMessage(line);
+          addMessage(`Artifact: \`${report.artifactPath}\``);
+          addMessage(
+            `Coverage: ${report.coverageSnapshot.source}${report.coverageSnapshot.reportPath ? ` (${report.coverageSnapshot.reportPath})` : ""}` +
+            ` · lines ${report.coverageSnapshot.linePercent ?? "n/a"}% · branches ${report.coverageSnapshot.branchPercent ?? "n/a"}%`,
+          );
+          addMessage(
+            `Module health: ${report.healthSnapshot.functioning} functioning · ${report.healthSnapshot.trouble} trouble · ` +
+            `${report.healthSnapshot.dead} dead · ${report.healthSnapshot.unknown} unknown`,
+          );
+          addMessage(
+            `Health delta: +${report.healthDelta.improved} improved · ${report.healthDelta.regressed} regressed · ` +
+            `${report.healthDelta.unchanged} unchanged · ${report.healthDelta.newModules} new`,
+          );
+          if (report.highRiskUntestedModules.length > 0) {
+            addMessage(`Top high-risk untested modules (${report.highRiskUntestedModules.length}):`);
+            report.highRiskUntestedModules.forEach((module, idx) => {
+              addMessage(
+                `${idx + 1}. ${module.filePath} · risk ${module.riskScore} · coverage ${module.lineCoveragePercent}% · ${module.lineCount} lines · churn ${module.churn30d}/30d`,
+              );
+            });
+          }
+          if (report.deadCodeCandidates.length > 0) {
+            addMessage(`Dead-code candidates (${report.deadCodeCandidates.length}):`);
+            report.deadCodeCandidates.forEach((candidate, idx) => {
+              addMessage(
+                `${idx + 1}. ${candidate.filePath} · confidence ${candidate.confidence} · inbound ${candidate.inboundReferences} · stale ${candidate.lastTouchedDays ?? "unknown"}d`,
+              );
+            });
+          }
+          if (report.ciFailureSignals.length > 0) {
+            addMessage(`Recent CI failure signals (${report.ciFailureSignals.length}):`);
+            report.ciFailureSignals.forEach((signal) => {
+              addMessage(`- [${signal.classification}] ${signal.workflow} run ${signal.runId}: ${signal.signature}`);
+            });
+          }
+          if (report.qualityEvidence.length > 0) {
+            addMessage("Quality evidence:");
+            report.qualityEvidence.forEach((entry) => {
+              addMessage(`- [${entry.status}] ${entry.command}${entry.output ? ` — ${entry.output}` : ""}`);
+            });
+          }
+          addMessage(
+            `Gap delta: +${report.delta.newGaps} new · ${report.delta.persistingGaps} persisting · ${report.delta.resolvedGaps} resolved`,
+          );
+
+          if (report.gaps.length === 0) {
+            addMessage("No critical test-coverage gaps detected.");
+          } else {
+            addMessage(`Prescriptions (${report.gaps.length}):`);
+            report.gaps.forEach((gap, idx) => {
+              addMessage(
+                `${idx + 1}. [${gap.severity}] ${gap.title}\n` +
+                `   Class: ${gap.problemClass || "unknown"}${gap.cureStatus ? ` · status ${gap.cureStatus}` : ""}\n` +
+                `   Evidence: ${gap.evidence[0] || "n/a"}\n` +
+                `   Prescription: ${gap.prescription}\n` +
+                `   Build task: ${gap.buildTask}` +
+                `${gap.targetFiles && gap.targetFiles.length > 0 ? `\n   Target files: ${gap.targetFiles.join(", ")}` : ""}` +
+                `${gap.verificationCommands && gap.verificationCommands.length > 0 ? `\n   Verify: ${gap.verificationCommands.join(" && ")}` : ""}` +
+                `${gap.successCriteria && gap.successCriteria.length > 0 ? `\n   Success: ${gap.successCriteria[0]}` : ""}`,
+              );
+            });
+          }
+          notifyIfEnabled(cliConfig?.bell, "WorkerMill", "Doctor analysis complete");
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          addMessage(`**Doctor failed:** ${msg}`);
+        } finally {
+          setRunning(false);
+          setPausedState(false);
+          setStatusMessage("");
+          clearPreviewLine();
+          setConfirmRequest(null);
+          releasePauseWaiters();
+        }
+      })();
+    },
+    [addMessage, clearPreviewLine, cliConfig?.bell, releasePauseWaiters, running],
   );
 
   // ------------------------------------------------------------------
@@ -1221,5 +1511,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, paused, start, startProgram, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
+  return { running, paused, start, startProgram, startDoctor, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
 }

@@ -183,11 +183,16 @@ describe("StatusBar: tool counts display", () => {
     expect(getToolEntries({})).toEqual([]);
   });
 
-  it("tool name underscores replaced with spaces for display", () => {
-    // The component does name.replace(/_/g, " ")
-    expect("read_file".replace(/_/g, " ")).toBe("read file");
-    expect("edit_file".replace(/_/g, " ")).toBe("edit file");
-    expect("bash".replace(/_/g, " ")).toBe("bash");
+  it("file tool names are shortened for display", () => {
+    const labels: Record<string, string> = {
+      read_file: "read",
+      write_file: "write",
+      edit_file: "edit",
+    };
+    const label = (name: string) => labels[name] || name.replace(/_/g, " ");
+    expect(label("read_file")).toBe("read");
+    expect(label("edit_file")).toBe("edit");
+    expect(label("bash")).toBe("bash");
   });
 });
 

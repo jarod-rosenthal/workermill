@@ -10,6 +10,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 import { loadConfig, getProviderForPersona } from "./config.js";
 import { runSetup } from "./setup.js";
+import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
 import { Root } from "./ui/Root.js";
 import { checkForUpdate } from "./update-check.js";
 
@@ -81,7 +82,9 @@ function addSharedOptions(cmd: Command): Command {
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
-    .option("--fork", "Fork the resumed session (use with --resume)");
+    .option("--fork", "Fork the resumed session (use with --resume)")
+    .option("--live-view", "Force open live browser diff view during /ship")
+    .option("--no-live-view", "Suppress live browser diff view during /ship");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -104,6 +107,13 @@ async function resolveConfig(options: Record<string, unknown>) {
   if (options.autoRevise) {
     config.review = { ...config.review, autoRevise: true };
   }
+  if (options.liveView) {
+    config.liveView = true;
+  } else if (options.noLiveView) {
+    config.liveView = false;
+  } else if (config.liveView === undefined) {
+    config.liveView = "auto";
+  }
   return { config, isFirstRun };
 }
 
@@ -123,6 +133,8 @@ const defaultCmd = program
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
     const workingDir = process.cwd();
     const roleModels = getRoleModelsFromConfig(config);
+    const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
+    const sandboxed = sandboxResolution.effective;
 
     if (options.prompt) {
       // Headless mode — run single prompt, print result, exit
@@ -140,10 +152,13 @@ const defaultCmd = program
       }
 
       const aiModel = createModel(provider as any, model, host, contextLength);
-      const sandboxed = options.fullDisk ? false : (config.sandbox ?? "os");
       const baseTools = createToolDefinitions(workingDir, aiModel, sandboxed);
       const mcpToolDefs = getMCPToolDefinitions();
       const tools = { ...baseTools, ...mcpToolDefs };
+
+      if (sandboxResolution.warning) {
+        console.error(`[wm] ${sandboxResolution.warning}`);
+      }
 
       let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
       const instructions = formatProjectInstructions(workingDir);
@@ -185,6 +200,10 @@ const defaultCmd = program
     }
 
     await printWelcome(workingDir, isFirstRun);
+    if (sandboxResolution.warning) {
+      console.log(chalk.yellow(`  ⚠ ${sandboxResolution.warning}`));
+      console.log();
+    }
 
     // Enable synchronized output (DEC mode 2026) to prevent terminal tearing.
     // Wraps each stdout.write in begin/end synchronized update sequences so the
@@ -214,7 +233,7 @@ const defaultCmd = program
         contextLength,
         trustAll: options.trust || false,
         planMode: options.plan || false,
-        sandboxed: options.fullDisk ? false : (config.sandbox ?? "os"),
+        sandboxed,
         resume: options.resume || false,
         fork: options.fork || false,
         maxTokens: options.maxTokens,
@@ -270,6 +289,26 @@ program
       try {
         const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
         console.log(chalk.green("  ✓") + ` Config found (default: ${config.default})`);
+        const requestedSandbox = config.sandbox ?? true;
+        if (requestedSandbox === "os") {
+          const status = getOSSandboxDependencyStatus();
+          if (!status.supported) {
+            console.log(chalk.red("  ✗") + " OS sandbox requested but unsupported on this platform");
+            issues++;
+          } else if (status.errors.length > 0) {
+            console.log(chalk.red("  ✗") + ` OS sandbox dependencies missing: ${status.errors.join(", ")}`);
+            issues++;
+          } else {
+            console.log(chalk.green("  ✓") + " OS sandbox dependencies installed");
+            if (status.warnings.length > 0) {
+              console.log(chalk.yellow("  ⚠") + ` OS sandbox warnings: ${status.warnings.join(", ")}`);
+            }
+          }
+        } else if (requestedSandbox === true) {
+          console.log(chalk.dim("  ○") + " Sandbox mode: path sandbox (default)");
+        } else {
+          console.log(chalk.yellow("  ⚠") + " Sandbox mode: disabled (full disk)");
+        }
 
         // Check each provider
         for (const [name, prov] of Object.entries(config.providers || {})) {

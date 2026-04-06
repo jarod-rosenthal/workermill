@@ -185,6 +185,8 @@ export interface OrchestrationOutput {
   updateUsageSummary?: (summary: UsageSummary) => void;
   /** Update tokens-per-second for a model (optional — noop if not provided) */
   updateTokPerSec?: (providerModel: string, tokPerSec: number) => void;
+  /** Notify live view of file changes (optional — noop if not provided) */
+  onFileChange?: (persona: string, storyIndex: number, storyTitle: string, filePath: string, tool: "created" | "edited") => void;
 }
 
 /**
@@ -519,7 +521,7 @@ export async function checkToolPermission(
 
   // Dangerous file path check for write operations
   if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
-    const filePath = String(toolInput.path || toolInput.file_path || "");
+    const filePath = extractToolFilePath(toolName, toolInput);
     const fileDanger = isDangerousFile(filePath);
     if (fileDanger && !isBypass) {
       output.error(`SENSITIVE FILE: ${fileDanger}`);
@@ -581,9 +583,30 @@ export async function checkToolPermission(
 }
 
 /** Format a tool call for display — short and to the point. */
+function extractToolFilePath(toolName: string, toolInput: Record<string, unknown>): string {
+  const direct = typeof toolInput.file_path === "string"
+    ? toolInput.file_path
+    : typeof toolInput.path === "string"
+      ? toolInput.path
+      : "";
+  if (direct) return direct;
+
+  // patch tool can target files without explicit file_path/path
+  if (toolName === "patch" && typeof toolInput.patch_text === "string") {
+    const patchText = toolInput.patch_text;
+    const patchHeader = patchText.match(/^\*\*\* (?:Update|Add|Delete) File:\s+(.+)$/m);
+    if (patchHeader?.[1]) return patchHeader[1].trim();
+    const diffHeader = patchText.match(/^\+\+\+\s+(?:[ab]\/)?(.+)$/m);
+    if (diffHeader?.[1] && diffHeader[1] !== "/dev/null") return diffHeader[1].trim();
+  }
+
+  return "";
+}
+
+/** Format a tool call for display — short and to the point. */
 function formatToolCallDisplay(toolName: string, toolInput: Record<string, unknown>): string {
-  if (toolInput.file_path) return String(toolInput.file_path);
-  if (toolInput.path) return String(toolInput.path);
+  const toolFilePath = extractToolFilePath(toolName, toolInput);
+  if (toolFilePath) return toolFilePath;
   if (toolInput.command) {
     const cmd = String(toolInput.command);
     return cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd;
@@ -1491,12 +1514,20 @@ export async function runOrchestration(
   trustAll: boolean | (() => boolean),
   sandboxed: boolean | "os",
   output: OrchestrationOutput,
-  abortSignal?: AbortSignal,
+  abortControllerOrSignal?: AbortController | AbortSignal,
   retryPlan?: RetryPlan,
   ticketKey?: string,
+  liveViewServer?: import("./live-view-server.js").LiveViewServer,
 ): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
+
+  const abortController = abortControllerOrSignal && "abort" in abortControllerOrSignal
+    ? abortControllerOrSignal as AbortController
+    : undefined;
+  const abortSignal = abortControllerOrSignal
+    ? ("signal" in abortControllerOrSignal ? abortControllerOrSignal.signal : abortControllerOrSignal)
+    : undefined;
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
   if (ticketKey) {
@@ -1588,6 +1619,11 @@ export async function runOrchestration(
     if (ctx) {
       await ensureLmStudioContext(host, defaultProvider.model, ctx);
     }
+  }
+
+  // Set abort controller on live view server
+  if (liveViewServer && abortController) {
+    liveViewServer.setAbortController(abortController);
   }
 
   // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
@@ -1789,7 +1825,7 @@ export async function runOrchestration(
     // Branch creation prompt — makes the branch name visible before workers start.
     // Skipped if the user already acknowledged the branch (via the existing-branch dialog above)
     // or if they have previously selected "always" (autoBranch: true in config).
-    if (!branchAlreadyAcknowledged && config.review?.autoBranch !== true) {
+    if (!branchAlreadyAcknowledged && config.review?.autoBranch !== true && !(typeof trustAll === "function" ? trustAll() : trustAll)) {
       const branchName = derivedBranch ?? "a feature branch";
       const r = await output.confirm(`About to create and check out \`${branchName}\`. Continue?`);
       const result = typeof r === "object" ? r : { allowed: r, mode: undefined };
@@ -1928,6 +1964,11 @@ export async function runOrchestration(
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
     output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m, ${formatContext(getModelContext(modelName, contextLength))} context)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
+
+    // Emit live view events
+    if (liveViewServer) {
+      liveViewServer.emitStoryStart(i + 1, story.title, story.persona, sorted.length);
+    }
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
 
@@ -2185,10 +2226,13 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
             for (const tc of toolCalls) {
               const name = tc.toolName;
               const input = tc.input as Record<string, unknown>;
-              if (name === "write_file" && input.file_path) {
-                storyActions.push({ tool: "created", detail: String(input.file_path) });
-              } else if ((name === "edit_file" || name === "patch") && input.file_path) {
-                storyActions.push({ tool: "edited", detail: String(input.file_path) });
+              const filePath = extractToolFilePath(name, input);
+              if (name === "write_file" && filePath) {
+                storyActions.push({ tool: "created", detail: filePath });
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
+              } else if ((name === "edit_file" || name === "patch") && filePath) {
+                storyActions.push({ tool: "edited", detail: filePath });
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
               } else if (name === "bash" && input.command) {
                 const cmd = String(input.command);
                 // Only track meaningful commands, not reads
@@ -2407,6 +2451,9 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
         if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
       }
+
+      const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;
+      if (liveViewServer) liveViewServer.emitStoryComplete(i + 1, storyElapsedForLiveView);
 
           break; // Story succeeded, exit revision loop
     } catch (err) {
@@ -2776,7 +2823,10 @@ ${loopGuardSection ? `\n${loopGuardSection}` : ""}
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
 
-**Bias toward approval**: If the code works and implements the requirements, approve it. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue. A score of ${config.review?.approvalThreshold ?? 8}+ means approved.
+**Quality gate stance**: Make decisions based on impact and evidence, not preference.
+- Block only for functional correctness, security, or missing-required-functionality issues backed by concrete evidence.
+- Do NOT block for style or cosmetic preferences.
+- If uncertain, inspect files or run lightweight verification before blocking.
 
 ## Output Format
 
@@ -2794,7 +2844,7 @@ For REVISION_NEEDED decisions, also include:
 BLOCKING_EVIDENCE: concrete proof from this code state (repro step, failing command, or exact missing/wrong implementation)
 ACTIONABLE_FIX: minimal specific change required to get approval
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = good quality (approve), 10 = exceptional. A score of ${config.review?.approvalThreshold ?? 8}+ means the code is ready to ship. Below ${config.review?.approvalThreshold ?? 8} means there are real issues to address.
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 8} means you found real blocking issues; ${config.review?.approvalThreshold ?? 8}+ means no blocking issues remain.
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
@@ -3137,6 +3187,17 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
               onStepFinish({ text, toolCalls }) {
+                if (toolCalls && toolCalls.length > 0) {
+                  for (const tc of toolCalls) {
+                    const filePath = extractToolFilePath(tc.toolName, tc.input as Record<string, unknown>);
+                    if (!filePath) continue;
+                    if (tc.toolName === "write_file") {
+                      if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
+                    } else if (tc.toolName === "edit_file" || tc.toolName === "patch") {
+                      if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
+                    }
+                  }
+                }
                 if ((!text || !text.trim()) && toolCalls && toolCalls.length > 0) {
                   const first = toolCalls[0];
                   const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
@@ -3172,12 +3233,6 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
-
-            // Commit revision changes — checkpoint on the feature branch
-            if (featureBranch) {
-              const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
-              if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
-            }
           } catch (err) {
             output.statusDone();
             if (isBalanceOrQuotaError(err)) {
@@ -3200,8 +3255,14 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
           }
+
+          // Commit revision changes — checkpoint on the feature branch
+          if (featureBranch) {
+            const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
+            if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
+          }
         }
-              // Loop back to review again
+        // Loop back to review again
       } catch (err) {
         output.statusDone();
         if (isBalanceOrQuotaError(err)) {
@@ -3435,10 +3496,21 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   // Clean up temp review diff file
   try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
 
+  // Emit run complete event
+  if (liveViewServer) {
+    const commitCount = featureBranch ? parseInt(execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim()) : 0;
+    liveViewServer.emitRunComplete(featureBranch || "main", commitCount);
+  }
+
   // Stop MCP servers and language server
   stopAllMCPServers();
   const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
   shutdownLSP();
+
+  // Stop live view server
+  if (liveViewServer) {
+    liveViewServer.stop();
+  }
 
   return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
 }
@@ -3617,7 +3689,7 @@ CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
 FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
 \`\`\`
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = good quality (approve), 10 = exceptional. A score of ${config.review?.approvalThreshold ?? 8}+ means the code is ready to ship. Below ${config.review?.approvalThreshold ?? 8} means there are real issues to address.`;
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 8} means you found real blocking issues; ${config.review?.approvalThreshold ?? 8}+ means no blocking issues remain.`;
 
   // Stream the review — use onStepFinish to capture text between tool calls
   // This matches the orchestrator's review pattern exactly.

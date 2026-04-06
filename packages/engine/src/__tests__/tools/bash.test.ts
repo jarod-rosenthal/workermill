@@ -33,4 +33,10 @@ describe("bash tool", () => {
     const result = await tools.bash.execute({ command: "exit 42" }, CTX);
     expect(result).toContain("Error");
   });
+
+  it("falls back gracefully when os sandbox dependencies are unavailable", async () => {
+    const osTools = createToolDefinitions(dir, undefined, "os");
+    const result = await osTools.bash.execute({ command: "echo fallback-ok" }, CTX);
+    expect(result).toContain("fallback-ok");
+  });
 });

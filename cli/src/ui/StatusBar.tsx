@@ -25,6 +25,16 @@ interface StatusBarProps {
   tokPerSec?: Record<string, number>;
 }
 
+const TOOL_USAGE_LABELS: Record<string, string> = {
+  read_file: "read",
+  write_file: "write",
+  edit_file: "edit",
+};
+
+function toolUsageLabel(name: string): string {
+  return TOOL_USAGE_LABELS[name] || name.replace(/_/g, " ");
+}
+
 function equalRoleModels(
   a?: { worker: string; planner: string; reviewer: string },
   b?: { worker: string; planner: string; reviewer: string },
@@ -221,13 +231,13 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
         ) : null}
       </Box>
 
-      {/* Row 2: Tool usage stats — wraps to next line if too wide */}
+      {/* Row 2: Tool usage stats */}
       <Box>
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
             <Text key={name} dimColor>
               <Text color={theme.success}>{"✓ "}</Text>
-              <Text color={theme.subtle}>{name.replace(/_/g, " ")}</Text>
+              <Text color={theme.subtle}>{toolUsageLabel(name)}</Text>
               <Text color={theme.inactive}>{` ×${count}`}</Text>
               {i < toolEntries.length - 1 ? <Text color={theme.inactive}>{" │ "}</Text> : null}
             </Text>

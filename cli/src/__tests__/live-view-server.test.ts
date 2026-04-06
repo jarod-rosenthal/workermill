@@ -17,8 +17,16 @@ function createTempGitRepo(): string {
   return dir;
 }
 
-async function readFirstSseEvent(port: number): Promise<any> {
+async function readSseEvent(
+  port: number,
+  predicate: (event: any) => boolean = () => true,
+): Promise<any> {
   return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      req.destroy();
+      reject(new Error("Timed out waiting for SSE event"));
+    }, 5000);
+
     const req = http.request({
       hostname: "127.0.0.1",
       port,
@@ -30,24 +38,40 @@ async function readFirstSseEvent(port: number): Promise<any> {
       res.setEncoding("utf-8");
       res.on("data", (chunk: string) => {
         buffer += chunk;
-        const marker = "\n\n";
-        const idx = buffer.indexOf(marker);
-        if (idx === -1) return;
-        const packet = buffer.slice(0, idx);
-        const line = packet.split("\n").find((l) => l.startsWith("data: "));
-        if (!line) return;
-        try {
-          const parsed = JSON.parse(line.slice(6));
-          req.destroy();
-          resolve(parsed);
-        } catch (err) {
-          reject(err);
+        while (true) {
+          const marker = "\n\n";
+          const idx = buffer.indexOf(marker);
+          if (idx === -1) return;
+          const packet = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + marker.length);
+
+          const line = packet.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (!predicate(parsed)) continue;
+            clearTimeout(timeout);
+            req.destroy();
+            resolve(parsed);
+            return;
+          } catch (err) {
+            clearTimeout(timeout);
+            reject(err);
+            return;
+          }
         }
       });
-      res.on("error", reject);
+      res.on("error", (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
 
-    req.on("error", reject);
+    req.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
     req.end();
   });
 }
@@ -74,7 +98,7 @@ describe("live-view-server", () => {
     const server = createLiveViewServer(repoDir, "main");
     server.emitFileChange("backend_developer", 1, "Edit app", "app.ts", "edited");
 
-    const event = await readFirstSseEvent(server.port);
+    const event = await readSseEvent(server.port, (evt) => evt.type === "file-changed");
     server.stop();
 
     expect(event.type).toBe("file-changed");
@@ -89,7 +113,7 @@ describe("live-view-server", () => {
     const server = createLiveViewServer(repoDir, "main");
     server.emitFileChange("backend_developer", 2, "Create file", "new-file.ts", "created");
 
-    const event = await readFirstSseEvent(server.port);
+    const event = await readSseEvent(server.port, (evt) => evt.type === "file-changed");
     server.stop();
 
     expect(event.type).toBe("file-changed");

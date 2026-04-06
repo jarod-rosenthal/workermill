@@ -323,24 +323,67 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     var followBtn = document.getElementById('followBtn');
 
     var eventSource = new EventSource('/events');
+    var sseConnected = false;
+    var pollingInterval = null;
+    var lastPolledIndex = 0;
+
+    function markConnected(label) {
+      statusEl.textContent = label || 'Connected';
+      statusEl.style.color = '#b4f3be';
+    }
 
     eventSource.onopen = function() {
-      statusEl.textContent = 'Connected';
-      statusEl.style.color = '#b4f3be';
+      sseConnected = true;
+      markConnected('Connected');
     };
 
     eventSource.onerror = function() {
-      statusEl.textContent = 'Disconnected — reconnecting...';
-      statusEl.style.color = '#ffdca3';
-      setTimeout(function() { location.reload(); }, 1000);
+      if (sseConnected) {
+        statusEl.textContent = 'Disconnected — reconnecting...';
+        statusEl.style.color = '#ffdca3';
+        setTimeout(function() { location.reload(); }, 1000);
+      }
+      // If never connected, let the polling fallback handle it.
     };
 
     eventSource.onmessage = function(e) {
+      sseConnected = true;
       var event = JSON.parse(e.data);
       handleEvent(event);
     };
 
+    // Polling fallback — if SSE doesn't connect within 3 seconds
+    // (common on WSL2 where long-lived HTTP responses stall),
+    // silently switch to polling /events-snapshot every 2 seconds.
+    setTimeout(function() {
+      if (!sseConnected) {
+        eventSource.close();
+        markConnected('Connected');
+        pollingInterval = setInterval(function() {
+          fetch('/events-snapshot')
+            .then(function(r) { return r.json(); })
+            .then(function(events) {
+              for (var i = lastPolledIndex; i < events.length; i++) {
+                handleEvent(events[i]);
+              }
+              lastPolledIndex = events.length;
+            })
+            .catch(function() {});
+        }, 2000);
+      }
+    }, 3000);
+
     function handleEvent(event) {
+      if (statusEl.textContent.indexOf('Connected') !== 0) {
+        markConnected('Connected');
+      }
+
+      if (event.type === 'ready') {
+        statusEl.textContent = 'Connected — waiting for story execution';
+        statusEl.style.color = '#b4f3be';
+        return;
+      }
+
       if (event.type === 'story-start') {
         state.stories[event.storyIndex] = {
           title: event.storyTitle,
@@ -508,7 +551,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     function parseUnifiedDiff(diffText) {
       if (!diffText || !diffText.trim()) return [];
 
-      var lines = diffText.split('\n');
+      var lines = diffText.split(String.fromCharCode(10));
       var rows = [];
       var oldLine = 0;
       var newLine = 0;
@@ -517,7 +560,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
         var line = lines[i];
 
         if (line.startsWith('@@')) {
-          var m = /@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+          var m = /@@\\s+-(\\d+)(?:,\\d+)?\\s+\\+(\\d+)(?:,\\d+)?\\s+@@/.exec(line);
           if (m) {
             oldLine = parseInt(m[1], 10);
             newLine = parseInt(m[2], 10);

@@ -38,10 +38,19 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
   server.on("request", (req, res) => {
     if (req.method === "GET" && req.url === "/") {
       // Serve the live view HTML
-      res.writeHead(200, { "Content-Type": "text/html" });
+      res.writeHead(200, {
+        "Content-Type": "text/html",
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      });
       res.end(LIVE_VIEW_HTML);
     } else if (req.method === "GET" && req.url === "/events") {
-      // SSE endpoint
+      // SSE endpoint — disable Nagle's algorithm so every write is sent
+      // immediately.  Without this, small SSE frames (~300 bytes) sit in
+      // the OS TCP send buffer waiting for an ACK, which over WSL2's
+      // virtual network causes the browser to stay on "Connecting..." forever.
+      req.socket.setNoDelay(true);
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -49,6 +58,14 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Cache-Control",
       });
+      // Flush an initial SSE heartbeat so clients transition from
+      // "Connecting..." even before the first live event arrives.
+      if (typeof (res as { flushHeaders?: () => void }).flushHeaders === "function") {
+        (res as { flushHeaders: () => void }).flushHeaders();
+      }
+      // Send a lightweight first data frame so clients that wait for
+      // initial payload bytes can transition from "Connecting..." quickly.
+      res.write(`data: ${JSON.stringify({ type: "ready", timestamp: Date.now() })}\n\n`);
 
       const client = { res, replay: allEvents.slice() };
       clients.add(client);
@@ -61,6 +78,16 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
       req.on("close", () => {
         clients.delete(client);
       });
+    } else if (req.method === "GET" && req.url === "/events-snapshot") {
+      // Polling fallback — returns all events as JSON for clients where SSE
+      // doesn't connect (WSL2 long-lived connection issues).
+      const body = JSON.stringify(allEvents);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(body);
     } else if (req.method === "POST" && req.url === "/abort") {
       // Abort endpoint
       if (abortController) {
@@ -72,6 +99,12 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
       res.writeHead(404);
       res.end();
     }
+  });
+
+  // Disable Nagle's algorithm on every connection so SSE frames are
+  // sent immediately — without this, small writes stall on WSL2.
+  server.on("connection", (socket) => {
+    socket.setNoDelay(true);
   });
 
   server.listen(0);

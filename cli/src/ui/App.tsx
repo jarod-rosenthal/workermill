@@ -496,6 +496,7 @@ export function App(props: AppProps): React.ReactElement {
     hasLiveStatusActivity,
   );
   const shouldAddQueuedInputSpacer = hasLiveToolActivity && queuedInput !== null;
+  const shouldAddPromptInputSpacer = hasLiveStatusActivity || shouldAddQueuedInputSpacer;
 
   return (
     <Box flexDirection="column" width="100%">
@@ -581,7 +582,7 @@ export function App(props: AppProps): React.ReactElement {
         <OrchestratorConfirm key={props.orchestratorConfirm.prompt} request={props.orchestratorConfirm} />
       ) : !props.permissionRequest && !props.orchestratorConfirm ? (
         <>
-          {shouldAddQueuedInputSpacer ? <Box height={1} /> : null}
+          {shouldAddPromptInputSpacer ? <Box height={1} /> : null}
           {rollbackOfferVisible ? (
             <Box marginLeft={2} marginBottom={1}>
               <Text color={theme.warning}>Roll back last exchange and restore your previous prompt? </Text>

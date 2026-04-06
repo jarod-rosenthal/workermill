@@ -122,7 +122,7 @@ export interface CliConfig {
   qualityGates?: QualityGateCommand[];
   /** Disable automatic fetching of remote model catalog (default: false) */
   disableModelAutoUpdate?: boolean;
-  /** Preferred terminal editor for /editor command: "vim", "nano", or "auto" (uses $EDITOR/$VISUAL/vi) */
+  /** Preferred terminal editor for /edit command: "vim", "nano", or "auto" (uses $EDITOR/$VISUAL/vi) */
   editor?: "vim" | "nano" | "auto";
   /** /program orchestration preferences */
   program?: ProgramConfig;

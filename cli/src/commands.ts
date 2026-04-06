@@ -40,7 +40,7 @@ export async function handleCommand(
       console.log(chalk.dim("  /cost      ") + "Show token cost breakdown");
       console.log(chalk.dim("  /git       ") + "Show git status");
       console.log(chalk.dim("  /sessions  ") + "List/switch sessions");
-      console.log(chalk.dim("  /editor    ") + "Open $EDITOR for input");
+      console.log(chalk.dim("  /edit      ") + "Open $EDITOR for input");
       console.log(chalk.dim("  /plan      ") + "Toggle plan mode (read-only)");
       console.log(chalk.dim("  /quit      ") + "Exit");
       console.log();
@@ -170,7 +170,7 @@ export async function handleCommand(
       break;
     }
 
-    case "editor": {
+    case "edit": {
       const editor = process.env.EDITOR || process.env.VISUAL || "vi";
       const tmpFile = path.join(os.tmpdir(), `workermill-${Date.now()}.md`);
       fs.writeFileSync(tmpFile, "", "utf-8");

@@ -1290,14 +1290,14 @@ describe("handleSlashCommand", () => {
     });
   });
 
-  // ---- /editor ----
+  // ---- /edit ----
 
-  describe("/editor", () => {
+  describe("/edit", () => {
     it("submits editor content when non-empty", () => {
       vi.mocked(fs.readFileSync).mockReturnValueOnce("Build a REST API for users");
       vi.mocked(execSync).mockReturnValue("" as any);
       const ctx = createContext();
-      handleSlashCommand("/editor", ctx);
+      handleSlashCommand("/edit", ctx);
       expect(fs.writeFileSync).toHaveBeenCalled();
       expect(ctx.addUserMessage).toHaveBeenCalledWith("Build a REST API for users");
       expect(ctx.submit).toHaveBeenCalledWith("Build a REST API for users");
@@ -1307,7 +1307,7 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.readFileSync).mockReturnValueOnce("  \n  ");
       vi.mocked(execSync).mockReturnValue("" as any);
       const ctx = createContext();
-      handleSlashCommand("/editor", ctx);
+      handleSlashCommand("/edit", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("no content"),
       );
@@ -1317,7 +1317,7 @@ describe("handleSlashCommand", () => {
     it("shows error when editor fails to open", () => {
       vi.mocked(execSync).mockImplementation(() => { throw new Error("editor not found"); });
       const ctx = createContext();
-      handleSlashCommand("/editor", ctx);
+      handleSlashCommand("/edit", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Failed to open editor"),
       );

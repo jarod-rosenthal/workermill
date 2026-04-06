@@ -33,7 +33,7 @@ const BUILTIN_COMMANDS = [
   { name: "/log", desc: "CLI log entries" },
   { name: "/git", desc: "Git status" },
   { name: "/sessions", desc: "Manage sessions" },
-  { name: "/editor", desc: "Open $EDITOR" },
+  { name: "/edit", desc: "Open $EDITOR" },
   { name: "/clear", desc: "Reset conversation" },
   { name: "/help", desc: "All commands" },
   { name: "/quit", desc: "Exit" },

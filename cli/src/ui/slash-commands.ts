@@ -146,7 +146,7 @@ export function getGitStatus(cwd: string): string {
 
 export const BUILTIN_COMMANDS = new Set([
   "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
-  "cancel", "clear", "compact", "config", "cost", "deny", "diff", "editor", "exit",
+  "cancel", "clear", "compact", "config", "cost", "deny", "diff", "edit", "exit",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
   "memories", "memory", "model", "permissions", "personas", "q", "quit",
   "pause", "release-notes", "releasenotes", "remember", "reset", "retry", "review",
@@ -209,7 +209,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/hooks\` | View pre/post tool hooks |
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
-| \`/editor\` | Open editor for longer input (vim/nano — set with \`/settings editor\`) |
+| \`/edit\` | Open editor for longer input (vim/nano — set with \`/settings editor\`) |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
 | \`/schedule\` | Scheduled tasks *(experimental)* |
@@ -829,8 +829,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
-    // ---- /editor ----
-    case "editor": {
+    // ---- /edit ----
+    case "edit": {
       const editorPref = loadConfig()?.editor;
       const editor = (editorPref && editorPref !== "auto")
         ? editorPref

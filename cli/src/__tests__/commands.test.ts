@@ -360,7 +360,7 @@ describe("commands", () => {
     });
   });
 
-  describe("handleCommand('editor')", () => {
+  describe("handleCommand('edit')", () => {
     it("opens editor and processes the content", async () => {
       const processInput = vi.fn();
       const ctx = createTestContext({ processInput });
@@ -376,7 +376,7 @@ describe("commands", () => {
         return "" as any;
       });
 
-      await handleCommand("/editor", ctx);
+      await handleCommand("/edit", ctx);
       expect(processInput).toHaveBeenCalledWith("Fix the login bug");
     });
 
@@ -387,7 +387,7 @@ describe("commands", () => {
       // Editor leaves file empty
       vi.mocked(execSync).mockImplementation(() => "" as any);
 
-      await handleCommand("/editor", ctx);
+      await handleCommand("/edit", ctx);
       expect(processInput).not.toHaveBeenCalled();
       const logCalls = (console.log as any).mock.calls.flat().join(" ");
       expect(logCalls).toContain("Empty input");
@@ -397,7 +397,7 @@ describe("commands", () => {
       const ctx = createTestContext();
       vi.mocked(execSync).mockImplementation(() => { throw new Error("editor crashed"); });
 
-      await handleCommand("/editor", ctx);
+      await handleCommand("/edit", ctx);
       const logCalls = (console.log as any).mock.calls.flat().join(" ");
       expect(logCalls).toContain("Editor failed");
     });

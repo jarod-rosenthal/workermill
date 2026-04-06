@@ -37,6 +37,8 @@ import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPerm
 import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
 import { withConcurrencyControl } from "../tool-concurrency.js";
+import { createLiveViewServer, type LiveViewServer } from "../live-view-server.js";
+import { formatLiveViewUrlMessage, getLiveViewUrls } from "../live-view-url.js";
 import type {
   Message,
   ToolCallInfo,
@@ -114,6 +116,8 @@ export interface UseAgentOptions {
   maxTokens?: number;
   /** Called after every bash tool execution (e.g. to refresh git branch). */
   onBashComplete?: () => void;
+  /** Startup live view override from CLI flags/settings merge. */
+  liveView?: boolean | "auto";
 }
 
 export interface UseAgentReturn {
@@ -173,6 +177,34 @@ export interface UseAgentReturn {
   switchModel: (provider: string, model: string) => void;
   /** Force a compaction of the conversation. */
   forceCompact: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
+  /** Enable or disable interactive live view for this session. Returns active URL when enabled. */
+  setLiveViewEnabled: (enabled: boolean) => string | null;
+  /** Current live view URL (if running). */
+  getLiveViewUrl: () => string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Cost helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Records partial token usage to the cost tracker when a run is aborted mid-stream.
+ * Called in the AbortError catch path so tokens consumed before ESC are not lost.
+ * No-op when both counts are zero (i.e. abort happened before any tokens were billed).
+ */
+export function trackAbortCost(
+  partialInputTokens: number,
+  partialOutputTokens: number,
+  persona: string,
+  provider: string,
+  model: string,
+  costTracker: { addUsage: (p: string, pr: string, m: string, i: number, o: number) => void; getTotalCost: () => number },
+  setCost: (cost: number) => void,
+): void {
+  if (partialInputTokens > 0 || partialOutputTokens > 0) {
+    costTracker.addUsage(persona, provider, model, partialInputTokens, partialOutputTokens);
+    setCost(costTracker.getTotalCost());
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +269,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const permissionRulesRef = useRef<PermissionRuleConfig | undefined>(undefined);
   const recentToolSignaturesRef = useRef<string[]>([]);
   const initDoneRef = useRef(false);
+  const liveViewEnabledRef = useRef(false);
+  const liveViewServerRef = useRef<LiveViewServer | null>(null);
+  const liveViewUrlRef = useRef<string | null>(null);
+  const pendingSystemMessagesRef = useRef<string[]>([]);
 
   // Deferred tool loading — MCP tools start deferred, promoted on tool_search
   const deferredToolsRef = useRef<DeferredToolEntry[]>([]);
@@ -245,6 +281,25 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // Keep refs in sync with state so callbacks see fresh values.
   trustAllRef.current = trustAll;
   planModeRef.current = planMode;
+
+  const startLiveView = useCallback((): string => {
+    if (liveViewServerRef.current && liveViewUrlRef.current) {
+      return liveViewUrlRef.current;
+    }
+    const server = createLiveViewServer(workingDirRef.current, "main");
+    liveViewServerRef.current = server;
+    const urls = getLiveViewUrls(server.port);
+    liveViewUrlRef.current = urls.preferredUrl;
+    return urls.preferredUrl;
+  }, []);
+
+  const stopLiveView = useCallback((): void => {
+    const server = liveViewServerRef.current;
+    if (!server) return;
+    server.stop();
+    liveViewServerRef.current = null;
+    liveViewUrlRef.current = null;
+  }, []);
 
   const flushToolCounts = useCallback(() => {
     if (toolCountFlushTimerRef.current) {
@@ -350,6 +405,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       hooksConfigRef.current = cliConfig?.hooks;
       bellEnabledRef.current = cliConfig?.bell;
       permissionRulesRef.current = cliConfig?.permissions;
+      const effectiveLiveView = options.liveView ?? cliConfig?.liveView;
+      liveViewEnabledRef.current = effectiveLiveView === true || effectiveLiveView === "auto";
+      if (liveViewEnabledRef.current) {
+        const url = startLiveView();
+        const parsedPort = Number(new URL(url).port || "0");
+        if (parsedPort > 0) pendingSystemMessagesRef.current.push(formatLiveViewUrlMessage(parsedPort));
+        else pendingSystemMessagesRef.current.push(`Live view → ${url}`);
+      }
     } catch (err) {
       logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
     }
@@ -406,12 +469,40 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // Push restored messages into React state after first render.
   useEffect(() => {
     const s = sessionRef.current as Session & { _restored?: Message[] };
+    const pending = pendingSystemMessagesRef.current.splice(0);
     if (s._restored) {
-      setMessages(s._restored);
+      const restored = s._restored;
       delete s._restored;
+      if (pending.length > 0) {
+        const pendingMessages: Message[] = pending.map((content) => ({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content,
+          compact: true,
+          timestamp: new Date().toISOString(),
+        }));
+        setMessages([...restored, ...pendingMessages]);
+      } else {
+        setMessages(restored);
+      }
+    } else if (pending.length > 0) {
+      const pendingMessages: Message[] = pending.map((content) => ({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content,
+        compact: true,
+        timestamp: new Date().toISOString(),
+      }));
+      setMessages((prev) => [...prev, ...pendingMessages]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    return () => {
+      stopLiveView();
+    };
+  }, [stopLiveView]);
 
   // ------- Helpers -------- //
 
@@ -794,6 +885,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               typeof result === "string" ? result : JSON.stringify(result);
             logger.info("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
+            const liveViewServer = liveViewServerRef.current;
+            if (liveViewServer && (name === "write_file" || name === "edit_file" || name === "patch")) {
+              const filePath = String(input.path || input.file_path || "").trim();
+              if (filePath) {
+                const toolType = name === "write_file" ? "created" : "edited";
+                liveViewServer.emitFileChange("worker", 1, "Interactive chat", filePath, toolType);
+              }
+            }
+
             // Track for loop detection
             const sig = `${name}:${JSON.stringify(input).substring(0, 200)}`;
             recentToolSignaturesRef.current.push(sig);
@@ -905,6 +1005,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
         const controller = new AbortController();
         abortRef.current = controller;
+        if (liveViewServerRef.current) {
+          liveViewServerRef.current.setAbortController(controller);
+        }
+        if (liveViewServerRef.current) {
+          const storyTitle = (displayText ?? input).split("\n")[0]?.slice(0, 120) || "Interactive chat";
+          liveViewServerRef.current.emitStoryStart(1, storyTitle, "worker", 1);
+        }
 
         // No artificial timeout — the user controls cancellation via ESC/Ctrl+C.
 
@@ -933,6 +1040,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           });
 
           const agentStreamStartMs = Date.now();
+          let partialInputTokens = 0;
+          let partialOutputTokens = 0;
           const stream = streamText({
             model,
             system: systemPrompt,
@@ -956,7 +1065,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             ...(["openai", "xai"].includes(aiProviderRef.current)
               ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
               : {}),
-            onStepFinish({ text, toolCalls: calls }) {
+            onStepFinish({ text, toolCalls: calls, usage: stepUsage }) {
+              partialInputTokens += stepUsage?.inputTokens ?? 0;
+              partialOutputTokens += stepUsage?.outputTokens ?? 0;
               const stepStartMs = Date.now();
               const callCount = calls?.length ?? 0;
               traceDispatch("onStepFinish:enter", {
@@ -1138,6 +1249,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             notifyIfEnabled(bellEnabledRef.current, "WorkerMill", "Auto-compaction complete");
           }
 
+          if (liveViewServerRef.current) {
+            liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+          }
           setStatus("idle");
           abortRef.current = null;
           break; // success — exit retry loop
@@ -1160,6 +1274,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           if (err instanceof Error && err.name === "AbortError") {
             // Cancellation -- already handled by cancel().
+            // Preserve any tokens consumed in completed steps before the abort.
+            trackAbortCost(
+              partialInputTokens,
+              partialOutputTokens,
+              "agent",
+              aiProviderRef.current,
+              activeModelNameRef.current,
+              costTrackerRef.current,
+              setCost,
+            );
             setStatus("idle");
             return;
           }
@@ -1191,6 +1315,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           });
           setStreamingText("");
           setStreamingToolCalls([]);
+          if (liveViewServerRef.current) {
+            liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+          }
           setStatus("idle");
           break; // error handled — exit retry loop
         }
@@ -1332,6 +1459,20 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
+  const setLiveViewEnabled = useCallback((enabled: boolean): string | null => {
+    liveViewEnabledRef.current = enabled;
+    if (enabled) {
+      const url = startLiveView();
+      return url;
+    }
+    stopLiveView();
+    return null;
+  }, [startLiveView, stopLiveView]);
+
+  const getLiveViewUrl = useCallback((): string | null => {
+    return liveViewUrlRef.current;
+  }, []);
+
   // ------- switchModel() — hot-swap provider/model mid-session -------- //
 
   const switchModel = useCallback((newProvider: string, newModel: string) => {
@@ -1447,5 +1588,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     tokPerSec,
     switchModel,
     forceCompact,
+    setLiveViewEnabled,
+    getLiveViewUrl,
   };
 }

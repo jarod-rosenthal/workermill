@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { trackAbortCost } from "../ui/useAgent.js";
 
 // ---------------------------------------------------------------------------
 // 1. switchModel logic (pure replication)
@@ -1022,4 +1023,55 @@ describe("switchModel env var mapping — all supported providers", () => {
       expect(process.env[envVar]).toBe(key);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 11. trackAbortCost — preserves partial token costs when ESC cancels a run
+// ---------------------------------------------------------------------------
+
+describe("trackAbortCost", () => {
+  it("records tokens to the cost tracker and updates the display cost", () => {
+    const addUsage = vi.fn();
+    const setCost = vi.fn();
+    const tracker = { addUsage, getTotalCost: vi.fn(() => 0.0018) };
+
+    trackAbortCost(1200, 600, "agent", "anthropic", "claude-sonnet-4-6", tracker, setCost);
+
+    expect(addUsage).toHaveBeenCalledWith("agent", "anthropic", "claude-sonnet-4-6", 1200, 600);
+    expect(setCost).toHaveBeenCalledWith(0.0018);
+  });
+
+  it("does nothing when no tokens were consumed before abort", () => {
+    const addUsage = vi.fn();
+    const setCost = vi.fn();
+    const tracker = { addUsage, getTotalCost: vi.fn(() => 0) };
+
+    trackAbortCost(0, 0, "agent", "anthropic", "claude-sonnet-4-6", tracker, setCost);
+
+    expect(addUsage).not.toHaveBeenCalled();
+    expect(setCost).not.toHaveBeenCalled();
+  });
+
+  it("records cost when only input tokens exist (e.g. abort before first output token)", () => {
+    const addUsage = vi.fn();
+    const setCost = vi.fn();
+    const tracker = { addUsage, getTotalCost: vi.fn(() => 0.0005) };
+
+    trackAbortCost(500, 0, "agent", "openai", "gpt-5.4", tracker, setCost);
+
+    expect(addUsage).toHaveBeenCalledWith("agent", "openai", "gpt-5.4", 500, 0);
+    expect(setCost).toHaveBeenCalledWith(0.0005);
+  });
+
+  it("accumulates tokens from multiple completed steps correctly", () => {
+    const addUsage = vi.fn();
+    const setCost = vi.fn();
+    const tracker = { addUsage, getTotalCost: vi.fn(() => 0.004) };
+
+    // Caller already summed step 1 (1000 in / 400 out) + step 2 (200 in / 150 out)
+    trackAbortCost(1200, 550, "agent", "google", "gemini-3.1-pro", tracker, setCost);
+
+    expect(addUsage).toHaveBeenCalledWith("agent", "google", "gemini-3.1-pro", 1200, 550);
+    expect(setCost).toHaveBeenCalledWith(0.004);
+  });
 });

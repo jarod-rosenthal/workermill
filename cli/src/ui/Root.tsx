@@ -99,7 +99,7 @@ export function Root(props: RootProps): React.ReactElement {
     });
   }, []);
 
-  const agent = useAgent({ ...props, onBashComplete: refreshGitBranch });
+  const agent = useAgent({ ...props, onBashComplete: refreshGitBranch, liveView: props.cliConfig?.liveView });
 
   // Active provider/model/context — starts from props, updates on /model switch
   const [activeProvider, setActiveProvider] = useState(props.provider);
@@ -194,6 +194,7 @@ export function Root(props: RootProps): React.ReactElement {
         isBusy: orchestrator.running || agent.status !== "idle",
         startOrchestrator: orchestrator.start,
         startProgram: orchestrator.startProgram,
+        startDoctor: orchestrator.startDoctor,
         retryOrchestrator: orchestrator.retry,
         startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => orchestrator.review(trustAll, sandboxed, target),
         lastBuildTask: lastBuildTask.current,
@@ -201,6 +202,8 @@ export function Root(props: RootProps): React.ReactElement {
         sandboxed: props.sandboxed,
         exit,
         switchModel: switchModelAndDisplay,
+        setLiveViewEnabled: agent.setLiveViewEnabled,
+        getLiveViewUrl: agent.getLiveViewUrl,
         updateRoleModels: () => {
           try {
             const cfg = resolveConfig();

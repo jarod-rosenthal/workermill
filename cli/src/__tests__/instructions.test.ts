@@ -38,14 +38,24 @@ describe("instructions", () => {
       expect(loadProjectInstructions(workDir)).toBeNull();
     });
 
-    it("finds WORKERMILL.md first (highest priority)", async () => {
+    it("finds AGENT.md first (highest priority)", async () => {
       const { loadProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "workermill instructions");
+      writeFile("AGENT.md", "agent instructions");
+      writeFile("AGENTS.md", "agents instructions");
       writeFile("CLAUDE.md", "claude instructions");
       writeFile(".cursorrules", "cursor instructions");
 
-      expect(loadProjectInstructions(workDir)).toBe("workermill instructions");
+      expect(loadProjectInstructions(workDir)).toBe("agent instructions");
+    });
+
+    it("uses AGENTS.md when AGENT.md is absent", async () => {
+      const { loadProjectInstructions } = await importInstructions();
+
+      writeFile("AGENTS.md", "agents instructions");
+      writeFile("CLAUDE.md", "claude instructions");
+
+      expect(loadProjectInstructions(workDir)).toBe("agents instructions");
     });
 
     it("finds .workermill/instructions.md over CLAUDE.md", async () => {
@@ -57,7 +67,7 @@ describe("instructions", () => {
       expect(loadProjectInstructions(workDir)).toBe("workermill dir instructions");
     });
 
-    it("falls back to CLAUDE.md when WORKERMILL.md does not exist", async () => {
+    it("falls back to CLAUDE.md when AGENT.md does not exist", async () => {
       const { loadProjectInstructions } = await importInstructions();
 
       writeFile("CLAUDE.md", "claude instructions");
@@ -66,7 +76,7 @@ describe("instructions", () => {
       expect(loadProjectInstructions(workDir)).toBe("claude instructions");
     });
 
-    it("falls back to .cursorrules when WORKERMILL.md and CLAUDE.md are absent", async () => {
+    it("falls back to .cursorrules when AGENT.md/CLAUDE.md are absent", async () => {
       const { loadProjectInstructions } = await importInstructions();
 
       writeFile(".cursorrules", "cursor rules content");
@@ -83,10 +93,22 @@ describe("instructions", () => {
       expect(loadProjectInstructions(workDir)).toBe("copilot instructions");
     });
 
+    it("loads Cursor rules from .cursor/rules/*.mdc when present", async () => {
+      const { loadProjectInstructions } = await importInstructions();
+
+      writeFile(".cursor/rules/00-core.mdc", "core cursor rule");
+      writeFile(".cursor/rules/10-style.mdc", "style cursor rule");
+
+      const content = loadProjectInstructions(workDir);
+      expect(content).toContain("core cursor rule");
+      expect(content).toContain("style cursor rule");
+      expect(content).toContain(".cursor/rules/00-core.mdc");
+    });
+
     it("returns null for a file that exists but is empty", async () => {
       const { loadProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "");
+      writeFile("AGENT.md", "");
 
       expect(loadProjectInstructions(workDir)).toBeNull();
     });
@@ -99,10 +121,10 @@ describe("instructions", () => {
       expect(loadProjectInstructions(workDir)).toBeNull();
     });
 
-    it("skips empty WORKERMILL.md and falls through to CLAUDE.md", async () => {
+    it("skips empty AGENT.md and falls through to CLAUDE.md", async () => {
       const { loadProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "   "); // whitespace-only — treated as empty
+      writeFile("AGENT.md", "   "); // whitespace-only — treated as empty
       writeFile("CLAUDE.md", "actual claude instructions");
 
       expect(loadProjectInstructions(workDir)).toBe("actual claude instructions");
@@ -120,7 +142,7 @@ describe("instructions", () => {
       const { loadProjectInstructions } = await importInstructions();
 
       const content = "Line one\nLine two\nLine three";
-      writeFile("WORKERMILL.md", content);
+      writeFile("AGENT.md", content);
 
       expect(loadProjectInstructions(workDir)).toBe(content);
     });
@@ -145,7 +167,7 @@ describe("instructions", () => {
     it("includes content after the header", async () => {
       const { formatProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "use TypeScript strictly");
+      writeFile("AGENT.md", "use TypeScript strictly");
 
       const result = formatProjectInstructions(workDir);
       expect(result).toMatch(/## Project Instructions[\s\S]*use TypeScript strictly/);
@@ -163,7 +185,7 @@ describe("instructions", () => {
     it("returns empty string for whitespace-only instruction file", async () => {
       const { formatProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "   ");
+      writeFile("AGENT.md", "   ");
 
       expect(formatProjectInstructions(workDir)).toBe("");
     });
@@ -171,11 +193,11 @@ describe("instructions", () => {
     it("formats correctly for the highest-priority found file", async () => {
       const { formatProjectInstructions } = await importInstructions();
 
-      writeFile("WORKERMILL.md", "workermill rules");
+      writeFile("AGENT.md", "agent rules");
       writeFile("CLAUDE.md", "claude rules");
 
       const result = formatProjectInstructions(workDir);
-      expect(result).toContain("workermill rules");
+      expect(result).toContain("agent rules");
       expect(result).not.toContain("claude rules");
     });
   });

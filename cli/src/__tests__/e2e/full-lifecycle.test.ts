@@ -228,7 +228,7 @@ describe("CLI E2E — full lifecycle", () => {
   // 1. Slash Command Tests
   // =========================================================================
   describe("slash commands (real config)", () => {
-    it("/init — creates or validates WORKERMILL.md in cloned repo", () => {
+    it("/init — creates or validates AGENT.md in cloned repo", () => {
       if (!ollamaAvailable) {
         console.log("Skipping: Ollama not available");
         return;
@@ -237,10 +237,10 @@ describe("CLI E2E — full lifecycle", () => {
       const tempDir = cloneTestRepo();
       const ctx = buildMockContext({ workingDir: tempDir });
 
-      // Remove WORKERMILL.md so /init triggers generation
-      const wmPath = path.join(tempDir, "WORKERMILL.md");
-      if (fs.existsSync(wmPath)) fs.unlinkSync(wmPath);
-      expect(fs.existsSync(wmPath)).toBe(false);
+      // Remove AGENT.md so /init triggers generation
+      const agentPath = path.join(tempDir, "AGENT.md");
+      if (fs.existsSync(agentPath)) fs.unlinkSync(agentPath);
+      expect(fs.existsSync(agentPath)).toBe(false);
 
       const handled = handleSlashCommand("/init", ctx);
       expect(handled).toBe(true);
@@ -248,22 +248,22 @@ describe("CLI E2E — full lifecycle", () => {
       // /init submits a prompt to the agent for codebase exploration
       expect(ctx.submittedInputs.length).toBe(1);
       expect(ctx.submittedInputs[0].input).toContain("Explore this codebase");
-      expect(ctx.submittedInputs[0].input).toContain("WORKERMILL.md");
+      expect(ctx.submittedInputs[0].input).toContain("AGENT.md");
 
       // Also verify the system message about analyzing codebase
       expect(ctx.systemMessages.some((m) => m.includes("Analyzing codebase"))).toBe(true);
     });
 
-    it("/init — validates existing WORKERMILL.md", () => {
+    it("/init — validates existing AGENT.md", () => {
       if (!ollamaAvailable) {
         console.log("Skipping: Ollama not available");
         return;
       }
 
       const tempDir = cloneTestRepo();
-      // Create a WORKERMILL.md so /init triggers validation path
+      // Create an AGENT.md so /init triggers validation path
       fs.writeFileSync(
-        path.join(tempDir, "WORKERMILL.md"),
+        path.join(tempDir, "AGENT.md"),
         "# Test Project\n\nA simple Express app.\n",
       );
 
@@ -274,8 +274,8 @@ describe("CLI E2E — full lifecycle", () => {
       // Validation path — submits a different prompt
       expect(ctx.submittedInputs.length).toBe(1);
       // The submission should be the validation prompt, not the generation prompt
-      expect(ctx.submittedInputs[0].input).toContain("Read the existing WORKERMILL.md");
-      expect(ctx.systemMessages.some((m) => m.includes("Validating WORKERMILL.md"))).toBe(true);
+      expect(ctx.submittedInputs[0].input).toContain("Read the existing AGENT.md");
+      expect(ctx.systemMessages.some((m) => m.includes("Validating AGENT.md"))).toBe(true);
     });
 
     it("/settings key ollama test-key — saves API key to config", () => {

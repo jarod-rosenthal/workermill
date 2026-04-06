@@ -490,13 +490,13 @@ export function App(props: AppProps): React.ReactElement {
     Boolean(props.orchestratorStatus) ||
     props.status !== "idle" ||
     Boolean(props.buildPreviewLine);
+  const hasLiveActivity = hasLiveToolActivity || hasLiveStatusActivity;
   const shouldAddLiveActivitySpacer = shouldSeparateLiveActivityFromPrompt(
     props.messages,
     hasLiveToolActivity,
     hasLiveStatusActivity,
   );
-  const shouldAddQueuedInputSpacer = hasLiveToolActivity && queuedInput !== null;
-  const shouldAddPromptInputSpacer = hasLiveStatusActivity || shouldAddQueuedInputSpacer;
+  const shouldAddPromptInputSpacer = !hasLiveActivity;
 
   return (
     <Box flexDirection="column" width="100%">
@@ -543,35 +543,32 @@ export function App(props: AppProps): React.ReactElement {
         }}
       </Static>
 
-      {/* Tool call/activity — fixed region above prompts and status bar */}
-      <Box flexDirection="column" minHeight={2}>
-        {shouldAddLiveActivitySpacer ? <Box height={1} /> : null}
-        {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
-          <Box marginLeft={2}>
-            <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
+      {/* Tool call/activity — single-line status region above prompts and status bar */}
+      {hasLiveActivity ? (
+        <Box flexDirection="column">
+          {shouldAddLiveActivitySpacer ? <Box height={1} /> : null}
+          <Box marginLeft={2} minHeight={1}>
+            {hasLiveToolActivity ? (
+              <ToolCallDisplay tool={props.streamingToolCalls![props.streamingToolCalls!.length - 1]} />
+            ) : props.orchestratorStatus ? (
+              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+            ) : props.status === "thinking" ? (
+              <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+            ) : props.status === "streaming" ? (
+              <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+            ) : props.status === "tool_running" ? (
+              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+            ) : props.status === "permission" ? (
+              <Text color={theme.permission}>● Waiting for permission...</Text>
+            ) : props.buildPreviewLine ? (
+              <Text color={theme.subtle}>{props.buildPreviewLine}</Text>
+            ) : (
+              <Text>{" "}</Text>
+            )}
           </Box>
-        ) : (
           <Box height={1} />
-        )}
-
-        <Box marginLeft={2} height={1}>
-          {props.orchestratorStatus ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
-          ) : props.status === "thinking" ? (
-            <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
-          ) : props.status === "streaming" ? (
-            <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
-          ) : props.status === "tool_running" ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
-          ) : props.status === "permission" ? (
-            <Text color={theme.permission}>● Waiting for permission...</Text>
-          ) : props.buildPreviewLine ? (
-            <Text color={theme.subtle}>{props.buildPreviewLine}</Text>
-          ) : (
-            <Text>{" "}</Text>
-          )}
         </Box>
-      </Box>
+      ) : null}
 
       {/* Permission/confirm prompts — shown above status bar when active */}
       {props.permissionRequest ? (

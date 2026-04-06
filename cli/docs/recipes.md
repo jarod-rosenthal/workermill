@@ -364,7 +364,7 @@ Run once to generate:
 /init
 ```
 
-This creates `WORKERMILL.md` in the repo root — a codebase analysis the agent loads on every turn. Commit it.
+This creates `AGENT.md` in the repo root — a codebase analysis the agent loads on every turn. Commit it.
 
 Update it when the project changes significantly (new stack, new conventions). Or use `/remember` to add specific facts:
 
@@ -376,7 +376,7 @@ Update it when the project changes significantly (new stack, new conventions). O
 
 Memories persist per project in `~/.workermill/memories/<project-id>.json` and load automatically with every session.
 
-**The agent also reads** (in order): `WORKERMILL.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`. If you already have one of these from another tool, WorkerMill picks it up automatically.
+**The agent also reads** common standards (priority order): `AGENT.md`, `AGENTS.md`, `.workermill/instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.windsurfrules`, `.windsurf/rules/*`, `.clinerules`, and `.github/copilot-instructions.md`.
 
 ---
 

@@ -7,7 +7,7 @@ const BUILTIN_COMMANDS = [
   { name: "/ship", desc: "Multi-expert orchestration" },
   { name: "/build", desc: "Alias for /ship" },
   { name: "/retry", desc: "Re-run last build" },
-  { name: "/init", desc: "Generate WORKERMILL.md" },
+  { name: "/init", desc: "Generate AGENT.md" },
   { name: "/setup", desc: "Re-run provider setup wizard" },
   { name: "/settings", desc: "View/change settings" },
   { name: "/permissions", desc: "Tool permissions" },
@@ -72,7 +72,7 @@ function getCompletions(
 // Fake cwd files used across .md tests
 const FAKE_FILES = [
   "README.md",
-  "WORKERMILL.md",
+  "AGENT.md",
   "CHANGELOG.md",
   "docs.txt",       // non-.md, should be ignored
   ".secrets.md",    // hidden, should be ignored
@@ -144,7 +144,7 @@ describe("Input completion logic", () => {
     expect(mockReaddirSync).toHaveBeenCalled();
     const names = results.map((r) => r.name);
     expect(names).toContain("/ship README.md");
-    expect(names).toContain("/ship WORKERMILL.md");
+    expect(names).toContain("/ship AGENT.md");
     expect(names).toContain("/ship CHANGELOG.md");
     expect(names).toContain("/ship ship-plan.md");
     // Non-.md files must be excluded
@@ -157,7 +157,7 @@ describe("Input completion logic", () => {
     const results = getCompletions("/build ", mockReaddirSync);
     const names = results.map((r) => r.name);
     expect(names).toContain("/build README.md");
-    expect(names).toContain("/build WORKERMILL.md");
+    expect(names).toContain("/build AGENT.md");
     // Non-.md excluded
     expect(names).not.toContain("/build docs.txt");
     // Hidden excluded
@@ -168,7 +168,7 @@ describe("Input completion logic", () => {
     const results = getCompletions("/ship r", mockReaddirSync);
     const names = results.map((r) => r.name);
     expect(names).toContain("/ship README.md");
-    expect(names).not.toContain("/ship WORKERMILL.md");
+    expect(names).not.toContain("/ship AGENT.md");
     expect(names).not.toContain("/ship CHANGELOG.md");
   });
 
@@ -176,7 +176,7 @@ describe("Input completion logic", () => {
     const results = getCompletions("/ship RE", mockReaddirSync);
     const names = results.map((r) => r.name);
     expect(names).toContain("/ship README.md");
-    expect(names).not.toContain("/ship WORKERMILL.md");
+    expect(names).not.toContain("/ship AGENT.md");
   });
 
   it("excludes exact .md match after /ship", () => {

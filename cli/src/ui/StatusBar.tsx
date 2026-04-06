@@ -19,7 +19,7 @@ interface StatusBarProps {
   mcpCount?: number;
   /** Session start time (ms since epoch) */
   sessionStart?: number;
-  /** Whether WORKERMILL.md or similar instructions file is loaded */
+  /** Whether AGENT.md or similar instructions file is loaded */
   hasInstructions?: boolean;
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec?: Record<string, number>;
@@ -181,7 +181,7 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
   // Row 1 right side
   const costStr = formatCost(props.cost);
   const timeStr = props.sessionStart ? formatElapsed(props.sessionStart) : "";
-  const instructionsStr = props.hasInstructions ? " WORKERMILL.md" : "";
+  const instructionsStr = props.hasInstructions ? " AGENT.md" : "";
   const mcpStr = props.mcpCount && props.mcpCount > 0 ? ` ${props.mcpCount} MCP` : "";
 
   return (

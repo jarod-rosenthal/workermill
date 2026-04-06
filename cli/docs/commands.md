@@ -144,9 +144,9 @@ Show uncommitted changes in the working directory with syntax highlighting.
 
 ### `/init`
 
-Analyze the codebase and generate a `WORKERMILL.md` project instructions file. The agent reads the file on every turn as part of its system prompt.
+Analyze the codebase and generate an `AGENT.md` project instructions file. The agent reads this (or other supported instruction files) on every turn as part of its system prompt.
 
-`WORKERMILL.md` is like `CLAUDE.md` or `.cursorrules` — project-specific conventions, tech stack, and guardrails that persist across sessions.
+`AGENT.md` is WorkerMill's default, but the CLI also recognizes common formats like `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.windsurfrules`, `.windsurf/rules/*`, `.clinerules`, and `.github/copilot-instructions.md`.
 
 ### `/remember <text>`
 

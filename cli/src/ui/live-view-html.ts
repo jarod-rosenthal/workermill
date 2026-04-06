@@ -341,7 +341,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       .stream-panel { padding: 10px; }
     }
 
-    ${PRISM_THEME_CSS_PLACEHOLDER}
+    __PRISM_THEME_CSS__
   </style>
 </head>
 <body>
@@ -374,7 +374,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <script>${PRISM_JS_PLACEHOLDER}</script>
+  <script>__PRISM_JS__</script>
   <script>
     /* ── State ── */
     var state = {
@@ -802,4 +802,4 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     window.abortRun = abortRun;
   </script>
 </body>
-</html>`.replace('${PRISM_JS_PLACEHOLDER}', PRISM_JS).replace('${PRISM_THEME_CSS_PLACEHOLDER}', PRISM_THEME_CSS);
+</html>`.replace('__PRISM_JS__', PRISM_JS).replace('__PRISM_THEME_CSS__', PRISM_THEME_CSS);

@@ -9,6 +9,7 @@ import { render } from "ink";
 import chalk from "chalk";
 import { Command } from "commander";
 import { loadConfig, getProviderForPersona } from "./config.js";
+import { findProjectInstructionSource } from "./instructions.js";
 import { runSetup } from "./setup.js";
 import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
 import { Root } from "./ui/Root.js";
@@ -42,21 +43,23 @@ async function printWelcome(workingDir: string, isFirstRun = false): Promise<voi
   if (isFirstRun) {
     console.log();
     console.log(brand("  Welcome aboard!") + dim(" You have a team of AI experts ready to work."));
-    console.log(dim("  Try /ship <task> to plan, build, review, and commit — all in one shot."));
+    console.log(dim("  Try /build <task> to plan, build, review, and commit — all in one shot."));
     console.log(dim("  Or just describe what you need and your team will figure it out."));
   }
   console.log();
 
   const tips = [
-    "/ship <task> assigns a team of experts to plan, build, review, and commit your feature.",
+    "/build <task> assigns a team of experts to plan, build, review, and commit your feature.",
+    "/program #120 runs full-spec orchestration from a parent GitHub issue across epic-ordered child issues.",
+    "In /program, epic boundaries prompt with y/n/a: continue once, pause, or continue all.",
     "/as backend_developer <task> gives you a single dedicated expert for focused work.",
     "/review runs a tech lead code review on your uncommitted changes.",
-    "/init creates a WORKERMILL.md — project context that every expert reads before starting.",
+    "/init creates an AGENT.md — project context that every expert reads before starting.",
     "Switch your planner or reviewer model: `/model planner google/gemini-3.1-pro`.",
     "Use /model <provider>/<model> to switch models mid-session without restarting.",
     "Next time, launch with `workermill --resume` to restore this session's messages and context.",
-    "/ship GH-42 or /ship #42 fetches a GitHub issue and builds it. Set up with /setup.",
-    "/ship PROJ-123 fetches a Jira or Linear ticket and builds it. Configure with /setup.",
+    "/build GH-42 or /build #42 fetches a GitHub issue and builds it. Set up with /setup.",
+    "/build PROJ-123 fetches a Jira or Linear ticket and builds it. Configure with /setup.",
   ];
   console.log(dim(`  ${tips[Math.floor(Math.random() * tips.length)]}`));
   console.log(dim(`  Type ${white("/help")} for all commands.`));
@@ -78,13 +81,13 @@ function addSharedOptions(cmd: Command): Command {
     .option("--provider <provider>", "Override default provider")
     .option("--model <model>", "Override model")
     .option("--trust", "Skip all tool permission prompts")
-    .option("--auto-revise", "Auto-approve revisions during /ship reviews")
+    .option("--auto-revise", "Auto-approve revisions during /build reviews")
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
     .option("--fork", "Fork the resumed session (use with --resume)")
-    .option("--live-view", "Force open live browser diff view during /ship")
-    .option("--no-live-view", "Suppress live browser diff view during /ship");
+    .option("--live-view", "Enable live browser diff view")
+    .option("--no-live-view", "Disable live browser diff view");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -111,8 +114,6 @@ async function resolveConfig(options: Record<string, unknown>) {
     config.liveView = true;
   } else if (options.noLiveView) {
     config.liveView = false;
-  } else if (config.liveView === undefined) {
-    config.liveView = "auto";
   }
   return { config, isFirstRun };
 }
@@ -361,8 +362,7 @@ program
 
     // Check project instructions
     const cwd = process.cwd();
-    const instructionFiles = [".workermill/instructions.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md"];
-    const found = instructionFiles.find(f => fs.existsSync(path.join(cwd, f)));
+    const found = findProjectInstructionSource(cwd);
     if (found) {
       console.log(chalk.green("  ✓") + ` Project instructions: ${found}`);
     } else {

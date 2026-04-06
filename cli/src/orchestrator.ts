@@ -1508,6 +1508,20 @@ export function shouldTransitionTicketOnPrOpen(ticketSystem: string | undefined)
   return (ticketSystem || "").toLowerCase() !== "github";
 }
 
+function isAbortSignalLike(value: unknown): value is AbortSignal {
+  if (!value || typeof value !== "object") return false;
+  const signal = value as { aborted?: unknown; addEventListener?: unknown; removeEventListener?: unknown };
+  return typeof signal.aborted === "boolean"
+    && typeof signal.addEventListener === "function"
+    && typeof signal.removeEventListener === "function";
+}
+
+function isAbortControllerLike(value: unknown): value is AbortController {
+  if (!value || typeof value !== "object") return false;
+  const controller = value as { abort?: unknown; signal?: unknown };
+  return typeof controller.abort === "function" && isAbortSignalLike(controller.signal);
+}
+
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
@@ -1522,12 +1536,20 @@ export async function runOrchestration(
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
 
-  const abortController = abortControllerOrSignal && "abort" in abortControllerOrSignal
-    ? abortControllerOrSignal as AbortController
+  const abortController = isAbortControllerLike(abortControllerOrSignal)
+    ? abortControllerOrSignal
     : undefined;
-  const abortSignal = abortControllerOrSignal
-    ? ("signal" in abortControllerOrSignal ? abortControllerOrSignal.signal : abortControllerOrSignal)
-    : undefined;
+  const abortSignal = isAbortControllerLike(abortControllerOrSignal)
+    ? abortControllerOrSignal.signal
+    : isAbortSignalLike(abortControllerOrSignal)
+      ? abortControllerOrSignal
+      : undefined;
+
+  if (abortControllerOrSignal != null && !abortController && !abortSignal) {
+    logger.warn("Ignoring invalid abort argument passed to runOrchestration", {
+      type: typeof abortControllerOrSignal,
+    });
+  }
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
   if (ticketKey) {
@@ -3507,10 +3529,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
   const { shutdown: shutdownLSP } = await import("../../packages/engine/src/tools/lsp.js");
   shutdownLSP();
 
-  // Stop live view server
-  if (liveViewServer) {
-    liveViewServer.stop();
-  }
+  // Keep live view server alive for the current CLI session so users can
+  // keep the same browser tab open across multiple /build runs.
 
   return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
 }

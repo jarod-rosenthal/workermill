@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "prebuild": "find src/ui -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; find ../api/src ../packages/engine/src -name '*.js' -not -path '*/node_modules/*' -delete 2>/dev/null; true",
+    "prebuild": "find src -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; find src/ui -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; find ../api/src ../packages/engine/src -name '*.js' -not -path '*/node_modules/*' -delete 2>/dev/null; true",
     "build": "tsup",
     "prepublishOnly": "cp ../README.md ./README.md && npm run build",
     "postpublish": "rm -f ./README.md",

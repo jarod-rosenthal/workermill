@@ -426,6 +426,17 @@ describe("orchestrator", () => {
       expect(plannerCall).toHaveProperty("abortSignal");
     });
 
+    it("ignores invalid abort arguments instead of crashing planner", async () => {
+      const config = createTestConfig();
+      const output = createMockOutput();
+
+      await runOrchestration(config, "Add endpoint", true, false, output, { bad: "signal" } as unknown as AbortSignal);
+
+      const plannerCall = mockStreamTextCalls[0] as Record<string, unknown>;
+      expect(plannerCall.abortSignal).toBeUndefined();
+      expect(output.errors).toHaveLength(0);
+    });
+
     it("reports story completion in logs", async () => {
       const config = createTestConfig();
       const output = createMockOutput();

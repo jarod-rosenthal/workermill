@@ -353,6 +353,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
         statusEl.textContent = 'Story ' + event.storyIndex + '/' + event.total + ' — ' + event.persona;
         statusEl.style.color = '#b4f3be';
         renderMeta();
+        renderStream();
         return;
       }
 
@@ -362,6 +363,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
           state.stories[event.storyIndex].elapsed = event.elapsed || 0;
         }
         renderMeta();
+        renderStream();
         return;
       }
 
@@ -394,6 +396,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
         statusEl.textContent = 'Run complete — ' + state.commitCount + ' commits on ' + state.branch;
         statusEl.style.color = '#9ec4ff';
         renderMeta();
+        renderStream();
       }
     }
 
@@ -432,7 +435,24 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
         return !state.activeFile || change.filePath === state.activeFile;
       });
 
-      emptyEl.style.display = filtered.length === 0 ? 'block' : 'none';
+      if (filtered.length === 0) {
+        var storiesStarted = Object.keys(state.stories).length > 0;
+        var activeStories = Object.values(state.stories).filter(function(s) { return s && s.status === 'active'; }).length;
+        var completedStories = Object.values(state.stories).filter(function(s) { return s && s.status === 'done'; }).length;
+
+        if (state.runComplete) {
+          emptyEl.textContent = 'Run complete — no file-level diffs were captured for this session.';
+        } else if (activeStories > 0) {
+          emptyEl.textContent = 'Story execution is active — waiting for the first file edit...';
+        } else if (storiesStarted || completedStories > 0) {
+          emptyEl.textContent = 'Stories executed, but no file-level diffs have arrived yet.';
+        } else {
+          emptyEl.textContent = 'Waiting for story execution and file changes...';
+        }
+        emptyEl.style.display = 'block';
+      } else {
+        emptyEl.style.display = 'none';
+      }
       streamEl.innerHTML = filtered.map(renderChangeCard).join('');
     }
 

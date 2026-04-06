@@ -20,7 +20,14 @@ export interface LiveViewServer {
   emitRunComplete(branch: string, commitCount: number): void;
 }
 
+let sharedServer: LiveViewServer | null = null;
+let sharedServerDir: string | null = null;
+
 export function createLiveViewServer(workingDir: string, _mainBranch: string): LiveViewServer {
+  if (sharedServer && sharedServerDir === workingDir) {
+    return sharedServer;
+  }
+
   const server = createServer();
   const clients = new Set<{ res: any; replay: LiveViewEvent[] }>();
   const allEvents: LiveViewEvent[] = [];
@@ -117,12 +124,16 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
     return "";
   }
 
-  return {
+  const liveViewServer: LiveViewServer = {
     port,
     stop() {
       if (stopped) return;
       stopped = true;
       server.close();
+      if (sharedServer === liveViewServer) {
+        sharedServer = null;
+        sharedServerDir = null;
+      }
     },
     setAbortController(controller: AbortController) {
       abortController = controller;
@@ -170,6 +181,11 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
       broadcast(event);
     },
   };
+
+  sharedServer = liveViewServer;
+  sharedServerDir = workingDir;
+
+  return liveViewServer;
 }
 
 export function setAbortController(server: LiveViewServer, controller: AbortController): void {

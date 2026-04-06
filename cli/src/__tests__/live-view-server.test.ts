@@ -102,4 +102,13 @@ describe("live-view-server", () => {
     server.stop();
     expect(() => server.stop()).not.toThrow();
   });
+
+  it("reuses the same server and port within the same working directory", () => {
+    const first = createLiveViewServer(repoDir, "main");
+    const second = createLiveViewServer(repoDir, "main");
+
+    expect(second.port).toBe(first.port);
+
+    first.stop();
+  });
 });

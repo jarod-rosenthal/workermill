@@ -70,6 +70,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           cwd: resolvedCwd,
           timeout,
           osSandbox,
+          sandboxRoot: workingDir,
         });
         if (result.success) {
           return result.stdout || "(no output)";

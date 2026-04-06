@@ -9,8 +9,14 @@ type ProviderModule = typeof import("../../api/src/providers/index.js");
 const providers = (
   "getPricingEngine" in providersNamespace
     ? providersNamespace
-    : (providersNamespace as unknown as { default: ProviderModule }).default
+    : ("default" in providersNamespace
+      ? (Reflect.get(providersNamespace, "default") as ProviderModule | undefined)
+      : undefined)
 ) as ProviderModule;
+
+if (!providers) {
+  throw new Error("Provider registry exports are unavailable (missing named/default exports).");
+}
 
 export const getPricingEngine: ProviderModule["getPricingEngine"] = (...args) =>
   providers.getPricingEngine(...args);

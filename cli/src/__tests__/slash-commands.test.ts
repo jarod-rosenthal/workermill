@@ -1470,7 +1470,7 @@ describe("handleSlashCommand", () => {
       expect(saveConfig).not.toHaveBeenCalled();
     });
 
-    it("updates sandbox true/false", () => {
+    it("updates sandbox true/false/os", () => {
       const ctx = createContext();
       handleSlashCommand("/settings sandbox true", ctx);
       expect(saveConfig).toHaveBeenCalledWith(
@@ -1482,6 +1482,21 @@ describe("handleSlashCommand", () => {
       expect(saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({ sandbox: false }),
       );
+
+      vi.clearAllMocks();
+      handleSlashCommand("/settings sandbox os", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox: "os" }),
+      );
+    });
+
+    it("rejects invalid sandbox values", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings sandbox maybe", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid value for `sandbox`")
+      );
+      expect(saveConfig).not.toHaveBeenCalled();
     });
 
     it("sets API key for known provider", () => {

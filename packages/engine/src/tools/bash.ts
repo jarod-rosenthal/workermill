@@ -3,6 +3,7 @@ import {
   SandboxManager,
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // OS-level sandboxing via @anthropic-ai/sandbox-runtime
@@ -10,22 +11,48 @@ import {
 
 let sandboxInitialized = false;
 let sandboxInitPromise: Promise<void> | undefined;
+let sandboxUnavailableReason: string | null = null;
+let sandboxWarningAppended = false;
+let sandboxRootPath: string | null = null;
 
 async function initSandbox(cwd: string): Promise<void> {
-  if (sandboxInitialized) return;
+  if (sandboxUnavailableReason) {
+    throw new Error(sandboxUnavailableReason);
+  }
+  const normalizedRoot = path.resolve(cwd);
+  if (sandboxInitialized && sandboxRootPath === normalizedRoot) return;
+  if (sandboxInitialized && sandboxRootPath && sandboxRootPath !== normalizedRoot) {
+    await SandboxManager.reset();
+    sandboxInitialized = false;
+    sandboxInitPromise = undefined;
+    sandboxWarningAppended = false;
+  }
   if (sandboxInitPromise) return sandboxInitPromise;
 
   sandboxInitPromise = (async () => {
+    const deps = SandboxManager.checkDependencies();
+    if (deps.errors.length > 0) {
+      sandboxUnavailableReason = deps.errors.join(", ");
+      sandboxInitPromise = undefined;
+      throw new Error(`Sandbox dependencies not available: ${sandboxUnavailableReason}`);
+    }
     const config: SandboxRuntimeConfig = {
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: {
-        allowWrite: [cwd],
+        allowWrite: [normalizedRoot],
         denyWrite: [],
         denyRead: [],
       },
     };
-    await SandboxManager.initialize(config);
-    sandboxInitialized = true;
+    try {
+      await SandboxManager.initialize(config);
+      sandboxInitialized = true;
+      sandboxRootPath = normalizedRoot;
+    } catch (err) {
+      sandboxUnavailableReason = err instanceof Error ? err.message : String(err);
+      sandboxInitPromise = undefined;
+      throw err;
+    }
   })();
 
   return sandboxInitPromise;
@@ -200,6 +227,7 @@ interface BashParams {
   cwd?: string;
   timeout?: number;
   osSandbox?: boolean;
+  sandboxRoot?: string;
 }
 
 interface BashResult {
@@ -277,6 +305,7 @@ export async function execute({
   cwd,
   timeout = 120000,
   osSandbox = false,
+  sandboxRoot,
 }: BashParams): Promise<BashResult> {
   const longRunning = isLongRunning(command);
   if (longRunning) {
@@ -306,12 +335,22 @@ export async function execute({
   }
 
   const effectiveCwd = cwd || process.cwd();
-  const useSandbox = osSandbox && SandboxManager.isSupportedPlatform();
+  const effectiveSandboxRoot = sandboxRoot || effectiveCwd;
+  const sandboxRequested = osSandbox && SandboxManager.isSupportedPlatform();
+  let useSandbox = sandboxRequested && !sandboxUnavailableReason;
 
   let shellCommand = command;
   if (useSandbox) {
-    await initSandbox(effectiveCwd);
-    shellCommand = await SandboxManager.wrapWithSandbox(command);
+    try {
+      await initSandbox(effectiveSandboxRoot);
+      shellCommand = await SandboxManager.wrapWithSandbox(command);
+    } catch (err) {
+      // Graceful fallback: if OS sandbox init fails (e.g. missing dependencies
+      // like socat/ripgrep), continue without OS sandbox instead of failing
+      // every bash command.
+      sandboxUnavailableReason = err instanceof Error ? err.message : String(err);
+      useSandbox = false;
+    }
   }
 
   const startTime = Date.now();
@@ -341,9 +380,14 @@ export async function execute({
     return { success: true, exitCode: 0, stdout: result.stdout, stderr: result.stderr, duration };
   }
 
-  const finalStderr = useSandbox
+  let finalStderr = useSandbox
     ? SandboxManager.annotateStderrWithSandboxFailures(command, result.stderr)
     : result.stderr;
+  if (!useSandbox && sandboxRequested && sandboxUnavailableReason && !sandboxWarningAppended) {
+    const warning = `OS sandbox unavailable (${sandboxUnavailableReason}); running commands with path safety only.`;
+    finalStderr = finalStderr ? `${finalStderr}\n${warning}` : warning;
+    sandboxWarningAppended = true;
+  }
   return {
     success: false, exitCode: result.exitCode, stdout: result.stdout, stderr: finalStderr,
     error: `Command exited with code ${result.exitCode}`,

@@ -881,7 +881,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const autoBranch = config.review?.autoBranch ?? false;
         const epicPrompt = config.program?.epicPrompt || "ask";
         const editorSetting = config.editor || "auto";
-        const sandboxEnabled = config.sandbox !== false;
+        const sandboxMode = config.sandbox === "os" ? "os" : (config.sandbox !== false ? "true" : "false");
         const bellEnabled = config.bell === true;
         const allowRules = config.permissions?.allow || [];
         const denyRules = config.permissions?.deny || [];
@@ -901,7 +901,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
           `| Program epic prompt | ${epicPrompt} | \`/settings program.epicPrompt <ask/always>\` |\n` +
           `| Editor | ${editorSetting} | \`/settings editor <vim\\|nano\\|auto>\` |\n` +
-          `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
+          `| Sandbox | ${sandboxMode} | \`/settings sandbox <true/false/os>\` |\n` +
           `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |\n` +
@@ -997,7 +997,21 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
           }
           case "sandbox": {
-            config.sandbox = boolVal(value);
+            const normalized = value.toLowerCase();
+            if (normalized === "os") {
+              config.sandbox = "os";
+              break;
+            }
+            if (["true", "1", "on", "yes"].includes(normalized)) {
+              config.sandbox = true;
+              break;
+            }
+            if (["false", "0", "off", "no"].includes(normalized)) {
+              config.sandbox = false;
+              break;
+            }
+            ctx.addSystemMessage("Invalid value for `sandbox`. Use `true`, `false`, or `os`.");
+            settingApplied = false;
             break;
           }
           case "bell": {

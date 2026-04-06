@@ -1,5 +1,7 @@
-import { createServer, type Server } from "http";
-import { execSync } from "child_process";
+import { createServer } from "http";
+import { execFileSync } from "child_process";
+import fs from "fs";
+import path from "path";
 import { LIVE_VIEW_HTML } from "./ui/live-view-html.js";
 
 export type LiveViewEvent =
@@ -18,13 +20,13 @@ export interface LiveViewServer {
   emitRunComplete(branch: string, commitCount: number): void;
 }
 
-export function createLiveViewServer(workingDir: string, mainBranch: string): LiveViewServer {
+export function createLiveViewServer(workingDir: string, _mainBranch: string): LiveViewServer {
   const server = createServer();
   const clients = new Set<{ res: any; replay: LiveViewEvent[] }>();
-  const fileDiffs = new Map<string, string>();
   const allEvents: LiveViewEvent[] = [];
 
   let abortController: AbortController | null = null;
+  let stopped = false;
 
   server.on("request", (req, res) => {
     if (req.method === "GET" && req.url === "/") {
@@ -65,9 +67,7 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
     }
   });
 
-  server.listen(0, () => {
-    // Port is assigned by OS
-  });
+  server.listen(0);
 
   const port = (server.address() as any).port;
 
@@ -80,45 +80,65 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
     }
   }
 
+  function runGitDiff(args: string[]): string {
+    try {
+      return execFileSync("git", args, {
+        cwd: workingDir,
+        encoding: "utf-8",
+        stdio: "pipe",
+      }).trimEnd();
+    } catch (err) {
+      const stdout = (err as { stdout?: unknown })?.stdout;
+      if (typeof stdout === "string" && stdout.trim()) return stdout.trimEnd();
+      if (Buffer.isBuffer(stdout) && stdout.length > 0) return stdout.toString("utf-8").trimEnd();
+      return "";
+    }
+  }
+
+  function getLiveDiff(filePath: string, tool: "created" | "edited"): string {
+    const normalizedPath = filePath.trim();
+    if (!normalizedPath) return "";
+
+    let diff = runGitDiff(["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", normalizedPath]);
+    if (diff) return diff;
+
+    diff = runGitDiff(["diff", "--no-ext-diff", "--unified=3", "--", normalizedPath]);
+    if (diff) return diff;
+
+    // Untracked file creation: synthesize a standard unified diff against /dev/null
+    const absolutePath = path.resolve(workingDir, normalizedPath);
+    if (tool === "created" && fs.existsSync(absolutePath)) {
+      diff = runGitDiff(["diff", "--no-index", "--unified=3", "/dev/null", absolutePath]);
+      if (diff) {
+        return diff.replaceAll(absolutePath, normalizedPath);
+      }
+    }
+
+    return "";
+  }
+
   return {
     port,
     stop() {
+      if (stopped) return;
+      stopped = true;
       server.close();
     },
     setAbortController(controller: AbortController) {
       abortController = controller;
     },
     emitFileChange(persona: string, storyIndex: number, storyTitle: string, filePath: string, tool: "created" | "edited") {
-      try {
-        // Generate diff using git diff HEAD -- <filePath>
-        const diff = execSync(`git diff HEAD -- "${filePath}"`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
-        const event: LiveViewEvent = {
-          type: "file-changed",
-          persona,
-          storyIndex,
-          storyTitle,
-          filePath,
-          tool,
-          diff,
-          timestamp: Date.now(),
-        };
-        fileDiffs.set(filePath, JSON.stringify(event));
-        broadcast(event);
-      } catch (err) {
-        // If git diff fails, use empty diff
-        const event: LiveViewEvent = {
-          type: "file-changed",
-          persona,
-          storyIndex,
-          storyTitle,
-          filePath,
-          tool,
-          diff: "",
-          timestamp: Date.now(),
-        };
-        fileDiffs.set(filePath, JSON.stringify(event));
-        broadcast(event);
-      }
+      const event: LiveViewEvent = {
+        type: "file-changed",
+        persona,
+        storyIndex,
+        storyTitle,
+        filePath,
+        tool,
+        diff: getLiveDiff(filePath, tool),
+        timestamp: Date.now(),
+      };
+      broadcast(event);
     },
     emitStoryStart(storyIndex: number, storyTitle: string, persona: string, total: number) {
       const event: LiveViewEvent = {

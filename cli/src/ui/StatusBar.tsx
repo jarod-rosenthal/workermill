@@ -29,42 +29,10 @@ const TOOL_USAGE_LABELS: Record<string, string> = {
   read_file: "read",
   write_file: "write",
   edit_file: "edit",
-  web_search: "search",
-  sub_agent: "agent",
 };
 
 function toolUsageLabel(name: string): string {
   return TOOL_USAGE_LABELS[name] || name.replace(/_/g, " ");
-}
-
-function appendEllipsis(line: string, maxChars: number): string {
-  if (maxChars <= 0) return "";
-  if (maxChars <= 3) return ".".repeat(maxChars);
-  if (line.length + 3 <= maxChars) return `${line}...`;
-  return `${line.slice(0, maxChars - 3)}...`;
-}
-
-/** Build row-2 tool usage text constrained to a single line. */
-export function formatToolUsageLine(
-  counts: Record<string, number>,
-  maxChars: number,
-): string {
-  const toolEntries = Object.entries(counts)
-    .filter(([, c]) => c > 0)
-    .sort((a, b) => b[1] - a[1]);
-  if (toolEntries.length === 0) return "no tool calls";
-
-  let line = "";
-  for (const [name, count] of toolEntries) {
-    const part = `✓ ${toolUsageLabel(name)} ×${count}`;
-    const candidate = line ? `${line} │ ${part}` : part;
-    if (candidate.length <= maxChars) {
-      line = candidate;
-      continue;
-    }
-    return appendEllipsis(line || part, maxChars);
-  }
-  return line;
 }
 
 function equalRoleModels(
@@ -206,7 +174,9 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
 
   // Tool counts for row 2
   const counts = props.toolCounts || {};
-  const toolLine = formatToolUsageLine(counts, Math.max(12, width - 6));
+  const toolEntries = Object.entries(counts)
+    .filter(([, c]) => c > 0)
+    .sort((a, b) => b[1] - a[1]);
 
   // Row 1 right side
   const costStr = formatCost(props.cost);
@@ -261,9 +231,20 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
         ) : null}
       </Box>
 
-      {/* Row 2: Tool usage stats — wraps to next line if too wide */}
+      {/* Row 2: Tool usage stats */}
       <Box>
-        <Text color={theme.subtle} dimColor>{toolLine}</Text>
+        {toolEntries.length > 0 ? (
+          toolEntries.map(([name, count], i) => (
+            <Text key={name} dimColor>
+              <Text color={theme.success}>{"✓ "}</Text>
+              <Text color={theme.subtle}>{toolUsageLabel(name)}</Text>
+              <Text color={theme.inactive}>{` ×${count}`}</Text>
+              {i < toolEntries.length - 1 ? <Text color={theme.inactive}>{" │ "}</Text> : null}
+            </Text>
+          ))
+        ) : (
+          <Text color={theme.subtle}>{"no tool calls"}</Text>
+        )}
       </Box>
 
       {/* Row 3: Permission mode + planner/reviewer */}

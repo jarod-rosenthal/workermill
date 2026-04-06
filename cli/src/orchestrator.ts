@@ -2195,10 +2195,10 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
               const input = tc.input as Record<string, unknown>;
               if (name === "write_file" && input.file_path) {
                 storyActions.push({ tool: "created", detail: String(input.file_path) });
-                output.onFileChange?.(story.persona, i + 1, story.title, String(input.file_path), "created");
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, String(input.file_path), "created");
               } else if ((name === "edit_file" || name === "patch") && input.file_path) {
                 storyActions.push({ tool: "edited", detail: String(input.file_path) });
-                output.onFileChange?.(story.persona, i + 1, story.title, String(input.file_path), "edited");
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, String(input.file_path), "edited");
               } else if (name === "bash" && input.command) {
                 const cmd = String(input.command);
                 // Only track meaningful commands, not reads

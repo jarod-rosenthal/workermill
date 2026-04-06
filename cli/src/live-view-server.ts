@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import { execSync } from "child_process";
+import { LIVE_VIEW_HTML } from "./ui/live-view-html.js";
 
 export type LiveViewEvent =
   | { type: "file-changed"; persona: string; storyIndex: number; storyTitle: string; filePath: string; tool: "created" | "edited"; diff: string; timestamp: number }
@@ -24,7 +25,11 @@ export function createLiveViewServer(workingDir: string, mainBranch: string): Li
   let abortController: AbortController | null = null;
 
   server.on("request", (req, res) => {
-    if (req.method === "GET" && req.url === "/events") {
+    if (req.method === "GET" && req.url === "/") {
+      // Serve the live view HTML
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(LIVE_VIEW_HTML);
+    } else if (req.method === "GET" && req.url === "/events") {
       // SSE endpoint
       res.writeHead(200, {
         "Content-Type": "text/event-stream",

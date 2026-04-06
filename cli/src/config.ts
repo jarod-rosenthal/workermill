@@ -40,7 +40,7 @@ export interface ReviewConfig {
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
   specCheck?: boolean;
-  /** Automatically proceed when /ship creates a feature branch without prompting (default: false) */
+  /** Automatically proceed when /build creates a feature branch without prompting (default: false) */
   autoBranch?: boolean;
 }
 
@@ -143,7 +143,7 @@ export interface CliConfig {
   bell?: boolean;
   /** Granular permission rules — pattern-based allow/deny per tool */
   permissions?: PermissionRuleConfig;
-  /** Issue tracker for /ship ticket references (default: "github") */
+  /** Issue tracker for /build ticket references (default: "github") */
   ticketSystem?: TicketSystem;
   /** Jira credentials (only when ticketSystem === "jira") */
   jira?: JiraConfig;
@@ -159,9 +159,9 @@ export interface CliConfig {
   program?: ProgramConfig;
   /** /doctor triage thresholds */
   doctor?: DoctorConfig;
-  /** Enable live browser diff view during /ship runs ("auto", true, or false) */
+  /** Enable live browser diff view during /build runs ("auto", true, or false) */
   liveView?: boolean | "auto";
-  /** Enable experimental features: /build, /ship, /doctor, /program (default: false) */
+  /** Enable experimental features: /doctor, /orchestrate (default: false) */
   experimental?: boolean;
 }
 

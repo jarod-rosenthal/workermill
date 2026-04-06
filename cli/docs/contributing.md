@@ -32,7 +32,7 @@ From `cli/package.json`:
 cli/
 ├── src/
 │   ├── index.ts               # Commander CLI entry + chat default command
-│   ├── orchestrator.ts        # /ship pipeline: planner → critic → workers → reviewer
+│   ├── orchestrator.ts        # /build pipeline: planner → critic → workers → reviewer
 │   ├── agent.ts               # Single-agent mode logic
 │   ├── config.ts              # Load/save ~/.workermill/cli.json
 │   ├── setup.ts               # First-run provider wizard
@@ -53,7 +53,7 @@ cli/
 │   │   ├── Input.tsx          # Multi-line input with history and autocomplete
 │   │   ├── StatusBar.tsx      # Bottom status bar
 │   │   ├── useAgent.ts        # Single-agent state + tool loop
-│   │   ├── useOrchestrator.ts # /ship state + orchestrator coordination
+│   │   ├── useOrchestrator.ts # /build state + orchestrator coordination
 │   │   └── slash-commands.ts  # All slash command handlers
 │   └── __tests__/             # Vitest unit tests
 ├── personas/                  # Built-in persona markdown files

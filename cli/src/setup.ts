@@ -582,7 +582,7 @@ async function configureTicketSystem(
   p: Prompter,
   existingConfig: CliConfig | null,
 ): Promise<{ ticketSystem: TicketSystem; jira?: { baseUrl: string; email: string; apiToken: string }; linear?: { apiKey: string } }> {
-  console.log(chalk.hex("#D77757").bold("  ④ Issue Tracker") + chalk.dim(" — for /ship #123 ticket references"));
+  console.log(chalk.hex("#D77757").bold("  ④ Issue Tracker") + chalk.dim(" — for /build #123 ticket references"));
   console.log();
 
   const trackers = [

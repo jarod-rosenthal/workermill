@@ -25,7 +25,7 @@ user input → AI SDK streamText → tool calls → permission check → tool ex
 
 ### Multi-expert orchestration (`useOrchestrator.ts` + `orchestrator.ts`)
 
-Triggered by `/ship`. A team of specialized models works together.
+Triggered by `/build`. A team of specialized models works together.
 
 Flow:
 ```

@@ -13,7 +13,7 @@ Hooks run code at specific points in the CLI's execution. Use them to:
 
 - Run a formatter after every file write
 - Block dangerous operations before they happen
-- Notify Slack when `/ship` finishes
+- Notify Slack when `/build` finishes
 - Stream tool errors to your observability stack
 - Run project-specific quality gates after the agent finishes
 
@@ -87,7 +87,7 @@ Non-zero exit codes from post-hooks are logged but don't abort further tool call
   "hooks": {
     "on": {
       "ship_complete": [
-        { "command": "say 'ship finished'" },
+        { "command": "say 'build finished'" },
         { "command": "notify-send 'WorkerMill' 'Ship complete'" }
       ],
       "tool_error": [
@@ -107,13 +107,13 @@ Non-zero exit codes from post-hooks are logged but don't abort further tool call
 |---|---|
 | `session_start` | CLI session begins |
 | `session_end` | CLI session ends |
-| `ship_start` | `/ship` orchestration begins |
-| `ship_complete` | `/ship` orchestration finishes (success or failure) |
+| `ship_start` | `/build` orchestration begins |
+| `ship_complete` | `/build` orchestration finishes (success or failure) |
 | `review_complete` | Tech lead review finishes |
 | `compact` | Context compaction triggered |
 | `tool_error` | Any tool execution error |
 | `permission_denied` | User denied a tool permission |
-| `story_complete` | An individual `/ship` story finishes |
+| `story_complete` | An individual `/build` story finishes |
 | `memory_saved` | A `::learning::` or `::remember::` marker was extracted |
 
 ### HTTP hooks
@@ -172,7 +172,7 @@ Run typecheck and lint after every write, block if they fail:
 
 When the agent writes broken code, the hook reports the typecheck error. The agent sees the error in the next turn and fixes it.
 
-### Example: Slack notification on ship complete
+### Example: Slack notification on build complete
 
 ```json
 {
@@ -255,7 +255,7 @@ The command supports positional arguments: `/deploy production` passes `producti
 
 ### Name collisions with built-ins
 
-If a custom command shares a name with a built-in slash command (e.g. `help`, `ship`, `model`), the built-in wins. `/skills` warns when it detects a shadowed custom command — rename the file to resolve the conflict.
+If a custom command shares a name with a built-in slash command (e.g. `help`, `build`, `model`), the built-in wins. `/skills` warns when it detects a shadowed custom command — rename the file to resolve the conflict.
 
 ### Viewing custom commands
 
@@ -329,7 +329,7 @@ This puts a high-powered review command in every project without needing to type
 | "Format code after every write" | **Hook** (post-hook on `write_file`) |
 | "Add `/deploy` command to every project" | **Custom command** (user-level) |
 | "Make the backend dev aware of our Drizzle schema conventions" | **Persona** (project-level override) |
-| "Notify Slack on ship complete" | **Hook** (lifecycle on `ship_complete`) |
+| "Notify Slack on build complete" | **Hook** (lifecycle on `ship_complete`) |
 | "Repeat a complex prompt without retyping" | **Custom command** |
 | "Block writes to certain paths" | **Permission rule** (see [Configuration](configuration.md#permissions)) |
 

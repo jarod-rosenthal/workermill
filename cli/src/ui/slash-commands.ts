@@ -181,7 +181,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 
 | Command | Description |
 |---|---|
-| \`/build <task>\` | Multi-expert orchestration — plan, execute, review, ship (\`/ship\` alias) |
+| \`/build <task>\` | Multi-expert orchestration — plan, execute, review, ship |
 | \`/orchestrate <#issue>\` | **[experimental]** Full-spec orchestration across epic sub-issues |
 | \`/doctor [#issue\\|report\\|show\\|apply]\` | **[experimental]** Diagnose test health, view report, inspect or apply prescriptions |
 | \`/pause\` | Pause or resume a running \`/build\` orchestration |
@@ -262,7 +262,7 @@ export interface SlashCommandContext {
   tokens: number;
   permissionMode: string;
   trustAll: boolean;
-  /** Live getter for trust-all state — reads current mode, not the value at /ship launch */
+  /** Live getter for trust-all state — reads current mode, not the value at /build launch */
   isTrustAll: () => boolean;
   planMode: boolean;
   setPlanMode: (v: boolean) => void;
@@ -573,7 +573,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
-    // ---- /ship (primary) and /build (alias) ----
+    // ---- /build (primary) and /ship (backward-compat alias) ----
     case "ship":
     case "build": {
       if (!arg) {
@@ -584,7 +584,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "- `/build ./specs/auth-redesign.md` — from spec file\n" +
           "- `/build #42` — from GitHub Issue\n" +
           "- `/build PROJ-123` — from Jira/Linear ticket\n\n" +
-          "`/ship` remains available as an alias.\n\n" +
+          "`/ship` is also accepted as an alias.\n\n" +
           "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
           "executes with tool calls, reviews, and ships.\n\n" +
           "**Note:** Plans on your current branch, then creates a feature branch after you approve. " +
@@ -1260,7 +1260,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     // ---- /pause ----
     case "pause": {
       if (!ctx.orchestratorRunning) {
-        ctx.addSystemMessage("No `/ship` orchestration is running.");
+        ctx.addSystemMessage("No `/build` orchestration is running.");
         break;
       }
       if (ctx.orchestratorPaused) {
@@ -1292,7 +1292,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         ctx.addUserMessage("/retry");
         const started = ctx.retryOrchestrator(ctx.isTrustAll, ctx.sandboxed ?? "os");
         if (!started) {
-          ctx.addSystemMessage("Nothing to retry. No incomplete `/ship` runs found for this project.");
+          ctx.addSystemMessage("Nothing to retry. No incomplete `/build` runs found for this project.");
         }
       }
       break;

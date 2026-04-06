@@ -104,7 +104,7 @@ Per-persona provider routing. Any persona not listed falls back to `default`.
 }
 ```
 
-The `planner` and `tech_lead` keys control the planner and reviewer roles in `/ship`. Other keys route `/as <persona>` invocations.
+The `planner` and `tech_lead` keys control the planner and reviewer roles in `/build`. Other keys route `/as <persona>` invocations.
 
 ### Setting from the CLI
 
@@ -118,7 +118,7 @@ The referenced provider must already exist in `providers`. Add one with `/settin
 
 ## `review`
 
-Controls the `/ship` review pipeline.
+Controls the `/build` review pipeline.
 
 ```json
 "review": {
@@ -170,7 +170,7 @@ See [Quality Gates & Spec Check](quality-gates.md) for full documentation, examp
 
 ## `qualityGates`
 
-Static shell commands that run on every `/ship`, after all stories complete and before the tech lead reviewer sees the diff. Use these for project-wide invariants — things that must always hold regardless of what was built.
+Static shell commands that run on every `/build`, after all stories complete and before the tech lead reviewer sees the diff. Use these for project-wide invariants — things that must always hold regardless of what was built.
 
 **Off by default.** Add to `.workermill/config.json` to enable:
 
@@ -269,7 +269,7 @@ Shell commands or HTTP requests that run around tool calls and lifecycle events.
   ],
   "on": {
     "ship_complete": [
-      { "command": "say 'ship finished'" }
+      { "command": "say 'build finished'" }
     ],
     "tool_error": [
       { "url": "https://your-webhook.example.com/workermill", "type": "http" }
@@ -313,13 +313,13 @@ Attach hooks to `hooks.on.<event>`:
 |---|---|
 | `session_start` | CLI session begins |
 | `session_end` | CLI session ends |
-| `ship_start` | `/ship` orchestration begins |
-| `ship_complete` | `/ship` finishes (success or failure) |
+| `ship_start` | `/build` orchestration begins |
+| `ship_complete` | `/build` finishes (success or failure) |
 | `review_complete` | Tech lead review finishes |
 | `compact` | Context compaction triggered |
 | `tool_error` | Any tool execution error |
 | `permission_denied` | User denied a tool permission |
-| `story_complete` | An individual `/ship` story finishes |
+| `story_complete` | An individual `/build` story finishes |
 | `memory_saved` | A `::learning::` or `::remember::` marker was extracted |
 
 ### Viewing configured hooks
@@ -379,7 +379,7 @@ File and bash tool sandboxing.
 
 ## `bell`
 
-Play a terminal bell and desktop notification when `/ship` completes or fails, and on auto-compaction. Default `false`.
+Play a terminal bell and desktop notification when `/build` completes or fails, and on auto-compaction. Default `false`.
 
 ```
 /settings bell true
@@ -387,7 +387,7 @@ Play a terminal bell and desktop notification when `/ship` completes or fails, a
 
 ## `ticketSystem`, `jira`, `linear`
 
-Configures which issue tracker `/ship <ticket-ref>` fetches from.
+Configures which issue tracker `/build <ticket-ref>` fetches from.
 
 ```json
 "ticketSystem": "github"

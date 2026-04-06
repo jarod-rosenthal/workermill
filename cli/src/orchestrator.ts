@@ -1493,7 +1493,7 @@ export async function runOrchestration(
     const trunkBranches = ["main", "master", "develop", "trunk"];
     if (originalBranch && !trunkBranches.includes(originalBranch)) {
       output.log("system", `You're on \`${originalBranch}\`, not a trunk branch. New work will stack on top of it and the PR will target \`${originalBranch}\` as its base.`);
-      output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/ship\` again.`);
+      output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/build\` again.`);
       const r = await output.confirm("Continue and stack on this branch?");
       const confirmed = typeof r === "object" ? r.allowed : r;
       if (!confirmed) {
@@ -1602,7 +1602,7 @@ export async function runOrchestration(
         const continueR = await output.confirm(`Continue on existing \`${derivedBranch}\`?`);
         const cont = typeof continueR === "object" ? continueR.allowed : continueR;
         if (!cont) {
-          output.log("system", "Cancelled. Run `/ship` again after resolving the branch.");
+          output.log("system", "Cancelled. Run `/build` again after resolving the branch.");
           return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         }
       }
@@ -2347,7 +2347,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
     // Clear state so /retry doesn't repeat the same failures.
     const newCompletions = completedStoryIds.filter(id => !retryPlan?.completedStoryIds.includes(id));
     if (newCompletions.length === 0 && failedStories.size > 0) {
-      output.coordinatorLog("No stories completed — this run made no progress. Edit your spec and `/ship` again.");
+      output.coordinatorLog("No stories completed — this run made no progress. Edit your spec and `/build` again.");
       if (featureBranch) clearShipRun(featureBranch);
       retryable = false;
     }
@@ -2787,7 +2787,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
                 // Switch to auto-revise for remaining rounds
                 autoRevise = true;
                 output.coordinatorLog("Auto-revise enabled for remaining rounds.");
-                // Persist globally so future /ship runs behave consistently.
+                // Persist globally so future /build runs behave consistently.
                 // Users can revert with: /settings review.autoRevise false
                 try {
                   const globalCfg = loadConfig();
@@ -3080,7 +3080,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         execSync("git add .", { cwd: workingDir, stdio: "pipe" });
         const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
         if (status) {
-          execSync('git commit --no-verify -m "chore: uncommitted changes from /ship session"', { cwd: workingDir, stdio: "pipe" });
+          execSync('git commit --no-verify -m "chore: uncommitted changes from /build session"', { cwd: workingDir, stdio: "pipe" });
         }
       } catch { /* nothing to commit */ }
 

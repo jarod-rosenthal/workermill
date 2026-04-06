@@ -74,7 +74,7 @@ export function getCurrentBranch(workingDir: string): string | null {
 }
 
 /**
- * Derive the feature branch name that /ship would use, without creating it.
+ * Derive the feature branch name that /build would use, without creating it.
  * Useful for checking existence before prompting the user.
  */
 export function deriveFeatureBranchName(workingDir: string, taskDescription?: string, branchPrefix?: string): string | null {
@@ -132,7 +132,7 @@ export function deleteLocalBranch(workingDir: string, branchName: string): void 
 }
 
 /**
- * Create a feature branch for the /ship session.
+ * Create a feature branch for the /build session.
  *
  * Branch format: workermill/{slugified-task-description}
  * Falls back to workermill/ship-{short-hash} if no task provided.
@@ -435,7 +435,7 @@ export function getHeadHash(workingDir: string): string {
 }
 
 /**
- * Return to the original branch (used when /ship completes or is cancelled).
+ * Return to the original branch (used when /build completes or is cancelled).
  */
 export function returnToOriginalBranch(workingDir: string, originalBranch: string): void {
   try {

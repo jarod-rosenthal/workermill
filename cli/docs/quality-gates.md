@@ -20,7 +20,7 @@ Suggestion: json  (Enter to accept, or type your answer)
 
 Press **Enter** to accept the suggestion, or type your answer. Press **Esc** to skip and use the suggestion automatically. The answer is appended to your spec before it reaches the planner.
 
-If you run `/ship` unattended (e.g. via a script), suggestions are applied silently and logged — no prompt blocks the run.
+If you run `/build` unattended (e.g. via a script), suggestions are applied silently and logged — no prompt blocks the run.
 
 **What it flags:** Only high-severity gaps — things where the wrong assumption causes real rework. It won't interrupt you for implementation details, naming, or anything a reasonable developer would handle correctly.
 
@@ -128,7 +128,7 @@ When `verifyEnabled: true`, the planner generates `verificationCommands` per sto
 
 ### 2. Static config (manual)
 
-For project-wide output assertions that should run on every `/ship`. Only useful for things that don't change per-feature.
+For project-wide output assertions that should run on every `/build`. Only useful for things that don't change per-feature.
 
 **Do not use static gates for:** `typecheck`, `npm test`, `go build`, `pytest` — the expert already runs these during story execution.
 
@@ -210,7 +210,7 @@ The reviewer flags it; the expert fixes it in the revision loop.
 
 ### `config.qualityGates`
 
-Static gates that run on every `/ship`.
+Static gates that run on every `/build`.
 
 ```typescript
 qualityGates: Array<{

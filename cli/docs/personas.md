@@ -2,7 +2,7 @@
 
 Personas are named expert roles. Each persona is a markdown file with a system prompt and tool allowlist. The CLI uses them in two places:
 
-- **`/ship`** — the planner assigns stories to personas; workers run with the persona's system prompt
+- **`/build`** — the planner assigns stories to personas; workers run with the persona's system prompt
 - **`/as <persona> <task>`** — you directly invoke a persona for a one-off task
 
 ## Built-in personas
@@ -21,7 +21,7 @@ Shipped with the CLI in `cli/personas/`:
 | `security_engineer` | Auth flows, OWASP, encryption, secure coding |
 | `tech_writer` | Documentation, code comments, READMEs |
 
-Plus two used internally by `/ship`:
+Plus two used internally by `/build`:
 
 - **`planner`** — decomposes tasks into scoped stories
 - **`tech_lead`** — reviews code against requirements

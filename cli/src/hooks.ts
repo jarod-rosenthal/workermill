@@ -118,13 +118,13 @@ export function runPreHooksWithBlocking(
  * Supported lifecycle events:
  * - session_start: CLI session begins
  * - session_end: CLI session ends
- * - ship_start: /ship orchestration begins
- * - ship_complete: /ship orchestration finishes (success or failure)
+ * - ship_start: /build orchestration begins
+ * - ship_complete: /build orchestration finishes (success or failure)
  * - review_complete: Tech lead review finishes
  * - compact: Context compaction triggered
  * - tool_error: Any tool execution error
  * - permission_denied: User denied a tool permission
- * - story_complete: Individual story in /ship completed
+ * - story_complete: Individual story in /build completed
  * - memory_saved: A new memory/learning was extracted
  */
 export type LifecycleEvent =

@@ -1451,18 +1451,18 @@ export function useOrchestrator(
                     emitLine(`[🎯 coordinator] ${issueUrl}`);
                     flushLine();
 
-                    // Kick off /ship with the new issue
+                    // Kick off /build with the new issue
                     setRunning(false);
                     start(`Fix code review findings from ${issueNumber}`, trustAll, sandboxed, issueNumber);
                     return; // start() takes over — skip the finally block's setRunning(false)
                   } else {
                     emitLine(`[🎯 coordinator] Issue created: ${issueUrl}`);
-                    addMessage("Issue created but couldn't parse the number. Run `/ship` manually with the issue number.");
+                    addMessage("Issue created but couldn't parse the number. Run `/build` manually with the issue number.");
                   }
                 } catch (err) {
                   const msg = err instanceof Error ? err.message : String(err);
                   emitLine(`[🎯 coordinator] Failed to create issue: ${msg}`);
-                  addMessage(`Could not create GitHub issue. You can fix manually or run \`/ship\` with the review feedback.`);
+                  addMessage(`Could not create GitHub issue. You can fix manually or run \`/build\` with the review feedback.`);
                 }
               }
             }

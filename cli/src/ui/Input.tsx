@@ -7,8 +7,8 @@ import { resolveConfig } from "../config.js";
 
 const BUILTIN_COMMANDS = [
   { name: "/as", desc: "Run task as persona" },
-  { name: "/ship", desc: "Multi-expert orchestration" },
-  { name: "/build", desc: "Alias for /ship" },
+  { name: "/build", desc: "Multi-expert orchestration" },
+  { name: "/ship", desc: "Alias for /build" },
   { name: "/orchestrate", desc: "Full-spec orchestration" },
   { name: "/doctor", desc: "Code health diagnosis" },
   { name: "/retry", desc: "Re-run last build" },
@@ -199,7 +199,7 @@ export function Input({
   }, [liveModels, remoteModels]);
 
   // Filter matching commands when input starts with /
-  // After "/ship " or "/build ", complete with .md files from cwd
+  // After "/build " or "/ship ", complete with .md files from cwd
   // After "/model ", complete with provider/model names
   const completions = useMemo(() => {
     const shipMatch = value.match(/^\/(ship|build|retry)\s+(.*)/);

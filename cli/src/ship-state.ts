@@ -1,7 +1,7 @@
 /**
- * Persists /ship run state so /retry can resume after terminal restart.
+ * Persists /build run state so /retry can resume after terminal restart.
  *
- * Keyed by feature branch (unique per /ship run). Multiple runs per repo.
+ * Keyed by feature branch (unique per /build run). Multiple runs per repo.
  * /retry picks the most recent incomplete run for the current working directory.
  * Stored at ~/.workermill/ship-runs.json.
  */
@@ -17,7 +17,7 @@ const STATE_FILE = path.join(os.homedir(), ".workermill", "ship-runs.json");
 export interface ShipRun {
   workingDir: string;
   featureBranch: string;
-  mainBranch: string; // original branch before /ship (e.g. "main", "master", "develop")
+  mainBranch: string; // original branch before /build (e.g. "main", "master", "develop")
   userTask: string;
   stories: Story[];
   completedStoryIds: string[];

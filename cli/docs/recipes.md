@@ -21,7 +21,7 @@ Concrete workflows that combine WorkerMill features to solve real problems. Use 
 /model reviewer openai/gpt-5.4
 ```
 
-Now `/ship` uses Opus to plan, Grok Code Fast for workers, and GPT-5.4 for review. Workers run on the cheapest code-tuned model while judgment calls route to stronger models.
+Now `/build` uses Opus to plan, Grok Code Fast for workers, and GPT-5.4 for review. Workers run on the cheapest code-tuned model while judgment calls route to stronger models.
 
 **Why it works:** Different model families have different strengths and blind spots. Running review on a different family than execution catches a real class of mistakes.
 
@@ -45,7 +45,7 @@ ollama pull qwen3-coder:30b
 
 The `131072` sets Ollama's context window to 128K. For quality, use the largest model your hardware can run — `qwen3-coder:30b` or larger if you have the VRAM. LM Studio works the same way with `/model lmstudio/<model>`.
 
-**Caveats:** Local models are slower and weaker at planning than flagship cloud models. Use `/as` for focused tasks where you can direct the work yourself, rather than `/ship` for fully autonomous runs.
+**Caveats:** Local models are slower and weaker at planning than flagship cloud models. Use `/as` for focused tasks where you can direct the work yourself, rather than `/build` for fully autonomous runs.
 
 ---
 
@@ -98,7 +98,7 @@ Or for a Python project:
 /settings review.criticThreshold 8
 ```
 
-Now every `/ship` runs the planning critic. The critic scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Scores below 8 trigger a refinement loop (up to 3 iterations). Workers only start executing after the critic approves.
+Now every `/build` runs the planning critic. The critic scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Scores below 8 trigger a refinement loop (up to 3 iterations). Workers only start executing after the critic approves.
 
 **When to use:** Refactors, schema migrations, security-sensitive work, anything where a bad plan costs more than a few critic calls.
 
@@ -185,9 +185,9 @@ This override only applies in the project where the file exists. Other projects 
 
 ---
 
-## Slack notification on ship complete
+## Slack notification on build complete
 
-**Goal:** Ping a Slack channel when `/ship` finishes, so you can review without watching the terminal.
+**Goal:** Ping a Slack channel when `/build` finishes, so you can review without watching the terminal.
 
 Create a Slack incoming webhook, then add to `~/.workermill/cli.json`:
 
@@ -215,7 +215,7 @@ For a native macOS notification instead:
   "hooks": {
     "on": {
       "ship_complete": [
-        { "command": "osascript -e 'display notification \"ship finished\" with title \"WorkerMill\"'" }
+        { "command": "osascript -e 'display notification \"build finished\" with title \"WorkerMill\"'" }
       ]
     }
   }
@@ -232,7 +232,7 @@ For a native macOS notification instead:
 /review #42
 ```
 
-This fetches the PR's diff, runs the tech lead persona against it, and scores the code. If it finds issues, the CLI offers to create a GitHub issue from the findings and immediately kick off `/ship` to fix them.
+This fetches the PR's diff, runs the tech lead persona against it, and scores the code. If it finds issues, the CLI offers to create a GitHub issue from the findings and immediately kick off `/build` to fix them.
 
 **Tip:** Set the reviewer to a different model family than the PR author's toolchain. If the PR was written with Claude, review with GPT-5.4 or Gemini — you'll catch issues a same-family reviewer might rationalize away.
 
@@ -244,9 +244,9 @@ This fetches the PR's diff, runs the tech lead persona against it, and scores th
 
 ---
 
-## Resume a `/ship` that hit a blocker
+## Resume a `/build` that hit a blocker
 
-**Goal:** Your `/ship` crashed halfway through (network, rate limit, review rejection). Continue from where it left off instead of starting over.
+**Goal:** Your `/build` crashed halfway through (network, rate limit, review rejection). Continue from where it left off instead of starting over.
 
 ```
 /retry
@@ -330,7 +330,7 @@ Review the findings, fix anything flagged, then ship to a PR. You paid cloud cos
 
 ```
 /settings review.critic true
-/ship polish the tags feature
+/build polish the tags feature
 ```
 
 The critic runs on your locally-routed planner. If the plan is weak, it refines it locally too. Only the final review uses cloud if you routed the reviewer there.
@@ -382,10 +382,10 @@ Memories persist per project in `~/.workermill/memories/<project-id>.json` and l
 
 ## Scheduled recurring task (experimental)
 
-**Goal:** Run `/ship` on a schedule (e.g. "every weekday at 9am, triage new GitHub issues").
+**Goal:** Run `/build` on a schedule (e.g. "every weekday at 9am, triage new GitHub issues").
 
 ```
-/schedule "0 9 * * 1-5" /ship #oldest-open-issue
+/schedule "0 9 * * 1-5" /build #oldest-open-issue
 ```
 
 This uses cron syntax. Scheduled tasks run via the CLI's scheduling system and log to `~/.workermill/schedules/`. The feature is marked experimental — expect edge cases.

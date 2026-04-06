@@ -8,17 +8,17 @@ Commands chain: `/model anthropic/claude-opus-4-6 /as security_engineer audit au
 
 ## Build
 
-### `/ship [task]` (aliases: `/build`)
+### `/build [task]` (aliases: `/ship`)
 
 Full multi-expert orchestration: planner → workers → tech lead review → commit.
 
 ```
-/ship add dark mode to settings
-/ship ./specs/auth-redesign.md
-/ship GH-42
-/ship #42
-/ship PROJ-123
-/ship TEAM-42
+/build add dark mode to settings
+/build ./specs/auth-redesign.md
+/build GH-42
+/build #42
+/build PROJ-123
+/build TEAM-42
 ```
 
 Accepts inline text, a `.md` file path, or a ticket reference. Ticket references are resolved via the configured `ticketSystem` (GitHub Issues by default, Jira or Linear if configured).
@@ -48,7 +48,7 @@ Run `/personas` to see the active set.
 
 ### `/retry`
 
-Resume the last incomplete `/ship` run in the current repo.
+Resume the last incomplete `/build` run in the current repo.
 
 Loads the existing plan from disk, skips planning, and picks up from the first story that didn't complete. Workers see their prior commits via `git log`, so no wasted tokens replanning work that's already done.
 
@@ -64,7 +64,7 @@ Standalone tech lead review. No code is written — just analyzed and scored.
 | `/review diff` | Uncommitted changes only |
 | `/review #42` | GitHub PR by number |
 
-On a failing review, offers to create a GitHub issue from the findings and immediately kick off `/ship` to fix them.
+On a failing review, offers to create a GitHub issue from the findings and immediately kick off `/build` to fix them.
 
 ---
 
@@ -332,7 +332,7 @@ These work but the UX is rough — expect sharp edges.
 ### Autocomplete
 
 - Start with `/` — command autocomplete
-- `/ship ` or `/build ` — `.md` file autocomplete from the working directory
+- `/build ` — `.md` file autocomplete from the working directory
 - `/model ` — provider/model autocomplete from the curated registry plus live Ollama / LM Studio models
 
 ---

@@ -71,7 +71,7 @@ Context window is probably full. Run `/compact` to compress history, or `/clear`
 - `<$0.01` means the cost is real but below one cent — this is normal for cheap models like Grok Code Fast or Claude Haiku
 - `$0.00` means either no usage yet or a local model (Ollama / LM Studio, which are free)
 
-### `/ship` plan is "0 stories"
+### `/build` plan is "0 stories"
 
 The planner wrote text analysis but didn't output a JSON stories block. The CLI attempts a one-shot JSON extraction retry automatically. If that still fails, try:
 
@@ -95,7 +95,7 @@ Some MCP servers return tool schemas without the required `type` field. The CLI 
 
 ### "no upstream branch" when pushing
 
-The CLI stays on the feature branch after `/ship` so you can review. Push manually:
+The CLI stays on the feature branch after `/build` so you can review. Push manually:
 
 ```bash
 git push -u origin $(git branch --show-current)

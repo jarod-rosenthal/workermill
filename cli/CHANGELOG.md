@@ -7,9 +7,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- **`/program` full-spec orchestration** — new command that reads a parent GitHub issue, parses epic-grouped child issues, and executes them in dependency order by reusing the existing `/ship` flow for each child issue.
+- **`/program` full-spec orchestration + decomposition flow** — `/program #<parent>` can now decompose a parent issue into child cards, materialize child issues, and execute them in dependency order with persisted run-state for resume/recovery.
+- **`/doctor` diagnosis workflow** — added repo/issue-scoped health diagnosis with structured prescriptions plus follow-up commands: `/doctor report`, `/doctor show`, and `/doctor apply`.
+- **Multi-format project instructions ingestion** — instruction loading now supports additional sources and rule directories across common agent ecosystems (for example `AGENTS.md`, `.workermill/instructions.md`, `GEMINI.md`, `.cursor/rules/*`, `.windsurf/rules/*`).
 - **Program epic prompt setting** — added `program.epicPrompt` (`ask` or `always`) with `/settings program.epicPrompt <ask|always>`. Epic boundary prompts support `y/n/a`, and choosing `a` persists globally.
 - **PRD decomposition phase label lock** — added shared PRD decomposition phase labels plus a test lock to keep CLI wording aligned with the full platform decomposition phases.
+
+### Changed
+- **Settings surface simplified** — removed stale critic-facing settings, collapsed program controls into a clearer two-tier settings display, and filtered stale routing entries from `/settings show`.
+- **`/doctor` UX polish** — diagnosis now reports clearer progress and formatted output so prescription selection and follow-up actions are easier to run.
+
+### Fixed
+- **Live view SSE reliability** — fixed SSE stream syntax/runtime issues, disabled Nagle buffering for SSE writes, and added polling fallback when streaming is unavailable.
+- **`/ship` orchestration hardening** — improved session stability and failure handling in orchestration/live-view integration paths.
+- **ESC cancel cost accounting** — preserved partial token accounting on aborted runs.
+- **ESC abort crash regression** — fixed `ReferenceError: partialInputTokens is not defined` on cancel by keeping abort-cost counters in scope for the abort handler.
+- **`gpt-5.4-pro` routing + model-factory alignment** — corrected provider routing/selection paths so model resolution remains consistent across CLI and engine.
+- **Experimental feature gating** — `/doctor` and `/orchestrate` now consistently honor the `experimental` setting and provide explicit enablement guidance when disabled.
 
 ## [0.15.101] - 2026-04-05
 

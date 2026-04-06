@@ -914,7 +914,8 @@ describe("CLI E2E — full lifecycle", () => {
 
       const allMessages = ctx.systemMessages.join("\n");
       expect(allMessages).toContain("Usage");
-      expect(allMessages).toContain("/ship <task>");
+      expect(allMessages).toContain("/build <task>");
+      expect(allMessages).toContain("`/ship` is also accepted as an alias");
     });
 
     it("EngineAIClient handles timeout gracefully", async () => {

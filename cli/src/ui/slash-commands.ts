@@ -1507,7 +1507,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
-          `| Experimental (/build, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
+          `| Experimental (/orchestrate, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |`;
 
         if (showAll) {

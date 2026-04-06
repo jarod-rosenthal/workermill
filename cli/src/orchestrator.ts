@@ -1597,7 +1597,7 @@ export async function runOrchestration(
 
   // Set abort controller on live view server
   if (liveViewServer && abortController) {
-    (liveViewServer as any).setAbortController(abortController);
+    liveViewServer.setAbortController(abortController);
   }
 
   // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
@@ -1941,7 +1941,7 @@ export async function runOrchestration(
 
     // Emit live view events
     if (liveViewServer) {
-      liveViewServer.emitStoryStart(i, story.title, story.persona, sorted.length);
+      liveViewServer.emitStoryStart(i + 1, story.title, story.persona, sorted.length);
     }
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -2426,7 +2426,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       }
 
       const storyElapsed = (Date.now() - storyStartMs) / 1000;
-      if (liveViewServer) liveViewServer.emitStoryComplete(i, storyElapsed);
+      if (liveViewServer) liveViewServer.emitStoryComplete(i + 1, storyElapsed);
 
           break; // Story succeeded, exit revision loop
     } catch (err) {

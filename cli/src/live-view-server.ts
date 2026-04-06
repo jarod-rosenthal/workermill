@@ -11,13 +11,14 @@ export type LiveViewEvent =
 export interface LiveViewServer {
   port: number;
   stop(): void;
+  setAbortController(controller: AbortController): void;
   emitFileChange(persona: string, storyIndex: number, storyTitle: string, filePath: string, tool: "created" | "edited"): void;
   emitStoryStart(storyIndex: number, storyTitle: string, persona: string, total: number): void;
   emitStoryComplete(storyIndex: number, elapsed: number): void;
   emitRunComplete(branch: string, commitCount: number): void;
 }
 
-export function createLiveViewServer(workingDir: string, mainBranch: string): LiveViewServer & { setAbortController: (controller: AbortController) => void } {
+export function createLiveViewServer(workingDir: string, mainBranch: string): LiveViewServer {
   const server = createServer();
   const clients = new Set<{ res: any; replay: LiveViewEvent[] }>();
   const fileDiffs = new Map<string, string>();

@@ -83,7 +83,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
             files: []
           };
           updateSidebar();
-          updateStatus(\`Story \${event.storyIndex + 1}/\${event.total} — \${event.persona}\`);
+          updateStatus(\`Story \${event.storyIndex}/\${event.total} — \${event.persona}\`);
           break;
         case 'story-complete':
           if (stories[event.storyIndex]) {
@@ -144,7 +144,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
 
     function formatDiff(diff) {
       if (!diff) return '<span class="context">No diff available</span>';
-      const lines = diff.split('\\n');
+      const lines = diff.split('\n');
       return lines.map(line => {
         if (line.startsWith('+')) {
           return \`<span class="added">\${escapeHtml(line)}</span>\`;
@@ -153,7 +153,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
         } else {
           return \`<span class="context">\${escapeHtml(line)}</span>\`;
         }
-      }).join('\\n');
+      }).join('\n');
     }
 
     function escapeHtml(text) {

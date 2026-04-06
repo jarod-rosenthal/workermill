@@ -548,6 +548,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
       // Dangerous commands always require explicit confirmation.
       if (dangerLabel) {
+        logger.info("Dangerous prompt shown", { tool: toolName, danger: dangerLabel });
         return new Promise((resolve) => {
           setPermissionRequest({
             toolName,
@@ -555,6 +556,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             isDangerous: true,
             dangerLabel,
             resolve: (allowed: boolean, mode?: "always" | "trust") => {
+              logger.info("Dangerous prompt resolved", { tool: toolName, allowed, mode });
               setPermissionRequest(null);
               resolve({ allowed, mode });
             },
@@ -1016,8 +1018,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         // No artificial timeout — the user controls cancellation via ESC/Ctrl+C.
 
         let rateLimitRetries = 0;
-
         while (true) {
+        let partialInputTokens = 0;
+        let partialOutputTokens = 0;
         try {
           const model = modelRef.current!;
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
@@ -1038,10 +1041,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             tools: Object.keys(activeTools).join(", "),
             messageCount: session.messages.length,
           });
-
           const agentStreamStartMs = Date.now();
-          let partialInputTokens = 0;
-          let partialOutputTokens = 0;
           const stream = streamText({
             model,
             system: systemPrompt,

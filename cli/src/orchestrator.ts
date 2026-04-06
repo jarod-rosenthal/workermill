@@ -358,10 +358,13 @@ export async function checkToolPermission(
     const cmd = String(toolInput.command || "");
     const danger = isDangerous(cmd);
     if (danger && !isBypass) {
+      logger.info("Dangerous prompt shown (orchestrator)", { tool: toolName, danger });
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
       const result = await output.confirm("This is a dangerous operation. Are you sure?");
-      return typeof result === "object" ? result.allowed : result;
+      const allowed = typeof result === "object" ? result.allowed : result;
+      logger.info("Dangerous prompt resolved (orchestrator)", { tool: toolName, allowed, result: JSON.stringify(result) });
+      return allowed;
     }
   }
 
@@ -400,21 +403,23 @@ export async function checkToolPermission(
       // "Trust all" — add wildcard to session allow so all future tools auto-approve
       sessionAllow.add("*");
     } else if (result.mode === "always" && result.allowed) {
-      // "Yes, don't ask again" — for bash save permanent rule, otherwise session-only
+      // "Yes, don't ask again" — save to project-level settings.local.json
+      // (matches Claude Code behavior and single-agent path in useAgent.ts)
       if (toolName === "bash" && toolInput.command) {
-        const { commandToRule } = await import("./safety.js");
-        const { loadConfig, saveConfig } = await import("./config.js");
+        const { commandToRule, splitCompoundCommand } = await import("./safety.js");
+        const { loadLocalSettings, saveLocalSettings } = await import("./config.js");
         try {
-          const cfg = loadConfig();
-          if (cfg) {
-            cfg.permissions = cfg.permissions || {};
-            cfg.permissions.allow = cfg.permissions.allow || [];
-            const rule = commandToRule(String(toolInput.command));
-            if (!cfg.permissions.allow.includes(rule)) {
-              cfg.permissions.allow.push(rule);
+          const lSettings = loadLocalSettings() || {};
+          lSettings.allow = lSettings.allow || [];
+          const cmd = String(toolInput.command);
+          const subcommands = splitCompoundCommand(cmd);
+          const rules = subcommands.map(commandToRule);
+          for (const rule of rules) {
+            if (!lSettings.allow.includes(rule)) {
+              lSettings.allow.push(rule);
             }
-            saveConfig(cfg);
           }
+          saveLocalSettings(lSettings);
         } catch {
           // Fall back to session-only
         }
@@ -2660,6 +2665,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           stopWhen: stepCountIs(100),
           timeout: { chunkMs: 120_000 },
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+          ...buildReasoningOptions(revProvider, revModel),
           onStepFinish({ text }) {
             if (text) {
               reviewerOutput += text + "\n";
@@ -3053,8 +3059,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
           }
           continue;
         }
-        output.log("system", `Review skipped: ${err instanceof Error ? err.message : String(err)}`);
-              break;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error("Review failed", { error: errMsg, provider: revProvider, model: revModel });
+        output.log("system", `Review skipped: ${errMsg}`);
+        break;
       }
     } // end review loop
   }
@@ -3485,6 +3493,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       stopWhen: stepCountIs(100),
       timeout: { chunkMs: 120_000 },
       ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+      ...buildReasoningOptions(revProvider, revModel),
       onStepFinish({ text }) {
         if (text) {
           reviewerOutput += text + "\n";

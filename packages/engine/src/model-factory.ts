@@ -135,10 +135,10 @@ export function createModel(
         const customOpenAI = createOpenAI({ baseURL: host, ...(apiKey ? { apiKey } : {}) });
         return customOpenAI.chat(modelName);
       }
-      // Codex models (gpt-5-codex, gpt-5.1-codex, etc.) are Responses API only —
-      // they don't support /v1/chat/completions. Route them to .responses().
-      // All other models use .chat() to avoid Responses API state issues.
-      if (modelName.includes("codex")) {
+      // Some OpenAI models are Responses API only — they don't support
+      // /v1/chat/completions. Codex models and pro-tier reasoning models
+      // (gpt-5.4-pro, etc.) must use .responses(). All others use .chat().
+      if (modelName.includes("codex") || /\d.*-pro$/.test(modelName)) {
         return openai.responses(modelName);
       }
       return openai.chat(modelName);

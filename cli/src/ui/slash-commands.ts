@@ -182,8 +182,8 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/build <task>\` | Multi-expert orchestration — plan, execute, review, ship (\`/ship\` alias) |
-| \`/orchestrate <#issue>\` | Full-spec orchestration across epic sub-issues |
-| \`/doctor [#issue\\|report\\|apply]\` | Diagnose test health, view report, or apply one prescription with \`/build\` |
+| \`/orchestrate <#issue>\` | **[experimental]** Full-spec orchestration across epic sub-issues |
+| \`/doctor [#issue\\|report\\|show\\|apply]\` | **[experimental]** Diagnose test health, view report, inspect or apply prescriptions |
 | \`/pause\` | Pause or resume a running \`/build\` orchestration |
 | \`/cancel\` | Cancel the current running operation (same as \`ESC\`) |
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
@@ -607,11 +607,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const ticketRef = detectTicketRef(arg);
         if (ticketRef) {
           ctx.setLastBuildTask(arg);
-          ctx.addUserMessage(`/ship ${ticketRef.key}`);
+          ctx.addUserMessage(`/${cmd} ${ticketRef.key}`);
           ctx.startOrchestrator(ticketRef.key, ctx.isTrustAll, ctx.sandboxed ?? "os", ticketRef.key);
         } else {
           ctx.setLastBuildTask(arg);
-          ctx.addUserMessage(`/ship ${arg}`);
+          ctx.addUserMessage(`/${cmd} ${arg}`);
           ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? "os");
         }
       }
@@ -620,6 +620,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /orchestrate ----
     case "orchestrate": {
+      const orchConfig = loadConfig();
+      if (!orchConfig?.experimental) {
+        ctx.addSystemMessage("`/orchestrate` is an experimental feature. Enable it with `/settings experimental true`.");
+        break;
+      }
       if (!arg) {
         ctx.addSystemMessage(
           "**Usage:** `/orchestrate #<parent-issue>`\n\n" +
@@ -656,6 +661,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /doctor ----
     case "doctor": {
+      const docConfig = loadConfig();
+      if (!docConfig?.experimental) {
+        ctx.addSystemMessage("`/doctor` is an experimental feature. Enable it with `/settings experimental true`.");
+        break;
+      }
       if (!ctx.startDoctor) {
         ctx.addSystemMessage("`/doctor` is not available in this runtime.");
         break;
@@ -957,6 +967,135 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         break;
       }
 
+      if (subcommand === "show") {
+        let issueKey: string | undefined;
+        let requestedIndex: number | undefined;
+        const showTokens = rest.split(/\s+/).filter(Boolean);
+        if (showTokens.length > 0) {
+          const maybeRef = detectTicketRef(showTokens[0]);
+          if (maybeRef && maybeRef.system === "github") {
+            issueKey = maybeRef.key;
+            if (showTokens[1]) {
+              const idx = Number.parseInt(showTokens[1], 10);
+              if (Number.isNaN(idx) || idx < 1) {
+                ctx.addSystemMessage("Usage: `/doctor show [#123] <index>`");
+                break;
+              }
+              requestedIndex = idx;
+            }
+          } else {
+            const idx = Number.parseInt(showTokens[0], 10);
+            if (Number.isNaN(idx) || idx < 1) {
+              ctx.addSystemMessage("Usage: `/doctor show [#123] <index>`");
+              break;
+            }
+            requestedIndex = idx;
+          }
+        }
+        if (!requestedIndex) {
+          ctx.addSystemMessage("Usage: `/doctor show [#123] <index>` — specify which prescription to view.");
+          break;
+        }
+
+        const artifact = doctorArtifactPath(ctx.workingDir, issueKey);
+        if (!fs.existsSync(artifact)) {
+          ctx.addSystemMessage(`No doctor report found at \`${artifact}\`. Run \`/doctor${issueKey ? ` ${issueKey}` : ""}\` first.`);
+          break;
+        }
+        try {
+          const parsed = JSON.parse(fs.readFileSync(artifact, "utf-8")) as {
+            appliedPrescriptionIds?: string[];
+            gaps?: Array<{
+              id?: string;
+              severity?: string;
+              title?: string;
+              evidence?: string[];
+              prescription?: string;
+              buildTask?: string;
+              problemClass?: string;
+              targetFiles?: string[];
+              verificationCommands?: string[];
+              successCriteria?: string[];
+              cureStatus?: string;
+              riskScore?: number;
+              priority?: number;
+              dependsOn?: string[];
+            }>;
+          };
+          const gaps = parsed.gaps || [];
+          if (gaps.length === 0) {
+            ctx.addSystemMessage("No prescriptions in the doctor report.");
+            break;
+          }
+          // Sort identically to /doctor report so indices match
+          const sorted = [...gaps].sort((a, b) => {
+            const aRank = severityRank[normalizeSeverity(a.severity) as "high" | "medium" | "low"] ?? 3;
+            const bRank = severityRank[normalizeSeverity(b.severity) as "high" | "medium" | "low"] ?? 3;
+            if (aRank !== bRank) return aRank - bRank;
+            const aPriority = a.priority ?? a.riskScore ?? 0;
+            const bPriority = b.priority ?? b.riskScore ?? 0;
+            if (aPriority !== bPriority) return bPriority - aPriority;
+            return (a.title || "").localeCompare(b.title || "");
+          });
+          if (requestedIndex > sorted.length) {
+            ctx.addSystemMessage(`Index ${requestedIndex} is out of range. There are ${sorted.length} prescriptions.`);
+            break;
+          }
+          const g = sorted[requestedIndex - 1];
+          const applied = (parsed.appliedPrescriptionIds || []).includes(g.id || "");
+          const lines: string[] = [
+            `**Prescription ${requestedIndex}/${sorted.length}**${g.id ? ` (${g.id})` : ""}`,
+            "",
+            `**${g.title || "Untitled"}**`,
+            "",
+            `Severity: ${normalizeSeverity(g.severity)}${typeof g.riskScore === "number" ? ` · Risk score: ${g.riskScore}` : ""}${typeof g.priority === "number" ? ` · Priority: ${g.priority}` : ""}`,
+            `Status: ${g.cureStatus || "open"}${applied ? " (applied)" : ""}`,
+          ];
+          if (g.problemClass) lines.push(`Class: ${g.problemClass}`);
+          lines.push("");
+          if (g.evidence && g.evidence.length > 0) {
+            lines.push("**Evidence**");
+            g.evidence.forEach((e) => lines.push(`- ${e}`));
+            lines.push("");
+          }
+          if (g.prescription) {
+            lines.push("**Prescription**");
+            lines.push(g.prescription);
+            lines.push("");
+          }
+          if (g.buildTask) {
+            lines.push("**Build Task**");
+            lines.push(g.buildTask);
+            lines.push("");
+          }
+          if (g.targetFiles && g.targetFiles.length > 0) {
+            lines.push("**Target Files**");
+            g.targetFiles.forEach((f) => lines.push(`- ${f}`));
+            lines.push("");
+          }
+          if (g.verificationCommands && g.verificationCommands.length > 0) {
+            lines.push("**Verification Commands**");
+            g.verificationCommands.forEach((cmd) => lines.push(`- \`${cmd}\``));
+            lines.push("");
+          }
+          if (g.successCriteria && g.successCriteria.length > 0) {
+            lines.push("**Success Criteria**");
+            g.successCriteria.forEach((c) => lines.push(`- ${c}`));
+            lines.push("");
+          }
+          if (g.dependsOn && g.dependsOn.length > 0) {
+            lines.push(`**Depends On:** ${g.dependsOn.join(", ")}`);
+            lines.push("");
+          }
+          lines.push(`Run \`/doctor apply${issueKey ? ` ${issueKey}` : ""} ${requestedIndex}\` to execute this prescription.`);
+          ctx.addSystemMessage(lines.join("\n"));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.addSystemMessage(`Failed to read doctor report: ${msg}`);
+        }
+        break;
+      }
+
       if (subcommand === "apply") {
         if (!ctx.startOrchestrator) {
           ctx.addSystemMessage("`/doctor apply` is not available in this runtime.");
@@ -1108,6 +1247,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "- `/doctor` (local repo diagnosis)\n" +
           "- `/doctor #123` (issue-scoped diagnosis)\n" +
           "- `/doctor report [#123]`\n" +
+          "- `/doctor show [#123] <index>` (full details for one prescription)\n" +
           "- `/doctor apply [#123] [index]`",
         );
         break;
@@ -1367,6 +1507,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
+          `| Experimental (/build, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |`;
 
         if (showAll) {
@@ -1594,6 +1735,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           case "bell": {
             config.bell = boolVal(value);
+            break;
+          }
+          case "experimental": {
+            config.experimental = boolVal(value);
             break;
           }
           case "tickets": {

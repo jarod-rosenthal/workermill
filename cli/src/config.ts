@@ -161,6 +161,8 @@ export interface CliConfig {
   doctor?: DoctorConfig;
   /** Enable live browser diff view during /ship runs ("auto", true, or false) */
   liveView?: boolean | "auto";
+  /** Enable experimental features: /build, /ship, /doctor, /program (default: false) */
+  experimental?: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -291,6 +293,7 @@ export function resolveConfig(): CliConfig {
     program: { ...global.program, ...(project?.program || {}) },
     doctor: { ...global.doctor, ...(project?.doctor || {}) },
     liveView: project?.liveView ?? global.liveView,
+    experimental: project?.experimental ?? global.experimental,
   };
 }
 

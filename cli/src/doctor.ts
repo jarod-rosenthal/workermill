@@ -1546,7 +1546,13 @@ function writeDoctorArtifact(cwd: string, issueRef: string | undefined, report: 
   return filePath;
 }
 
-export async function runDoctorAssessment(cwd: string, issueRef?: string): Promise<DoctorReport> {
+export async function runDoctorAssessment(
+  cwd: string,
+  issueRef?: string,
+  onProgress?: (step: string) => void,
+): Promise<DoctorReport> {
+  const emit = onProgress || (() => {});
+
   const runtimeConfig = resolveDoctorRuntimeConfig(cwd);
   const previousPath = path.join(
     cwd,
@@ -1562,15 +1568,26 @@ export async function runDoctorAssessment(cwd: string, issueRef?: string): Promi
   }>(previousPath);
   const previousAppliedSet = new Set((previous?.appliedPrescriptionIds || []).filter(Boolean));
 
+  emit("Scanning files...");
   const filePaths = collectFiles(cwd);
+  emit(`Found ${filePaths.length} files — detecting languages and frameworks...`);
   const scan = classifyTests(filePaths);
   const languages = detectLanguages(scan.filePaths, scan.manifests);
   const frameworks = detectFrameworks(cwd, scan.manifests, scan.filePaths);
+
   const qualityCommands = detectQualityCommands(cwd, scan, languages);
+  if (qualityCommands.length > 0) {
+    emit(`Running quality commands: ${qualityCommands.join(", ")}...`);
+  }
+  // Yield to event loop so progress renders before blocking execSync
+  await new Promise((r) => setTimeout(r, 0));
   const qualityEvidence = runQualityCommands(cwd, qualityCommands);
 
+  emit("Analyzing coverage and CI signals...");
   const coverage = detectCoverage(cwd);
   const ciFailureSignals = collectCiFailureSignals(cwd);
+
+  emit("Building module health map...");
   const moduleHealth = buildModuleHealth(
     cwd,
     scan,
@@ -1584,6 +1601,7 @@ export async function runDoctorAssessment(cwd: string, issueRef?: string): Promi
   const highRiskUntestedModules = deriveHighRiskUntestedModules(moduleHealth, runtimeConfig);
   const deadCodeCandidates = deriveDeadCodeCandidates(moduleHealth, runtimeConfig);
 
+  emit("Generating prescriptions...");
   const gaps = createGaps(
     scan,
     languages,

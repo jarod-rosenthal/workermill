@@ -1184,73 +1184,58 @@ export function useOrchestrator(
       void (async () => {
         try {
           const { runDoctorAssessment } = await import("../doctor.js");
-          const report = await runDoctorAssessment(process.cwd(), issueRef);
+          const report = await runDoctorAssessment(process.cwd(), issueRef, (step) => {
+            setStatusMessage(`Doctor: ${step}`);
+            setPreviewLineThrottled(step);
+          });
 
           addSessionSummaryDivider(addMessage, true);
-          addMessage(`**Doctor report${issueRef ? ` for ${issueRef}` : ""}**`);
-          for (const line of report.summary) addMessage(line);
-          addMessage(`Artifact: \`${report.artifactPath}\``);
+
+          // ── Summary header (always shown) ──
+          const highGaps = report.gaps.filter((g) => g.severity === "high").length;
+          const medGaps = report.gaps.filter((g) => g.severity === "medium").length;
+          const passedCmds = report.qualityEvidence.filter((e) => e.status === "passed").length;
+          const failedCmds = report.qualityEvidence.filter((e) => e.status === "failed").length;
+
+          const healthLabel = highGaps === 0 && failedCmds === 0
+            ? "Healthy" : highGaps <= 2 ? "Needs attention" : "Unhealthy";
+
           addMessage(
-            `Coverage: ${report.coverageSnapshot.source}${report.coverageSnapshot.reportPath ? ` (${report.coverageSnapshot.reportPath})` : ""}` +
-            ` · lines ${report.coverageSnapshot.linePercent ?? "n/a"}% · branches ${report.coverageSnapshot.branchPercent ?? "n/a"}%`,
-          );
-          addMessage(
-            `Module health: ${report.healthSnapshot.functioning} functioning · ${report.healthSnapshot.trouble} trouble · ` +
-            `${report.healthSnapshot.dead} dead · ${report.healthSnapshot.unknown} unknown`,
-          );
-          addMessage(
-            `Health delta: +${report.healthDelta.improved} improved · ${report.healthDelta.regressed} regressed · ` +
-            `${report.healthDelta.unchanged} unchanged · ${report.healthDelta.newModules} new`,
-          );
-          if (report.highRiskUntestedModules.length > 0) {
-            addMessage(`Top high-risk untested modules (${report.highRiskUntestedModules.length}):`);
-            report.highRiskUntestedModules.forEach((module, idx) => {
-              addMessage(
-                `${idx + 1}. ${module.filePath} · risk ${module.riskScore} · coverage ${module.lineCoveragePercent}% · ${module.lineCount} lines · churn ${module.churn30d}/30d`,
-              );
-            });
-          }
-          if (report.deadCodeCandidates.length > 0) {
-            addMessage(`Dead-code candidates (${report.deadCodeCandidates.length}):`);
-            report.deadCodeCandidates.forEach((candidate, idx) => {
-              addMessage(
-                `${idx + 1}. ${candidate.filePath} · confidence ${candidate.confidence} · inbound ${candidate.inboundReferences} · stale ${candidate.lastTouchedDays ?? "unknown"}d`,
-              );
-            });
-          }
-          if (report.ciFailureSignals.length > 0) {
-            addMessage(`Recent CI failure signals (${report.ciFailureSignals.length}):`);
-            report.ciFailureSignals.forEach((signal) => {
-              addMessage(`- [${signal.classification}] ${signal.workflow} run ${signal.runId}: ${signal.signature}`);
-            });
-          }
-          if (report.qualityEvidence.length > 0) {
-            addMessage("Quality evidence:");
-            report.qualityEvidence.forEach((entry) => {
-              addMessage(`- [${entry.status}] ${entry.command}${entry.output ? ` — ${entry.output}` : ""}`);
-            });
-          }
-          addMessage(
-            `Gap delta: +${report.delta.newGaps} new · ${report.delta.persistingGaps} persisting · ${report.delta.resolvedGaps} resolved`,
+            `**Doctor Report${issueRef ? ` — ${issueRef}` : ""}**\n\n` +
+            `**Verdict: ${healthLabel}** — ${report.gaps.length} issue${report.gaps.length !== 1 ? "s" : ""} found` +
+            ` (${highGaps} high, ${medGaps} medium)\n\n` +
+            `| Metric | Value |\n` +
+            `|---|---|\n` +
+            `| Languages | ${report.languages.join(", ") || "unknown"} |\n` +
+            `| Test frameworks | ${report.frameworks.join(", ") || "none"} |\n` +
+            `| Test files | ${report.unitFileCount} unit · ${report.integrationFileCount} integration · ${report.e2eFileCount} E2E |\n` +
+            `| Quality commands | ${passedCmds} passed · ${failedCmds} failed |\n` +
+            `| Module health | ${report.healthSnapshot.functioning} ok · ${report.healthSnapshot.trouble} trouble · ${report.healthSnapshot.dead} dead |\n` +
+            `| High-risk untested | ${report.highRiskUntestedModules.length} module${report.highRiskUntestedModules.length !== 1 ? "s" : ""} |\n` +
+            `| Coverage | ${report.coverageSnapshot.linePercent != null ? `${report.coverageSnapshot.linePercent}% lines` : "not found"} |`,
           );
 
-          if (report.gaps.length === 0) {
-            addMessage("No critical test-coverage gaps detected.");
+          // ── Prescriptions (only if there are gaps) ──
+          if (report.gaps.length > 0) {
+            const prescriptionLines = report.gaps.map((gap, idx) =>
+              `${idx + 1}. **[${gap.severity.toUpperCase()}]** ${gap.title}\n` +
+              `   ${gap.prescription}`,
+            ).join("\n");
+            addMessage(`\n**Prescriptions**\n\n${prescriptionLines}\n\nRun \`/doctor apply\` to fix the top issue, or \`/doctor apply ${issueRef || ""} N\` for a specific one.`);
           } else {
-            addMessage(`Prescriptions (${report.gaps.length}):`);
-            report.gaps.forEach((gap, idx) => {
-              addMessage(
-                `${idx + 1}. [${gap.severity}] ${gap.title}\n` +
-                `   Class: ${gap.problemClass || "unknown"}${gap.cureStatus ? ` · status ${gap.cureStatus}` : ""}\n` +
-                `   Evidence: ${gap.evidence[0] || "n/a"}\n` +
-                `   Prescription: ${gap.prescription}\n` +
-                `   Build task: ${gap.buildTask}` +
-                `${gap.targetFiles && gap.targetFiles.length > 0 ? `\n   Target files: ${gap.targetFiles.join(", ")}` : ""}` +
-                `${gap.verificationCommands && gap.verificationCommands.length > 0 ? `\n   Verify: ${gap.verificationCommands.join(" && ")}` : ""}` +
-                `${gap.successCriteria && gap.successCriteria.length > 0 ? `\n   Success: ${gap.successCriteria[0]}` : ""}`,
-              );
-            });
+            addMessage("No critical issues found.");
           }
+
+          // ── High-risk modules (compact) ──
+          if (report.highRiskUntestedModules.length > 0) {
+            const moduleLines = report.highRiskUntestedModules.slice(0, 5).map((m, i) =>
+              `${i + 1}. \`${m.filePath}\` — risk ${m.riskScore}, ${m.lineCount} lines, ${m.lineCoveragePercent}% covered`,
+            ).join("\n");
+            addMessage(`\n**High-Risk Untested Modules**\n\n${moduleLines}`);
+          }
+
+          addMessage(`\nFull report: \`${report.artifactPath}\``);
+
           notifyIfEnabled(cliConfig?.bell, "WorkerMill", "Doctor analysis complete");
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);

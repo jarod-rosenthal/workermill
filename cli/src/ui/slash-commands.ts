@@ -1408,19 +1408,18 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         ctx.addSystemMessage(table);
 
-        // Show routing if configured
+        // Show routing — filter out stale entries (e.g. "critic" after removal)
         const routing = config.routing;
-        if (routing && Object.keys(routing).length > 0) {
-          const routingRows = Object.entries(routing).map(
-            ([persona, provider]) => `| ${persona} | ${provider} |`
-          );
-          ctx.addSystemMessage(
-            `\n**Persona Routing** (\`/settings route <persona> <provider>\`)\n\n` +
-            `| Persona | Provider |\n|---|---|\n` +
-            routingRows.join("\n") +
-            `\n\nUnrouted personas use the default provider (\`${config.default}\`).`
-          );
-        }
+        const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
+        const routingRows = [
+          `| default (all workers) | ${config.default} |`,
+          ...validEntries.map(([persona, provider]) => `| ${persona} | ${provider} |`),
+        ];
+        ctx.addSystemMessage(
+          `\n**Persona Routing** (\`/settings route <persona> <provider>\`)\n\n` +
+          `| Persona | Provider |\n|---|---|\n` +
+          routingRows.join("\n"),
+        );
       } else {
         // Parse key=value or key value
         const parts = arg.split(/[\s=]+/);

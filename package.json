@@ -1,28 +1,98 @@
 {
   "name": "workermill",
-  "version": "0.1.0",
-  "private": true,
-  "description": "The open-source AI coding agent with multi-expert orchestration",
-  "scripts": {
-    "build": "cd cli && npm run build",
-    "dev": "cd cli && npm run dev",
-    "lint": "cd cli && npm run lint",
-    "test": "cd cli && npm run test",
-    "typecheck": "cd cli && npm run typecheck"
+  "version": "0.15.99",
+  "description": "Professional AI coding team in your terminal. Multi-expert orchestration with planning, execution, and review — ensuring quality code through governance, not just generation.",
+  "type": "module",
+  "bin": {
+    "workermill": "dist/index.js",
+    "wm": "dist/index.js"
   },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "prebuild": "find src -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; find src/ui -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; true",
+    "build": "tsup",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.64",
+    "@ai-sdk/google": "^3.0.53",
+    "@ai-sdk/openai": "^3.0.48",
+    "@ai-sdk/openai-compatible": "^2.0.37",
+    "@anthropic-ai/sandbox-runtime": "0.0.46",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "ai": "^6.0.141",
+    "chalk": "^5.3.0",
+    "commander": "^14.0.3",
+    "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
+    "node-pty": "^1.1.0",
+    "ollama-ai-provider-v2": "^3.5.0",
+    "ora": "^9.3.0",
+    "react": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "@types/react": "^19.2.14",
+    "@vitest/coverage-v8": "^4.1.0",
+    "prismjs": "^1.30.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "picomatch": "^4.0.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "cli",
+    "workermill",
+    "multi-agent",
+    "code-review",
+    "ollama",
+    "anthropic",
+    "openai",
+    "llm",
+    "mcp",
+    "terminal",
+    "typescript",
+    "javascript",
+    "development",
+    "automation",
+    "git",
+    "ci-cd",
+    "testing",
+    "refactoring",
+    "code-generation",
+    "pair-programming"
+  ],
+  "license": "Apache-2.0",
+  "files": [
+    "dist/",
+    "personas/",
+    "docs/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jarod-rosenthal/workermill.git"
   },
-  "keywords": [
-    "ai",
-    "agents",
-    "coding-agent",
-    "multi-expert",
-    "orchestration",
-    "cli",
-    "workermill"
-  ],
-  "author": "Jarod Rosenthal",
-  "license": "Apache-2.0"
+  "homepage": "https://workermill.com",
+  "bugs": {
+    "url": "https://github.com/jarod-rosenthal/workermill/issues"
+  }
 }

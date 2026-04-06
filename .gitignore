@@ -1,6 +1,6 @@
 # Compiled TypeScript output in source directories
-cli/src/**/*.js
-cli/src/**/*.d.ts
+src/**/*.js
+src/**/*.d.ts
 
 # Dependencies
 node_modules/
@@ -8,6 +8,7 @@ node_modules/
 # Build outputs
 dist/
 build/
+lib/
 
 # Environment
 .env
@@ -45,11 +46,7 @@ coverage/
 
 # Internal docs, plans, and Claude config (not public)
 /private/
-/docs/
 
-# cli/README.md is generated at publish time from the root README.md
-# via the prepublishOnly script. Never edit it directly.
-/cli/README.md
 .plan
 .superpowers/
 CLAUDE.md
@@ -57,7 +54,6 @@ CLAUDE.md
 
 # E2E test fixture repo
 e2e-cli-tests/
-cli/e2e-cli-tests/
 
 # Misc
 *.png

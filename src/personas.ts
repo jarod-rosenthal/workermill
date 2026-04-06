@@ -54,7 +54,7 @@ export function loadPersona(slug: string): Persona | null {
     path.join(process.cwd(), ".workermill", "personas", `${slug}.md`),
     // User-level persona overrides
     path.join(os.homedir(), ".workermill", "personas", `${slug}.md`),
-    // Bundled with the npm package (cli/personas/)
+    // Bundled with the npm package (personas/)
     path.join(import.meta.dirname || __dirname, "../personas", `${slug}.md`),
     // Dev mode — resolve from monorepo
     path.join(import.meta.dirname || __dirname, "../engine/personas", `${slug}.md`),
@@ -105,7 +105,7 @@ export function listAvailablePersonas(): string[] {
 
   // Check built-in personas (multiple paths for monorepo vs npm install)
   const builtinDirs = [
-    path.join(import.meta.dirname || __dirname, "../personas"),  // npm: cli/dist/../personas = cli/personas
+    path.join(import.meta.dirname || __dirname, "../personas"),  // npm: dist/../personas
     path.join(import.meta.dirname || process.cwd(), "../engine/personas"),  // monorepo
   ];
   for (const builtinDir of builtinDirs) {

@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  cli-ci:
-    name: CLI - Type Check, Lint & Tests
+  ci:
+    name: Type Check, Lint, Build & Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -22,24 +22,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: cli/package-lock.json
 
       - name: Install dependencies
-        working-directory: cli
         run: npm ci
 
       - name: Type Check
-        working-directory: cli
         run: npm run typecheck
 
       - name: Lint
-        working-directory: cli
         run: npm run lint
 
       - name: Build
-        working-directory: cli
         run: npm run build
 
       - name: Unit Tests
-        working-directory: cli
         run: npx vitest run

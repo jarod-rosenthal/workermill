@@ -236,7 +236,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 
 Gate failures are passed to the tech lead reviewer as context. No retry loop — failures are flagged as must-fix during review.
 
-See \`cli/docs/quality-gates.md\` for full documentation and examples.`;
+See \`docs/quality-gates.md\` for full documentation and examples.`;
 
 // ---------------------------------------------------------------------------
 // Context interface
@@ -2289,13 +2289,13 @@ Write the file with write_file to AGENT.md in the project root.`,
           ctx.addSystemMessage(content);
         } else {
           ctx.addSystemMessage(
-            "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
+            "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/CHANGELOG.md"
           );
         }
       } catch (err) {
         logger.debug("Failed to read changelog", { error: err instanceof Error ? err.message : String(err) });
         ctx.addSystemMessage(
-          "Changelog not found. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
+          "Changelog not found. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/CHANGELOG.md"
         );
       }
       break;

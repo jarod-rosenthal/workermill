@@ -437,7 +437,7 @@ describe("personas", () => {
       const { listAvailablePersonas } = await importPersonas();
       const slugs = listAvailablePersonas();
 
-      // Builtin personas (from the cli/personas/ dir) may or may not be found depending
+      // Builtin personas (from the personas/ dir) may or may not be found depending
       // on import.meta.dirname resolution in tests — only assert the array is an Array
       // and sorted (no duplicates, no non-.md files leaked in).
       expect(Array.isArray(slugs)).toBe(true);

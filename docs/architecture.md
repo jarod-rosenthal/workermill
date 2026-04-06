@@ -70,7 +70,7 @@ Project overrides can live in `.workermill/config.json` at the repo root.
 
 ## Tools
 
-Tools are shared between the CLI and the WorkerMill platform worker via the `packages/engine/src/tools/` directory.
+Tools live in `src/engine/tools/`.
 
 Built-in tools:
 
@@ -137,12 +137,10 @@ Pre- and post-tool hooks run shell commands or HTTP requests around tool executi
 
 ## Costs & Tokens
 
-`CostTracker` accumulates usage across every model call and reports per-role costs via `/cost` and the status bar. Pricing data lives in `api/src/providers/*/pricing.ts` and is shared with the platform.
+`CostTracker` accumulates usage across every model call and reports per-role costs via `/cost` and the status bar. Pricing data lives in `src/providers/*/pricing.ts`.
 
 ## What the CLI Is Not
 
 - Not a server — nothing runs in the background
 - Not a SaaS — no account, no cloud sync, no telemetry
-- Not an IDE plugin — that's the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill), a separate project
-
-For the full multi-repo WorkerMill platform (web dashboard, cloud workers, team management), see the main [WorkerMill site](https://workermill.com).
+- Not an IDE plugin — it's a terminal-native tool

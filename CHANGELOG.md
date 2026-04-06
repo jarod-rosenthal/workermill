@@ -1,611 +1,591 @@
 # Changelog
 
-All notable changes to the WorkerMill platform are documented in this file.
+All notable changes to the WorkerMill CLI are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Component releases are tracked via git tags:
-`git tag -l 'agent-v*'`, `git tag -l 'vscode-v*'`.
+Format follows [Keep a Changelog](https://keepachangelog.com/).
 
----
-
-## 2026-04-01 — CLI v0.15.92
+## [Unreleased]
 
 ### Added
-- CLI: `/review branch|diff|#42` — standalone Tech Lead review using the configured reviewer model. Same prompt, scoring, and tools as the `/ship` review loop.
-- CLI: Post-review fix flow — if review finds issues, prompts to create a GitHub issue with findings and automatically kicks off `/ship` to fix them.
-- CLI: Ticket fetch in orchestrator — `/ship GH-1` now fetches the actual GitHub/Jira/Linear issue before planning. Case-insensitive (`gh-1` = `GH-1`).
-- CLI: `/settings tickets|jira.*|linear.key` — configure issue tracker mid-session without re-running setup.
-- CLI: "Trust all" option in every permission prompt — bypass permissions from any prompt, not just Shift+Tab.
-- CLI: Completion summary — "Shipped. 5 experts · 4 stories shipped · 3m 42s" instead of "Orchestration complete."
-- CLI: Context window display — all model announcements show context limit from pricing registry.
-- CLI: Tech Lead PR review — posts `gh pr review --approve|--request-changes` with score and feedback after PR creation.
-- CLI: Story completion comments with structured updates — expert summary, files created/modified, commands run (tracked from actual tool calls).
-- CLI: Tech lead review comments with revision count — "after 1 revision" on approval, "Revision 1/3" on each round.
-- CLI: Startup tips for issue tracker usage (`/ship GH-42`, `/ship PROJ-123`).
-- CLI: Cost tracking for standalone `/review` — reports to status bar.
-- CLI: System prompt teaches the agent about CLI features (`/ship`, `/review`, `/settings`) so it guides users to the right commands.
-- CLI: Status bar shows context window next to planner/reviewer models.
+- **`/program` full-spec orchestration + decomposition flow** — `/program #<parent>` can now decompose a parent issue into child cards, materialize child issues, and execute them in dependency order with persisted run-state for resume/recovery.
+- **`/doctor` diagnosis workflow** — added repo/issue-scoped health diagnosis with structured prescriptions plus follow-up commands: `/doctor report`, `/doctor show`, and `/doctor apply`.
+- **Multi-format project instructions ingestion** — instruction loading now supports additional sources and rule directories across common agent ecosystems (for example `AGENTS.md`, `.workermill/instructions.md`, `GEMINI.md`, `.cursor/rules/*`, `.windsurf/rules/*`).
+- **Program epic prompt setting** — added `program.epicPrompt` (`ask` or `always`) with `/settings program.epicPrompt <ask|always>`. Epic boundary prompts support `y/n/a`, and choosing `a` persists globally.
+- **PRD decomposition phase label lock** — added shared PRD decomposition phase labels plus a test lock to keep CLI wording aligned with the full platform decomposition phases.
 
 ### Changed
-- CLI: `/model planner <provider>/<model>` and `/model reviewer <provider>/<model>` — switch planner or reviewer model mid-session with autocomplete, API key validation, and immediate status bar update. Replaces the old `/settings route` approach.
-- CLI: Reviewer prompt restructured — detailed feedback required before decision markers, feedback guidelines from worker/epic/inline-reviewer.ts.
-- CLI: Score threshold prompt aligned with code: "8+ means approved".
-- CLI: `formatContext` uses /1024 for power-of-2 values (64K), /1000 for round values (200K).
-- CLI: Tech lead ticket comments now include full detailed review text, not just the FEEDBACK one-liner. Uses proper headers (`## Tech Lead Review`).
-- CLI: Bypass mode now fully bypasses all prompts including dangerous commands and sensitive files — consistent behavior everywhere.
-- CLI: All permission prompts (including dangerous/sensitive) route through `PermissionPrompt` component with Trust All option.
-
-### Fixed (settings)
-- CLI: `/settings route` validation — no longer saves invalid config when provider doesn't exist.
+- **Settings surface simplified** — removed stale critic-facing settings, collapsed program controls into a clearer two-tier settings display, and filtered stale routing entries from `/settings show`.
+- **`/doctor` UX polish** — diagnosis now reports clearer progress and formatted output so prescription selection and follow-up actions are easier to run.
 
 ### Fixed
-- CLI: Permission mode (Shift+Tab) now takes effect mid-run via ref-based `isBypassMode()`.
-- CLI: Consecutive confirm prompts (revision → push) locking up — React reused component state. Fixed with `key` prop to force fresh instance.
-- CLI: Reviewer inventing story numbers — prompt now lists valid stories explicitly, out-of-range numbers filtered.
-- CLI: PR creation failing on multi-line bodies — body passed via stdin (`--body-file -`).
-- CLI: Review diff truncation — caps diff to 50% of model context window, writes full diff to temp file for `read_file` access.
-- CLI: `--resume` typed in chat no longer sent to model — caught with helpful message.
-- CLI: Branch names capped at 3 words with ticket key prefix (`GH-1/full-stack-task`).
-- CLI: Distinct error messages for missing credentials vs issue not found.
-- CLI: Removed Dockerfile and CI files from sensitive file list — agents need to write these.
-- CLI: Ticket detection with spaces — `GH #11`, `GH 11` now match (whitespace collapsed before regex).
-- CLI: Sandbox comment updated — `bwrap` replaced by `@anthropic-ai/sandbox-runtime`.
-- CLI: Dangling `clearInterval` reference in orchestrator confirm — would crash on user response.
-- Docs: `/retry` example showed fictional planner output — fixed to show actual coordinator resume behavior.
-- Docs: Persona count "12" → "11+", removed nonexistent "critic" persona, fixed "reviewer" → "tech lead".
-- Docs: Tool count "15" → "15+", added missing `todo` to tool list.
-- Docs: `/sessions` description said "switch or resume" — fixed to show `--resume` flag is needed.
-- Docs: Permission description updated to describe all four modes, not just default.
-- Docs: `/as` example removed fake "Running quality gates" output (quality gates are `/ship` only).
-- Docs: CLI.tsx `approvalThreshold: 80` → `8` (1-10 scale, not 0-100).
-- Docs: CLI.tsx "Use `/setup` to route planner" → "Use `/settings route planner <provider>`".
-- Docs: CLI.tsx "13 tools" → "15+ tools".
-- Docs: VS Code README "Claude Code CLI" → "WorkerMill Agent", "GPT-4o, o1, o3" → "GPT-5.x".
-- Docs: CONTRIBUTING.md dead links to nonexistent docs replaced with PLATFORM.md.
+- **Live view SSE reliability** — fixed SSE stream syntax/runtime issues, disabled Nagle buffering for SSE writes, and added polling fallback when streaming is unavailable.
+- **`/ship` orchestration hardening** — improved session stability and failure handling in orchestration/live-view integration paths.
+- **ESC cancel cost accounting** — preserved partial token accounting on aborted runs.
+- **ESC abort crash regression** — fixed `ReferenceError: partialInputTokens is not defined` on cancel by keeping abort-cost counters in scope for the abort handler.
+- **`gpt-5.4-pro` routing + model-factory alignment** — corrected provider routing/selection paths so model resolution remains consistent across CLI and engine.
+- **Experimental feature gating** — `/doctor` and `/orchestrate` now consistently honor the `experimental` setting and provide explicit enablement guidance when disabled.
 
----
-
-## 2026-03-31 — CLI v0.15.88
-
-### Added
-- CLI: Custom skills system — `.workermill/skills/*.md` with YAML frontmatter supporting `allowedTools`, `model` override, `whenToUse` (model-invocable), and `args`. Project skills override user skills override legacy commands.
-- CLI: Micro-compaction — free pre-pass that truncates verbose tool output from older messages without an API call. Triggers at 60% context usage, reclaims context before LLM summarization kicks in.
-- CLI: Memory extraction before compaction — scans messages for `::learning::` and `::remember::` markers before they're compacted away, so learnings aren't lost.
-- CLI: Compaction circuit breaker — after 3 consecutive LLM summarization failures, skips the API call instead of retrying endlessly.
-- CLI: Hook lifecycle expansion — `runHooks` now passes `WORKERMILL_TOOL_INPUT`, `WORKERMILL_TOOL_OUTPUT`, `WORKERMILL_TOOL_SUCCESS` as env vars. New events: `tool_error`, `permission_denied`, `story_complete`, `memory_saved`.
-- CLI: Blocking pre-hooks — `runPreHooksWithBlocking()` lets hooks abort tool execution by exiting non-zero. HTTP hooks remain fire-and-forget.
-- CLI: Async hooks — `async: true` in hook config spawns detached instead of blocking.
-- CLI: Tool metadata system — `ToolMeta` interface with `isReadOnly`, `isDestructive`, `acceptEditsApproved`, `concurrencySafe`. `READ_TOOLS` and `ACCEPT_EDITS_TOOLS` now derived from metadata instead of hardcoded sets.
-- CLI: Tool call loop detection in single-agent mode — tracks last 6 tool call signatures, aborts if 4+ are identical (matches existing orchestrator pattern).
-- CLI: Dangerous file protection — 16 regex patterns for `.env`, `.bashrc`, `.ssh/`, `.git/config`, CI/CD workflows, Dockerfiles, lock files. `isDangerousFile()` exported from safety module.
-- CLI: Desktop notifications — macOS (osascript), Linux (notify-send), Windows (PowerShell toast) with terminal bell fallback. Fires on `/ship` complete/failed and auto-compaction. Controlled by `config.bell`.
-- CLI: Rate limit retry with backoff — detects 429s from any provider, extracts `retry-after` header, retries up to 3 times with status bar countdown.
-- CLI: Dangerous file protection wired into permissions — `write_file`/`edit_file`/`patch` to `.env`, `.bashrc`, `.ssh/`, `.git/config`, CI/CD workflows, lock files now triggers confirmation prompt.
-- CLI: Skills `whenToUse` in system prompt — custom skills with `whenToUse` frontmatter are listed in the system prompt so the model recommends them when relevant.
-- CLI: Memory extraction before compaction — `::learning::`/`::remember::` markers are saved via `addMemory()` before LLM compaction discards older messages.
-- CLI: Deferred tool loading — MCP tools load as one-liner descriptions in the system prompt. `tool_search` meta-tool promotes matching tools to full schema on demand. Promoted tools persist for the session.
-- CLI: Tool concurrency — tools marked `concurrencySafe` (read_file, glob, grep, ls, lsp, todo, fetch, web_search) run in parallel when the model requests multiple in one turn. Non-safe tools serialize through an async mutex.
-- CLI: Mode parity — all new features (isDangerousFile, blocking pre-hooks, tool concurrency, rate limit retry) now work in BOTH single-agent chat AND /ship orchestrator. No feature is single-mode only.
-- CLI: Blocking pre-hooks wired in — both useAgent.ts and orchestrator.ts use `runPreHooksWithBlocking()`. Pre-hooks that exit non-zero abort the tool call. Post-hooks receive tool output.
-- CLI: Rate limit retry in orchestrator — story and revision execution retry on 429 with exponential backoff, matching the single-agent behavior.
-- CLI: Test suite expanded — 52 new unit tests (maturity features + loop detection), 81 total for new features.
-- CLI: Model-invocable skills — `skill` tool lets the model invoke custom skills mid-conversation. Works in both chat and `/ship`. Skills from `.workermill/skills/` with `whenToUse` frontmatter appear in the system prompt and can be called programmatically.
-- CLI: npm package now includes CHANGELOG.md. `prepublishOnly` copies root README.md so npm and GitHub always show the same content.
-- CLI: npm description and keywords updated to match branding ("AI coding team", added workermill, multi-agent, code-review, llm, mcp, terminal).
-- CLI: Ticket-ops integration — `/ship #42` fetches a GitHub Issue and uses it as the task spec. Also supports Jira (`/ship PROJ-123`) and Linear tickets. Credentials configured via `/setup`. Posts completion comments back to the ticket when done.
-
----
-
-## 2026-03-31 — CLI v0.15.87 + Platform Updates
-
-### Added
-- CLI: Test suite — 227 tests across engine and CLI (Vitest 4.1, ~52% CLI line coverage, ~73% engine line coverage)
-  - Engine: 113 unit tests covering decisions, model-factory, and all 14 tools
-  - CLI: 110 unit tests covering safety, config, memory, session, git-ops, permissions, commands, cost-tracker, orchestrator
-  - E2E: 4 tests with real Ollama (single-agent bug fix, glob, read_file, full /ship workflow)
-  - WSL-aware Ollama host auto-detection for E2E tests
-- CLI: `/ship` command replaces `/build` — multi-expert orchestration (`/build` kept as alias)
-- CLI: Architect-led planner — reads codebase deeply, produces `targetFiles`, `referenceFiles`, and `implementationNotes` per story so workers follow existing patterns
-- CLI: Planner feasibility gate — rejects tasks that are too vague or contradictory before worker tokens are spent
-- CLI: Git branch management ported from WorkerMill platform — feature branch per `/ship`, commits per story, revision delta tracking
-- CLI: Completion flow — branch summary, commit count, push & PR creation with task spec + story breakdown + tech lead review in the PR body
-- CLI: Reviewer sees revision delta — only what changed since last review, not the full diff again
-- CLI: Per-story prior work capture — revision workers see their own previous commits via git log
-- CLI: `verify` tool — runs test/build commands, returns structured pass/fail
-- CLI: Structured bash output parsing — extracts test results, build errors, service health
-- CLI: Docker auto-cleanup — tracks `docker compose up` per story, runs `docker compose down` after completion
-- CLI: `.md` file autocomplete after `/ship` command
-- CLI: LM Studio provider support + Ollama context window picker in setup wizard
-- CLI: Claude Haiku 4.5 added to Anthropic model picker
-- CLI: Error classification engine — categorizes failures with targeted fix hints for retry
-- CLI: Color-coded model names by role (planner: cyan, workers: yellow, reviewer: magenta)
-- CLI: Confirm prompts show typed key before proceeding
-- CLI: Setup wizard explains each role and why model choice matters
-- CLI: Cost shown as estimate (~$0.12) not exact billing
-- CLI: `/retry` command shown in welcome screen
-- CLI: Homebrew formula (`brew install workermill`)
-- Homepage: dedicated Planner, Reviewer, and Workers documentation sections
+## [0.15.101] - 2026-04-05
 
 ### Fixed
-- Engine: `EngineAIClient` silently dropped all tool calls — AI SDK v6 renamed `args` to `input` in `onStepFinish` callback; guard check `"args" in tc` always failed
-- Engine: `EngineAIClient` missing `contextLength` passthrough — Ollama models ran with default context instead of configured value
-- CLI: Reviewer works from the plan (same source of truth as workers), not the raw spec
-- CLI: Approval threshold configurable via `/settings review.threshold` (1-10 scale, default 8)
-- CLI: Reviewer prompt rewritten for fairness — "be fair" not "bias toward approval"
-- CLI: Revision prompt ported from WorkerMill platform — per-story feedback, "What You Did Last Time" from git history, scope enforcement
-- CLI: Revision reviews send only the delta — prevents context window overflow on later rounds
-- CLI: Revision reviewer breaks deadlocks — persistent issues accepted as best effort
-- CLI: Planner failure stops workflow — no more silent fallback to a single story
-- CLI: `/setup` clears config and stays in app — user restarts to re-run setup
-- CLI: Feature branch named from task description (workermill/scheduled-rollouts) not timestamps
-- CLI: edit_file shows actual file content at match location on failure — helps models correct their next attempt
-- CLI: Codex models routed to OpenAI Responses API; other models use Chat Completions
-- CLI: Google TTS/audio-only models filtered from setup wizard
-- CLI: `gofmt -d .` not `gofmt -d ./...` in reviewer instructions
-- CLI: Ollama `keepAlive: "-1"` prevents model unload during long tool calls
-- CLI: Text repetition detection with fuzzy matching + abort at 10 repeats
-- CLI: Worker summary output suppressed after tool calls complete
-- CLI: ESC cancel checks at every phase boundary including planner
-- CLI: `rm -rf` on relative project paths no longer triggers dangerous command warning
-- CLI: Planner minimizes stories — one persona = one story, aims for 5 or fewer
-- CLI: All logging goes to cli.log — tool results, tool errors, model output, reviewer output
+- **Stale review-loop churn in `/ship` and `/review`** — review rounds now include a loop guard. When the reviewer repeats the same blockers across rounds, auto-revise pauses instead of burning more cycles. Reviewer instructions now require concrete blocking evidence and a minimal actionable fix when requesting revision.
+- **Planner over-trusting stale tickets/issues** — planning guidance now explicitly tells the planner to verify whether the reported gap is already fixed in the current code before proposing duplicate production changes.
+- **`/model` default persistence regression** — switching models now reliably persists the active default model/provider for future sessions, including coverage for local/project settings interactions.
+- **Diverged branch push failure flow in `/ship`** — when `git push -u origin <branch>` is rejected as non-fast-forward, the CLI now detects divergence, explains why, and offers a safe `--force-with-lease` confirmation path instead of failing opaquely.
+- **GitHub issue auto-close timing** — opening a PR from `/ship` no longer force-transitions GitHub tickets to done on PR creation. PRs still include close keywords so the issue closes at merge time in the normal GitHub flow.
 
-- CLI: Live model switching — `/model provider/model [context]` hot-swaps mid-session with autocomplete, API key validation, command chaining, and auto-compaction
-- CLI: `/compact [focus]` runs immediately with optional focus instructions
-- CLI: `/settings key <provider> <api-key>` adds API keys inline
-- CLI: Context window in status bar (`[provider/model (256k context)]`)
-- CLI: Cursor movement (arrow keys, Ctrl+A/E, word jump) in input
-- CLI: xAI, Groq, DeepSeek, Mistral as OpenAI-compatible providers
-- CLI: Google model alias resolution (gemini-3.1-pro → gemini-3.1-pro-preview)
-- CLI: MCP tools in orchestrator and headless mode
-- CLI: Docker Desktop MCP gateway auto-detection
-- Homepage: total npm downloads instead of weekly average
-- Homepage: contact links to jarodrosenthal.com
+## [0.15.100] - 2026-04-05
+
+### Added
+- **`wm models` command** — new CLI subcommand that lists all available AI models grouped by provider. Combines the static registry (Anthropic, OpenAI, Google, xAI, Groq, DeepSeek, Mistral, Ollama, LM Studio, OpenRouter, Bedrock, Azure) with live discovery of local providers. Flags: `--provider <name>` to restrict to one provider, `--available` to hide unreachable local providers, `--json` for scripting. The `/model` autocomplete inside a session also probes default Ollama (`localhost:11434`) and LM Studio (`localhost:1234`) ports so tab-completion works without explicit config.
+- **Branch pre-flight check in `/ship`** — if the feature branch for a ticket already exists locally (e.g. from a previous aborted run), `/ship` now detects it before creating any files and prompts: **reset** (delete and start fresh from main) or **continue** (resume on the existing branch). Previously the branch was silently reused, which could sweep up uncommitted changes into the worker's first commit.
+- **Phase 0 spec assessment in the planner** — the planner now reads the task description first and decides how much codebase analysis it actually needs before touching any tools. Well-specified tickets with explicit file paths and implementation constraints enter targeted mode (3–5 file reads). Vague tickets proceed with full codebase analysis. Eliminates the multi-million-token deep-read that well-specified tickets were triggering.
+
+## [0.15.99] - 2026-04-04
+
+### Fixed
+- **Modified Enter key handling in supporting terminals (WezTerm/kitty/ghostty)** — the CLI now enables enhanced keyboard reporting for the session so `Shift+Enter` / `Alt+Enter` can be disambiguated when the terminal supports it, and disables it on exit.
+- **Multiline compose reliability in flaky terminals** — improved fallback flow with `/multiline` mode plus explicit submit markers (`/submit` or `/send`) so users can always compose blank lines and submit reliably even when modifier keys collapse.
+
+## [0.15.98] - 2026-04-04
+
+### Fixed
+- **Transcript spacing polish (chat + tool flow)** — tightened several rendering edge cases that caused inconsistent vertical rhythm:
+  - always keeps one blank line between a user turn and the first assistant output line,
+  - keeps `/ship`-style compact logs single-spaced after that first gap,
+  - removes accidental wrapped-user artifacts like `word\n\n indented-continuation` in committed user messages.
+- **Live tool-call line crowding** — added a dedicated blank spacer before the active tool-call row so tool activity does not appear visually attached to the preceding transcript line.
+- **Permission prompt status-bar jump** — dismissing a tool permission prompt no longer causes the status bar to snap upward immediately. The prompt lane is temporarily reserved until the turn returns to idle, preventing layout jitter.
+- **Retry/token waste in repeated failure loops** — orchestration retries now stop earlier when the same fixable/transient failure signature repeats, and oversized retry/review feedback is truncated before re-injection into prompts to reduce context bloat.
+- **Pasted path scrambling in terminal input** — the CLI input box mixed functional `setValue(...)` updates with a stale `cursorPos` closure, so rapid pasted text could be inserted at the wrong position and appear garbled. Input editing now uses synchronized refs for value/cursor state so paste, typing, deletion, history restore, and completion acceptance all apply atomically.
+- **Cost tracking accuracy** — normalized `openai/` model prefixes before pricing lookup so usage from OpenAI-compatible model names resolves to the correct price entry.
+- **Bash dispatch latency** — reduced tool-call lag in interactive mode by fixing bash tool execution and preventing render-blocking tool dispatch paths.
+- **System prompt / persona updates** — refreshed the CLI system prompt and fallback persona guidance to better match current behavior and available commands.
+- **Setup / model filtering** — updated model selection behavior to keep older OpenAI families out of the current-model picker while preserving supported pricing and routing.
+- **`/settings review.threshold` not taking effect** — changing the approval threshold via `/settings review.threshold <n>` saved to disk but the orchestrator still used the stale config snapshot from CLI startup, always falling back to the default of 8. `/ship` and `/review` now reload config fresh from disk on each run so settings changes take effect immediately without restarting.
+- **Bash tool debug log below status bar** — the bash worker thread wrote `[bash-worker] received: ...` directly to `process.stderr`, bypassing Ink's terminal management and rendering text below the status bar. Removed the debug log.
+- **API keys not passed to OpenAI-compatible providers** — xAI, Groq, DeepSeek, and Mistral all route through `createOpenAI()` which defaulted to `OPENAI_API_KEY`. Now reads provider-specific env vars (`XAI_API_KEY`, `GROQ_API_KEY`, etc.) and passes the key from config directly.
+- **Cost tracking wrong after `/model` switch** — cost tracker read the startup provider/model instead of the active one, so switching mid-session tracked costs against the wrong pricing tier.
+- **Sub-penny costs shown as `~$0.00`** — status bar now shows `<$0.01` for small amounts so you can tell costs are being tracked.
+- **Git tool auto-allowed in acceptEdits mode** — git now prompts for permission in auto-edit mode instead of silently allowing.
+- **4 typecheck errors** — fixed nullable guards in `/model` switch and orchestrator error handler, plus `toolChoice` type mismatch.
+
+- **MCP tool schemas breaking Anthropic API** — Docker Desktop MCP gateway returns tools without `input_schema.type`, which Anthropic rejects with `tools.5.custom.input_schema.type: Field required`. Now forces `type: "object"` on all MCP tool schemas. MCP tools also removed from planner tool set (planner only needs codebase read tools).
+- **Planner producing text instead of JSON** — when the planner outputs analysis text without a JSON stories block, a single cheap follow-up call now extracts the plan as JSON instead of failing outright.
+- **o4-mini pricing was 7x too high** — had $4/$16 per M, corrected to $0.55/$2.20. Also fixed o3 (added caching support) and gemini-2.5-pro input ($1.25 → $1.00).
+- **xAI reasoning not surfacing** — `reasoningSummary: "detailed"` was not being sent for xAI provider in either single-agent or orchestrator paths.
+
+### Added
+- **Multiline input** — `Shift+Enter` or `Alt+Enter` inserts a newline in the input box instead of submitting. Alt+Enter works in all terminals; Shift+Enter requires enhanced keyboard protocols (kitty, WezTerm, modern Windows Terminal). Up/Down arrows navigate within lines first, falling back to history at the top/bottom.
+- **Planning critic loop** — ported from the platform (`api/src/services/critic-agent-local.ts`). After the planner produces stories, a critic pass scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Plans scoring below threshold (default 8, configurable via `/settings review.criticThreshold`) are sent back for refinement, up to 3 iterations. Off by default; enable with `/settings review.critic true`.
+- **Grok Code Fast model** — added `grok-code-fast-1` to xAI registry ($0.20/$1.50 per M, 256K context, purpose-built for agentic coding).
 
 ### Changed
-- CLI: Removed `/plan` command
-- CLI: `/init` re-run is stability-first — validates, asks before writing
-- CLI: Browser tools use Zod inputSchema (fixes OpenAI Responses API)
-- CLI: Completed tool calls hidden from message history (status bar tracks counts)
-- CLI: Session summary shows git diffstat instead of message count
-- CLI: Voice, Chrome, Schedule marked as experimental
-- CLI: Review model color: lilac instead of magenta
-- Platform: PLATFORM.md — removed dead documentation links
+- **Model registries updated to April 2026** — removed deprecated/ancient models from `/model` autocomplete. Updated: Anthropic (3 current models), Google (2.5 + 3.x only), xAI (Grok 4.x with 2M context + Grok Code Fast), DeepSeek (+V4), Mistral (Large 3, Small 3.1, Codestral, Devstral 2), Groq (+Qwen3), OpenRouter, Bedrock, Azure.
+- **Prebuild cleanup** — `npm run build` now auto-deletes orphan `.js` files from `api/src/` and `packages/engine/src/` that shadow `.ts` sources during bundling.
+- **Status bar context label** — removed the word "context" from the model display (e.g. `(2M)` instead of `(2M context)`).
+
+## [0.15.97] - 2026-04-03
 
 ### Fixed
-- CLI: Anthropic context windows — Opus 4.6 and Sonnet 4.6 are 1M (was 200k)
-- CLI: OpenAI pricing verified — gpt-5.4 (1M/$2.50/$15), gpt-5.4-mini (400k/$0.75/$4.50), gpt-5.4-pro (1.05M/$30/$180), gpt-5.4-nano (400k/$0.20/$1.25)
-- CLI: Google pricing verified — gemini-3.1-pro-preview ($2/$12), gemini-3-flash-preview ($0.50/$3)
-- CLI: Google model names use actual API names (`gemini-3.1-pro-preview`)
-- CLI: Ollama context switching — unloads model when context doesn't match (not just too small)
-- CLI: Status bar updates on `/model` switch (provider, model, context, tok/s)
-- CLI: Stale tsc build artifacts causing vitest to resolve wrong files
+- **`/model` not persisting across sessions** — switching the worker model via `/model <provider>/<model>` updated the provider's model entry but never set `config.default` to the new provider. On restart, the CLI loaded the old default provider, ignoring the switch. Now persists both the model and the default provider to `~/.workermill/cli.json`.
+
+---
+
+## [0.15.96] - 2026-04-03
+
+### Fixed
+- **Bash tool hang** — tool calls would hang for 30+ seconds (or indefinitely) in interactive mode. Root cause: Ink's Legacy mode `flushSyncWork()` blocks the Node.js event loop on every `setState`, preventing async child process callbacks from firing. Bash tool now runs `spawnSync` in a worker thread with `SharedArrayBuffer` + `Atomics.wait` for synchronous cross-thread communication — executes in ~5ms with zero event loop dependency.
+- **Tool dispatch blocked by render** — `onStepFinish` was calling `setStreamingText()` between AI SDK steps, triggering a synchronous Ink render that blocked tool execution for ~30 seconds when message history was accumulated. Now skips the render when the step contains tool calls.
+- **Git branch display lag** — branch name in the status bar took up to 5 seconds to update after `git checkout`. Now refreshes immediately after every bash tool call via `onBashComplete` callback.
+- **Ollama KV cache invalidation** — system prompt was rebuilt from disk on every turn, changing its content and invalidating Ollama's prompt cache. Now cached per session.
+
+### Changed
+- **Tool visual updates deferred** — `setState` calls for tool status ("pending", "running", "done") are batched after tool completion instead of before, preventing synchronous renders from blocking tool execution.
+
+---
+
+## [0.15.95] - 2026-04-02
+
+### Added
+- **LM Studio provider** — full native support for LM Studio as a local model provider. Setup wizard detects LM Studio at `localhost:1234` (or Windows host IP from WSL), lists available models, and saves config. `/model lmstudio/<model>` switches mid-session with autocomplete.
+- **LM Studio context management** — when switching to an LM Studio model with a specified context size (e.g. `/model lmstudio/gemma4:26b 128k`), the CLI automatically unloads and reloads the model via LM Studio's `/api/v1/models/unload` + `/api/v1/models/load` endpoints to match the requested context. Reports actual `loaded_context_length` from LM Studio's `/api/v0/models` endpoint — no more silent mismatches.
+- **Local model context hints** — switching to Ollama or LM Studio without specifying a context size now shows the active context window and a tip to set it explicitly (e.g. `/model ollama/qwen3-coder:30b 64k`). Defaults to 128k.
+- **Issue tracker optional** — setup wizard now offers "Skip (no issue tracker)" as option 1. Users without GitHub/Jira/Linear can complete setup without configuring a ticket system.
+- **LM Studio model autocomplete** — `/model` tab completion now fetches and lists LM Studio models live alongside Ollama models.
+
+### Changed
+- **Message spacing** — blank line added between all messages (user and assistant) for visual separation, matching Claude Code's layout.
+- **System prompt** — model no longer refuses non-coding requests. Explicitly instructed to help with any task the user asks.
+- **`/model` help text** — documents context window syntax for local models.
+- **`/model` supported providers list** — added `lmstudio`.
+
+### Fixed
+- **Terminal text wrapping** — assistant messages now render at the correct terminal width by passing `stdout.columns` explicitly into the Markdown renderer at commit time. Responses no longer wrap too early on wide terminals.
+- **LM Studio API key error** — LM Studio was being routed through the OpenAI provider without a dummy API key, causing `AI_LoadAPIKeyError` on every request. Now uses `createOpenAI({ apiKey: "lm-studio" })` with the correct `baseURL`.
+- **`lmstudio` provider not recognized** — `getProviderForPersona()` was remapping `lmstudio` to `openai` (losing the host). Added to `knownProviders` set so it routes correctly through the dedicated `lmstudio` case in `createModel()`.
+- **Local model context fallback** — `/model` switch logic only checked `ollama` provider when loading saved context length. Now checks both `ollama` and `lmstudio`.
+
+---
+
+## [0.15.94] - 2026-04-02
+
+### Changed
+- **LSP tool hardened** — crash recovery (auto-restarts on server exit), push diagnostics capture, file version tracking (`didChange` instead of re-opening), init failure recovery, dual symbol format support. No longer experimental.
+- **LSP conditionally loaded** — tool schema only sent to the model when the project has language markers (`tsconfig.json`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`). Deferred otherwise — saves ~200 tokens/turn. Still loadable via `tool_search`.
+- **Compaction overhauled** — thresholds lowered (micro: 50%, soft: 70%, hard: 90%). Three-tier micro-compaction: recent messages untouched, middle messages pattern-compressed, old messages aggressively compressed. Soft compaction summarizer sends 2000 chars per message (up from 500) and preserves file paths and decisions.
+- **Planning critic marked experimental** — the critic pass (`review.useCritic`) is scaffolded but not yet functional. Settings show *(experimental)* label. Full implementation will port the platform's battle-tested Planner-Critic loop from `critic-agent-local.ts`.
+
+### Fixed
+- **Context windows corrected across all providers** — OpenAI GPT-5.x models were showing 128K instead of 400K–1.05M. Claude Opus 4.6 and Sonnet 4.6 compaction limits were 200K instead of 1M. All values verified against provider pricing pages. Removed deprecated models (<256K context) from OpenAI registry. Added missing models (o3, o3-mini, o3-pro, o4-mini, gpt-5-codex, gpt-5-pro, gpt-5.1, gpt-5.1-codex-mini). Unknown model fallback raised from 128K to 256K.
+- **Context estimation accurate** — `shouldCompact()` now uses actual message content size instead of the Vercel AI SDK's inflated multi-step totals. Status bar token count matches.
+- **Rate limit detection rewritten** — fresh `isRateLimitError()` in both orchestrator and agent loop.
+- **Ticket detection** — `GH#1`, `GH #11`, `GH 11` all recognized. Project-level ticket config (`ticketSystem`, `jira`, `linear`) merges correctly from `.workermill/cli.json`.
+- **Review threshold from config** — review prompts use configured `approvalThreshold` instead of hardcoded `8`.
+- **Status bar flicker** — throttled to 2s intervals in orchestrator mode.
+- **Regex backtracking safety** — tool output patterns replaced with bounded alternatives.
+- **Session resume compacted** — `--resume` now runs micro-compaction on the loaded session before the first prompt, trimming stale tool output that would otherwise fill the context window.
+- **Dead `MEMORY_INSTRUCTIONS` removed** — unused 190-token constant was defined in the orchestrator but never referenced.
+- **`IGNORE_WORKERMILL` removed from orchestrator** — sandbox/directory confinement rules are a cloud worker concern, not CLI. Saves ~110 tokens per worker story.
+- **`VERSION_TRUST` removed** — obsolete workaround for older models that downgraded dependency versions. Current models don't need this. Saves ~70 tokens per story.
+- **`DOCKER_INSTRUCTIONS` conditional** — only injected when the story mentions databases, Docker, migrations, or services. Saves ~240 tokens on frontend/refactoring/docs stories.
+- **npm audit** — regenerated `package-lock.json` for CI compatibility.
+- **Documentation audit** — fixed `/retry` example, persona/tool counts, `/sessions` description, `/as` example, permission mode descriptions.
+
+## [0.15.88] - 2026-03-31
+
+### Added
+- **LSP tool** *(experimental)* — code intelligence via language servers. Diagnostics, go-to-definition, find-references, hover, and symbols. Auto-detects TypeScript, Python, Go, Rust. Falls back to grep/bash when no language server is available.
+- **Granular permission rules** — three-tier permission rules: `deny` > `ask` > `allow` with glob patterns. Example: `"allow": ["bash(npm run *)"]`, `"deny": ["bash(rm *)"]`, `"ask": ["bash(npm publish *)"]`. "Yes, don't ask again" saves permanent `bash(<command>)` rules to config (session-only for file edits). Compound commands (`&&`, `;`) split into separate rules.
+- **Isolated sub-agents** — `sub_agent({ isolated: true })` runs in a git worktree with full write tools. Changes stay on a separate branch for the parent agent to review. Worktrees auto-cleaned on exit.
+- **OS-level sandboxing** — `"sandbox": "os"` in config wraps bash commands in bubblewrap (`bwrap`) on Linux. Read-only system dirs, read-write working directory. Falls back to JS-level sandboxing if bwrap unavailable.
+- **File-level checkpoints** — every write/edit is snapshotted before execution. `/undo` reverts the last edit, `/undo N` reverts last N, `/undo <file>` reverts a specific file, `/undo list` shows all checkpoints. Old git-based undo moved to `/undo git`.
+- **Session fork** — `--resume --fork` continues from the last session with a new ID, leaving the original untouched.
+- **Lifecycle hooks** — `hooks.on` config for events: `session_start`, `session_end`, `ship_start`, `ship_complete`, `review_complete`, `compact`. Supports `"type": "http"` for webhook POSTs.
+- **Bell setting** — `/settings bell true` plays a beep when `/ship` finishes. Off by default.
+- **`/setup` inline config** — shows current providers, roles, and routing with commands to change each part. No longer deletes the config. `/setup reset` for full wipe.
+
+### Changed
+- **Permission modes renamed** — `ask` → `default`, `auto-edit` → `acceptEdits`, `trust all` → `bypassPermissions`. `plan` added to shift+tab cycle. New `dontAsk` mode (CLI flag only) auto-denies everything not in allow rules.
+- **Permission prompt simplified** — "Yes" / "Yes, don't ask again" / "Deny". Removed "Always allow this tool" and "Trust all tools" options. Trust-all is now a mode (shift+tab), not a prompt choice.
+- **`/permissions` shows saved rules** — displays persistent allow/ask/deny rules from config alongside the current mode.
+- **`/setup` no longer destructive** — shows current config and how to change it inline. Only `/setup reset` deletes the config file.
+- **`/undo` default is file-level** — reverts individual file edits from checkpoints. `/undo git` for the old git stash/reset behavior.
+- **`/compact [focus]` documented** — added to `/help` command list. Focus instructions were already supported but not discoverable.
+- **`lsp` added to all personas** — available to all developer, architect, tech lead, and writer personas.
+
+### Changed (cont.)
+- **`/ship` stays on feature branch** — no longer auto-checkouts main after completion. Developer stays on the feature branch to review, test, and push.
+- **`/help` expanded** — added `/as`, `/remember`, `/forget`, `/memories`, `/setup`, `/clear`, `/settings key`. Added keyboard shortcuts (arrow keys, Ctrl+A/E, Shift+Tab, Tab).
+- **`/settings` display** — added API keys row with `/settings key` command.
+- **Custom command shadow warning** — `/skills` warns when a custom command name conflicts with a built-in.
+
+### Fixed
+- **Trust-all permission bug** — selecting "trust all" in `/ship` mode only added 7 hardcoded tool names to the allow set. Tools like `verify`, `todo`, `lsp`, and MCP tools would prompt again. Now uses a `*` wildcard — one trust-all click covers everything.
+- **Shift+tab mode applies mid-run** — changing permission mode during `/ship` or `/retry` now takes effect immediately. Previously the mode was captured at launch and never rechecked.
+- **Unified permission prompt** — chat mode and `/ship` mode now use the same `PermissionPrompt` component. Previously two separate implementations with different options and behavior.
+- **Status bar visible during prompts** — permission prompts no longer hide the status bar. ESC key denies in all prompt types.
+- **`/permissions allow` and `deny` save permanently** — rules saved to `~/.workermill/cli.json`, not just the session. `/permissions allow bash` permanently allows all bash commands.
+- **Setup preserves API keys** — re-running setup reuses saved keys from existing config instead of forcing re-entry.
+- **Shorter permission prompt text** — tool display shows file path or command only, not verbose key dumps.
+- **Setup stdin handoff** — `rl.close()` destroyed stdin, preventing Ink from setting raw mode after first-run setup. Fixed with `rl.close()` + `process.stdin.resume()`.
+- **`/setup reset` routing** — `case "setup reset"` was a dead branch that never matched. Now handled as `arg === "reset"` inside the setup case.
+- **Stale `/retry` state** — `getRetryableRun` now verifies the branch still exists. Deleted branches are auto-cleared instead of showing "incomplete run" notes forever.
+- **`/log` crash** — replaced `require("crypto")` with ESM import (dynamic require not supported in ESM bundle).
+
+## [0.15.87] - 2026-03-30
+
+### Added
+- **Live model switching** — `/model provider/model [context]` hot-swaps mid-session. No restart. Status bar, context window, and tok/s all update immediately.
+- **Model autocomplete** — `/model ` shows all available models from all providers (cloud from pricing registry, Ollama from live API). Tab to accept.
+- **Context window in status bar** — displays `[provider/model (256k context)]` like Claude Code. Resolved from pricing registry for cloud, config for Ollama.
+- **Auto-compact on model switch** — switching to a smaller context model auto-compacts conversation if tokens exceed 80% of new limit.
+- **`/model` command chaining** — `/model openai/gpt-5.4 /as backend_developer fix auth` switches model then dispatches the trailing command.
+- **`/compact [focus]`** — runs compaction immediately with optional focus instructions (e.g. `/compact focus on API changes`). No longer defers to automatic.
+- **`/settings key <provider> <api-key>`** — add API keys inline without leaving the session. Saved to config and active immediately.
+- **API key validation on `/model` switch** — blocks switch if no key found, prompts user with `/settings key` command.
+- **Cursor movement** — left/right arrows, Ctrl+Left/Right (word jump), Ctrl+A/E (home/end) in the input field.
+- **OpenAI-compatible providers** — xAI, Groq, DeepSeek, Mistral work via `/model` with known base URLs.
+- **Google model alias resolution** — `gemini-3.1-pro` auto-resolves to `gemini-3.1-pro-preview` at the API level.
+
+### Changed
+- **Removed `/plan` command** — redundant with status bar permissions. Removed from help text, autocomplete, and tests.
+- **`/init` re-run prompt** — stability-first. Validates existing WORKERMILL.md, lists concrete issues, asks before writing. No longer auto-edits.
+- **Splash screen simplified** — removed role model display, context line, persona count. Shows a random tip and `/help` pointer.
+- **Browser tools use Zod** — converted from raw JSON schema `parameters` to Zod `inputSchema` for cross-provider compatibility (fixes OpenAI Responses API crash).
+- **Review model color** — lilac (`#C586C0` label, `#A066A0` model) instead of raw magenta. Easier on the eyes.
+- **Permission escalation consistent** — "Always allow this tool" now escalates status bar to `auto-edit`. Previously only "Trust all" updated the display.
+- **Completed tool calls hidden** — no longer shows vertical list of completed tools after each turn. Status bar tracks counts, in-progress indicator still shows.
+- **`/model` doesn't change planner/reviewer** — only switches the active worker model. Use `/setup` to change role assignments.
+- **Welcome message** — removed "12" from "AI experts ready to work" to avoid going stale.
+
+### Changed (cont.)
+- **Session summary** — exit summary shows git diffstat (files, +insertions, -deletions) instead of meaningless message count.
+- **`/compact` reports tokens** — shows before/after token count instead of message count. Status bar percentage updates after compaction.
+- **Orchestrator permission prompt** — removed spurious `[🤖 system] Tool: write_file` line. Permission details now inline in the confirm prompt.
+
+### Fixed
+- **Anthropic context windows** — Opus 4.6 and Sonnet 4.6 correctly show 1M context (was 200k).
+- **OpenAI pricing** — gpt-5.4 (1M/$2.50/$15), gpt-5.4-mini (400k/$0.75/$4.50), gpt-5.4-pro (1.05M/$30/$180), gpt-5.4-nano (400k/$0.20/$1.25). All verified from openai.com/api/pricing.
+- **Google pricing** — gemini-3.1-pro-preview ($2/$12), gemini-3-flash-preview ($0.50/$3), gemini-2.5-pro ($1.25/$10). All verified from ai.google.dev/pricing.
+- **Google model names** — use actual API names (`gemini-3.1-pro-preview`, not `gemini-3.1-pro`).
+- **Context display math** — power-of-2 values (Ollama) use 1024 divisor, cloud values use 1000.
+- **Stale tsc build artifacts** — vitest was resolving `.js` files over `.ts` sources. Cleaned `cli/src/` and `packages/engine/src/`.
+- **Status bar not updating on `/model` switch** — provider, model, and context now use reactive state.
+- **Tok/s tracking after `/model` switch** — was keyed to startup model, now uses active model refs.
+- **Ollama context switching** — `ensureOllamaContext` now unloads model when context doesn't match (was only unloading when too small, not when switching down).
+- **`buildOllamaOptions` uses active context** — was passing startup context length instead of the value set by `/model`.
+- **`/compact` on high-token short conversations** — now summarizes even with few messages when token count is high (e.g. 192k tokens in 2 messages from tool calls).
+
+## [0.15.85] - 2026-03-30
+
+### Added
+- **MCP tools in orchestrator and headless mode** — MCP servers now start and stop with `/ship` orchestration and headless (`-p`) mode, not just interactive single-agent mode. All MCP tools available to planner and story workers.
+- **MCP-aware system prompts** — when MCP servers are active, the system prompt tells the model which servers are connected and that `mcp__*` prefixed tools are real and working. Applied to interactive and headless modes.
+- **Docker Desktop MCP gateway auto-detection** — the CLI automatically discovers Docker Desktop's MCP gateway when available (WSL and native). No manual config needed — if Docker Desktop has MCP servers enabled, they're connected automatically across all three modes.
+- **External tool instructions** — agents now receive `EXTERNAL_TOOLS` guidance in story system prompts covering `gh` CLI, `web_search`, `fetch`, `curl`, and package managers.
+
+## [0.15.81] - 2026-03-28
+
+### Added
+- **Sandbox setting** — `/settings sandbox true/false` to toggle file directory restriction. On by default. CLI flag `--full-disk` also overrides. Persists to `cli.json`.
+- **Branch-aware `/diff`** — on a feature branch, `/diff` shows committed changes vs main instead of empty uncommitted diff.
+- **Status bar branch updates** — branch name updates immediately when `/ship` creates a feature branch (was stale until next prompt).
+- **Cost logging** — every `addUsage` call now logs persona, provider, model, token counts, cost, and running total to CLI logs. Review rounds also log input/output token counts.
+- **Review horizontal rules** — reviewer output framed with `────` lines above and below the decision/score for visual separation.
+- **Unit tests** — added tests for safety, config, memory, session, git-ops, permissions, commands, cost-tracker, and orchestrator.
+- **E2E tests** — Ollama integration tests for tool calling and streaming.
+
+### Changed
+- **Status bar layout** — all rows left-aligned with `│` separators (matches Claude Code). Previously project info and plan/review were right-aligned.
+- **Status bar colors** — plan (cyan) and review (magenta) colors now match terminal output exactly. Uses Ink named colors instead of hex approximations.
+- **Tool counts row dimmed** — gray text creates visual separation without extra line spacing.
+- **Worker model color** — orange in terminal output (ANSI 256-color `208`) to match status bar brand color. Was yellow.
+- **Completion summary** — shows branch + commit count only. Removed verbose diffstat file list.
+- **Banner** — "AI coding team" instead of "AI coding agent".
+- **README** — new value prop sections ("The Problem Isn't the Model" / "What WorkerMill Does Differently"), trimmed repetition, split badges into two rows, added npm weekly downloads badge.
+- **Demo video** replaced with new CLI walkthrough.
+
+### Fixed
+- **Score threshold as hard gate** — reviewer's `REVIEW_DECISION` marker alone doesn't approve; score must meet threshold (default 8).
+- **Reviewer re-blocks on real issues** — functional bugs across revision rounds properly trigger `needs_revision` even if the model marker says approved.
+- **`review.critic` setting** — was not persisting to config or being read by orchestrator.
+- **Project config** — orchestrator now reads per-project `.workermill/config.json` overrides.
+
+## [0.15.8] - 2026-03-26
+
+### Added
+- `/as <persona> <task>` command — run a single task with a specific expert persona (e.g. `/as security_engineer review the auth middleware`).
+- Splash screen shows expert count and discovery: `12 experts available (/build auto-assigns, /as to pick one, /personas to list)`.
+- Orchestrator tool calls now tracked in the status bar during `/build` and `/retry`.
+- `build.sh` script — verified builds with `--bump patch|minor|major`. Checks version sync, browser tools, tool definitions, synchronized output, and status bar presence.
+- Synchronized terminal output (DEC mode 2026) — wraps Ink renders in begin/end synchronized update sequences for atomic frame rendering. Eliminates tearing during rapid redraws.
+
+### Changed
+- **Workers receive the full original spec** as `## Ticket Requirements — THIS IS YOUR SPEC`, matching the WorkerMill platform pattern from `prompt-builder.ts`. Workers no longer rely on the planner's interpretation.
+- **Planner creates scope labels, not rewritten specs.** Story descriptions are file scope identifiers — workers read the full spec themselves.
+- **Three-tier review system** matching the WorkerMill platform: `REVIEW_DECISION: approved | revision_needed | rejected`. Score (1-10) is informational with a guide (7+ = approve). Replaces the harsh 0-100 numeric threshold.
+- **Review bias toward approval** — cosmetic issues don't block, only functional/security bugs trigger revision. Copied criteria directly from `worker/epic/inline-reviewer.ts`.
+- **Revision prompt includes per-story feedback** — workers get their specific `AFFECTED_REASONS` instead of the full review dump for all stories.
+- Splash screen simplified: `/build orchestrates experts  /help for all commands`.
+- `workers:` label (plural) in splash screen.
+- Plan/review model labels moved to status bar row 3 (with permission mode) — row 2 is tools only.
+- Status bar timer shows minutes only (`<1m`, `1m`, `2m`) to reduce unnecessary re-renders.
+- Natural greeting — agent doesn't introduce itself as WorkerMill unless asked.
+
+### Fixed
+- **Restored browser tools** — their presence in the tool set is required for Ollama tool calling. Removing them broke ALL tool serialization (model output XML instead of structured calls). Documented in CLAUDE.md as load-bearing.
+- Compaction summary emitted as `user` + `assistant` pair instead of bare `assistant` — prevents API 400 error on next prompt.
+- Trust-all from permission prompt updates `trustAllRef` immediately — subsequent tool calls in the same turn no longer re-prompt.
+- `rm -f <file>` no longer triggers dangerous-command warning — only `-r`/`--recursive`/`--force` flagged.
+- Input history shows most recent entry first on Up arrow.
+- CDP timer leak — `clearTimeout` on successful browser commands.
+- Status bar mode icons use single-width Unicode (▸ ◆ ◈) instead of emojis that caused line wrapping on Windows Terminal.
+- Long plan/review model names truncated at 25 chars to prevent row overflow.
+- Removed artificial 100K character limit on review content — no truncation.
+- `patchConsole: false` removed (was interfering with Ink rendering).
 
 ### Removed
-- CLI: Auto-detected quality gates (tsc/lint) — caused cascading failures; workers self-verify
-- CLI: Invented agents (inline verifier, integration fixer, review fixer, critic)
-- CLI: `::learning::` marker instructions from all personas
-- CLI: `sub_agent` tool from planner and reviewer
-- CLI: All `totalMs` wall-clock timeouts on AI operations
-- CLI: All content truncation
-- CLI: 10-minute safety timeout on agent operations
-- CLI: 5-minute E2E test timeout
+- `approvalThreshold` config setting — review approval now driven by `REVIEW_DECISION` marker, not a numeric score gate.
 
----
+## [0.13.3] - 2026-03-26
 
-## 2026-03-22 — WorkerMill CLI (v0.1.0–v0.8.x)
-
-The open-source CLI — standalone multi-expert orchestration via `npx workermill`.
-
-### Added
-- Interactive setup wizard with auto-detected Ollama and multi-provider config
-- `/build` slash command — planner + expert personas + tech lead review
-- `/config` for runtime provider and model changes
-- 13 tools: `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls`, `bash`, `sub_agent`, `todo`, `web_search`, `web_fetch`, `image`, `think`
-- 13 expert personas matching cloud worker roles
-- Topological dependency sorting for story execution order
-- Inline Tech Lead review with configurable quality threshold
-- Cost tracking with per-model pricing across all providers
-- ESC key cancels build in progress
-- Selective revision — only re-run affected stories on failure
-- Provider support: Anthropic, OpenAI, Google, Ollama (local models)
-- Published to npm as `workermill`
-
----
-
-## 2026-03-18 — GitHub Issues & Bitbucket Integration
+### Fixed
+- Auto-update no longer attempts `npm install -g` which fails without sudo. Shows `npx workermill@X.Y.Z` instead.
+- Browser tools removed from agent tool set — raw JSON schemas broke ALL tool definitions, causing models to fake tool calls in text output.
+- Update check cache stale after user upgrades — now re-fetches from npm when cached version is older than current.
+- Removed all content truncation from user-facing output (file contents, diffs, changelogs, persona prompts).
+- 68 silent `catch {}` blocks replaced with proper error logging.
+- Git branch detection works on repos with no commits (symbolic-ref fallback).
+- `/personas show` displays full prompt without truncation.
+- Status bar rows 2 and 3 no longer render giant black background blocks.
 
 ### Added
-- GitHub Issues as a first-class issue tracker (create parent/child issues from PRDs)
-- Bitbucket REST API auth unification
-- Linear status sync support
-- VS Code: Local Development onboarding flow and Get Started walkthrough
+- Three-row status bar: model/context/project, tool usage stats, permission mode with shift+tab hint.
+- `/chrome` command to open/close headless Chrome browser.
+- `/schedule` command — create recurring tasks with cron schedules.
+- Headless mode (`-p` flag) — run single prompt without TUI, streams to stdout.
+- `/voice` listens until silence (no arbitrary time limit).
+- Auto-revise option: press (a)lways at revision prompt, `--auto-revise` flag, or `/settings review.autoRevise true`.
+- Distinct permission mode icons: ▶ ask, ✏️ auto-edit, ⚡ trust all.
+- Agent identity includes "created by Jarod Rosenthal" (answers if asked).
+- Dynamic model selection for OpenAI and Google — fetches available models from API after key entry.
+- 7 additional providers via OpenAI-compatible API (Groq, DeepSeek, Mistral, OpenRouter, Together, xAI, Fireworks).
+- Ollama model list deduplicated by base name, sorted by coding relevance.
+- Google model list filtered to coding-capable Gemini models only.
+- Build output accumulates in dynamic area during build, commits to Static on completion.
+- `/init` uses the AI agent to explore codebase and generate WORKERMILL.md (not static scanning).
+- `/init` on existing file reviews and suggests improvements instead of overwriting.
 
 ### Changed
-- Standalone mode removed entirely — self-hosted uses cloud codebase directly
+- `WORKERMILL.md` in repo root is now the primary instructions file (was `.workermill/instructions.md`).
+- `/clear` actually resets the session (was showing "not supported").
+- Update check interval reduced from 24h to 4h.
 
----
-
-## 2026-03-16 — AI SDK Migration
+## [0.10.6] - 2026-03-25
 
 ### Added
-- Unified AIClient factory replaces all Claude CLI subprocess spawns
-- Direct `generateText()` / `streamText()` calls via Vercel AI SDK
-- Multi-provider parity for Epic mode (Anthropic, OpenAI, Google)
+- `/voice` command — speak instead of type. Uses platform-native speech recognition (Mac: `hear`, Windows: PowerShell, Linux: whisper). Listens until silence, no arbitrary time limit.
+- `/update` command — pulls latest version via `npm install -g workermill@latest`
+- `/skills`, `/personas`, `/mcp` commands — manage custom commands, personas, and MCP servers
+- `/release-notes` command — shows changelog
+- Built-in browser automation via Chrome DevTools Protocol — `browser_open`, `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_fill`, `browser_evaluate`, `browser_console`, `browser_close`
+
+### Fixed
+- Dangerous command detection too aggressive — `rm -rf prisma` (relative path) no longer triggers. Only flags root/home paths.
+- Reviewer confirm shows `(y/n)` not `(y)es (a)lways (t)rust all (n)o` for revision/plan/commit prompts
+- Reviewer gets actual code via `git ls-files` fallback when `::file_created::` markers missing
+- Story parser normalizes field names (`index`→`id`, `steps`→`stories`, `depends_on`→`dependsOn`)
+- Unique story IDs enforced before topological sort
+- Planner output streams line-by-line in real time
+
+## [0.9.3] - 2026-03-25
+
+### Fixed
+- **Ollama context length never applied** — `num_ctx` was at the wrong nesting level in `providerOptions`. Ollama always loaded at 32K default regardless of config. Now correctly sends `providerOptions.ollama.options.num_ctx`.
+
+## [0.9.2] - 2026-03-25
+
+### Fixed
+- `/model` message correctly says "restart CLI" (model can't hot-swap mid-session)
+- `/status` reads live permission mode instead of stale launch props
+- `/personas` works for npm users (was only scanning monorepo path)
+- Bell doesn't ring on cancelled builds
+- MCP client version string updated
+
+## [0.9.1] - 2026-03-25
+
+### Added
+- `/release-notes` command (also `/changelog`) — shows CHANGELOG.md or links to GitHub
+
+## [0.9.0] - 2026-03-25
+
+### Added
+- `/skills` command — lists custom commands with setup instructions
+- `/personas` command — list all personas, show prompt details, create custom personas
+- `/mcp` command — shows configured MCP servers with setup instructions
+- All three added to `/help` and autocomplete
+
+## [0.8.9] - 2026-03-25
 
 ### Changed
-- Workers use AI SDK directly instead of shelling out to Claude CLI binary
-- Feature flag removed — unified AIClient enabled by default
+- Planner output streams line-by-line in real time instead of dumping on step finish
 
----
-
-## 2026-03-12 — Quality Gates & Multi-Language Support
-
-### Added
-- Board-level quality gate commands (lint, typecheck, test, e2e)
-- `blockOnE2EFailures` setting — block PR approval on e2e test failures
-- Language-aware quality fix agent (Python, Go, Rust, Java)
-- Service log capture in integration fixer for debugging
-- Sandbox environment verification scripts for Windows
+## [0.8.8] - 2026-03-25
 
 ### Fixed
-- Infinite fix loop when typecheck tool unavailable
-- Python project support: auto-install `uv` and dependencies before gates
-- Gate commands use `bash` instead of `sh` (POSIX compatibility)
+- Normalize planner output field names (`index`→`id`, `steps`→`stories`, `depends_on`→`dependsOn`) for cross-model compatibility
 
----
+## [0.8.7] - 2026-03-25
 
-## 2026-03-08 — VS Code Live Diff (v0.2.80+)
+### Fixed
+- Ensure unique story IDs before topological sort (planners without IDs collapsed all stories into one)
 
-### Added
-- Sticky live diff — real-time code change visualization during task execution
-- File-level diff navigation with syntax highlighting
-- Start/stop task controls from VS Code
-- Error diagnostics in live diff manager
-
----
-
-## 2026-03-04 — Self-Hosted Docker Compose
-
-### Added
-- Embedded `docker-compose.yml` generation for self-hosted deployments
-- Automatic seed defaults for new installations
-- SES email configuration for self-hosted auth flows
+## [0.8.6] - 2026-03-25
 
 ### Changed
-- Self-hosted mode uses identical code paths as cloud — no feature forks
+- Build permission prompts support `(y)es (a)lways (t)rust all (n)o`
+- `/build` and `/retry` read current permission mode from Shift+Tab cycling
 
----
-
-## 2026-02-27 — Agent Standalone Mode
-
-### Added
-- `workermill-agent init --standalone` for local-only operation
-- `run` and `prd` CLI commands for the agent binary
-- Specs API client and Zustand store for frontend
-
----
-
-## 2026-02-24 — Cloud Billing & Language Profiles
-
-### Added
-- Cloud compute billing model ($3/hr, per-minute granularity)
-- Language profiles for multi-language quality verification
-- Persona Studio with seeded execution scripts
-- VS Code: error messages in task detail panel
-- Syntax-highlighted diffs in live code view (dashboard + VS Code)
+## [0.8.5] - 2026-03-25
 
 ### Fixed
-- PgBouncer sidecar compatibility (SSL, credential parsing, connection options)
-- Unique RedisStore per rate limiter (prevent cross-contamination)
-- Worker EBUSY on Windows temp dir cleanup
-- Dashboard task disappearance on concurrent SSE updates
+- Google model names: `gemini-3.1-pro-preview` (was `gemini-3.1-flash-lite` which doesn't exist in API)
 
----
+## [0.8.4] - 2026-03-25
 
-## 2026-02-21 — Terms of Service & VS Code CI/CD
+### Removed
+- `wm build` subcommand — use `/build` inside the CLI instead
+
+## [0.8.3] - 2026-03-25
+
+### Fixed
+- Semver comparison for update check (was string compare, told users to downgrade)
+
+## [0.8.2] - 2026-03-25
 
 ### Added
-- Server-side TOS enforcement with versioned re-acceptance
-- VS Code extension CI/CD pipeline (GitHub Actions)
-- One-click issue creation from VS Code
+- Shift+Tab cycles permission modes: ask → auto-edit → trust all
+- Auto-edit mode: auto-approves file tools, prompts only for bash
+
+## [0.8.1] - 2026-03-25
+
+### Added
+- Slash command autocomplete — type `/` to see filtered list, arrows to navigate, Tab to accept
+
+## [0.8.0] - 2026-03-25
+
+### Added
+- `/init` creates `WORKERMILL.md` in repo root (visible, committable) with project detection
+- `/clear` resets conversation (clears messages and tokens)
+- `/permissions` command with granular per-tool allow/deny
+- Tab/Shift+Tab cycling in permission prompts
+- Instructions loader checks `WORKERMILL.md` first
+
+## [0.7.2] - 2026-03-25
+
+### Fixed
+- Dangerous commands always prompt even in trust mode (was auto-approving rm -rf, force push during builds)
+- Dead `planText`/`allText` variables removed
+- MCP client version updated
+
+### Added
+- CHANGELOG.md
+
+## [0.7.1] - 2026-03-25
+
+### Added
+- Auto-update check: notifies when a newer version is available on npm (checks once per 24h)
+- `wm doctor` command: checks Node.js version, git, config, Ollama connectivity, project instructions, learnings, and custom commands
+- `/log` command: shows the last 20 entries from `.workermill/cli.log`
+- Pre/post tool hooks: configure shell commands to run before/after specific tools via `cli.json`
+- `/init` command: auto-generates `.workermill/instructions.md` from project metadata (package.json, requirements.txt, Dockerfile, git remote, directory structure)
+- `/model` command: switch provider/model at runtime (persisted to config)
+- `@folder/` mentions: inline directory tree listings (max depth 2) into prompts
+- `@url` mentions: fetch URL content via curl and inline into prompts
+- Terminal bell on long operations (>10s for chat, always for builds)
+- `--max-tokens` flag: cap output tokens per response
+- Double-ESC to roll back the last user+assistant conversation exchange
+- `/undo` command: stash uncommitted changes or soft-reset the last commit
+- `/diff` command: preview uncommitted changes with diff stat and content
+- `@file` mentions: inline text file contents into prompts with syntax highlighting
+- Project instructions: auto-loads `.workermill/instructions.md`, `CLAUDE.md`, `.cursorrules`, or `.github/copilot-instructions.md`
+- MCP (Model Context Protocol) server support: configure external tool servers in `cli.json`
+- Persistent learnings: `::learning::` markers extracted and saved across sessions
+- Custom slash commands: drop `.md` files in `.workermill/commands/` or `~/.workermill/commands/`
+- `@image` mentions: inline image files (png, jpg, gif, webp, bmp) as multimodal content
+- `/settings` command: view and modify review settings, Ollama host/context at runtime
+- `/retry` command: re-plan and re-run the last `/build` task
+- Inject original task spec into every worker's system prompt for full context
+- Animated braille spinner on activity indicator
+- Live status line showing persona activity during `/build`
+- Tool-specific status labels (e.g., "Reading src/index.ts...", "Running npm test...")
+- Bash guardrails: block dangerous commands (rm -rf, force push, drop table, etc.) with confirmation
+- Author credit in welcome header
+- Provider/model display when workers and reviewer start
+- Cost estimates shown with `~` prefix, rounded to cents
+
+### Fixed
+- Show status during revision and review tool execution
+- 1-based review round numbering (was 0-based)
+- ESC handler always active with `isActive: true`
+- Simplified build status to "persona: working..." instead of verbose output
+- Compact welcome commands into single line
+- Inject actual code diff into review prompt instead of summary
+- Unlimited review rounds with y/n prompt (configurable via settings)
+- Workers instructed to stay within working directory
+- Suppress `MaxListenersExceededWarning` during builds (raised default to 30)
+- Force `process.exit` on `/quit` and double Ctrl+C to prevent dangling listeners
+- Auto-fix Ollama context length mismatch at startup via `ensureOllamaContext`
+- Remove empty line spam, compact message spacing
+- Skip classification step for `/build` (go straight to multi-expert)
+- Stop filtering planner output lines
+- All agents ignore `.workermill/` directory
+- Replace verbose file listing with compact change summary after build
+- Properly mask API keys during setup by closing readline before raw input
+- Remove cost summary dump after build (status bar shows running total)
+- Resolve routed provider names for accurate cost tracking
+- ESC cancels build in progress
+- Move context bar next to worker model in status bar
+- Fix API key plaintext echo during setup
+- Show all role models in status bar
+
+## [0.5.4] - 2026-03-22
+
+### Fixed
+- Lockfile update for dependency resolution
+
+## [0.5.0] - 2026-03-21
+
+### Added
+- Role-based setup wizard: configure separate providers/models for workers, planner, and reviewer
+- Live cost tracking in status bar during all operations
+- Status bar improvements: git branch, token context usage, mode indicator
+
+### Fixed
+- Use API pricing engine for accurate cost calculation
+- Fix review score extraction from model output
+- Add structured logging throughout the CLI
+
+## [0.4.1] - 2026-03-20
+
+### Added
+- Bump OpenAI models to current generation (GPT-5.4 family)
+- Orchestrator logging for debugging build runs
+
+### Fixed
+- Fix API key handling for routed providers
+- Correct status bar layout for multi-provider setups
+
+## [0.4.0] - 2026-03-19
+
+### Added
+- Ink-based terminal UI replacing the scroll-region TUI
+- ESC to cancel running agent operations
+- React component architecture (App, Root, StatusBar, Input, Markdown, ToolCall, PermissionPrompt)
 
 ### Changed
-- Landing page "Get Started" → "Join the Waitlist"
+- Migrated from raw readline + ANSI escape codes to Ink (React for terminals)
+- Messages rendered via `<Static>` for proper scrollback
+- Permission system integrated into React state management
 
----
-
-## 2026-02-18 — PRD Decomposition from VS Code
-
-### Added
-- PRD decomposition via local Claude CLI with SSE streaming
-- Dual auth support (API key + OAuth) for VS Code extension
-- Image handling in worker prompts (base64 screenshots)
-- OnCallShift: waitlist system and product page consolidation
-
-### Fixed
-- Git and Claude CLI detection on Windows via registry + known paths
-- OAuth token refresh in Docker sandbox
-
----
-
-## 2026-02-16 — Agent Binary & VS Code Extension
+## [0.3.0] - 2026-03-18
 
 ### Added
-- **Standalone agent binary** — `tsc` → `esbuild` (5 bundles) → `bun compile`
-- Agent local API (HTTP + SSE on localhost)
-- **VS Code extension** — Jira backlog, curated logs, live code changes panel
-- Simplified planning mode (org-level setting)
-
-### Fixed
-- Bracket-matching JSON parsers replace fragile regex across all parsers
-- CLAUDECODE env var stripped to prevent nested-session guard
-- Node.js ESM compatibility via `createRequire` banner
-
-### Security
-- Race condition fixes in concurrent task updates
-- XSS prevention in log rendering
-- API key hashing for storage
-
----
-
-## 2026-02-13 — Decision Client & Bastion Access
-
-### Added
-- Decision client with retry, circuit breaker, and fallback classification
-- Wired into Epic coordinator, multi-expert, agents, and executor
-- Production bastion script (`bin/bastion start/stop`)
-
----
-
-## 2026-02-09 — Agent Self-Update & Terraform
-
-### Added
-- Agent self-update system with version tracking
-- Startup banner with agent version display
-- Terraform infrastructure-as-code for full AWS stack
-
----
-
-## 2026-02-07 — Self-Hosted Docker Mode
-
-### Added
-- Self-hosted deployment via Docker Compose (API + Worker + PostgreSQL + Redis)
-- Local worker spawner for single-machine deployments
-- AWS credential mounting for terraform/CLI access in worker containers
-
----
-
-## 2026-02-01 — Showcase & Public Demo
-
-### Added
-- Showcase repositories (ShipAPI, CalMill) for demo environments
-- Railway deployment integration
-- Bitbucket CLI support for worker reviewers
-- Request coalescing for coordination client (performance)
+- Battle-tested WorkerMill production prompts ported to CLI personas
+- Enriched all worker personas with WorkerMill production rules (Docker, version trust, communication style)
+- 13 persona files matching `worker/epic/experts.ts`
 
 ### Changed
-- Explicit AI SDK clients with org-specific API keys (no shared state)
+- Persona system aligned with WorkerMill worker to ensure CLI IS WorkerMill
 
----
-
-## 2026-01-26 — SSO, Auto-Improve & Persona Customization
+## [0.2.0] - 2026-03-17
 
 ### Added
-- **Google and Microsoft SSO** via Cognito federation
-- Auto-improve toggle — workers learn from review feedback across tasks
-- Org-specific persona customization (override system personas)
-- Multi-provider support for Epic inline reviewer
-- Hung task detection via stale heartbeat monitoring
-- Standard SDK Executor (Vercel AI SDK path alongside Claude CLI)
-
----
-
-## 2026-01-24 — Epic Mode & Multi-Expert Orchestration
-
-### Added
-- **Epic mode** — parallel multi-agent execution with expert collaboration
-- Real expert-to-expert coordination feed
-- Inline Tech Lead review with revision loop (up to 3 revisions)
-- Consolidated PR creation merging all expert branches
-- Multi-expert mode with Vercel AI SDK integration
-- **MCP server** for WorkerMill API access from Claude Desktop
-- Tech Lead, Tech Writer, and additional expert personas
+- Multi-expert orchestration (`/build` command)
+- Planner agent with codebase exploration
+- Tech Lead reviewer with score-based approval
+- Selective revision (only re-run affected stories)
+- Topological story sorting by dependencies
+- Inline review with revision loop
+- Context sharing between stories (files, decisions, learnings)
+- Automatic git commit after successful builds
 
 ### Fixed
-- Git identity configuration before committing in containers
-- Backtick escaping in PR bodies to prevent shell substitution
+- Context bar shows actual window usage, not cumulative spend
+- Ollama `num_ctx` passthrough with 64K default context
+- Single-agent WorkerMill format output
+- Bash error visibility and PATH fix
 
----
-
-## 2026-01-22 — Planning Agent V5 & Multi-Repo Deploy
-
-### Added
-- Planning V5 with Action Registry and dynamic coverage thresholds
-- Story count calibration multiplier (temperature dial for plan sizing)
-- Multi-repository deployment support via `.workermill/deploy.json`
-- Tech stack decisions passed to workers for coordination
-- Planning Agent settings in dashboard UI
-
-### Changed
-- Stories distributed proportionally by action count to prevent monolith steps
-
----
-
-## 2026-01-20 — V2 Planning & User Onboarding
+## [0.1.3] - 2026-03-15
 
 ### Added
-- V2 multi-phase PRD planning system
-- User onboarding flow (org creation/join)
-- Settings page redesign with sidebar navigation
-- Partial token usage tracking during worker execution
-- Semantic dependency auditor for planning agent
-
-### Fixed
-- Cancelled tasks no longer auto-restart on webhook trigger
-
----
-
-## 2026-01-18 — PRD Orchestration & Parallel Workers
-
-### Added
-- **PRD orchestration** — multi-agent workflow with sibling coordination
-- Parallel worker execution with orchestrator merging
-- Dependency graph enforcement during dispatch
-- Auto-merge child PRs for PRD workflows
-- Dry-run mode with auto-cleanup
-- Internal task management system (Kanban board)
-
-### Fixed
-- Circular dependency detection in story dispatch
-- UUID validation in log stream endpoint (crash prevention)
-
----
-
-## 2026-01-15 — Multi-Provider & Mission Control
-
-### Added
-- **OpenAI GPT-4o provider support** alongside Anthropic Claude
-- Persona-to-provider routing for cost optimization
-- Role-based dashboards for 10 personas including executive layer
-- Mission Control dashboard with system health overview
-- Post-agent validation for workflow completion
-
----
-
-## 2026-01-14 — Checkpointing & Multi-Provider Architecture
-
-### Added
-- Worker state checkpointing (save/resume across container restarts)
-- Multi-provider execution architecture with LangGraph
-- Jira webhook race condition handling for label detection
-
----
-
-## 2026-01-12 — Docker Builds & Deployment
-
-### Added
-- Kaniko Docker builds inside worker containers
-- Worker directive for checking Jira attachments
-- Spot instance interruption retry logic
-
-### Fixed
-- SSL certificate corruption after Kaniko builds
-- Infrastructure file protection rules in agent directives
-
----
-
-## 2026-01-11 — Virtual Manager & Live Streaming
-
-### Added
-- Virtual Manager Review workflow (human-in-the-loop approval)
-- Real-time log streaming to dashboard (database-backed SSE)
-- Cost tracking with log parser
-- Auto-collapse terminals for completed tasks
-
-### Fixed
-- JSON stream data marker cleanup
-- NaN handling in cost display
-
----
-
-## 2026-01-10 — WorkerMill Monorepo
-
-WorkerMill spun out of OnCallShift as a standalone AI software engineering platform.
-
-### Added
-- **WorkerMill monorepo** — API, Frontend, Worker, Infrastructure
-- Core orchestrator with pluggable provider interfaces
-- AWS integrations (ECS task runner, SQQ job queue)
-- React dashboard with task management
-- Docker Compose for local development
-- 10 specialized worker personas
-- Jira and GitHub webhook integrations
-- Claude CLI-based worker execution with stream-json output parsing
-- Standardized deployment script (`deploy.sh`)
-- Worker directives system for persona-specific behavior rules
-
----
-
-## 2026-01-03 — AI Workers Control Center (OnCallShift)
-
-The AI Workers system was built inside OnCallShift before spinning out as WorkerMill.
-
-### Added
-- **Super Admin Control Center** for AI Workers monitoring
-- AI Workers system for autonomous Jira task execution
-- AI Workers self-recovery system
-- Virtual Manager for PR review with identity signatures
-- DOE framework with deployment capability
-- Intelligent persona routing (keyword scoring)
-- Manager autonomous workflow with PR approval
-- Event-driven revision retries with circuit breaker
-- Cancel button for tasks in pr_created/manager_review status
-- Accurate token cost tracking via `log-parser.js`
-
-### Security
-- Authentication rate limiting to prevent brute force attacks
-- CORS wildcard replaced with explicit allowed origins
-- API keys masked in GET responses
-- Explicit security headers (HSTS, X-Frame-Options, noSniff)
-- Fail-closed Slack webhook signature verification
-
----
-
-## 2026-01-01 — AI Assistant & Analytics (OnCallShift)
-
-### Added
-- AI Assistant with Cloud Investigation capability
-- Unified AI Assistant with org-specific API keys
-- Runbook Automation with real shell command execution
-- Analytics dashboard with dark theme
-- Notifications, postmortems, and import/export
-- CloudFront S3 architecture for frontend hosting
-
----
-
-## 2025-12-31 — PagerDuty Migration & Webhook Parity (OnCallShift)
-
-### Added
-- PagerDuty/Opsgenie migration compatibility (zero-config key preservation)
-- Contact method and notification rule import
-- Alert routing rules import
-- Heartbeat monitors
-- Maintenance window, service dependency, and tag import
-- Frontend import wizard
-- Complete Webhook API parity with PagerDuty
-- SSO implementation guide
-- Comprehensive mobile app improvements
-
----
-
-## 2025-12-30 — Escalation Engine & Mobile (OnCallShift)
-
-### Added
-- Multi-target and repeat support for escalation policies
-- Weekly on-call calendar on dashboard
-- Automatic rotation handoffs via escalation timer worker
-- Notification status tracking per channel
-- Real shell command execution for runbook actions
-- Mobile notification status panel
-- OnCallShift brand logo and icons
-- CI/CD pipeline with GitHub Actions
-- Terraform plan approval workflow
-
----
-
-## 2025-12-28 — React Frontend (OnCallShift)
-
-### Added
-- React frontend with authentication and incident management
-- Express backend integration
-- Production Dockerfile with frontend integration
-- Test server for local development without database
-
----
-
-## 2025-12-27 — Project Inception (pagerduty-lite)
-
-### Added
-- Initial project structure — open-source PagerDuty alternative
-- Later renamed to **OnCallShift**, then the AI Workers system spun out as **WorkerMill**
+- Initial public release on npm as `workermill`
+- Single-agent interactive chat mode
+- Multi-expert orchestration (alpha)
+- 13 shared tools from `packages/engine/`
+- Ollama, Anthropic, OpenAI, and Google provider support
+- Scroll region TUI with pinned status bar
+- Session persistence and resume (`--resume`)
+- Auto-compaction when context usage exceeds 80%
+- Cost tracking with per-provider pricing

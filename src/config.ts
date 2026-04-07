@@ -161,8 +161,6 @@ export interface CliConfig {
   doctor?: DoctorConfig;
   /** Enable live browser diff view during /build runs ("auto", true, or false) */
   liveView?: boolean | "auto";
-  /** Activity animation intensity for the status line. */
-  uiActivity?: "off" | "minimal" | "full";
   /** Show inline edited-file previews for committed tool edits (default: true). */
   inlineEditPreview?: boolean;
   /** Enable experimental features: /doctor, /orchestrate (default: false) */
@@ -297,7 +295,6 @@ export function resolveConfig(): CliConfig {
     program: { ...global.program, ...(project?.program || {}) },
     doctor: { ...global.doctor, ...(project?.doctor || {}) },
     liveView: project?.liveView ?? global.liveView,
-    uiActivity: project?.uiActivity ?? global.uiActivity,
     inlineEditPreview: project?.inlineEditPreview ?? global.inlineEditPreview,
     experimental: project?.experimental ?? global.experimental,
   };

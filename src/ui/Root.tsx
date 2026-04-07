@@ -112,9 +112,6 @@ export function Root(props: RootProps): React.ReactElement {
   );
   // Role models — updates when planner/reviewer are switched via /model
   const [roleModels, setRoleModels] = useState(props.roleModels);
-  const [uiActivityMode, setUiActivityMode] = useState<"off" | "minimal" | "full">(
-    props.cliConfig?.uiActivity ?? "full",
-  );
   const [inlineEditPreviewEnabled, setInlineEditPreviewEnabled] = useState(
     props.cliConfig?.inlineEditPreview ?? true,
   );
@@ -213,7 +210,6 @@ export function Root(props: RootProps): React.ReactElement {
         switchModel: switchModelAndDisplay,
         setLiveViewEnabled: agent.setLiveViewEnabled,
         getLiveViewUrl: agent.getLiveViewUrl,
-        setUiActivityMode: (mode: "off" | "minimal" | "full") => setUiActivityMode(mode),
         setInlineEditPreviewEnabled: (enabled: boolean) => setInlineEditPreviewEnabled(enabled),
         updateRoleModels: () => {
           try {
@@ -343,7 +339,6 @@ export function Root(props: RootProps): React.ReactElement {
       orchestratorPaused={orchestrator.paused}
       onPauseOrchestrator={orchestrator.pause}
       onResumeOrchestrator={orchestrator.resume}
-      uiActivityMode={uiActivityMode}
       inlineEditPreviewEnabled={inlineEditPreviewEnabled}
     />
   );

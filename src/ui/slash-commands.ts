@@ -297,7 +297,6 @@ export interface SlashCommandContext {
   forceCompact?: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
   setLiveViewEnabled?: (enabled: boolean) => string | null;
   getLiveViewUrl?: () => string | null;
-  setUiActivityMode?: (mode: "off" | "minimal" | "full") => void;
   setInlineEditPreviewEnabled?: (enabled: boolean) => void;
 }
 
@@ -1510,7 +1509,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const liveViewEnabled = config.liveView === true;
         const liveViewUrl = ctx.getLiveViewUrl?.() || null;
         const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
-        const uiActivity = config.uiActivity || "full";
         const inlineEditPreview = config.inlineEditPreview ?? true;
         const bellEnabled = config.bell === true;
 
@@ -1525,7 +1523,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| Inline edit preview | ${inlineEditPreview} | \`/settings ui.inlineEditPreview <true/false>\` |\n` +
-          `| UI activity | ${uiActivity} | \`/settings ui.activity <off/minimal/full>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Experimental (/orchestrate, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |`;
@@ -1627,7 +1624,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "ui.inlineeditpreview": "ui.inlineEditPreview",
           "inlineeditpreview": "ui.inlineEditPreview",
           "bell": "bell",
-          "ui.activity": "ui.activity",
           "experimental": "experimental",
           "tickets": "tickets",
           "jira.url": "jira.url",
@@ -1814,16 +1810,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.inlineEditPreview = boolVal(value);
             break;
           }
-          case "ui.activity": {
-            const normalized = value.toLowerCase();
-            if (normalized !== "off" && normalized !== "minimal" && normalized !== "full") {
-              ctx.addSystemMessage("Invalid value for `ui.activity`. Use `off`, `minimal`, or `full`.");
-              settingApplied = false;
-              break;
-            }
-            config.uiActivity = normalized;
-            break;
-          }
           case "experimental": {
             config.experimental = boolVal(value);
             break;
@@ -1911,7 +1897,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "ui.activity", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
           if (key === "liveView" && ctx.setLiveViewEnabled) {
@@ -1925,12 +1911,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
               ctx.addSystemMessage("Live code view enabled.");
             } else {
               ctx.addSystemMessage("Live code view disabled.");
-            }
-          }
-          if (key === "ui.activity" && ctx.setUiActivityMode) {
-            const normalized = value.toLowerCase();
-            if (normalized === "off" || normalized === "minimal" || normalized === "full") {
-              ctx.setUiActivityMode(normalized);
             }
           }
           if (key === "ui.inlineEditPreview" && ctx.setInlineEditPreviewEnabled) {

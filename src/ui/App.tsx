@@ -85,15 +85,12 @@ interface AppProps {
   onPauseOrchestrator?: () => void;
   /** Called when Ctrl+P is pressed to resume the orchestrator. */
   onResumeOrchestrator?: () => void;
-  /** Status-line activity animation intensity. */
-  uiActivityMode?: "off" | "minimal" | "full";
   /** Show inline edited-file previews for committed tool-only messages. */
   inlineEditPreviewEnabled?: boolean;
 }
 
 const ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const ACTIVITY_TICK_MS_FAST = 160;
-const ACTIVITY_TICK_MS_SLOW = 420;
 
 function Spinner({ color, tick }: { color: string; tick: number }): React.ReactElement {
   return <Text color={color}>{ACTIVITY_FRAMES[tick % ACTIVITY_FRAMES.length]}</Text>;
@@ -507,9 +504,8 @@ export function App(props: AppProps): React.ReactElement {
     hasLiveStatusActivity,
   );
   const shouldAddPromptInputSpacer = !hasLiveActivity;
-  const uiActivityMode = props.uiActivityMode ?? "full";
   const inlineEditPreviewEnabled = props.inlineEditPreviewEnabled ?? true;
-  const animateActivity = uiActivityMode !== "off";
+  const animateActivity = true;
 
   useEffect(() => {
     if (!hasLiveActivity) {
@@ -523,12 +519,11 @@ export function App(props: AppProps): React.ReactElement {
 
   useEffect(() => {
     if (!hasLiveActivity || !animateActivity) return;
-    const tickMs = uiActivityMode === "minimal" ? ACTIVITY_TICK_MS_SLOW : ACTIVITY_TICK_MS_FAST;
     const timer = setInterval(() => {
       setActivityTick((t) => (t + 1) % 10_000);
-    }, tickMs);
+    }, ACTIVITY_TICK_MS_FAST);
     return () => clearInterval(timer);
-  }, [animateActivity, hasLiveActivity, uiActivityMode]);
+  }, [animateActivity, hasLiveActivity]);
 
   const elapsedSec = activitySinceRef.current ? Math.max(0, Math.floor((Date.now() - activitySinceRef.current) / 1000)) : 0;
   const elapsedLabel = elapsedSec > 0 ? ` ${elapsedSec}s` : "";

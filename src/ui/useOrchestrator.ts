@@ -20,7 +20,7 @@ import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
 import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state.js";
-import { getCurrentBranch, shellArg } from "../git-ops.js";
+import { execGh, getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
 import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
@@ -1473,10 +1473,10 @@ export function useOrchestrator(
                 const issueBody = `## Tech Lead Review\n\n**Score:** ${result.score}/10\n**Decision:** ${result.decision}\n\n${result.feedback}\n\n---\n*Created by [WorkerMill CLI](https://workermill.com) /review*`;
 
                 try {
-                  const issueUrl = execSync(
-                    `gh issue create --title ${shellArg(issueTitle)} --body-file -`,
-                    { cwd: process.cwd(), encoding: "utf-8", input: issueBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
-                  ).trim();
+                  const issueUrl = execGh(
+                    ["issue", "create", "--title", issueTitle, "--body-file", "-"],
+                    { cwd: process.cwd(), input: issueBody, timeout: 15_000 },
+                  );
                   // Extract issue number from URL
                   const issueMatch = issueUrl.match(/\/issues\/(\d+)/);
                   const issueNumber = issueMatch ? `#${issueMatch[1]}` : null;

@@ -20,7 +20,7 @@ import {
   deriveFeatureBranchName, localBranchExists, deleteLocalBranch,
   commitStoryChanges, commitRevisionChanges,
   captureStoryPriorWork, getDiffForReview, getDiffSinceCommit,
-  getHeadHash, returnToOriginalBranch, shellArg,
+  getHeadHash, returnToOriginalBranch, shellArg, execGh,
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "./safety.js";
@@ -3857,10 +3857,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               }
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
-              const prUrl = execSync(
-                `gh pr create --title ${shellArg(prTitle)} --body-file - --head ${shellArg(featureBranch)} --base ${shellArg(mainBranch)} 2>&1`,
-                { cwd: workingDir, encoding: "utf-8", input: prBody, stdio: ["pipe", "pipe", "pipe"] },
-              ).trim();
+              const prUrl = execGh(
+                ["pr", "create", "--title", prTitle, "--body-file", "-", "--head", featureBranch, "--base", mainBranch],
+                { cwd: workingDir, input: prBody },
+              );
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
 

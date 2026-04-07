@@ -9,7 +9,7 @@
  * are identical.
  */
 
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import * as logger from "./logger.js";
@@ -20,6 +20,20 @@ import * as logger from "./logger.js";
  */
 export function shellArg(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+export function execGh(args: string[], options?: {
+  cwd?: string;
+  input?: string;
+  timeout?: number;
+}): string {
+  return execFileSync("gh", args, {
+    cwd: options?.cwd,
+    input: options?.input,
+    timeout: options?.timeout,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  }).trim();
 }
 
 /**

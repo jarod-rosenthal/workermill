@@ -5,6 +5,14 @@ import { loadConfig, saveConfig, type CliConfig, type ProviderConfig } from "./c
 import type { TicketSystem } from "./config.js";
 import { TicketOps } from "./ticket-ops.js";
 import * as logger from "./logger.js";
+import type { ModelInfo } from "./providers/types.js";
+import {
+  GROQ_MODELS,
+  DEEPSEEK_MODELS,
+  MISTRAL_MODELS,
+  OPENROUTER_MODELS,
+  XAI_MODELS,
+} from "./providers/generic/pricing.js";
 
 interface ProviderOption {
   name: string;
@@ -74,9 +82,40 @@ const COMPATIBLE_PROVIDERS: Array<{ name: string; display: string; baseURL: stri
   { name: "mistral", display: "Mistral AI", baseURL: "https://api.mistral.ai/v1", envVar: "MISTRAL_API_KEY", defaultModel: "mistral-large-latest" },
   { name: "openrouter", display: "OpenRouter (any model)", baseURL: "https://openrouter.ai/api/v1", envVar: "OPENROUTER_API_KEY", defaultModel: "anthropic/claude-sonnet-4" },
   { name: "together", display: "Together AI", baseURL: "https://api.together.xyz/v1", envVar: "TOGETHER_API_KEY", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-  { name: "xai", display: "xAI (Grok)", baseURL: "https://api.x.ai/v1", envVar: "XAI_API_KEY", defaultModel: "grok-3" },
+  { name: "xai", display: "xAI (Grok)", baseURL: "https://api.x.ai/v1", envVar: "XAI_API_KEY", defaultModel: "grok-4-1-fast-reasoning" },
   { name: "fireworks", display: "Fireworks AI", baseURL: "https://api.fireworks.ai/inference/v1", envVar: "FIREWORKS_API_KEY", defaultModel: "accounts/fireworks/models/llama-v3p3-70b-instruct" },
 ];
+
+function getCompatibleProviderModels(providerName: string, defaultModel: string): { id: string; label: string }[] {
+  const catalogs: Record<string, Record<string, ModelInfo>> = {
+    groq: GROQ_MODELS,
+    deepseek: DEEPSEEK_MODELS,
+    mistral: MISTRAL_MODELS,
+    openrouter: OPENROUTER_MODELS,
+    xai: XAI_MODELS,
+  };
+
+  const catalog = catalogs[providerName];
+  if (!catalog) {
+    return [{ id: defaultModel, label: `${defaultModel} (default)` }];
+  }
+
+  const entries = Object.values(catalog);
+  entries.sort((a, b) => {
+    if (a.id === defaultModel) return -1;
+    if (b.id === defaultModel) return 1;
+    const tierRank = { powerful: 0, balanced: 1, fast: 2 } as const;
+    const aTier = tierRank[a.tier as keyof typeof tierRank] ?? 99;
+    const bTier = tierRank[b.tier as keyof typeof tierRank] ?? 99;
+    if (aTier !== bTier) return aTier - bTier;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  return entries.slice(0, 10).map((model) => ({
+    id: model.id,
+    label: `${model.displayName}${model.id === defaultModel ? " (recommended)" : ""}`,
+  }));
+}
 
 /** Mutable readline holder — allows close/recreate without breaking callers. */
 class Prompter {
@@ -145,7 +184,7 @@ async function pickProvider(
         display: cp.display,
         needsKey: true,
         envVar: cp.envVar,
-        models: [{ id: cp.defaultModel, label: `${cp.defaultModel} (default)` }],
+        models: getCompatibleProviderModels(cp.name, cp.defaultModel),
         // Store baseURL in a way that gets picked up by config
         detectedModels: undefined,
         _baseURL: cp.baseURL,

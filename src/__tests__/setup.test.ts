@@ -291,6 +291,30 @@ describe("setup.ts", () => {
       expect(config.providers["groq"].host).toBe("https://api.groq.com/openai/v1");
     });
 
+    it("offers current xAI models during setup instead of only grok-3", async () => {
+      const providersLength = 5; // PROVIDERS has 5 entries
+      setAnswers([
+        String(providersLength + 1), // "More providers..."
+        "6", // xAI in COMPATIBLE_PROVIDERS
+        "1", // first setup model for xAI
+        "y", // same for planner
+        "y", // same for reviewer
+      ]);
+
+      setTimeout(() => {
+        process.stdin.emit("data", Buffer.from("xai_test_key\r"));
+      }, 200);
+
+      const { runSetup } = await import("../setup.js");
+      const config = await runSetup();
+
+      expect(config.default).toBe("xai");
+      expect(config.providers["xai"]).toBeDefined();
+      expect(config.providers["xai"].host).toBe("https://api.x.ai/v1");
+      expect(config.providers["xai"].model).toBe("grok-4-1-fast-reasoning");
+      expect(config.providers["xai"].model).not.toBe("grok-3");
+    });
+
     it("handles custom OpenAI-compatible provider (last option)", async () => {
       const providersLength = 5;
       const compatProvidersLength = 7; // COMPATIBLE_PROVIDERS has 7 entries

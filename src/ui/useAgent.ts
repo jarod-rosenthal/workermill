@@ -1269,7 +1269,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                 });
               } else if (ENABLE_STEP_STREAMING_TEXT && reasoningText && callCount === 0 && !text) {
                 const setStreamingStartMs = Date.now();
-                setStreamingText(`(thinking)\n${reasoningText}`);
+                setStreamingText(reasoningText);
                 const setStreamingDurationMs = Date.now() - setStreamingStartMs;
                 setStatus("thinking");
                 traceDispatch("onStepFinish:reasoning_rendered", {

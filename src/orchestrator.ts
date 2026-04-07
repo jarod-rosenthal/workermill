@@ -711,7 +711,7 @@ function emitReasoningDelta(
   if (!delta) return;
   const lines = delta.split("\n").map((line) => line.trim()).filter(Boolean);
   for (const line of lines) {
-    emit(`(thinking) ${line}`);
+    emit(line);
   }
 }
 
@@ -2609,7 +2609,7 @@ export async function runOrchestration(
               const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
               const sig = `${first.toolName}:${detail}`;
               if (sig !== lastSyntheticThinkingSig) {
-                output.log(story.persona, `(thinking) ${first.toolName}${detail ? ` ${detail}` : ""}`);
+                output.log(story.persona, `${first.toolName}${detail ? ` ${detail}` : ""}`);
                 lastSyntheticThinkingSig = sig;
               }
             }
@@ -2653,7 +2653,7 @@ export async function runOrchestration(
             // Always log full text to cli.log — terminal may suppress but logs show truth
             logger.debug("Story output", { persona: story.persona, text });
           }
-          output.status(`${story.persona}: thinking...`);
+          output.status(`${story.persona}: working...`);
         },
       });
 
@@ -3667,7 +3667,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 if ((!text || !text.trim()) && toolCalls && toolCalls.length > 0) {
                   const first = toolCalls[0];
                   const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
-                  output.log(story.persona, `(thinking) ${first.toolName}${detail ? ` ${detail}` : ""}`);
+                  output.log(story.persona, `${first.toolName}${detail ? ` ${detail}` : ""}`);
                 }
                 if (text) {
                   const lines = text.split("\n").filter(l => l.trim());
@@ -3676,7 +3676,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                     output.log(story.persona, line);
                   }
                 }
-                output.status(`${story.persona}: thinking...`);
+                output.status(`${story.persona}: working...`);
               },
             });
 

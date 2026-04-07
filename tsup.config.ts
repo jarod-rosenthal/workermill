@@ -5,6 +5,7 @@ export default defineConfig({
   format: ["esm"],
   target: "node20",
   clean: true,
+  splitting: false,
   shims: true,
   // Keep npm dependencies external — users install them.
   external: [

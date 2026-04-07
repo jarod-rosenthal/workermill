@@ -131,6 +131,36 @@ const program = new Command()
   .description("WorkerMill — AI coding agent for your terminal")
   .version(VERSION);
 
+// ── Run command: headless automation ──
+program
+  .command("run [prompt...]")
+  .description("Run a prompt headlessly and exit")
+  .option("--json", "Emit structured JSON result")
+  .option("--session <id>", "Continue a specific session")
+  .option("--continue", "Continue the most recent session")
+  .option("--model <provider/model>", "Override model")
+  .option("--max-steps <n>", "Cap tool/reasoning steps", parseInt)
+  .action(async (prompt, options) => {
+    if (!prompt || prompt.length === 0) {
+      console.error("Error: prompt is required");
+      process.exit(2);
+    }
+    const { config } = await loadCliConfig(options);
+    const workingDir = process.cwd();
+    const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
+    const runOptions = {
+      prompt: prompt.join(" "),
+      json: options.json || false,
+      session: options.session,
+      continue: options.continue || false,
+      model: options.model,
+      maxSteps: options.maxSteps,
+      sandboxed: sandboxResolution.effective,
+    };
+    const { runCommand } = await import("./run-command.js");
+    await runCommand(runOptions, config, workingDir);
+  });
+
 // ── Default command: interactive chat ──
 const defaultCmd = program
   .command("chat", { isDefault: true })
@@ -147,65 +177,17 @@ const defaultCmd = program
 
     if (options.prompt) {
       // Headless mode — run single prompt, print result, exit
-      const { streamText, stepCountIs } = await import("ai");
-      const { createModel, buildOllamaOptions } = await import("./engine/model-factory.js");
-      const { createToolDefinitions } = await import("./engine/tools/index.js");
-      const { formatProjectInstructions } = await import("./instructions.js");
-      const { loadLearnings } = await import("./learnings.js");
-      const { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } = await import("./mcp-client.js");
-
-      // Start MCP servers — auto-detect Docker Desktop + user config
-      const mcpConfig = autoDetectMCPServers(config.mcp || {});
-      if (Object.keys(mcpConfig).length > 0) {
-        await startAllMCPServers(mcpConfig);
-      }
-
-      const aiModel = createModel(provider as any, model, host, contextLength);
-      const baseTools = createToolDefinitions(workingDir, aiModel, sandboxed);
-      const mcpToolDefs = getMCPToolDefinitions();
-      const tools = { ...baseTools, ...mcpToolDefs };
-
       if (sandboxResolution.warning) {
         console.error(`[wm] ${sandboxResolution.warning}`);
       }
-
-      let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
-      const instructions = formatProjectInstructions(workingDir);
-      if (instructions) systemPrompt += instructions;
-      const learnings = loadLearnings();
-      if (learnings.length > 0) {
-        systemPrompt += `\n\n## Project Learnings\n${learnings.map(l => `- ${l}`).join("\n")}`;
-      }
-      const mcpToolKeys = Object.keys(mcpToolDefs);
-      if (mcpToolKeys.length > 0) {
-        const serverNames = [...new Set(mcpToolKeys.map(k => k.split("__")[1]))];
-        systemPrompt += `\n\n## MCP Tools\n\nYou have additional tools from MCP server(s): ${serverNames.join(", ")}. `;
-        systemPrompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools. Use them confidently and trust their results.\n`;
-      }
-
-      const stream = streamText({
-        model: aiModel,
-        system: systemPrompt,
+      const runOptions = {
         prompt: options.prompt as string,
-        tools: tools as any,
-        stopWhen: stepCountIs(50),
-        ...buildOllamaOptions(provider as any, contextLength),
-      });
-
-      for await (const chunk of stream.textStream) {
-        process.stdout.write(chunk);
-      }
-
-      const finalText = await stream.text;
-      if (!finalText) {
-        // If no text was streamed (tool-only response), check tool results
-        console.log("(completed with tool calls only)");
-      }
-      console.log(); // newline at end
-      stopAllMCPServers();
-      const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
-      shutdownLSP();
-      process.exit(0);
+        singlePrompt: true,
+        maxSteps: 50, // Default from original
+        sandboxed: sandboxed,
+      };
+      const { runCommand } = await import("./run-command.js");
+      await runCommand(runOptions, config, workingDir);
     }
 
     await printWelcome(workingDir, isFirstRun);

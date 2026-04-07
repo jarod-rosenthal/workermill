@@ -1,110 +1,113 @@
 /**
- * File-level checkpoints — snapshot files before edits so they can be reverted individually.
- * Stored in .workermill/checkpoints/ (gitignored).
+ * Session change tracker — tracks file changes for rollback and history view.
+ * Supports created files, edits, and multi-file patches.
  */
 import fs from "fs";
 import path from "path";
 
-interface Checkpoint {
-  originalPath: string;
-  backupPath: string;
+interface TrackedChange {
+  path: string;
+  tool: "write_file" | "edit_file" | "patch";
+  beforeContent: string | null; // null => file did not exist
   timestamp: number;
+  persona?: string;
+  storyId?: string;
 }
 
-const checkpoints: Checkpoint[] = [];
+const trackedChanges: TrackedChange[] = [];
 let workingDir = process.cwd();
 
 export function setCheckpointDir(dir: string): void {
   workingDir = dir;
 }
 
-function checkpointDir(): string {
-  return path.join(workingDir, ".workermill", "checkpoints");
-}
-
 /**
- * Snapshot a file before it gets edited. Returns true if a checkpoint was created.
- * Skips if the file doesn't exist yet (new file — nothing to revert to).
+ * Track a file change before it happens. Records the pre-change state.
+ * For new files, beforeContent is null. Only records first change per file in session.
  */
-export function checkpoint(filePath: string): boolean {
+export function checkpoint(filePath: string, tool: string): boolean {
   const resolvedPath = path.resolve(filePath);
-  if (!fs.existsSync(resolvedPath)) return false;
+  // Check if already tracked
+  if (trackedChanges.some(tc => tc.path === resolvedPath)) return false;
 
-  const dir = checkpointDir();
-  fs.mkdirSync(dir, { recursive: true });
-
+  const beforeContent = fs.existsSync(resolvedPath) ? fs.readFileSync(resolvedPath, "utf-8") : null;
   const timestamp = Date.now();
-  const safeName = resolvedPath.replace(/[/\\:]/g, "_");
-  const backupPath = path.join(dir, `${timestamp}-${safeName}`);
-
-  fs.copyFileSync(resolvedPath, backupPath);
-  checkpoints.push({ originalPath: resolvedPath, backupPath, timestamp });
+  trackedChanges.push({ path: resolvedPath, tool: tool as "write_file" | "edit_file" | "patch", beforeContent, timestamp });
   return true;
 }
 
 /**
- * Revert the last N file edits (default 1). Returns the files restored.
+ * Revert the last N file changes (default 1). Returns the files restored.
  */
 export function undoLast(count = 1): string[] {
   const restored: string[] = [];
-  for (let i = 0; i < count && checkpoints.length > 0; i++) {
-    const cp = checkpoints.pop()!;
+  for (let i = 0; i < count && trackedChanges.length > 0; i++) {
+    const tc = trackedChanges.pop()!;
     try {
-      fs.copyFileSync(cp.backupPath, cp.originalPath);
-      fs.unlinkSync(cp.backupPath);
-      restored.push(path.relative(workingDir, cp.originalPath));
+      if (tc.beforeContent === null) {
+        // File was created, delete it
+        if (fs.existsSync(tc.path)) fs.unlinkSync(tc.path);
+      } else {
+        // Restore previous content
+        fs.writeFileSync(tc.path, tc.beforeContent, "utf-8");
+      }
+      restored.push(path.relative(workingDir, tc.path));
     } catch {
-      // File may have been deleted — skip
+      // File may have been deleted or permissions issue — skip
     }
   }
   return restored;
 }
 
 /**
- * Revert a specific file to its last checkpoint. Returns true if restored.
+ * Revert a specific file to its session start state. Returns true if restored.
  */
 export function undoFile(filePath: string): boolean {
   const resolvedPath = path.resolve(filePath);
-  // Find the most recent checkpoint for this file
-  for (let i = checkpoints.length - 1; i >= 0; i--) {
-    if (checkpoints[i].originalPath === resolvedPath) {
-      const cp = checkpoints.splice(i, 1)[0];
-      try {
-        fs.copyFileSync(cp.backupPath, cp.originalPath);
-        fs.unlinkSync(cp.backupPath);
-        return true;
-      } catch {
-        return false;
-      }
+  // Find the first (earliest) tracked change for this file
+  const tc = trackedChanges.find(tc => tc.path === resolvedPath);
+  if (!tc) return false;
+
+  try {
+    if (tc.beforeContent === null) {
+      // File was created, delete it
+      if (fs.existsSync(tc.path)) fs.unlinkSync(tc.path);
+    } else {
+      // Restore previous content
+      fs.writeFileSync(tc.path, tc.beforeContent, "utf-8");
     }
+    // Remove from tracked changes
+    const idx = trackedChanges.indexOf(tc);
+    if (idx !== -1) trackedChanges.splice(idx, 1);
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
- * List current checkpoints (most recent first).
+ * List current tracked changes (most recent first).
  */
 export function listCheckpoints(): Array<{ file: string; time: string }> {
-  return checkpoints
+  return trackedChanges
     .slice()
     .reverse()
-    .map(cp => ({
-      file: path.relative(workingDir, cp.originalPath),
-      time: new Date(cp.timestamp).toLocaleTimeString(),
+    .map(tc => ({
+      file: path.relative(workingDir, tc.path),
+      time: new Date(tc.timestamp).toLocaleTimeString(),
     }));
 }
 
 /**
- * Clear all checkpoints. Call on session end.
+ * Get all tracked changes in this session.
+ */
+export function getChangedFiles(): TrackedChange[] {
+  return trackedChanges.slice();
+}
+
+/**
+ * Clear all tracked changes. Call on session end.
  */
 export function clearCheckpoints(): void {
-  const dir = checkpointDir();
-  if (fs.existsSync(dir)) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // Best effort
-    }
-  }
-  checkpoints.length = 0;
+  trackedChanges.length = 0;
 }

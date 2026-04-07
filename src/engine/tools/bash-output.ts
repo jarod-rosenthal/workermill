@@ -42,7 +42,7 @@ export async function execute({
   }
 
   // Auto-cleanup shells that have been done for more than 10 minutes
-  if (shell.done && Date.now() - shell.startTime > 10 * 60 * 1000) {
+  if (shell.done && shell.completionTime && Date.now() - shell.completionTime > 10 * 60 * 1000) {
     activeShells.delete(shellId);
     return {
       output: shell.buffer.join('\n'),

@@ -6,6 +6,7 @@ interface ShellProcess {
   child: ChildProcess;
   buffer: string[];
   startTime: number;
+  completionTime?: number;
   done: boolean;
   exitCode?: number;
   status: 'running' | 'done' | 'killed' | 'failed_to_start';
@@ -67,13 +68,27 @@ function addToBuffer(buffer: string[], line: string): void {
   }
 }
 
+function evictStaleShells(): void {
+  const now = Date.now();
+  for (const [shellId, shell] of activeShells.entries()) {
+    if (shell.done && shell.completionTime && now - shell.completionTime > 10 * 60 * 1000) {
+      activeShells.delete(shellId);
+    }
+  }
+}
+
 function cleanupShell(shellId: string): void {
   const shell = activeShells.get(shellId);
   if (shell) {
     if (!shell.done) {
-      shell.child.kill('SIGTERM');
-      shell.status = 'killed';
-      shell.done = true;
+      try {
+        process.kill(-shell.child.pid!, 'SIGTERM');
+        shell.status = 'killed';
+        shell.done = true;
+        shell.completionTime = Date.now();
+      } catch (err) {
+        // Process might already be dead
+      }
     }
     activeShells.delete(shellId);
   }
@@ -138,6 +153,8 @@ export async function execute({
     throw new Error(`Blocked: command references "${outsidePath}" which is outside the working directory. All files must be created within the project directory.`);
   }
 
+  evictStaleShells();
+
   if (activeShells.size >= MAX_CONCURRENT_SHELLS) {
     throw new Error(`Maximum concurrent background shells (${MAX_CONCURRENT_SHELLS}) reached. Wait for some to finish or kill them.`);
   }
@@ -181,12 +198,14 @@ export async function execute({
     shellProcess.done = true;
     shellProcess.exitCode = code ?? undefined;
     shellProcess.status = 'done';
+    shellProcess.completionTime = Date.now();
     addToBuffer(shellProcess.buffer, `exit: code ${code}`);
   });
 
   child.on('error', (err) => {
     shellProcess.done = true;
     shellProcess.status = 'failed_to_start';
+    shellProcess.completionTime = Date.now();
     addToBuffer(shellProcess.buffer, `error: ${err.message}`);
   });
 

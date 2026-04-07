@@ -91,6 +91,57 @@ function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
   return { retryAfterMs: 30_000 };
 }
 
+type ParsedPseudoToolCall = {
+  name: string;
+  input: Record<string, unknown>;
+};
+
+function parsePseudoToolCalls(text: string): ParsedPseudoToolCall[] {
+  if (!text.includes("<function=")) return [];
+
+  const calls: ParsedPseudoToolCall[] = [];
+  const fnRe = /<function=([a-zA-Z0-9_:-]+)>\s*([\s\S]*?)\s*<\/function>/g;
+  let fnMatch: RegExpExecArray | null;
+  while ((fnMatch = fnRe.exec(text)) !== null) {
+    const name = fnMatch[1]?.trim();
+    const body = fnMatch[2] || "";
+    if (!name) continue;
+
+    const input: Record<string, unknown> = {};
+    const paramRe = /<parameter=([a-zA-Z0-9_:-]+)>\s*([\s\S]*?)\s*<\/parameter>/g;
+    let paramMatch: RegExpExecArray | null;
+    while ((paramMatch = paramRe.exec(body)) !== null) {
+      const key = paramMatch[1]?.trim();
+      const rawValue = (paramMatch[2] || "").trim();
+      if (!key) continue;
+      if (!rawValue) {
+        input[key] = "";
+        continue;
+      }
+      if ((rawValue.startsWith("{") && rawValue.endsWith("}")) || (rawValue.startsWith("[") && rawValue.endsWith("]"))) {
+        try {
+          input[key] = JSON.parse(rawValue);
+          continue;
+        } catch {
+          // fall through to string
+        }
+      }
+      input[key] = rawValue;
+    }
+
+    if (Object.keys(input).length > 0) calls.push({ name, input });
+  }
+
+  return calls;
+}
+
+function stripPseudoToolCallMarkup(text: string): string {
+  return text
+    .replace(/<function=[a-zA-Z0-9_:-]+>[\s\S]*?<\/function>\s*(?:<\/tool_call>)?/g, "")
+    .replace(/<\/tool_call>/g, "")
+    .trim();
+}
+
 /** Modes in the shift+tab cycle. */
 const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
 /** All valid permission modes including CLI-only modes not in the cycle. */
@@ -1236,7 +1287,44 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const outputTokens = usage?.outputTokens ?? 0;
           const turnElapsedMs = Date.now() - turnStartTime;
           const currentToolCalls = streamingToolCallsRef.current;
-          const toolCallCount = currentToolCalls.length;
+          let toolCallCount = currentToolCalls.length;
+
+          // Some local models emit XML-like pseudo tool calls instead of native
+          // structured calls. When that happens, parse and execute them through
+          // the same wrapped tool definitions so permission checks still apply.
+          if (toolCallCount === 0 && finalText.includes("<function=")) {
+            const pseudoCalls = parsePseudoToolCalls(finalText);
+            if (pseudoCalls.length > 0) {
+              logger.info("Pseudo tool call fallback triggered", {
+                callCount: pseudoCalls.length,
+                names: pseudoCalls.map((c) => c.name).join(","),
+              });
+              const toolsByName = activeTools as Record<string, AnyToolDef>;
+              const fallbackLines: string[] = [];
+              for (const call of pseudoCalls) {
+                const toolDef = toolsByName[call.name];
+                if (!toolDef || typeof toolDef.execute !== "function") {
+                  fallbackLines.push(`- ${call.name}: unavailable`);
+                  continue;
+                }
+                try {
+                  const result = await toolDef.execute(call.input);
+                  const resultText = typeof result === "string" ? result : JSON.stringify(result);
+                  fallbackLines.push(`- ${call.name}: ${resultText}`);
+                } catch (err) {
+                  const errMsg = err instanceof Error ? err.message : String(err);
+                  fallbackLines.push(`- ${call.name}: Error: ${errMsg}`);
+                }
+              }
+
+              const cleaned = stripPseudoToolCallMarkup(finalText);
+              finalText =
+                `${cleaned ? `${cleaned}\n\n` : ""}` +
+                `Executed tool calls parsed from model output:\n` +
+                `${fallbackLines.join("\n")}`;
+              toolCallCount = streamingToolCallsRef.current.length;
+            }
+          }
 
           if (
             shouldBlockUnverifiedImageAnswer(resolvedInput, finalText, {

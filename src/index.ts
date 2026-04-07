@@ -50,9 +50,6 @@ async function printWelcome(workingDir: string, isFirstRun = false): Promise<voi
 
   const tips = [
     "/build <task> assigns a team of experts to plan, build, review, and commit your feature.",
-    "/orchestrate #120 runs full-spec orchestration from a parent GitHub issue across epic-ordered child issues.",
-    "In /orchestrate, epic boundaries prompt with y/n/a: continue once, pause, or continue all.",
-    "/doctor #120 analyzes repo test health and outputs prescriptions for ETE/E2E and regression coverage.",
     "/as backend_developer <task> gives you a single dedicated expert for focused work.",
     "/review runs a tech lead code review on your uncommitted changes.",
     "/init creates an AGENT.md — project context that every expert reads before starting.",

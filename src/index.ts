@@ -14,6 +14,7 @@ import { runSetup } from "./setup.js";
 import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
 import { Root } from "./ui/Root.js";
 import { checkForUpdate } from "./update-check.js";
+import { runCommand } from "./run-command.js";
 
 /** Resolve display strings for all 3 roles from the full config. */
 function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
@@ -439,6 +440,71 @@ program
   .action(async (options) => {
     const { runLogsCommand } = await import("./logs-command.js");
     runLogsCommand(options);
+  });
+
+// ── Run command: headless execution ──
+program
+  .command("run")
+  .description("Run a single prompt headlessly")
+  .argument("[prompt...]", "the prompt to run")
+  .option("--json", "emit structured result object")
+  .option("--session <id>", "continue a specific session")
+  .option("--continue", "continue most recent session")
+  .option("--model <provider/model>", "override worker model")
+  .option("--max-steps <n>", "cap tool/reasoning steps", parseInt)
+  .action(async (promptParts: string[], options) => {
+    const prompt = promptParts.join(" ");
+    if (!prompt) {
+      console.error("Error: prompt is required");
+      process.exit(2);
+    }
+    let providerOverride, modelOverride;
+    if (options.model) {
+      const parts = options.model.split("/");
+      if (parts.length !== 2) {
+        console.error("Error: --model must be in format provider/model");
+        process.exit(2);
+      }
+      [providerOverride, modelOverride] = parts;
+    }
+    // Load config with overrides
+    const cliOptions = {
+      provider: providerOverride,
+      model: modelOverride,
+    };
+    const { config } = await loadCliConfig(cliOptions);
+    const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
+    try {
+      const result = await runCommand({
+        prompt,
+        json: options.json,
+        session: options.session,
+        continue: options.continue,
+        model: options.model,
+        maxSteps: options.maxSteps,
+        config,
+        provider,
+        modelName: model,
+        host,
+        contextLength,
+        apiKey,
+        trustAll: false,
+        fullDisk: false,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      }
+      if (result.status === "ok") {
+        process.exit(0);
+      } else if (result.status === "error") {
+        process.exit(1);
+      } else if (result.status === "cancelled") {
+        process.exit(130);
+      }
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   });
 
 program.parse();

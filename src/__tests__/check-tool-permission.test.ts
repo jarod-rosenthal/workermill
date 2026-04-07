@@ -20,12 +20,14 @@ vi.mock("../config.js", async (importOriginal) => {
     ...actual,
     loadConfig: vi.fn(() => ({ providers: {}, default: "ollama", permissions: { allow: [] } })),
     saveConfig: vi.fn(),
+    loadLocalSettings: vi.fn(() => ({ allow: [] })),
+    saveLocalSettings: vi.fn(),
   };
 });
 
 import { checkToolPermission } from "../orchestrator.js";
 import { isDangerous, checkPermissionRules } from "../safety.js";
-import { loadConfig, saveConfig } from "../config.js";
+import { loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import type { OrchestrationOutput } from "../orchestrator.js";
 
 function createMockOutput(): OrchestrationOutput {
@@ -53,15 +55,17 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("dangerous commands", () => {
-    it("auto-approves dangerous bash when trustAll=true (bypass mode)", async () => {
+    it("dangerous bash ALWAYS prompts even in trustAll mode", async () => {
       vi.mocked(isDangerous).mockReturnValue("rm -rf /");
       const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue(true);
 
       const allowed = await checkToolPermission(
         "bash", { command: "rm -rf /" }, true, new Set(), output,
       );
 
-      expect(output.confirm).not.toHaveBeenCalled();
+      // Dangerous commands must always prompt — trust mode skips normal prompts, not safety gates
+      expect(output.confirm).toHaveBeenCalled();
       expect(allowed).toBe(true);
     });
 
@@ -251,9 +255,9 @@ describe("checkToolPermission — exhaustive", () => {
 
       await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
 
-      expect(saveConfig).toHaveBeenCalled();
-      const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
-      expect(savedConfig.permissions?.allow).toContain("bash(npm test:*)");
+      expect(saveLocalSettings).toHaveBeenCalled();
+      const saved = vi.mocked(saveLocalSettings).mock.calls[0][0] as { allow?: string[] };
+      expect(saved.allow).toContain("bash(npm test:*)");
     });
 
     it("mode=always for bash with compound command saves prefix rule for full command", async () => {
@@ -263,9 +267,9 @@ describe("checkToolPermission — exhaustive", () => {
 
       await checkToolPermission("bash", { command: "git status && npm test" }, false, sessionAllow, output);
 
-      const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
-      // Compound commands get a prefix rule for the first command
-      expect(savedConfig.permissions?.allow).toContain("bash(git status:*)");
+      const saved = vi.mocked(saveLocalSettings).mock.calls[0][0] as { allow?: string[] };
+      // Compound commands split into separate rules
+      expect(saved.allow).toContain("bash(git status:*)");
     });
 
     it("mode=always for non-bash adds to sessionAllow (session-only)", async () => {

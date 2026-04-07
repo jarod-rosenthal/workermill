@@ -395,15 +395,12 @@ export async function checkToolPermission(
   output: OrchestrationOutput,
   permissionRules?: { allow?: string[]; deny?: string[] },
 ): Promise<boolean> {
-  // Check trust mode first — bypass skips all permission prompts including dangerous checks
-  const isTrustedEarly = typeof trustAll === "function" ? trustAll() : trustAll;
-  const isBypass = isTrustedEarly || sessionAllow.has("*");
-
-  // Dangerous command check
+  // Dangerous commands ALWAYS prompt — even in trust/bypass mode.
+  // Trust mode skips normal permission prompts but not safety gates.
   if (toolName === "bash") {
     const cmd = String(toolInput.command || "");
     const danger = isDangerous(cmd);
-    if (danger && !isBypass) {
+    if (danger) {
       logger.info("Dangerous prompt shown (orchestrator)", { tool: toolName, danger });
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
@@ -413,6 +410,10 @@ export async function checkToolPermission(
       return allowed;
     }
   }
+
+  // Bypass mode — skips normal prompts but NOT dangerous command gates above
+  const isTrustedEarly = typeof trustAll === "function" ? trustAll() : trustAll;
+  const isBypass = isTrustedEarly || sessionAllow.has("*");
 
   // Dangerous file path check for write operations
   if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {

@@ -158,10 +158,32 @@ export function listProjects(): Array<ProjectMeta & { id: string }> {
   return projects.sort((a, b) => new Date(b.lastAccessed).getTime() - new Date(a.lastAccessed).getTime());
 }
 
+function migrateGlobalHistory(cwd?: string): void {
+  const oldPath = path.join(os.homedir(), ".workermill", "history");
+  const newPath = getProjectHistoryPath(cwd);
+
+  if (!fs.existsSync(oldPath) || fs.existsSync(newPath)) return;
+
+  ensureProjectDirs(cwd);
+
+  try {
+    fs.copyFileSync(oldPath, newPath);
+    if (fs.readFileSync(oldPath, 'utf-8') === fs.readFileSync(newPath, 'utf-8')) {
+      fs.unlinkSync(oldPath);
+    } else {
+      // Remove failed copy
+      try { fs.unlinkSync(newPath); } catch {}
+    }
+  } catch (err) {
+    // Ignore migration errors
+  }
+}
+
 /**
  * Ensure the project directory structure exists.
  */
 export function ensureProjectDirs(cwd?: string): void {
+  migrateGlobalHistory(cwd);
   const rootDir = getProjectRootDir(cwd);
   const sessionsDir = getProjectSessionsDir(cwd);
   const logsDir = path.dirname(getProjectLogPath(cwd));

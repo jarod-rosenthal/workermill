@@ -3,14 +3,40 @@ import path from "path";
 import os from "os";
 import crypto from "crypto";
 import * as logger from "./logger.js";
+import { getProjectLearningsPath, ensureProjectDirs } from "./project-data.js";
 
 function learningsPath(): string {
-  // Per-project learnings in ~/.workermill/learnings/<project-hash>.json
-  const projectHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
-  return path.join(os.homedir(), ".workermill", "learnings", `${projectHash}.json`);
+  return getProjectLearningsPath();
+}
+
+function migrateLegacyLearnings(): void {
+  // Old path using raw cwd hash
+  const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
+  const oldPath = path.join(os.homedir(), ".workermill", "learnings", `${oldHash}.json`);
+  const newPath = learningsPath();
+
+  if (!fs.existsSync(oldPath) || fs.existsSync(newPath)) return;
+
+  try {
+    fs.copyFileSync(oldPath, newPath);
+    if (fs.readFileSync(oldPath, 'utf-8') === fs.readFileSync(newPath, 'utf-8')) {
+      fs.unlinkSync(oldPath);
+      // Remove old dir if empty
+      const oldDir = path.dirname(oldPath);
+      try {
+        fs.rmdirSync(oldDir);
+      } catch {}
+    } else {
+      // Remove failed copy
+      try { fs.unlinkSync(newPath); } catch {}
+    }
+  } catch (err) {
+    logger.error("Failed to migrate legacy learnings", { error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export function loadLearnings(): string[] {
+  migrateLegacyLearnings();
   try {
     const fp = learningsPath();
     if (fs.existsSync(fp)) {
@@ -23,10 +49,10 @@ export function loadLearnings(): string[] {
 }
 
 export function saveLearnings(learnings: string[]): void {
+  migrateLegacyLearnings();
   try {
     const fp = learningsPath();
-    const dir = path.dirname(fp);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    ensureProjectDirs();
     // Keep max 50 learnings, newest last
     const trimmed = learnings.slice(-50);
     fs.writeFileSync(fp, JSON.stringify(trimmed, null, 2) + "\n", "utf-8");

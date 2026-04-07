@@ -4,6 +4,7 @@ import { getLogPath, parseLogLine } from "../logger.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 
 // Mock fs
 vi.mock("fs");
@@ -14,6 +15,8 @@ const mockExit = vi.spyOn(process, "exit").mockImplementation(() => { throw new 
 const mockFs = fs as any;
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+vi.spyOn(fs, "realpathSync").mockImplementation((p: string) => p);
 
 describe("logs-command", () => {
   beforeEach(() => {
@@ -60,15 +63,15 @@ describe("logs-command", () => {
   describe("getLogPath", () => {
     it("returns log path for cwd", () => {
       const cwd = "/test/dir";
-      const hash = require("crypto").createHash("md5").update(cwd).digest("hex").slice(0, 8);
-      const expected = path.join(os.homedir(), ".workermill", "logs", hash, "cli.log");
+      const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
+      const expected = path.join(os.homedir(), ".workermill", "projects", hash, "logs", "cli.log");
       expect(getLogPath(cwd)).toBe(expected);
     });
 
     it("returns log path for undefined cwd", () => {
       const cwd = process.cwd();
-      const hash = require("crypto").createHash("md5").update(cwd).digest("hex").slice(0, 8);
-      const expected = path.join(os.homedir(), ".workermill", "logs", hash, "cli.log");
+      const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
+      const expected = path.join(os.homedir(), ".workermill", "projects", hash, "logs", "cli.log");
       expect(getLogPath()).toBe(expected);
     });
   });

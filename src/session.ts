@@ -3,9 +3,10 @@ import path from "path";
 import os from "os";
 import crypto from "crypto";
 import * as logger from "./logger.js";
+import { getProjectSessionsDir, ensureProjectDirs } from "./project-data.js";
 
-// Sessions stored in ~/.workermill/sessions/ (global, not per-project)
-const SESSIONS_DIR = path.join(os.homedir(), ".workermill", "sessions");
+// Sessions stored in project-specific directory
+const SESSIONS_DIR = getProjectSessionsDir();
 
 export interface SessionMessage {
   role: "user" | "assistant";
@@ -32,10 +33,48 @@ export interface SessionSummary {
   preview: string;
 }
 
-function ensureSessionsDir(): void {
-  if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+function migrateGlobalSessions(): void {
+  const oldSessionsDir = path.join(os.homedir(), ".workermill", "sessions");
+  if (!fs.existsSync(oldSessionsDir)) return;
+
+  ensureProjectDirs();
+
+  try {
+    const files = fs.readdirSync(oldSessionsDir).filter(f => f.endsWith('.json'));
+    if (files.length === 0) {
+      try {
+        fs.rmdirSync(oldSessionsDir);
+      } catch {}
+      return;
+    }
+
+    let migrated = true;
+    for (const file of files) {
+      const oldPath = path.join(oldSessionsDir, file);
+      const newPath = path.join(SESSIONS_DIR, file);
+      if (!fs.existsSync(newPath)) {
+        fs.copyFileSync(oldPath, newPath);
+        if (fs.readFileSync(oldPath, 'utf-8') !== fs.readFileSync(newPath, 'utf-8')) {
+          migrated = false;
+          try { fs.unlinkSync(newPath); } catch {}
+        }
+      }
+    }
+
+    if (migrated) {
+      for (const file of files) {
+        try { fs.unlinkSync(path.join(oldSessionsDir, file)); } catch {}
+      }
+      try { fs.rmdirSync(oldSessionsDir); } catch {}
+    }
+  } catch (err) {
+    logger.error("Failed to migrate global sessions", { error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+function ensureSessionsDir(): void {
+  migrateGlobalSessions();
+  ensureProjectDirs();
 }
 
 export function createSession(provider: string, model: string): Session {

@@ -407,7 +407,12 @@ export interface Story {
   // Enriched fields from planner's codebase analysis
   targetFiles?: string[];      // Files to create or modify
   referenceFiles?: string[];   // Existing files to read for patterns
+  primaryPattern?: string;     // Canonical existing file to follow
+  integrationPoints?: string[]; // Exact seams where this work attaches
+  assumptions?: string[];      // Planner assumptions, not confirmed facts
+  nonGoals?: string[];         // Explicit scope boundaries
   implementationNotes?: string; // Planner's architectural guidance
+  validationSignal?: string;   // Observable condition that proves this story is complete
   // Shell commands to verify acceptance criteria post-execution (verifyEnabled only)
   verificationCommands?: string[];
 }
@@ -862,7 +867,12 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
       "description": "Scope: which files/directories this story owns and what area it covers.",
       "targetFiles": ["src/models/webhook.py", "src/routers/webhooks.py"],
       "referenceFiles": ["src/models/product.py", "src/routers/products.py"],
+      "primaryPattern": "src/models/product.py",
+      "integrationPoints": ["router: src/routers/webhooks.py", "dependency: get_current_admin", "background task dispatch hook"],
+      "assumptions": ["Webhook delivery state is not already persisted elsewhere."],
+      "nonGoals": ["Do not redesign the existing audit logging model.", "Do not add new auth flows."],
       "implementationNotes": "Follow the pattern in product.py for the model — use SQLAlchemy declarative with UUID primary key, org_id foreign key, and created_at timestamp. The router should mirror products.py structure: admin-only endpoints using get_current_admin dependency. Use FastAPI BackgroundTasks for async webhook delivery — do NOT dispatch inside the database transaction. The existing audit logger in middleware.py can be extended for delivery tracking.",
+      "validationSignal": "A webhook can be created through the existing admin route pattern and delivery is dispatched asynchronously without breaking the surrounding transaction flow.",
       "dependsOn": ["id-of-dependency"]
     }
   ]
@@ -875,6 +885,13 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 - Integration points with existing code (exact function names, imports, patterns)
 - Risks or gotchas you discovered while reading the code
 - Do NOT be generic ("follow best practices") — be specific ("use the Depends(get_db) pattern from dependencies.py")
+
+**Each story must also include:**
+- \`primaryPattern\`: the single best existing file to follow
+- \`integrationPoints\`: exact seams where the work attaches
+- \`nonGoals\`: explicit boundaries that must remain out of scope
+- \`validationSignal\`: the observable condition that proves the story is complete
+- \`assumptions\`: only when needed, and only for things not confirmed from the repo
 
 **Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
 
@@ -1020,6 +1037,25 @@ Rules:
 
   logger.info("Planner completed", { storiesFound: stories.length, planTextLength: planText.length });
 
+  if (stories.length > 0) {
+    const validationIssues = validatePlannerStories(stories);
+    if (validationIssues.length > 0) {
+      const reason = `Planner produced an incomplete handoff: ${validationIssues.slice(0, 6).join("; ")}`;
+      logger.error("Planner story validation failed", { issues: validationIssues });
+      output.error(reason);
+      output.statusDone();
+      return {
+        stories: [],
+        provider: pProvider,
+        model: pModel,
+        inputTokens: planUsage?.inputTokens || 0,
+        outputTokens: planUsage?.outputTokens || 0,
+        rejected: true,
+        rejectionReason: reason,
+      };
+    }
+  }
+
   // If the planner produced text but no parseable JSON stories, do a single
   // cheap follow-up to extract the plan as JSON. This mirrors the platform's
   // critic refinement loop (critic-agent-local.ts) but without scoring overhead.
@@ -1035,7 +1071,7 @@ Rules:
         prompt: `You previously analyzed a codebase and produced the following plan:\n\n${extractionInput}\n\n` +
           `Convert your analysis into the required JSON format. Output ONLY a \`\`\`json code block:\n\n` +
           "```json\n" +
-          `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
+          `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "targetFiles": ["path/to/file"], "referenceFiles": ["path/to/pattern"], "primaryPattern": "path/to/pattern", "integrationPoints": ["exact seam"], "nonGoals": ["scope boundary"], "validationSignal": "observable proof of correctness", "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
           "```\n\n" +
           "Valid personas: backend_developer, frontend_developer, fullstack_developer, qa_engineer, devops_engineer, tech_writer.\n" +
           "Output ONLY the JSON block, no other text.",
@@ -1157,9 +1193,32 @@ function normalizeStory(raw: Record<string, unknown>, index: number): Story {
     dependsOn: toStringArray(raw.dependsOn) ?? toStringArray(raw.depends_on) ?? toStringArray(raw.dependencies),
     targetFiles: toStringArray(raw.targetFiles) ?? toStringArray(raw.target_files),
     referenceFiles: toStringArray(raw.referenceFiles) ?? toStringArray(raw.reference_files),
+    primaryPattern: raw.primaryPattern ? String(raw.primaryPattern) : raw.primary_pattern ? String(raw.primary_pattern) : undefined,
+    integrationPoints: toStringArray(raw.integrationPoints) ?? toStringArray(raw.integration_points),
+    assumptions: toStringArray(raw.assumptions),
+    nonGoals: toStringArray(raw.nonGoals) ?? toStringArray(raw.non_goals),
     implementationNotes: raw.implementationNotes ? String(raw.implementationNotes) : undefined,
+    validationSignal: raw.validationSignal ? String(raw.validationSignal) : raw.validation_signal ? String(raw.validation_signal) : undefined,
     verificationCommands: toStringArray(raw.verificationCommands) ?? toStringArray(raw.verification_commands),
   };
+}
+
+function validatePlannerStories(stories: Story[]): string[] {
+  const issues: string[] = [];
+
+  stories.forEach((story, index) => {
+    const label = `Story ${index + 1} (${story.title || story.id || "untitled"})`;
+    if (!story.title.trim()) issues.push(`${label}: missing title`);
+    if (!story.description.trim()) issues.push(`${label}: missing description`);
+    if (!story.targetFiles?.length) issues.push(`${label}: missing targetFiles`);
+    if (!story.primaryPattern?.trim()) issues.push(`${label}: missing primaryPattern`);
+    if (!story.integrationPoints?.length) issues.push(`${label}: missing integrationPoints`);
+    if (!story.nonGoals?.length) issues.push(`${label}: missing nonGoals`);
+    if (!story.validationSignal?.trim()) issues.push(`${label}: missing validationSignal`);
+    if (!story.implementationNotes?.trim()) issues.push(`${label}: missing implementationNotes`);
+  });
+
+  return issues;
 }
 
 function tryParseStories(text: string): Story[] | null {
@@ -1647,6 +1706,10 @@ export async function runOrchestration(
       output.log("planner", `Story ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
       if (s.targetFiles?.length) output.log("planner", `  files: ${s.targetFiles.join(", ")}`);
       if (s.referenceFiles?.length) output.log("planner", `  patterns: ${s.referenceFiles.join(", ")}`);
+      if (s.primaryPattern) output.log("planner", `  primary pattern: ${s.primaryPattern}`);
+      if (s.integrationPoints?.length) output.log("planner", `  integration: ${s.integrationPoints.join(", ")}`);
+      if (s.nonGoals?.length) output.log("planner", `  non-goals: ${s.nonGoals.join(", ")}`);
+      if (s.validationSignal) output.log("planner", `  validation: ${s.validationSignal}`);
       if (s.implementationNotes) output.log("planner", `  guidance: ${s.implementationNotes.split("\n")[0].slice(0, 120)}...`);
     });
     output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
@@ -2056,6 +2119,11 @@ ${userTask}
 ${story.description}
 ${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
 ${story.referenceFiles?.length ? `\n**Reference files (read these first for patterns):** ${story.referenceFiles.join(", ")}` : ""}
+${story.primaryPattern ? `\n**Primary pattern file:** ${story.primaryPattern}` : ""}
+${story.integrationPoints?.length ? `\n**Integration points:** ${story.integrationPoints.join(", ")}` : ""}
+${story.nonGoals?.length ? `\n**Non-goals:** ${story.nonGoals.join(", ")}` : ""}
+${story.assumptions?.length ? `\n**Assumptions (verify before coding):** ${story.assumptions.join(", ")}` : ""}
+${story.validationSignal ? `\n**Validation signal:** ${story.validationSignal}` : ""}
 ${story.implementationNotes ? `\n## Implementation Guidance from Architect\n\n${story.implementationNotes}\n\n**This guidance is based on actual analysis of the codebase. Follow it closely.**` : ""}
 
 **The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
@@ -3127,6 +3195,10 @@ ${whatYouDidLastTime}
 ## Your Story Scope
 Story ${i + 1}: "${story.title}" — ${story.description}
 ${story.targetFiles?.length ? `**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.primaryPattern ? `\n**Primary pattern file:** ${story.primaryPattern}` : ""}
+${story.integrationPoints?.length ? `\n**Integration points:** ${story.integrationPoints.join(", ")}` : ""}
+${story.nonGoals?.length ? `\n**Non-goals:** ${story.nonGoals.join(", ")}` : ""}
+${story.validationSignal ? `\n**Validation signal:** ${story.validationSignal}` : ""}
 ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementationNotes}` : ""}
 
 **IMPORTANT: Only fix issues that are YOUR story's responsibility.**

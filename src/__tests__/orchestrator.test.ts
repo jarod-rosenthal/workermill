@@ -159,6 +159,7 @@ vi.mock("../safety.js", () => ({
 // Now import the functions under test
 import {
   runOrchestration,
+  runStandaloneReview,
   classifyComplexity,
   shouldTransitionTicketOnPrOpen,
   checkToolPermission,
@@ -1737,6 +1738,17 @@ describe("classifyError categories (via story execution errors)", () => {
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
       callCount++;
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+          text: "done",
+          toolCalls: callCount === 2 ? [FAKE_TOOL_CALL] : [],
+        });
+      }
+      if (callCount === 2) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", "impl-review-retry.ts"), "// impl");
+      }
       if (callCount === 1) {
         return {
           textStream: (async function* () { yield planText; })(),
@@ -2474,6 +2486,48 @@ FEEDBACK: Missing everything.`;
     // Should complete without hanging
     const coordLogs = output.logs.filter(l => l.includes("[coordinator]")).join(" ");
     expect(coordLogs).toMatch(/max.?revision|proceeding/i);
+  });
+
+  it("retries a transient reviewer failure once and completes the run", async () => {
+    const reviewerApprovesText = `Looks good.
+REVIEW_DECISION: approved
+CODE_QUALITY_SCORE: 9
+FEEDBACK: Shippable.`;
+
+    fs.writeFileSync(path.join(repoDir, "README.md"), "# Updated\n");
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+          text: "done",
+          toolCalls: [],
+        });
+      }
+      if (callCount === 1) {
+        throw new Error("ETIMEDOUT: reviewer stalled");
+      }
+      return {
+        textStream: (async function* () { yield reviewerApprovesText; })(),
+        text: Promise.resolve(reviewerApprovesText),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    const result = await runStandaloneReview(config as any, output, "diff");
+
+    expect(result?.decision).toBe("approved");
+    expect(callCount).toBe(2);
+    expect(output.logs.join(" ")).toMatch(/retrying once/i);
+    expect(output.errors).toHaveLength(0);
   });
 
   it("pauses auto-revise when reviewer repeats the same blocker", async () => {

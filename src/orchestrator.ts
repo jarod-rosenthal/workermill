@@ -123,6 +123,83 @@ function formatContext(tokens: number): string {
   return `${tokens}`;
 }
 
+function getReviewWallTimeoutMs(): number {
+  const raw = Number(process.env.WM_REVIEW_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 8 * 60 * 1000;
+}
+
+function createTimedAbortSignal(
+  baseSignal: AbortSignal | undefined,
+  timeoutMs: number,
+  label: string,
+): {
+  signal: AbortSignal;
+  didTimeout: () => boolean;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort(baseSignal?.reason);
+  if (baseSignal) {
+    if (baseSignal.aborted) {
+      controller.abort(baseSignal.reason);
+    } else {
+      baseSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer);
+      if (baseSignal) baseSignal.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+async function collectReviewStreamResult(
+  reviewStream: {
+    textStream: AsyncIterable<unknown>;
+    text: PromiseLike<string>;
+    totalUsage: PromiseLike<{ inputTokens?: number; outputTokens?: number } | undefined>;
+  },
+  timeoutMs: number,
+  timedAbort: { didTimeout: () => boolean },
+  label: string,
+): Promise<{
+  finalText: string;
+  usage: { inputTokens?: number; outputTokens?: number } | undefined;
+}> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+  });
+  const consumePromise = (async () => {
+    for await (const _chunk of reviewStream.textStream) { /* consumed */ }
+    const [finalText, usage] = await Promise.all([
+      reviewStream.text,
+      reviewStream.totalUsage,
+    ]);
+    return { finalText: (finalText || "").trim(), usage };
+  })();
+  try {
+    return await Promise.race([consumePromise, timeoutPromise]);
+  } catch (err) {
+    if (timedAbort.didTimeout()) {
+      throw new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
 /** Bound large payloads before reinserting them into prompts. */
 function truncateForPrompt(text: string, maxChars: number, label: string): string {
   if (text.length <= maxChars) return text;
@@ -2921,29 +2998,62 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         let reviewerOutput = "";
         let reviewerFinalText = "";
         const reviewStartMs = Date.now();
-        const reviewStream = streamText({
-          model: reviewModel,
-          abortSignal,
-          system: reviewer.systemPrompt,
-          prompt: reviewPrompt,
-          tools: reviewerTools,
-          stopWhen: stepCountIs(100),
-          timeout: { chunkMs: 120_000 },
-          ...buildOllamaOptions(revProvider as AIProvider, revCtx),
-          ...buildReasoningOptions(revProvider, revModel),
-          onStepFinish({ text }) {
-            if (text) {
-              reviewerOutput += text + "\n";
-              const lines = text.split("\n").filter(l => l.trim());
-              for (const line of lines) {
-                if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
-                output.log("tech_lead", line);
-              }
-            }
-          },
-        });
-        for await (const _chunk of reviewStream.textStream) { /* consumed */ }
-        reviewerFinalText = (await reviewStream.text || "").trim();
+        const reviewTimeoutMs = getReviewWallTimeoutMs();
+        const maxReviewAttempts = 2;
+        let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+        let lastReviewError: unknown;
+        for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+          const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+          try {
+            const reviewStream = streamText({
+              model: reviewModel,
+              abortSignal: timedAbort.signal,
+              system: reviewer.systemPrompt,
+              prompt: reviewPrompt,
+              tools: reviewerTools,
+              stopWhen: stepCountIs(100),
+              timeout: { chunkMs: 120_000 },
+              ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+              ...buildReasoningOptions(revProvider, revModel),
+              onStepFinish({ text }) {
+                if (text) {
+                  reviewerOutput += text + "\n";
+                  const lines = text.split("\n").filter(l => l.trim());
+                  for (const line of lines) {
+                    if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                    output.log("tech_lead", line);
+                  }
+                }
+              },
+            });
+            const result = await collectReviewStreamResult(
+              reviewStream,
+              reviewTimeoutMs,
+              timedAbort,
+              "Tech Lead review",
+            );
+            reviewerFinalText = result.finalText;
+            reviewUsage = result.usage;
+            lastReviewError = undefined;
+            break;
+          } catch (err) {
+            lastReviewError = err;
+            const transient = isTransientError(err);
+            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient);
+            if (!canRetry) throw err;
+            const retryReason = timedAbort.didTimeout() ? "timed out" : "hit a transient provider error";
+            output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
+            logger.warn("Retrying tech lead review", {
+              attempt,
+              provider: revProvider,
+              model: revModel,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          } finally {
+            timedAbort.dispose();
+          }
+        }
+        if (lastReviewError) throw lastReviewError;
 
         // Some providers/models put the decisive final answer in stream.text
         // rather than step chunks; prefer that when it is richer.
@@ -2952,7 +3062,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           ? reviewerFinalText
           : (stepText || reviewerFinalText);
         logger.debug("Reviewer output", { reviewRound, text: reviewText });
-        const reviewUsage = await reviewStream.totalUsage;
 
         output.statusDone();
 
@@ -3775,35 +3884,66 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   let reviewText = "";
   const reviewStartMs = Date.now();
   try {
-    const reviewStream = streamText({
-      model: reviewModel,
-      abortSignal,
-      system: reviewer.systemPrompt,
-      prompt: reviewPrompt,
-      tools: reviewerTools as ToolSet,
-      stopWhen: stepCountIs(100),
-      timeout: { chunkMs: 120_000 },
-      ...buildOllamaOptions(revProvider as AIProvider, revCtx),
-      ...buildReasoningOptions(revProvider, revModel),
-      onStepFinish({ text }) {
-        if (text) {
-          reviewerOutput += text + "\n";
-          const lines = text.split("\n").filter((l: string) => l.trim());
-          for (const line of lines) {
-            if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
-            output.log("tech_lead", line);
-          }
-        }
-        output.status("tech_lead: reviewing...");
-      },
-    });
-    for await (const _chunk of reviewStream.textStream) { /* consumed */ }
-    reviewerFinalText = (await reviewStream.text || "").trim();
+    const reviewTimeoutMs = getReviewWallTimeoutMs();
+    const maxReviewAttempts = 2;
+    let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+    let lastReviewError: unknown;
+    for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+      const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+      try {
+        const reviewStream = streamText({
+          model: reviewModel,
+          abortSignal: timedAbort.signal,
+          system: reviewer.systemPrompt,
+          prompt: reviewPrompt,
+          tools: reviewerTools as ToolSet,
+          stopWhen: stepCountIs(100),
+          timeout: { chunkMs: 120_000 },
+          ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+          ...buildReasoningOptions(revProvider, revModel),
+          onStepFinish({ text }) {
+            if (text) {
+              reviewerOutput += text + "\n";
+              const lines = text.split("\n").filter((l: string) => l.trim());
+              for (const line of lines) {
+                if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                output.log("tech_lead", line);
+              }
+            }
+            output.status("tech_lead: reviewing...");
+          },
+        });
+        const result = await collectReviewStreamResult(
+          reviewStream,
+          reviewTimeoutMs,
+          timedAbort,
+          "Tech Lead review",
+        );
+        reviewerFinalText = result.finalText;
+        reviewUsage = result.usage;
+        lastReviewError = undefined;
+        break;
+      } catch (err) {
+        lastReviewError = err;
+        const transient = isTransientError(err);
+        const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient);
+        if (!canRetry) throw err;
+        output.coordinatorLog("Tech Lead review stalled; retrying once...");
+        logger.warn("Retrying standalone tech lead review", {
+          attempt,
+          provider: revProvider,
+          model: revModel,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        timedAbort.dispose();
+      }
+    }
+    if (lastReviewError) throw lastReviewError;
     const stepText = reviewerOutput.trim();
     reviewText = reviewerFinalText.length > stepText.length
       ? reviewerFinalText
       : (stepText || reviewerFinalText);
-    const reviewUsage = await reviewStream.totalUsage;
     // Track cost
     const revInputTokens = reviewUsage?.inputTokens || 0;
     const revOutputTokens = reviewUsage?.outputTokens || 0;

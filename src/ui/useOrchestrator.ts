@@ -665,6 +665,15 @@ export function useOrchestrator(
               );
               // Update status bar tool counts
               incrementToolCount?.(toolName);
+              if (["edit_file", "write_file", "patch", "multi_edit_file"].includes(toolName)) {
+                const toolCall: ToolCallInfo = {
+                  id: `orch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  name: toolName,
+                  input: toolInput,
+                  status: "done",
+                };
+                addMessage("", "assistant", [toolCall]);
+              }
             },
 
             updateBranch(branch: string): void {

@@ -40,13 +40,18 @@ describe("checkpoints", () => {
       expect(created).toBe(true);
     });
 
-    it("does not track the same file twice", () => {
+    it("tracks repeated edits on the same file in undo order", () => {
       const filePath = path.join(tempDir, "test.ts");
-      fs.writeFileSync(filePath, "original content");
+      fs.writeFileSync(filePath, "v1");
 
       checkpoint(filePath, "edit_file");
-      const second = checkpoint(filePath, "edit_file");
-      expect(second).toBe(false);
+      fs.writeFileSync(filePath, "v2");
+      checkpoint(filePath, "edit_file");
+
+      const changes = getChangedFiles();
+      expect(changes).toHaveLength(2);
+      expect(changes[0].beforeContent).toBe("v1");
+      expect(changes[1].beforeContent).toBe("v2");
     });
   });
 
@@ -126,6 +131,21 @@ describe("checkpoints", () => {
       const result = undoFile("/nonexistent/file.ts");
       expect(result).toBe(false);
     });
+
+    it("restores a repeatedly edited file to session start state", () => {
+      const filePath = path.join(tempDir, "repeat.ts");
+      fs.writeFileSync(filePath, "v1");
+
+      checkpoint(filePath, "edit_file");
+      fs.writeFileSync(filePath, "v2");
+      checkpoint(filePath, "edit_file");
+      fs.writeFileSync(filePath, "v3");
+
+      const result = undoFile(filePath);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("v1");
+      expect(listCheckpoints()).toHaveLength(0);
+    });
   });
 
   describe("listCheckpoints()", () => {
@@ -186,15 +206,20 @@ describe("checkpoints", () => {
   });
 
   describe("multiple files", () => {
-    it("tracks only first change per file", () => {
+    it("tracks repeated edits and undoes them stepwise", () => {
       const filePath = path.join(tempDir, "multi.ts");
       fs.writeFileSync(filePath, "v1");
       checkpoint(filePath, "edit_file");
 
       fs.writeFileSync(filePath, "v2");
-      checkpoint(filePath, "edit_file"); // should not add second
+      checkpoint(filePath, "edit_file");
+      fs.writeFileSync(filePath, "v3");
 
-      expect(listCheckpoints()).toHaveLength(1);
+      expect(listCheckpoints()).toHaveLength(2);
+
+      const restored = undoLast();
+      expect(restored).toEqual(["multi.ts"]);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("v2");
     });
 
     it("undoLast(2) restores both files", () => {

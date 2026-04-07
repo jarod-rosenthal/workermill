@@ -29,6 +29,7 @@ import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetec
 import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
 import * as lspTool from "./engine/tools/lsp.js";
+import { checkpoint } from "./checkpoints.js";
 import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
 
 /** Run LSP diagnostics on touched files. Returns error count (0 = clean, -1 = no LSP). */
@@ -631,6 +632,34 @@ function extractToolFilePath(toolName: string, toolInput: Record<string, unknown
   }
 
   return "";
+}
+
+function extractCheckpointTargets(toolName: string, toolInput: Record<string, unknown>, workingDir: string): Array<{ path: string; tool: "write_file" | "edit_file" | "multi_edit_file" | "patch" }> {
+  if (toolName === "patch" && typeof toolInput.patch_text === "string") {
+    const rows = toolInput.patch_text.replace(/\r\n/g, "\n").split("\n");
+    const targets: Array<{ path: string; tool: "patch" }> = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].startsWith("--- ")) continue;
+      const plus = rows[i + 1];
+      if (!plus || !plus.startsWith("+++ ")) continue;
+      const oldRaw = rows[i].replace(/^---\s+/, "").trim().replace(/^[ab]\//, "");
+      const newRaw = plus.replace(/^\+\+\+\s+/, "").trim().replace(/^[ab]\//, "");
+      const candidate = oldRaw === "/dev/null" ? newRaw : (newRaw === "/dev/null" ? oldRaw : newRaw);
+      if (!candidate || candidate === "/dev/null") continue;
+      const resolved = path.isAbsolute(candidate) ? candidate : path.resolve(workingDir, candidate);
+      if (!targets.some((t) => t.path === resolved)) targets.push({ path: resolved, tool: "patch" });
+    }
+    return targets;
+  }
+
+  if ((toolName === "write_file" || toolName === "edit_file" || toolName === "multi_edit_file")
+      && (typeof toolInput.path === "string" || typeof toolInput.file_path === "string")) {
+    const raw = String(toolInput.path || toolInput.file_path);
+    const resolved = path.isAbsolute(raw) ? raw : path.resolve(workingDir, raw);
+    return [{ path: resolved, tool: toolName }];
+  }
+
+  return [];
 }
 
 /** Format a tool call for display — short and to the point. */
@@ -2076,6 +2105,9 @@ export async function runOrchestration(
             }
 
             output.toolCall(story.persona, toolName, input);
+            for (const target of extractCheckpointTargets(toolName, input, workingDir)) {
+              checkpoint(target.path, target.tool);
+            }
             const hookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
             if (hookResult.blocked) {
               return `Tool blocked by pre-hook: ${hookResult.reason}`;

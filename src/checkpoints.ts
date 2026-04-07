@@ -7,7 +7,7 @@ import path from "path";
 
 interface TrackedChange {
   path: string;
-  tool: "write_file" | "edit_file" | "patch";
+  tool: "write_file" | "edit_file" | "multi_edit_file" | "patch";
   beforeContent: string | null; // null => file did not exist
   timestamp: number;
   persona?: string;
@@ -15,6 +15,7 @@ interface TrackedChange {
 }
 
 const trackedChanges: TrackedChange[] = [];
+const firstSnapshots = new Map<string, TrackedChange>();
 let workingDir = process.cwd();
 
 export function setCheckpointDir(dir: string): void {
@@ -22,17 +23,23 @@ export function setCheckpointDir(dir: string): void {
 }
 
 /**
- * Track a file change before it happens. Records the pre-change state.
- * For new files, beforeContent is null. Only records first change per file in session.
+ * Track a file change before it happens. Records both:
+ * - the full ordered change history for stepwise /undo
+ * - the first snapshot for deterministic per-file rollback to session start
  */
 export function checkpoint(filePath: string, tool: string): boolean {
   const resolvedPath = path.resolve(filePath);
-  // Check if already tracked
-  if (trackedChanges.some(tc => tc.path === resolvedPath)) return false;
-
   const beforeContent = fs.existsSync(resolvedPath) ? fs.readFileSync(resolvedPath, "utf-8") : null;
-  const timestamp = Date.now();
-  trackedChanges.push({ path: resolvedPath, tool: tool as "write_file" | "edit_file" | "patch", beforeContent, timestamp });
+  const change: TrackedChange = {
+    path: resolvedPath,
+    tool: tool as TrackedChange["tool"],
+    beforeContent,
+    timestamp: Date.now(),
+  };
+  trackedChanges.push(change);
+  if (!firstSnapshots.has(resolvedPath)) {
+    firstSnapshots.set(resolvedPath, change);
+  }
   return true;
 }
 
@@ -55,6 +62,9 @@ export function undoLast(count = 1): string[] {
     } catch {
       // File may have been deleted or permissions issue — skip
     }
+    if (!trackedChanges.some(change => change.path === tc.path)) {
+      firstSnapshots.delete(tc.path);
+    }
   }
   return restored;
 }
@@ -64,8 +74,7 @@ export function undoLast(count = 1): string[] {
  */
 export function undoFile(filePath: string): boolean {
   const resolvedPath = path.resolve(filePath);
-  // Find the first (earliest) tracked change for this file
-  const tc = trackedChanges.find(tc => tc.path === resolvedPath);
+  const tc = firstSnapshots.get(resolvedPath);
   if (!tc) return false;
 
   try {
@@ -76,9 +85,12 @@ export function undoFile(filePath: string): boolean {
       // Restore previous content
       fs.writeFileSync(tc.path, tc.beforeContent, "utf-8");
     }
-    // Remove from tracked changes
-    const idx = trackedChanges.indexOf(tc);
-    if (idx !== -1) trackedChanges.splice(idx, 1);
+    for (let i = trackedChanges.length - 1; i >= 0; i--) {
+      if (trackedChanges[i].path === resolvedPath) {
+        trackedChanges.splice(i, 1);
+      }
+    }
+    firstSnapshots.delete(resolvedPath);
     return true;
   } catch {
     return false;
@@ -110,4 +122,5 @@ export function getChangedFiles(): TrackedChange[] {
  */
 export function clearCheckpoints(): void {
   trackedChanges.length = 0;
+  firstSnapshots.clear();
 }

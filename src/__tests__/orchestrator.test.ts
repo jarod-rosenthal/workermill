@@ -397,6 +397,74 @@ describe("orchestrator", () => {
       expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(2);
     });
 
+    it("retries a story with a tighter prompt budget when the model rejects prompt length", async () => {
+      const hugeNotes = "A".repeat(220_000);
+      const plan = `Here is the plan:\n\`\`\`json\n${JSON.stringify({
+        stories: [
+          {
+            id: "setup-api",
+            title: "Set up API endpoint",
+            persona: "backend_developer",
+            description: "Create the API endpoint with proper routing.",
+            targetFiles: ["src/api.ts"],
+            referenceFiles: [],
+            implementationNotes: hugeNotes,
+          },
+        ],
+      })}\n\`\`\`\n`;
+      const output = createMockOutput();
+      const config = {
+        providers: {
+          xai: { model: "grok-code-fast-1" },
+        },
+        default: "xai",
+        review: { enabled: false },
+      };
+
+      const workerSystems: string[] = [];
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        if (callCount === 1) {
+          return {
+            textStream: (async function* () { yield plan; })(),
+            text: Promise.resolve(plan),
+            totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+          };
+        }
+
+        workerSystems.push(String(opts.system || ""));
+
+        if (callCount === 2) {
+          const err = new Error("Bad Request");
+          (err as Error & { responseBody?: string }).responseBody =
+            "{\"code\":\"Client specified an invalid argument\",\"error\":\"This model's maximum prompt length is 256000 but the request contains 261244 tokens.\"}";
+          throw err;
+        }
+
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text: "Implemented the API endpoint.",
+            toolCalls: [FAKE_TOOL_CALL],
+          });
+        }
+        fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+        fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "// impl");
+        return {
+          textStream: (async function* () { yield "Implemented the API endpoint."; })(),
+          text: Promise.resolve("Implemented the API endpoint.\n::file_modified::src/impl.ts"),
+          totalUsage: Promise.resolve({ inputTokens: 1000, outputTokens: 250 }),
+        };
+      });
+
+      await runOrchestration(config as ReturnType<typeof createTestConfig>, "Add a health check endpoint", true, false, output);
+
+      expect(workerSystems).toHaveLength(2);
+      expect(workerSystems[1].length).toBeLessThan(workerSystems[0].length);
+      expect(output.logs.some((line) => line.includes("retrying with tighter prompt budget"))).toBe(true);
+    });
+
     it("handles plan confirmation when not in trust mode", async () => {
       const config = createTestConfig();
       const output = createMockOutput();

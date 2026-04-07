@@ -31,6 +31,7 @@ import { withConcurrencyControl } from "./tool-concurrency.js";
 import * as lspTool from "./engine/tools/lsp.js";
 import { checkpoint } from "./checkpoints.js";
 import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
+import { estimateContextTokens } from "./compaction.js";
 
 /** Run LSP diagnostics on touched files. Returns error count (0 = clean, -1 = no LSP). */
 async function runDiagnosticsOnTouchedFiles(
@@ -227,6 +228,278 @@ function rateLimitSleep(ms: number): Promise<void> {
 function clipLogText(text: string, maxChars = 1200): string {
   if (!text) return "";
   return text.length > maxChars ? `${text.slice(0, maxChars)} ...[truncated ${text.length - maxChars} chars]` : text;
+}
+
+function estimateToolSchemaTokens(tools: ToolSet): number {
+  try {
+    const payload = Object.entries(tools).map(([name, def]) => ({
+      name,
+      description: typeof def?.description === "string" ? def.description : "",
+      inputSchema:
+        (def as Record<string, unknown>)?.inputSchema ??
+        (def as Record<string, unknown>)?.parameters ??
+        null,
+    }));
+    return Math.round(JSON.stringify(payload).length / 4);
+  } catch {
+    return 0;
+  }
+}
+
+function parsePromptLengthError(err: unknown): { limitTokens: number; actualTokens: number } | null {
+  const candidates = [
+    err instanceof Error ? err.message : String(err || ""),
+    typeof (err as { responseBody?: unknown })?.responseBody === "string"
+      ? String((err as { responseBody?: unknown }).responseBody)
+      : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const match = candidate.match(/maximum prompt length is (\d+)\D+request contains (\d+) tokens/i);
+    if (match) {
+      return {
+        limitTokens: Number(match[1]),
+        actualTokens: Number(match[2]),
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildWorkerPromptSections(args: {
+  personaSystemPrompt: string;
+  projectInstructions: string;
+  userTask: string;
+  story: Story;
+  contextBlock: string;
+  revisionFeedback: string;
+  workingDir: string;
+}): { systemPrompt: string; prompt: string } {
+  const {
+    personaSystemPrompt,
+    projectInstructions,
+    userTask,
+    story,
+    contextBlock,
+    revisionFeedback,
+    workingDir,
+  } = args;
+
+  const implementationGuidance = story.implementationNotes
+    ? `\n## Implementation Guidance from Architect\n\n${story.implementationNotes}\n\n**This guidance is based on actual analysis of the codebase. Follow it closely.**`
+    : "";
+
+  const systemPrompt = `${personaSystemPrompt}${projectInstructions}${contextBlock}
+
+## Ticket Requirements — THIS IS YOUR SPEC
+
+${userTask}
+
+## Your File Scope — STAY IN YOUR LANE
+
+${story.description}
+${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.referenceFiles?.length ? `\n**Reference files (read these first for patterns):** ${story.referenceFiles.join(", ")}` : ""}
+${story.primaryPattern ? `\n**Primary pattern file:** ${story.primaryPattern}` : ""}
+${story.integrationPoints?.length ? `\n**Integration points:** ${story.integrationPoints.join(", ")}` : ""}
+${story.nonGoals?.length ? `\n**Non-goals:** ${story.nonGoals.join(", ")}` : ""}
+${story.assumptions?.length ? `\n**Assumptions (verify before coding):** ${story.assumptions.join(", ")}` : ""}
+${story.validationSignal ? `\n**Validation signal:** ${story.validationSignal}` : ""}${implementationGuidance}
+
+**The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
+Do NOT modify files outside this scope unless absolutely necessary for shared types/imports. If you must touch a file owned by another story, note it with a ::file_modified:: marker so subsequent experts are aware.
+
+## Verification Before Completion
+
+Before you finish:
+1. Verify your implementation addresses every point from your story description above
+2. Prefer the repository's own verification commands first: existing package scripts, documented CI commands, or commands already used in the repo
+3. Only run stack-specific compile/typecheck commands when the repo actually supports them. Examples: run \`npx tsc --noEmit\` only when TypeScript is configured, \`go build ./...\` only when a Go module exists, and similar for other ecosystems
+4. Run the project's test command if tests exist and are relevant to your change
+5. Run lint if configured and relevant to your change
+6. If the repo does not expose a heavier compile/test command, run the smallest valid verification for the actual stack instead (for example \`node -c\` for a simple JavaScript entry file)
+7. Fix any errors you find — do not leave broken code for the next expert
+
+Verification rules:
+- Do NOT invent generic verification commands. Derive them from the actual repo/toolchain in front of you.
+- Do NOT run \`npx tsc --noEmit\` in plain JavaScript repos that do not have TypeScript configured.
+- Do NOT treat missing toolchains as blockers if they are not part of the repo's actual stack.
+- If a verification command fails because the toolchain is absent or not applicable, choose a smaller repo-appropriate verification instead of repeating the same bad command.
+
+If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
+
+Working directory: ${workingDir}
+
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+Think out loud as you work: before major tool calls, briefly state your intent; after major tool calls, briefly report what changed and your next step.
+
+When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form.
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, webpack serve, etc.). These block execution indefinitely.
+- NEVER run interactive commands that wait for user input.
+- Only run commands that complete and exit.
+- If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
+
+## How you deliver work
+**You MUST use tools (edit_file, write_file, multi_edit_file, patch) to make every code change.** Describing what you would change in prose is NOT work — only tool calls that modify files on disk count. If you finish without having called any file-writing tool, you have failed the task.
+
+After using tools to make changes, add these metadata markers in your text output so the system can track what happened:
+- ::decision:: for decisions that affect other parts of the system
+- ::file_created::path for files you created
+- ::file_modified::path for files you modified
+These markers are metadata ONLY — they do not replace actually using tools.
+
+## Diagnostics Enforcement
+Run diagnostics on touched files only when the workspace and language server support them for this repo. If LSP is unavailable or not applicable to the stack, do not invent diagnostics workarounds; use the repo's actual verification commands instead.
+${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+
+  return {
+    systemPrompt,
+    prompt: story.description,
+  };
+}
+
+function fitWorkerPromptToContext(args: {
+  personaSystemPrompt: string;
+  projectInstructions: string;
+  userTask: string;
+  story: Story;
+  contextBlock: string;
+  revisionFeedback: string;
+  workingDir: string;
+  personaTools: ToolSet;
+  contextWindow: number;
+  aggressive?: boolean;
+  overflowTokens?: number;
+}): { systemPrompt: string; prompt: string; trimmedSections: string[]; estimatedTokens: number; budgetTokens: number } {
+  const {
+    personaSystemPrompt,
+    projectInstructions,
+    story,
+    workingDir,
+    personaTools,
+    contextWindow,
+    aggressive = false,
+    overflowTokens = 0,
+  } = args;
+  let userTask = args.userTask;
+  let contextBlock = args.contextBlock;
+  let implementationNotes = story.implementationNotes || "";
+  let revisionFeedback = args.revisionFeedback;
+  const trimmedSections: string[] = [];
+  const toolTokens = estimateToolSchemaTokens(personaTools);
+  const budgetTokens = Math.floor(contextWindow * (aggressive ? 0.72 : 0.84));
+
+  const build = () => buildWorkerPromptSections({
+    personaSystemPrompt,
+    projectInstructions,
+    userTask,
+    story: { ...story, implementationNotes },
+    contextBlock,
+    revisionFeedback,
+    workingDir,
+  });
+
+  let built = build();
+  let estimatedTokens = estimateContextTokens(
+    [
+      { content: built.systemPrompt },
+      { content: built.prompt },
+    ],
+    0,
+  ) + toolTokens;
+
+  const shrinkers: Array<{
+    name: string;
+    get: () => string;
+    set: (value: string) => void;
+    minKeepChars: number;
+  }> = [
+    {
+      name: "prior story context",
+      get: () => contextBlock,
+      set: (value) => { contextBlock = value; },
+      minKeepChars: aggressive ? 1_000 : 2_000,
+    },
+    {
+      name: "implementation guidance",
+      get: () => implementationNotes,
+      set: (value) => { implementationNotes = value; },
+      minKeepChars: aggressive ? 1_000 : 2_000,
+    },
+    {
+      name: "revision feedback",
+      get: () => revisionFeedback,
+      set: (value) => { revisionFeedback = value; },
+      minKeepChars: 800,
+    },
+    {
+      name: "ticket requirements",
+      get: () => userTask,
+      set: (value) => { userTask = value; },
+      minKeepChars: aggressive ? 2_000 : 4_000,
+    },
+  ];
+
+  for (const shrinker of shrinkers) {
+    if (estimatedTokens <= budgetTokens) break;
+    const current = shrinker.get();
+    if (!current) continue;
+    const removable = current.length - shrinker.minKeepChars;
+    if (removable <= 0) continue;
+    const overflowChars = Math.max(1_500, Math.ceil((estimatedTokens - budgetTokens) * 4.2));
+    const reduceBy = Math.min(removable, Math.max(overflowChars, Math.ceil(current.length * (aggressive ? 0.45 : 0.25))));
+    const nextMaxChars = Math.max(shrinker.minKeepChars, current.length - reduceBy);
+    const next = truncateForPrompt(current, nextMaxChars, shrinker.name);
+    if (next !== current) {
+      shrinker.set(next);
+      trimmedSections.push(shrinker.name);
+      built = build();
+      estimatedTokens = estimateContextTokens(
+        [
+          { content: built.systemPrompt },
+          { content: built.prompt },
+        ],
+        0,
+      ) + toolTokens;
+    }
+  }
+
+  let forcedOverflowChars = overflowTokens > 0 ? Math.ceil(overflowTokens * 4.5) + 8_000 : 0;
+  for (const shrinker of shrinkers) {
+    if (forcedOverflowChars <= 0) break;
+    const current = shrinker.get();
+    if (!current) continue;
+    const removable = current.length - shrinker.minKeepChars;
+    if (removable <= 0) continue;
+    const reduceBy = Math.min(removable, forcedOverflowChars);
+    const next = truncateForPrompt(current, Math.max(shrinker.minKeepChars, current.length - reduceBy), shrinker.name);
+    if (next !== current) {
+      shrinker.set(next);
+      trimmedSections.push(shrinker.name);
+      built = build();
+      estimatedTokens = estimateContextTokens(
+        [
+          { content: built.systemPrompt },
+          { content: built.prompt },
+        ],
+        0,
+      ) + toolTokens;
+      forcedOverflowChars -= reduceBy;
+    }
+  }
+
+  return {
+    systemPrompt: built.systemPrompt,
+    prompt: built.prompt,
+    trimmedSections: [...new Set(trimmedSections)],
+    estimatedTokens,
+    budgetTokens,
+  };
 }
 
 function extractExecErrorDetail(err: unknown): { summary: string; stdout: string; stderr: string } {
@@ -2208,6 +2481,8 @@ export async function runOrchestration(
 
     let revisionFeedback = "";
     let storyRateLimitRetries = 0;
+    let contextOverflowRetries = 0;
+    let contextOverflowSlackTokens = 0;
     const retryErrorSignatureCounts = new Map<string, number>();
     for (let revision = 0; revision <= 2; revision++) {
 
@@ -2239,73 +2514,38 @@ export async function runOrchestration(
     const contextBlock = contextParts.join("\n");
 
     const projectInstructions = formatProjectInstructions(workingDir);
-    const systemPrompt = `${persona.systemPrompt}${projectInstructions}${contextBlock}
-
-## Ticket Requirements — THIS IS YOUR SPEC
-
-${userTask}
-
-## Your File Scope — STAY IN YOUR LANE
-
-${story.description}
-${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
-${story.referenceFiles?.length ? `\n**Reference files (read these first for patterns):** ${story.referenceFiles.join(", ")}` : ""}
-${story.primaryPattern ? `\n**Primary pattern file:** ${story.primaryPattern}` : ""}
-${story.integrationPoints?.length ? `\n**Integration points:** ${story.integrationPoints.join(", ")}` : ""}
-${story.nonGoals?.length ? `\n**Non-goals:** ${story.nonGoals.join(", ")}` : ""}
-${story.assumptions?.length ? `\n**Assumptions (verify before coding):** ${story.assumptions.join(", ")}` : ""}
-${story.validationSignal ? `\n**Validation signal:** ${story.validationSignal}` : ""}
-${story.implementationNotes ? `\n## Implementation Guidance from Architect\n\n${story.implementationNotes}\n\n**This guidance is based on actual analysis of the codebase. Follow it closely.**` : ""}
-
-**The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
-Do NOT modify files outside this scope unless absolutely necessary for shared types/imports. If you must touch a file owned by another story, note it with a ::file_modified:: marker so subsequent experts are aware.
-
-## Verification Before Completion
-
-Before you finish:
-1. Verify your implementation addresses every point from your story description above
-2. Prefer the repository's own verification commands first: existing package scripts, documented CI commands, or commands already used in the repo
-3. Only run stack-specific compile/typecheck commands when the repo actually supports them. Examples: run \`npx tsc --noEmit\` only when TypeScript is configured, \`go build ./...\` only when a Go module exists, and similar for other ecosystems
-4. Run the project's test command if tests exist and are relevant to your change
-5. Run lint if configured and relevant to your change
-6. If the repo does not expose a heavier compile/test command, run the smallest valid verification for the actual stack instead (for example \`node -c\` for a simple JavaScript entry file)
-7. Fix any errors you find — do not leave broken code for the next expert
-
-Verification rules:
-- Do NOT invent generic verification commands. Derive them from the actual repo/toolchain in front of you.
-- Do NOT run \`npx tsc --noEmit\` in plain JavaScript repos that do not have TypeScript configured.
-- Do NOT treat missing toolchains as blockers if they are not part of the repo's actual stack.
-- If a verification command fails because the toolchain is absent or not applicable, choose a smaller repo-appropriate verification instead of repeating the same bad command.
-
-If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
-
-Working directory: ${workingDir}
-
-## Communication Style
-
-Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
-Think out loud as you work: before major tool calls, briefly state your intent; after major tool calls, briefly report what changed and your next step.
-
-When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form.
-
-## Critical rules
-- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, webpack serve, etc.). These block execution indefinitely.
-- NEVER run interactive commands that wait for user input.
-- Only run commands that complete and exit.
-- If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
-
-## How you deliver work
-**You MUST use tools (edit_file, write_file, multi_edit_file, patch) to make every code change.** Describing what you would change in prose is NOT work — only tool calls that modify files on disk count. If you finish without having called any file-writing tool, you have failed the task.
-
-After using tools to make changes, add these metadata markers in your text output so the system can track what happened:
-- ::decision:: for decisions that affect other parts of the system
-- ::file_created::path for files you created
-- ::file_modified::path for files you modified
-These markers are metadata ONLY — they do not replace actually using tools.
-
-## Diagnostics Enforcement
-Run diagnostics on touched files only when the workspace and language server support them for this repo. If LSP is unavailable or not applicable to the stack, do not invent diagnostics workarounds; use the repo's actual verification commands instead.
-${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+    const contextWindow = getModelContext(modelName, contextLength);
+    const fittedPrompt = fitWorkerPromptToContext({
+      personaSystemPrompt: persona.systemPrompt,
+      projectInstructions,
+      userTask,
+      story,
+      contextBlock,
+      revisionFeedback,
+      workingDir,
+      personaTools: personaTools as ToolSet,
+      contextWindow,
+      aggressive: contextOverflowRetries > 0,
+      overflowTokens: contextOverflowSlackTokens,
+    });
+    const systemPrompt = fittedPrompt.systemPrompt;
+    if (fittedPrompt.trimmedSections.length > 0) {
+      output.log(
+        "system",
+        `Trimmed ${fittedPrompt.trimmedSections.join(", ")} to fit ${formatContext(contextWindow)} context (${Math.round(fittedPrompt.estimatedTokens / 1000)}K/${Math.round(fittedPrompt.budgetTokens / 1000)}K prompt budget)`,
+      );
+      logger.info("Worker prompt trimmed for context", {
+        story: story.id,
+        persona: story.persona,
+        provider,
+        model: modelName,
+        contextWindow,
+        estimatedTokens: fittedPrompt.estimatedTokens,
+        budgetTokens: fittedPrompt.budgetTokens,
+        trimmedSections: fittedPrompt.trimmedSections,
+        aggressive: contextOverflowRetries > 0,
+      });
+    }
 
     try {
       // Combine user abort with loop detection abort
@@ -2334,7 +2574,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         model,
         abortSignal: combinedAbort.signal,
         system: systemPrompt,
-        prompt: story.description,
+        prompt: fittedPrompt.prompt,
         tools: personaTools as ToolSet,
         stopWhen: stepCountIs(100),
         timeout: { chunkMs: 120_000 },
@@ -2634,6 +2874,25 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
           return { stories: sorted, completedStoryIds, featureBranch, userTask };
         }
         // Retry same revision after user tops up or switches provider.
+        continue;
+      }
+
+      const promptOverflow = parsePromptLengthError(err);
+      if (promptOverflow && contextOverflowRetries < 1) {
+        contextOverflowRetries++;
+        contextOverflowSlackTokens = Math.max(0, promptOverflow.actualTokens - promptOverflow.limitTokens);
+        output.log(
+          "system",
+          `Prompt exceeded model context (${formatContext(promptOverflow.actualTokens)} > ${formatContext(promptOverflow.limitTokens)}) — retrying with tighter prompt budget`,
+        );
+        logger.info("Retrying story after prompt-length overflow", {
+          story: i + 1,
+          persona: story.persona,
+          provider,
+          model: modelName,
+          actualTokens: promptOverflow.actualTokens,
+          limitTokens: promptOverflow.limitTokens,
+        });
         continue;
       }
 

@@ -284,6 +284,44 @@ export function getLiveViewChangeTargets(
   return [...byPath.entries()].map(([filePath, tool]) => ({ filePath, tool }));
 }
 
+/**
+ * Safety guard against image hallucinations:
+ * block visual claims when no image input/tool evidence exists for the turn.
+ */
+export function shouldBlockUnverifiedImageAnswer(
+  userInput: string,
+  assistantOutput: string,
+  opts: { turnHadInlineImages: boolean; toolCalls: ToolCallInfo[] },
+): boolean {
+  if (!assistantOutput.trim()) return false;
+
+  const userLooksImageRelated =
+    /\b(image|screenshot|picture|photo|png|jpe?g|gif|webp|bmp)\b/i.test(userInput) ||
+    /\/mnt\/[^\s]+\.(png|jpe?g|gif|webp|bmp)\b/i.test(userInput) ||
+    /[A-Za-z]:\\[^\n]+\.(png|jpe?g|gif|webp|bmp)\b/i.test(userInput);
+
+  if (!userLooksImageRelated) return false;
+
+  const hasImageEvidence =
+    opts.turnHadInlineImages ||
+    opts.toolCalls.some((c) => c.name === "view_image" || c.name === "browser_screenshot");
+
+  if (hasImageEvidence) return false;
+
+  const explicitlyCannotSee =
+    /\b(i can(?:not|'t)\s+(?:see|view|inspect)|no vision|without vision|text[- ]based|can't access image)\b/i.test(
+      assistantOutput,
+    );
+  if (explicitlyCannotSee) return false;
+
+  const makesVisualClaims =
+    /\b(i can see|the image|the screenshot|looks like|appears to|visible|shown in|depicts)\b/i.test(
+      assistantOutput,
+    );
+
+  return makesVisualClaims;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -1059,6 +1097,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         let resolvedInput = resolveFileReferences(input, workingDirRef.current);
         resolvedInput = resolveFolderReferences(resolvedInput, workingDirRef.current);
         resolvedInput = await resolveUrlReferences(resolvedInput);
+        const inlineImageParse = parseImageReferences(resolvedInput, workingDirRef.current);
+        const turnHadInlineImages = inlineImageParse.hasImages;
 
         const turnStartTime = Date.now();
 
@@ -1187,13 +1227,24 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
 
           // ---- Finalise ---- //
-          const finalText = await stream.text;
+          let finalText = await stream.text;
           const usage = await stream.totalUsage;
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
           const turnElapsedMs = Date.now() - turnStartTime;
           const currentToolCalls = streamingToolCallsRef.current;
           const toolCallCount = currentToolCalls.length;
+
+          if (
+            shouldBlockUnverifiedImageAnswer(resolvedInput, finalText, {
+              turnHadInlineImages,
+              toolCalls: currentToolCalls,
+            })
+          ) {
+            finalText =
+              "I can’t verify image contents in this turn because no image was actually provided to a vision input/tool. " +
+              "Attach it with `@/path/to/file.png` or ask me to run `view_image` on the file path.";
+          }
 
           // Extract and save memories from model output
           const newMemories = extractMemoryMarkers(finalText);

@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getLiveViewChangeTargets, trackAbortCost } from "../ui/useAgent.js";
+import { getLiveViewChangeTargets, shouldBlockUnverifiedImageAnswer, trackAbortCost } from "../ui/useAgent.js";
 
 // ---------------------------------------------------------------------------
 // 1. switchModel logic (pure replication)
@@ -1119,5 +1119,54 @@ describe("getLiveViewChangeTargets", () => {
 
     expect(writeTargets).toEqual([{ filePath: "src/new-file.ts", tool: "created" }]);
     expect(editTargets).toEqual([{ filePath: "src/app.ts", tool: "edited" }]);
+  });
+});
+
+describe("shouldBlockUnverifiedImageAnswer", () => {
+  it("blocks image claims when no inline image or image tools were used", () => {
+    const blocked = shouldBlockUnverifiedImageAnswer(
+      "what does this screenshot show?",
+      "The screenshot shows a red error banner at the top.",
+      { turnHadInlineImages: false, toolCalls: [] },
+    );
+    expect(blocked).toBe(true);
+  });
+
+  it("does not block when inline image evidence exists", () => {
+    const blocked = shouldBlockUnverifiedImageAnswer(
+      "what does this image show?",
+      "It appears to show a terminal window with a module not found error.",
+      { turnHadInlineImages: true, toolCalls: [] },
+    );
+    expect(blocked).toBe(false);
+  });
+
+  it("does not block when view_image was called", () => {
+    const blocked = shouldBlockUnverifiedImageAnswer(
+      "check this png",
+      "The image shows a missing import in the stack trace.",
+      {
+        turnHadInlineImages: false,
+        toolCalls: [
+          {
+            id: "1",
+            name: "view_image",
+            input: { path: "/tmp/a.png" },
+            status: "done",
+            result: "ok",
+          },
+        ],
+      },
+    );
+    expect(blocked).toBe(false);
+  });
+
+  it("does not block explicit no-vision responses", () => {
+    const blocked = shouldBlockUnverifiedImageAnswer(
+      "what do you see in this screenshot?",
+      "I can't inspect that image in this turn because I don't have vision input here.",
+      { turnHadInlineImages: false, toolCalls: [] },
+    );
+    expect(blocked).toBe(false);
   });
 });

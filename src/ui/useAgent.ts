@@ -1019,7 +1019,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-            if ((name === "write_file" || name === "edit_file" || name === "patch" || name === "multi_edit_file") && (input.path || input.file_path)) {
+            if (name === "patch") {
+              const patchText = String(input.patch_text || "");
+              const targets = parsePatchTargets(patchText, workingDirRef.current);
+              for (const target of targets) {
+                const resolved = path.resolve(workingDirRef.current, target.filePath);
+                checkpoint(resolved, "patch");
+              }
+            } else if ((name === "write_file" || name === "edit_file" || name === "multi_edit_file") && (input.path || input.file_path)) {
               const filePath = String(input.path || input.file_path);
               const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
               checkpoint(resolved, name);

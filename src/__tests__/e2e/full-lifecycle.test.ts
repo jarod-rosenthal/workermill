@@ -12,6 +12,7 @@ import type { SlashCommandContext } from "../../ui/slash-commands.js";
 import { EngineAIClient } from "../../engine/ai-client.js";
 import type { StreamMessage, TokenUsage } from "../../engine/types.js";
 import { detectOllamaHost } from "../helpers/ollama-host.js";
+import { createTempWorkerMillHome, type TempHome } from "../helpers/temp-workermill-home.js";
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -31,10 +32,16 @@ const tempDirs: string[] = [];
 const cleanupBranches: Array<{ dir: string; branch: string }> = [];
 const cleanupPRs: Array<{ dir: string; prNumber: string }> = [];
 
-// Backup config path
-const CONFIG_DIR = path.join(os.homedir(), ".workermill");
-const CONFIG_FILE = path.join(CONFIG_DIR, "cli.json");
+let tempHome: TempHome | null = null;
 let originalConfig: string | null = null;
+
+function getConfigDir(): string {
+  return path.join(os.homedir(), ".workermill");
+}
+
+function getConfigFile(): string {
+  return path.join(getConfigDir(), "cli.json");
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -149,11 +156,13 @@ function buildOrchestrationOutput(): {
 
 beforeAll(async () => {
   originalCwd = process.cwd();
+  tempHome = createTempWorkerMillHome();
 
   // Backup existing config
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      originalConfig = fs.readFileSync(CONFIG_FILE, "utf-8");
+    const configFile = getConfigFile();
+    if (fs.existsSync(configFile)) {
+      originalConfig = fs.readFileSync(configFile, "utf-8");
     }
   } catch { /* no config */ }
 
@@ -215,8 +224,13 @@ afterAll(async () => {
 
   // Restore original config
   if (originalConfig !== null) {
-    fs.writeFileSync(CONFIG_FILE, originalConfig, "utf-8");
+    fs.writeFileSync(getConfigFile(), originalConfig, "utf-8");
+  } else {
+    fs.rmSync(getConfigFile(), { force: true });
   }
+
+  tempHome?.restore();
+  tempHome?.cleanup();
 });
 
 // ---------------------------------------------------------------------------

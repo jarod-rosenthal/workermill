@@ -204,6 +204,16 @@ export function commandToRule(command: string): string {
   return `bash(${command.trim()})`;
 }
 
+/** Generate a durable permission rule for a tool invocation. */
+export function toolInputToRule(toolName: string, toolInput: Record<string, unknown>): string | null {
+  if (toolName === "bash") {
+    const command = String(toolInput.command || "").trim();
+    if (!command) return null;
+    return commandToRule(command);
+  }
+  return toolName;
+}
+
 /** Match a rule like "bash(npm run:*)" against a tool name and value. */
 function matchesRule(rule: string, toolName: string, value: string): boolean {
   const parenIdx = rule.indexOf("(");

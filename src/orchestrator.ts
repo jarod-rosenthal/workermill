@@ -495,24 +495,22 @@ export async function checkToolPermission(
     } else if (result.mode === "always" && result.allowed) {
       // "Yes, don't ask again" — save to project-level settings.local.json
       // (matches Claude Code behavior and single-agent path in useAgent.ts)
-      if (toolName === "bash" && toolInput.command) {
-        const { commandToRule, splitCompoundCommand } = await import("./safety.js");
+      try {
+        const { toolInputToRule, splitCompoundCommand } = await import("./safety.js");
         const { loadLocalSettings, saveLocalSettings } = await import("./config.js");
-        try {
-          const lSettings = loadLocalSettings() || {};
-          lSettings.allow = lSettings.allow || [];
-          const cmd = String(toolInput.command);
-          const subcommands = splitCompoundCommand(cmd);
-          const rules = subcommands.map(commandToRule);
-          for (const rule of rules) {
-            if (!lSettings.allow.includes(rule)) {
-              lSettings.allow.push(rule);
-            }
+        const lSettings = loadLocalSettings() || {};
+        lSettings.allow = lSettings.allow || [];
+        const rules = toolName === "bash" && toolInput.command
+          ? splitCompoundCommand(String(toolInput.command)).map((cmd) => toolInputToRule(toolName, { command: cmd }))
+          : [toolInputToRule(toolName, toolInput)];
+        for (const rule of rules) {
+          if (rule && !lSettings.allow.includes(rule)) {
+            lSettings.allow.push(rule);
           }
-          saveLocalSettings(lSettings);
-        } catch {
-          // Fall back to session-only
         }
+        saveLocalSettings(lSettings);
+      } catch {
+        // Fall back to session-only
       }
       sessionAllow.add(toolName);
     }

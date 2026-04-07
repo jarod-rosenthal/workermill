@@ -980,29 +980,27 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           }
 
           if (mode === "always" && allowed) {
-            if (name === "bash" && input.command) {
-              const cmd = String(input.command);
-              const subcommands = splitCompoundCommand(cmd);
-              const rules = subcommands.map(commandToRule);
-              try {
-                const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
-                const lSettings = loadLocalSettings() || {};
-                lSettings.allow = lSettings.allow || [];
-                for (const rule of rules) {
-                  if (!lSettings.allow.includes(rule)) {
-                    lSettings.allow.push(rule);
-                  }
+            try {
+              const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+              const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
+              const lSettings = loadLocalSettings() || {};
+              lSettings.allow = lSettings.allow || [];
+              const rules = name === "bash" && input.command
+                ? splitCompoundCommand(String(input.command)).map((cmd) => toolInputToRule(name, { command: cmd }))
+                : [toolInputToRule(name, input)];
+              for (const rule of rules) {
+                if (rule && !lSettings.allow.includes(rule)) {
+                  lSettings.allow.push(rule);
                 }
-                saveLocalSettings(lSettings);
-                // Update the merged permissions
-                const config = resolveConfig();
-                permissionRulesRef.current = config.permissions;
-              } catch {
-                sessionAllowRef.current.add(name);
               }
-            } else {
+              saveLocalSettings(lSettings);
+              // Update the merged permissions
+              const config = resolveConfig();
+              permissionRulesRef.current = config.permissions;
+            } catch {
               sessionAllowRef.current.add(name);
             }
+            sessionAllowRef.current.add(name);
           }
 
           if (!allowed) {

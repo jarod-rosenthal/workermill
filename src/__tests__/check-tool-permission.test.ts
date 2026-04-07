@@ -272,7 +272,7 @@ describe("checkToolPermission — exhaustive", () => {
       expect(saved.allow).toContain("bash(git status:*)");
     });
 
-    it("mode=always for non-bash adds to sessionAllow (session-only)", async () => {
+    it("mode=always for non-bash saves a durable tool allow rule", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
@@ -280,8 +280,9 @@ describe("checkToolPermission — exhaustive", () => {
       await checkToolPermission("write_file", { path: "foo.ts" }, false, sessionAllow, output);
 
       expect(sessionAllow.has("write_file")).toBe(true);
-      // No persistent config save for non-bash
-      expect(saveConfig).not.toHaveBeenCalled();
+      expect(saveLocalSettings).toHaveBeenCalled();
+      const saved = vi.mocked(saveLocalSettings).mock.calls.at(-1)?.[0] as { allow?: string[] };
+      expect(saved.allow).toContain("write_file");
     });
 
     it("mode=always — second call to same bash pattern is auto-allowed via saved rule", async () => {

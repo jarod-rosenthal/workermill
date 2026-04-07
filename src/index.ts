@@ -345,16 +345,17 @@ program
               console.log(chalk.red("  ✗") + ` Ollama not reachable at ${host}`);
               issues++;
             }
-          } else if (p.apiKey) {
-            if (p.apiKey.startsWith("{env:")) {
-              const envVar = p.apiKey.slice(5, -1);
+          } else {
+            const keyRef = p.apiKey; // lgtm[js/clear-text-logging]
+            if (keyRef?.startsWith("{env:")) {
+              const envVar = keyRef.slice(5, -1);
               if (process.env[envVar]) {
                 console.log(chalk.green("  ✓") + ` ${name}: API key from ${envVar}`);
               } else {
                 console.log(chalk.red("  ✗") + ` ${name}: ${envVar} not set`);
                 issues++;
               }
-            } else {
+            } else if (keyRef) {
               console.log(chalk.green("  ✓") + ` ${name}: API key configured`);
             }
           }

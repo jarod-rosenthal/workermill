@@ -20,7 +20,7 @@ import {
   deriveFeatureBranchName, localBranchExists, deleteLocalBranch,
   commitStoryChanges, commitRevisionChanges,
   captureStoryPriorWork, getDiffForReview, getDiffSinceCommit,
-  getHeadHash, returnToOriginalBranch,
+  getHeadHash, returnToOriginalBranch, shellArg,
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "./safety.js";
@@ -2033,7 +2033,7 @@ export async function runOrchestration(
     if (currentBranch !== featureBranch) {
       // Verify branch exists
       try {
-        execSync(`git rev-parse --verify "${featureBranch}"`, { cwd: workingDir, stdio: "pipe" });
+        execSync(`git rev-parse --verify ${shellArg(featureBranch)}`, { cwd: workingDir, stdio: "pipe" });
       } catch {
         output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -2041,7 +2041,7 @@ export async function runOrchestration(
 
       output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
       try {
-        execSync(`git checkout "${featureBranch}"`, { cwd: workingDir, stdio: "pipe" });
+        execSync(`git checkout ${shellArg(featureBranch)}`, { cwd: workingDir, stdio: "pipe" });
       } catch {
         output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -3787,7 +3787,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             output.status("Pushing branch...");
             let pushOutput = "";
             try {
-              pushOutput = execSync(`git push -u origin "${featureBranch}" 2>&1`, {
+              pushOutput = execSync(`git push -u origin ${shellArg(featureBranch)} 2>&1`, {
                 cwd: workingDir,
                 encoding: "utf-8",
                 stdio: "pipe",
@@ -3802,7 +3802,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 const confirmed = typeof force === "object" ? force.allowed : force;
                 if (confirmed) {
                   try {
-                    pushOutput = execSync(`git push --force-with-lease -u origin "${featureBranch}" 2>&1`, {
+                    pushOutput = execSync(`git push --force-with-lease -u origin ${shellArg(featureBranch)} 2>&1`, {
                       cwd: workingDir,
                       encoding: "utf-8",
                       stdio: "pipe",
@@ -3858,7 +3858,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
               const prUrl = execSync(
-                `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body-file - --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
+                `gh pr create --title ${shellArg(prTitle)} --body-file - --head ${shellArg(featureBranch)} --base ${shellArg(mainBranch)} 2>&1`,
                 { cwd: workingDir, encoding: "utf-8", input: prBody, stdio: ["pipe", "pipe", "pipe"] },
               ).trim();
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });

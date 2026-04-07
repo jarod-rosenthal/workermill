@@ -20,7 +20,7 @@ import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
 import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state.js";
-import { getCurrentBranch } from "../git-ops.js";
+import { getCurrentBranch, shellArg } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
 import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
@@ -1474,7 +1474,7 @@ export function useOrchestrator(
 
                 try {
                   const issueUrl = execSync(
-                    `gh issue create --title "${issueTitle.replace(/"/g, '\\"')}" --body-file -`,
+                    `gh issue create --title ${shellArg(issueTitle)} --body-file -`,
                     { cwd: process.cwd(), encoding: "utf-8", input: issueBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
                   ).trim();
                   // Extract issue number from URL

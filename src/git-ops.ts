@@ -15,6 +15,14 @@ import path from "path";
 import * as logger from "./logger.js";
 
 /**
+ * Escape a string for safe use as a single-quoted shell argument.
+ * Handles the only character that can break single quotes: the quote itself.
+ */
+export function shellArg(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * Ensure .gitignore contains entries that prevent `git add .` from staging
  * build artifacts, node_modules, and WorkerMill internal files.
  *
@@ -117,7 +125,7 @@ export function deriveFeatureBranchName(workingDir: string, taskDescription?: st
  */
 export function localBranchExists(workingDir: string, branchName: string): boolean {
   try {
-    execSync(`git rev-parse --verify "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+    execSync(`git rev-parse --verify ${shellArg(branchName)}`, { cwd: workingDir, stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -128,7 +136,7 @@ export function localBranchExists(workingDir: string, branchName: string): boole
  * Delete a local branch (must not be the current branch).
  */
 export function deleteLocalBranch(workingDir: string, branchName: string): void {
-  execSync(`git branch -D "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+  execSync(`git branch -D ${shellArg(branchName)}`, { cwd: workingDir, stdio: "pipe" });
 }
 
 /**
@@ -172,11 +180,11 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
     const branchName = `${prefix}/${slug}`;
 
     try {
-      execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+      execSync(`git checkout -b ${shellArg(branchName)}`, { cwd: workingDir, stdio: "pipe" });
       logger.info("Created feature branch", { branch: branchName });
     } catch {
       // Branch already exists (user chose "Continue") — just check it out
-      execSync(`git checkout "${branchName}"`, { cwd: workingDir, stdio: "pipe" });
+      execSync(`git checkout ${shellArg(branchName)}`, { cwd: workingDir, stdio: "pipe" });
       logger.info("Checked out existing feature branch", { branch: branchName });
     }
     return branchName;

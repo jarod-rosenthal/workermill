@@ -759,7 +759,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
         if (line.startsWith('@@')) {
-          var m = /@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+          var m = /@@\\s+-(\\d+)(?:,\\d+)?\\s+\\+(\\d+)(?:,\\d+)?\\s+@@/.exec(line);
           if (m) { oldLine = parseInt(m[1], 10); newLine = parseInt(m[2], 10); }
           rows.push({ type: 'hunk', text: line });
           continue;

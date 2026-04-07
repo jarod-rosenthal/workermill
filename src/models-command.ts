@@ -1,4 +1,5 @@
 import { listProviders, fetchLiveModels, fetchRemoteModels } from "./provider-registry.js";
+import type { CliConfig } from "./config.js";
 
 interface ModelEntry {
   provider: string;
@@ -17,7 +18,14 @@ export async function runModelsCommand(
   options?: { json?: boolean; provider?: string; available?: boolean }
 ): Promise<void> {
   const { json = false, provider: filterProvider, available = false } = options ?? {};
-  const config = (await import("./config.js")).resolveConfig();
+  const { resolveConfig, loadConfig } = await import("./config.js");
+  let config: CliConfig;
+  try {
+    config = resolveConfig();
+  } catch {
+    // `wm models` should still work without an initialized CLI profile.
+    config = loadConfig() ?? { providers: {}, default: "anthropic" };
+  }
 
   // Handle refresh command
   const isRefresh = filter === "refresh";

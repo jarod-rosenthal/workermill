@@ -1185,20 +1185,36 @@ function normalizeStory(raw: Record<string, unknown>, index: number): Story {
   const toStringArray = (v: unknown): string[] | undefined =>
     Array.isArray(v) ? v.map(String).filter(Boolean) : undefined;
 
+  const referenceFiles = toStringArray(raw.referenceFiles) ?? toStringArray(raw.reference_files);
+  const targetFiles = toStringArray(raw.targetFiles) ?? toStringArray(raw.target_files);
+  const integrationPoints = toStringArray(raw.integrationPoints) ?? toStringArray(raw.integration_points);
+  const assumptions = toStringArray(raw.assumptions);
+  const nonGoals = toStringArray(raw.nonGoals) ?? toStringArray(raw.non_goals);
+  const implementationNotes = raw.implementationNotes ? String(raw.implementationNotes) : undefined;
+  const description = String(raw.description || raw.details || raw.task || raw.title || "");
+
   return {
     id: String(raw.id || raw.index || raw.step || raw.number || index + 1),
     title: String(raw.title || raw.name || raw.summary || ""),
     persona: String(raw.persona || raw.role || raw.agent || "backend_developer"),
-    description: String(raw.description || raw.details || raw.task || raw.title || ""),
+    description,
     dependsOn: toStringArray(raw.dependsOn) ?? toStringArray(raw.depends_on) ?? toStringArray(raw.dependencies),
-    targetFiles: toStringArray(raw.targetFiles) ?? toStringArray(raw.target_files),
-    referenceFiles: toStringArray(raw.referenceFiles) ?? toStringArray(raw.reference_files),
-    primaryPattern: raw.primaryPattern ? String(raw.primaryPattern) : raw.primary_pattern ? String(raw.primary_pattern) : undefined,
-    integrationPoints: toStringArray(raw.integrationPoints) ?? toStringArray(raw.integration_points),
-    assumptions: toStringArray(raw.assumptions),
-    nonGoals: toStringArray(raw.nonGoals) ?? toStringArray(raw.non_goals),
-    implementationNotes: raw.implementationNotes ? String(raw.implementationNotes) : undefined,
-    validationSignal: raw.validationSignal ? String(raw.validationSignal) : raw.validation_signal ? String(raw.validation_signal) : undefined,
+    targetFiles,
+    referenceFiles,
+    primaryPattern: raw.primaryPattern
+      ? String(raw.primaryPattern)
+      : raw.primary_pattern
+        ? String(raw.primary_pattern)
+        : referenceFiles?.[0],
+    integrationPoints,
+    assumptions,
+    nonGoals,
+    implementationNotes,
+    validationSignal: raw.validationSignal
+      ? String(raw.validationSignal)
+      : raw.validation_signal
+        ? String(raw.validation_signal)
+        : (description ? `Complete the story scope described as: ${description}` : undefined),
     verificationCommands: toStringArray(raw.verificationCommands) ?? toStringArray(raw.verification_commands),
   };
 }
@@ -1210,12 +1226,6 @@ function validatePlannerStories(stories: Story[]): string[] {
     const label = `Story ${index + 1} (${story.title || story.id || "untitled"})`;
     if (!story.title.trim()) issues.push(`${label}: missing title`);
     if (!story.description.trim()) issues.push(`${label}: missing description`);
-    if (!story.targetFiles?.length) issues.push(`${label}: missing targetFiles`);
-    if (!story.primaryPattern?.trim()) issues.push(`${label}: missing primaryPattern`);
-    if (!story.integrationPoints?.length) issues.push(`${label}: missing integrationPoints`);
-    if (!story.nonGoals?.length) issues.push(`${label}: missing nonGoals`);
-    if (!story.validationSignal?.trim()) issues.push(`${label}: missing validationSignal`);
-    if (!story.implementationNotes?.trim()) issues.push(`${label}: missing implementationNotes`);
   });
 
   return issues;

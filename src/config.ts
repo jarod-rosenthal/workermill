@@ -163,6 +163,8 @@ export interface CliConfig {
   liveView?: boolean | "auto";
   /** Activity animation intensity for the status line. */
   uiActivity?: "off" | "minimal" | "full";
+  /** Show inline edited-file previews for committed tool edits (default: true). */
+  inlineEditPreview?: boolean;
   /** Enable experimental features: /doctor, /orchestrate (default: false) */
   experimental?: boolean;
 }
@@ -296,6 +298,7 @@ export function resolveConfig(): CliConfig {
     doctor: { ...global.doctor, ...(project?.doctor || {}) },
     liveView: project?.liveView ?? global.liveView,
     uiActivity: project?.uiActivity ?? global.uiActivity,
+    inlineEditPreview: project?.inlineEditPreview ?? global.inlineEditPreview,
     experimental: project?.experimental ?? global.experimental,
   };
 }

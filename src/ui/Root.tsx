@@ -113,6 +113,9 @@ export function Root(props: RootProps): React.ReactElement {
   const [uiActivityMode, setUiActivityMode] = useState<"off" | "minimal" | "full">(
     props.cliConfig?.uiActivity ?? "full",
   );
+  const [inlineEditPreviewEnabled, setInlineEditPreviewEnabled] = useState(
+    props.cliConfig?.inlineEditPreview ?? true,
+  );
 
   // Wrap switchModel to also update the display state
   const switchModelAndDisplay = useCallback((provider: string, model: string) => {
@@ -209,6 +212,7 @@ export function Root(props: RootProps): React.ReactElement {
         setLiveViewEnabled: agent.setLiveViewEnabled,
         getLiveViewUrl: agent.getLiveViewUrl,
         setUiActivityMode: (mode: "off" | "minimal" | "full") => setUiActivityMode(mode),
+        setInlineEditPreviewEnabled: (enabled: boolean) => setInlineEditPreviewEnabled(enabled),
         updateRoleModels: () => {
           try {
             const cfg = resolveConfig();
@@ -338,6 +342,7 @@ export function Root(props: RootProps): React.ReactElement {
       onPauseOrchestrator={orchestrator.pause}
       onResumeOrchestrator={orchestrator.resume}
       uiActivityMode={uiActivityMode}
+      inlineEditPreviewEnabled={inlineEditPreviewEnabled}
     />
   );
 }

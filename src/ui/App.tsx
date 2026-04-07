@@ -87,6 +87,8 @@ interface AppProps {
   onResumeOrchestrator?: () => void;
   /** Status-line activity animation intensity. */
   uiActivityMode?: "off" | "minimal" | "full";
+  /** Show inline edited-file previews for committed tool-only messages. */
+  inlineEditPreviewEnabled?: boolean;
 }
 
 const ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
@@ -506,6 +508,7 @@ export function App(props: AppProps): React.ReactElement {
   );
   const shouldAddPromptInputSpacer = !hasLiveActivity;
   const uiActivityMode = props.uiActivityMode ?? "full";
+  const inlineEditPreviewEnabled = props.inlineEditPreviewEnabled ?? true;
   const animateActivity = uiActivityMode !== "off";
 
   useEffect(() => {
@@ -539,6 +542,7 @@ export function App(props: AppProps): React.ReactElement {
           // Show rich inline edit snippets when we have committed tool edits.
           if (message.role === "assistant" && !message.content.trim()) {
             if (!message.toolCalls || message.toolCalls.length === 0) return null;
+            if (!inlineEditPreviewEnabled) return null;
             return (
               <Box key={message.id} flexDirection="column" marginLeft={2}>
                 <EditedFilePreview toolCalls={message.toolCalls} />

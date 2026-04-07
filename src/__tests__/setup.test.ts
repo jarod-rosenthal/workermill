@@ -11,9 +11,10 @@ vi.mock("../logger.js", () => ({
 
 // saveConfig spy — capture what gets written without hitting disk
 const saveConfigMock = vi.fn();
+const loadConfigMock = vi.fn(() => null);
 vi.mock("../config.js", () => ({
   saveConfig: (...args: unknown[]) => saveConfigMock(...args),
-  loadConfig: () => null,
+  loadConfig: () => loadConfigMock(),
 }));
 
 // Silence chalk's color codes so assertions are readable
@@ -101,6 +102,7 @@ function suppressOutput() {
 describe("setup.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadConfigMock.mockReturnValue(null);
     suppressOutput();
     // Default: fetch always fails (no Ollama / cloud models)
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -313,6 +315,39 @@ describe("setup.ts", () => {
       expect(config.providers["xai"].host).toBe("https://api.x.ai/v1");
       expect(config.providers["xai"].model).toBe("grok-4-1-fast-reasoning");
       expect(config.providers["xai"].model).not.toBe("grok-3");
+    });
+
+    it("does not reuse a saved xAI key when OpenAI is selected", async () => {
+      loadConfigMock.mockReturnValue({
+        default: "xai",
+        providers: {
+          xai: {
+            apiKey: "xai-kj_saved_from_prior_setup",
+            host: "https://api.x.ai/v1",
+            model: "grok-4-1-fast-reasoning",
+          },
+        },
+      });
+
+      const providersLength = 5;
+      setAnswers([
+        "4", // OpenAI
+        "1", // first OpenAI model
+        "y", // same for planner
+        "y", // same for reviewer
+      ]);
+
+      setTimeout(() => {
+        process.stdin.emit("data", Buffer.from("sk-proj-openai-real-key\r"));
+      }, 200);
+
+      const { runSetup } = await import("../setup.js");
+      const config = await runSetup();
+
+      expect(config.default).toBe("openai");
+      expect(config.providers["openai"]).toBeDefined();
+      expect(config.providers["openai"].apiKey).toBe("sk-proj-openai-real-key");
+      expect(config.providers["openai"].apiKey).not.toBe("xai-kj_saved_from_prior_setup");
     });
 
     it("handles custom OpenAI-compatible provider (last option)", async () => {

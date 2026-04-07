@@ -250,6 +250,11 @@ function maskKey(key: string): string {
   return key.slice(0, 6) + "•".repeat(Math.min(key.length - 10, 30)) + key.slice(-4);
 }
 
+function getProviderConfigKey(provider: ProviderOption): string {
+  const extended = provider as ProviderOption & { _providerName?: string };
+  return extended._providerName || provider.name;
+}
+
 /** Get API key for a provider — check env first, then prompt. */
 async function getApiKey(
   p: Prompter,
@@ -257,10 +262,11 @@ async function getApiKey(
   existingKeys: Map<string, string>,
 ): Promise<string | undefined> {
   if (!provider.needsKey) return undefined;
+  const providerKey = getProviderConfigKey(provider);
 
   // Reuse key if we already have one (from existing config or earlier in this setup)
-  if (existingKeys.has(provider.name)) {
-    const existing = existingKeys.get(provider.name)!;
+  if (existingKeys.has(providerKey)) {
+    const existing = existingKeys.get(providerKey)!;
     const masked = existing.startsWith("{env:") ? existing : `${existing.slice(0, 6)}${"•".repeat(20)}${existing.slice(-4)}`;
     console.log(chalk.green(`  ✓ Using saved ${provider.display} API key (${masked})`));
     return existing;
@@ -271,7 +277,7 @@ async function getApiKey(
   if (envValue) {
     console.log(chalk.green(`  ✓ Found ${provider.envVar} in environment`));
     const key = `{env:${provider.envVar}}`;
-    existingKeys.set(provider.name, key);
+    existingKeys.set(providerKey, key);
     return key;
   }
 
@@ -280,7 +286,7 @@ async function getApiKey(
   const key = await readKeyMasked(chalk.dim(`  ${provider.display} API key: `));
   resume();
   const trimmed = key.trim();
-  existingKeys.set(provider.name, trimmed);
+  existingKeys.set(providerKey, trimmed);
   return trimmed;
 }
 
@@ -811,12 +817,12 @@ export async function runSetup(): Promise<CliConfig> {
       await fetchCloudModels(plannerProvider, rawKey);
     }
     plannerModel = await pickModel(p, plannerProvider);
-    plannerProviderName = plannerProvider.name;
+    plannerProviderName = getProviderConfigKey(plannerProvider);
     if (plannerKey && plannerProvider.name !== workerProvider.name) {
       // Will be added to providers below
     }
   } else {
-    plannerProviderName = workerProvider.name;
+    plannerProviderName = getProviderConfigKey(workerProvider);
     plannerModel = workerModel;
     console.log(chalk.dim(`  → ${workerProvider.display} / ${workerModel}`));
   }
@@ -839,12 +845,12 @@ export async function runSetup(): Promise<CliConfig> {
       await fetchCloudModels(reviewerProvider, rawKey);
     }
     reviewerModel = await pickModel(p, reviewerProvider);
-    reviewerProviderName = reviewerProvider.name;
+    reviewerProviderName = getProviderConfigKey(reviewerProvider);
     if (reviewerKey && reviewerProvider.name !== workerProvider.name) {
       // Will be added to providers below
     }
   } else {
-    reviewerProviderName = workerProvider.name;
+    reviewerProviderName = getProviderConfigKey(workerProvider);
     reviewerModel = workerModel;
     console.log(chalk.dim(`  → ${workerProvider.display} / ${workerModel}`));
   }
@@ -865,31 +871,31 @@ export async function runSetup(): Promise<CliConfig> {
   // LM Studio uses the OpenAI SDK with a custom host
   const workerConfigKey = workerProvider.name === "lmstudio"
     ? "lmstudio"
-    : (wpExt._providerName || workerProvider.name);
+    : getProviderConfigKey(workerProvider);
 
   const providers: Record<string, ProviderConfig> = {
     [workerConfigKey]: workerConfig,
   };
 
   // Add planner provider if different
-  if (plannerProviderName !== workerProvider.name && !providers[plannerProviderName]) {
-    const pProvider = PROVIDERS.find(p => p.name === plannerProviderName)!;
+  if (plannerProviderName !== workerConfigKey && !providers[plannerProviderName]) {
+    const pProvider = PROVIDERS.find(p => p.name === plannerProviderName);
     const cfg: ProviderConfig = { model: plannerModel };
     const key = apiKeys.get(plannerProviderName);
     if (key) cfg.apiKey = key;
-    if (pProvider.name === "ollama") await configureOllama(cfg);
-    if (pProvider.name === "lmstudio") await configureLmStudio(cfg);
+    if (pProvider?.name === "ollama") await configureOllama(cfg);
+    if (pProvider?.name === "lmstudio") await configureLmStudio(cfg);
     providers[plannerProviderName] = cfg;
   }
 
   // Add reviewer provider if different
-  if (reviewerProviderName !== workerProvider.name && !providers[reviewerProviderName]) {
-    const rProvider = PROVIDERS.find(p => p.name === reviewerProviderName)!;
+  if (reviewerProviderName !== workerConfigKey && !providers[reviewerProviderName]) {
+    const rProvider = PROVIDERS.find(p => p.name === reviewerProviderName);
     const cfg: ProviderConfig = { model: reviewerModel };
     const key = apiKeys.get(reviewerProviderName);
     if (key) cfg.apiKey = key;
-    if (rProvider.name === "ollama") await configureOllama(cfg);
-    if (rProvider.name === "lmstudio") await configureLmStudio(cfg);
+    if (rProvider?.name === "ollama") await configureOllama(cfg);
+    if (rProvider?.name === "lmstudio") await configureLmStudio(cfg);
     providers[reviewerProviderName] = cfg;
   }
 

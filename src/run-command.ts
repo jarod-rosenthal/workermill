@@ -75,7 +75,7 @@ export async function runCommand(options: RunCommandOptions): Promise<RunResult>
   const mcpToolDefs = getMCPToolDefinitions();
   const tools = { ...baseTools, ...mcpToolDefs };
 
-  if (sandboxResolution.warning) {
+  if (sandboxResolution.warning && !options.json) {
     console.error(`[wm] ${sandboxResolution.warning}`);
   }
 
@@ -123,15 +123,19 @@ export async function runCommand(options: RunCommandOptions): Promise<RunResult>
       },
     });
 
-    for await (const chunk of stream.textStream) {
-      process.stdout.write(chunk);
+    if (!options.json) {
+      for await (const chunk of stream.textStream) {
+        process.stdout.write(chunk);
+      }
     }
 
     finalText = await stream.text;
     if (!finalText) {
       finalText = "(completed with tool calls only)";
     }
-    console.log(); // newline
+    if (!options.json) {
+      console.log(); // newline
+    }
 
     const totalUsage = await stream.totalUsage;
     inputTokens = totalUsage?.inputTokens ?? inputTokens;
@@ -142,7 +146,9 @@ export async function runCommand(options: RunCommandOptions): Promise<RunResult>
       // already handled
     } else {
       error = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${error}`);
+      if (!options.json) {
+        console.error(`Error: ${error}`);
+      }
     }
   } finally {
     stopAllMCPServers();

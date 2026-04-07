@@ -453,6 +453,10 @@ program
   .option("--model <provider/model>", "override worker model")
   .option("--max-steps <n>", "cap tool/reasoning steps", parseInt)
   .action(async (promptParts: string[], options) => {
+    if (options.session && options.continue) {
+      console.error("Error: --session and --continue cannot be used together");
+      process.exit(2);
+    }
     const prompt = promptParts.join(" ");
     if (!prompt) {
       console.error("Error: prompt is required");

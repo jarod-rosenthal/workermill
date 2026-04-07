@@ -183,7 +183,7 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("read tools auto-allow", () => {
-    const READ_TOOL_NAMES = ["read_file", "glob", "grep", "ls", "sub_agent", "lsp"];
+    const READ_TOOL_NAMES = ["read_file", "view_image", "glob", "grep", "ls", "sub_agent", "lsp"];
 
     for (const toolName of READ_TOOL_NAMES) {
       it(`auto-allows ${toolName} without prompting (trustAll=false)`, async () => {

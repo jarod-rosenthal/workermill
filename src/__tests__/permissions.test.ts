@@ -25,6 +25,12 @@ describe("PermissionManager", () => {
       expect(allowed).toBe(true);
     });
 
+    it("allows view_image without prompting", async () => {
+      const pm = new PermissionManager(false);
+      const allowed = await pm.checkPermission("view_image", { path: "/tmp/screenshot.png" });
+      expect(allowed).toBe(true);
+    });
+
     it("allows glob without prompting", async () => {
       const pm = new PermissionManager(false);
       const allowed = await pm.checkPermission("glob", { pattern: "*.ts" });

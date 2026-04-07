@@ -111,6 +111,29 @@ describe("parseImageReferences", () => {
     expect(blocked).toBeDefined();
   });
 
+  it("allows explicit absolute image paths outside working directory", () => {
+    const outsideDir = makeTempDir();
+    try {
+      const absoluteImagePath = writeFile(outsideDir, "outside.png", TINY_PNG_BYTES);
+      const result = parseImageReferences(`check @${absoluteImagePath} please`, tmpDir);
+      expect(result.hasImages).toBe(true);
+      const imagePart = result.parts.find((p) => p.type === "image");
+      expect(imagePart).toBeDefined();
+      expect(imagePart!.mimeType).toBe("image/png");
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports quoted image paths with spaces", () => {
+    const imagePath = writeFile(tmpDir, "my screenshot.png", TINY_PNG_BYTES);
+    const result = parseImageReferences(`analyze @"${imagePath}"`, tmpDir);
+    expect(result.hasImages).toBe(true);
+    const imagePart = result.parts.find((p) => p.type === "image");
+    expect(imagePart).toBeDefined();
+    expect(imagePart!.mimeType).toBe("image/png");
+  });
+
   it("handles multiple image references in one input", () => {
     writeFile(tmpDir, "a.png", TINY_PNG_BYTES);
     writeFile(tmpDir, "b.webp", TINY_PNG_BYTES);

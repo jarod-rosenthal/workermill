@@ -18,9 +18,10 @@ import * as webSearchTool from "./web-search.js";
 import * as todoTool from "./todo.js";
 import * as verifyTool from "./verify.js";
 import * as lspTool from "./lsp.js";
+import * as viewImageTool from "./view-image.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -115,6 +116,35 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         });
         if (result.success) {
           return result.content || "";
+        }
+        return `Error: ${result.error}`;
+      },
+    }),
+
+    view_image: tool({
+      description: viewImageTool.description,
+      inputSchema: z.object({
+        path: z
+          .string()
+          .describe("Path to the image to read (absolute or relative to cwd)"),
+      }),
+      execute: async ({ path: filePath }) => {
+        const isAbsolute = path.isAbsolute(filePath);
+        const resolvedPath = isAbsolute
+          ? filePath
+          : path.resolve(workingDir, filePath);
+
+        // Allow explicit absolute image paths (e.g. desktop screenshots),
+        // while keeping relative paths constrained to the workspace.
+        if (!isAbsolute) {
+          assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        }
+
+        const result = await viewImageTool.execute({
+          path: resolvedPath,
+        });
+        if (result.success) {
+          return { content: result.content };
         }
         return `Error: ${result.error}`;
       },

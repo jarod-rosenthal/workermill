@@ -19,6 +19,7 @@ export interface ToolMeta {
 export const TOOL_METADATA: Record<string, ToolMeta> = {
   // Read-only tools — always allowed
   read_file:   { isReadOnly: true,  isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
+  view_image:  { isReadOnly: true,  isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
   glob:        { isReadOnly: true,  isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
   grep:        { isReadOnly: true,  isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
   ls:          { isReadOnly: true,  isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },

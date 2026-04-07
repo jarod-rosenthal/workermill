@@ -743,7 +743,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       execute: async () => {
         const { base64, description } = await browserScreenshot();
         if (base64) {
-          return `${description}\n[Screenshot captured — image data available for analysis]`;
+          return {
+            content: [
+              { type: "text", text: description },
+              { type: "image", image: base64, mimeType: "image/png" },
+            ],
+          };
         }
         return description;
       },

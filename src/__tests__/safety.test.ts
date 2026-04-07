@@ -78,6 +78,7 @@ describe("safety", () => {
   describe("READ_TOOLS", () => {
     it("contains expected tools", () => {
       expect(READ_TOOLS.has("read_file")).toBe(true);
+      expect(READ_TOOLS.has("view_image")).toBe(true);
       expect(READ_TOOLS.has("glob")).toBe(true);
       expect(READ_TOOLS.has("grep")).toBe(true);
       expect(READ_TOOLS.has("ls")).toBe(true);
@@ -94,6 +95,7 @@ describe("safety", () => {
   describe("AUTO_EDIT_TOOLS", () => {
     it("contains expected tools", () => {
       expect(AUTO_EDIT_TOOLS.has("read_file")).toBe(true);
+      expect(AUTO_EDIT_TOOLS.has("view_image")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("write_file")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("edit_file")).toBe(true);
       expect(AUTO_EDIT_TOOLS.has("patch")).toBe(true);

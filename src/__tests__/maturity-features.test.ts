@@ -215,15 +215,15 @@ describe("Tool Metadata", () => {
     getToolMeta = mod.getToolMeta;
   });
 
-  it("getReadOnlyTools returns exactly {read_file, glob, grep, ls, lsp, sub_agent}", () => {
+  it("getReadOnlyTools returns exactly {read_file, view_image, glob, grep, ls, lsp, sub_agent}", () => {
     const ro = getReadOnlyTools();
-    expect(ro).toEqual(new Set(["read_file", "glob", "grep", "ls", "lsp", "sub_agent"]));
+    expect(ro).toEqual(new Set(["read_file", "view_image", "glob", "grep", "ls", "lsp", "sub_agent"]));
   });
 
   it("getAcceptEditsTools returns read-only tools plus write tools", () => {
     const ae = getAcceptEditsTools();
     // Must contain all read-only tools
-    for (const t of ["read_file", "glob", "grep", "ls", "lsp", "sub_agent"]) {
+    for (const t of ["read_file", "view_image", "glob", "grep", "ls", "lsp", "sub_agent"]) {
       expect(ae.has(t)).toBe(true);
     }
     // Must contain write/edit tools

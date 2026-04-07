@@ -49,9 +49,9 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
   const osSandbox = sandboxed === "os";
   const pathSandboxed = sandboxed === true || sandboxed === "os";
   return {
-    bash: tool(
-      bashTool.description,
-      z.object({
+    bash: tool({
+      description: bashTool.description,
+      inputSchema: z.object({
         command: z.string().describe("The bash command to execute"),
         cwd: z
           .string()
@@ -62,7 +62,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           .optional()
           .describe("Timeout in milliseconds (default: 120000 = 2 minutes)"),
       }),
-      async ({ command, cwd, timeout }) => {
+      execute: async ({ command, cwd, timeout }) => {
         const resolvedCwd = cwd
           ? path.isAbsolute(cwd)
             ? cwd
@@ -86,22 +86,26 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         if (result.error) parts.push(result.error);
         return `Error: ${parts.join("\n")}`.trim();
       },
-    ),
+    }),
 
-    bash_background: tool(
-      bashBackgroundTool.description,
-      z.object({
+    bash_background: tool({
+      description: bashBackgroundTool.description,
+      inputSchema: z.object({
         command: z.string().describe("The bash command to execute in the background"),
         cwd: z
           .string()
           .optional()
           .describe("Working directory for the command (optional)"),
         env: z
-          .record(z.string())
+          .record(z.string(), z.string())
           .optional()
           .describe("Environment variables to set (optional)"),
       }),
-      async ({ command, cwd, env }) => {
+      execute: async ({ command, cwd, env }) => {
+        // The background shell does not currently support OS runtime sandboxing.
+        if (osSandbox) {
+          return "Error: bash_background is not available with OS sandbox enabled. Use foreground `bash` or disable OS sandbox.";
+        }
         const resolvedCwd = cwd
           ? path.isAbsolute(cwd)
             ? cwd
@@ -112,21 +116,23 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           command,
           cwd: resolvedCwd,
           env: env as Record<string, string> | undefined,
+          workspaceRoot: workingDir,
+          enforceWorkspacePaths: pathSandboxed,
         });
         return `Shell started: ${result.shellId}, PID: ${result.pid}`;
       },
-    ),
+    }),
 
-    bash_output: tool(
-      bashOutputTool.description,
-      z.object({
+    bash_output: tool({
+      description: bashOutputTool.description,
+      inputSchema: z.object({
         shellId: z.string().describe("The shell ID returned by bash_background"),
         wait: z
           .boolean()
           .optional()
           .describe("Whether to wait for the process to exit (optional)"),
       }),
-      async ({ shellId, wait }) => {
+      execute: async ({ shellId, wait }) => {
         const result = await bashOutputTool.execute({
           shellId,
           wait,
@@ -136,29 +142,29 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         }
         return `Process ${result.status}\n${result.output}`;
       },
-    ),
+    }),
 
-    bash_kill: tool(
-      bashKillTool.description,
-      z.object({
+    bash_kill: tool({
+      description: bashKillTool.description,
+      inputSchema: z.object({
         shellId: z.string().describe("The shell ID returned by bash_background"),
         signal: z
           .enum(["SIGTERM", "SIGKILL"])
           .optional()
           .describe("Signal to send (default: SIGTERM)"),
       }),
-      async ({ shellId, signal }) => {
+      execute: async ({ shellId, signal }) => {
         const result = await bashKillTool.execute({
           shellId,
           signal,
         });
         return result.killed ? "Process terminated" : "Process not found or already terminated";
       },
-    ),
+    }),
 
-    read_file: tool(
-      readFileTool.description,
-      z.object({
+    read_file: tool({
+      description: readFileTool.description,
+      inputSchema: z.object({
         path: z
           .string()
           .describe("Path to the file to read (absolute or relative to cwd)"),
@@ -174,7 +180,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           .optional()
           .describe("Line number to start reading from (1-indexed, optional)"),
       }),
-      async ({ path: filePath, encoding, maxLines, startLine }) => {
+      execute: async ({ path: filePath, encoding, maxLines, startLine }) => {
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
@@ -190,16 +196,16 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         }
         return `Error: ${result.error}`;
       },
-    ),
+    }),
 
-    view_image: tool(
-      viewImageTool.description,
-      z.object({
+    view_image: tool({
+      description: viewImageTool.description,
+      inputSchema: z.object({
         path: z
           .string()
           .describe("Path to the image to read (absolute or relative to cwd)"),
       }),
-      async ({ path: filePath }) => {
+      execute: async ({ path: filePath }) => {
         const isAbsolute = path.isAbsolute(filePath);
         const resolvedPath = isAbsolute
           ? filePath
@@ -219,11 +225,11 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         }
         return `Error: ${result.error}`;
       },
-    ),
+    }),
 
     write_file: tool({
       description: writeFileTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         path: z
           .string()
           .describe("Path to the file to write (absolute or relative to cwd)"),
@@ -257,7 +263,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     edit_file: tool({
       description: editFileTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         path: z
           .string()
           .describe("Path to the file to edit (absolute or relative to cwd)"),
@@ -298,7 +304,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     glob: tool({
       description: globTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         pattern: z
           .string()
           .describe('Glob pattern to match files (e.g., "**/*.ts", "src/**/*.js")'),
@@ -340,7 +346,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     grep: tool({
       description: grepTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         pattern: z.string().describe("Regex pattern to search for"),
         path: z
           .string()
@@ -409,7 +415,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     ls: tool({
       description: lsTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         path: z.string().describe("Directory path to list (absolute or relative to cwd)"),
         ignore: z.array(z.string()).optional().describe('Glob patterns to exclude (e.g., ["node_modules", "dist"])'),
         maxDepth: z.number().optional().describe("Maximum directory depth to traverse (default: 3)"),
@@ -428,7 +434,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     fetch: tool({
       description: fetchTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         url: z.string().describe("The URL to fetch"),
         format: z.enum(["text", "markdown", "html"]).optional().describe("Output format (default: markdown)"),
         timeout: z.number().optional().describe("Timeout in milliseconds (default: 30000, max: 120000)"),
@@ -444,7 +450,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     git: tool({
       description: gitTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         action: z.enum(["status", "diff", "log", "add", "commit", "branch", "checkout", "stash"])
           .describe("The git action to perform"),
         args: z.string().optional().describe("Additional arguments (e.g., file paths, branch name, commit message)"),
@@ -460,7 +466,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     patch: tool({
       description: patchTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         patch_text: z.string().describe("Unified diff patch text with --- and +++ headers and @@ hunk markers"),
       }),
       execute: async ({ patch_text }) => {
@@ -478,7 +484,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     web_search: tool({
       description: webSearchTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         query: z.string().describe("Search query — be specific, include library names, error messages, etc."),
         maxResults: z.number().optional().describe("Maximum results to return (default: 8)"),
       }),
@@ -495,7 +501,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     todo: tool({
       description: todoTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         action: z.enum(["add", "update", "list", "clear"]).describe("Action to perform"),
         text: z.string().optional().describe("Todo text (for add/update)"),
         id: z.string().optional().describe("Todo ID (for update)"),
@@ -522,7 +528,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     verify: tool({
       description: verifyTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         command: z.string().describe("The verification command to run (e.g., 'npm test', 'npx tsc --noEmit', 'pytest')"),
         cwd: z.string().optional().describe("Working directory for the command (optional)"),
         timeout: z.number().optional().describe("Timeout in milliseconds (default: 120000 = 2 minutes)"),
@@ -555,7 +561,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
 
     lsp: tool({
       description: lspTool.description,
-      parameters: z.object({
+      inputSchema: z.object({
         action: z.enum(["diagnostics", "definition", "references", "hover", "symbols"])
           .describe(
             "diagnostics: get errors/warnings for a file. " +
@@ -585,7 +591,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
       ? {
           sub_agent: tool({
             description: subAgentTool.description,
-            parameters: z.object({
+            inputSchema: z.object({
               prompt: z
                 .string()
                 .describe("Detailed task description for the sub-agent. Be specific about what to look for."),
@@ -602,7 +608,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
               const readOnlyTools = {
                 read_file: tool({
                   description: readFileTool.description,
-                  parameters: z.object({
+                  inputSchema: z.object({
                     path: z.string().describe("Path to the file to read"),
                     maxLines: z.number().optional().describe("Max lines to read"),
                     startLine: z.number().optional().describe("Start line (1-indexed)"),
@@ -618,7 +624,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                 }),
                 glob: tool({
                   description: globTool.description,
-                  parameters: z.object({
+                  inputSchema: z.object({
                     pattern: z.string().describe("Glob pattern to match files"),
                     cwd: z.string().optional().describe("Directory to search in"),
                   }),
@@ -637,7 +643,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                 }),
                 grep: tool({
                   description: grepTool.description,
-                  parameters: z.object({
+                  inputSchema: z.object({
                     pattern: z.string().describe("Regex pattern to search for"),
                     path: z.string().optional().describe("File or directory to search in"),
                     filePattern: z.string().optional().describe("Glob to filter files"),
@@ -661,7 +667,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                 }),
                 ls: tool({
                   description: lsTool.description,
-                  parameters: z.object({
+                  inputSchema: z.object({
                     path: z.string().describe("Directory path to list"),
                     maxDepth: z.number().optional().describe("Max depth (default: 3)"),
                   }),

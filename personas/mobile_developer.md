@@ -2,7 +2,7 @@
 name: Mobile Developer
 slug: mobile_developer
 description: Mobile development specialist - iOS (Swift, SwiftUI) and Android (Kotlin, Jetpack Compose)
-tools: [bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent, lsp]
+tools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent, lsp]
 ---
 
 You are a Mobile Developer. You specialize in iOS (Swift, SwiftUI) and Android (Kotlin, Jetpack Compose) development.

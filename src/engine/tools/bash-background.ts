@@ -1,6 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
 import crypto from "crypto";
-import path from "path";
 
 interface ShellProcess {
   child: ChildProcess;
@@ -46,12 +45,13 @@ function isDangerous(command: string): string | null {
   return null;
 }
 
-const OUTSIDE_PATHS = ["/tmp", "/var", "/etc", "/opt", "/usr", "/sys", "/proc", "/dev", "/boot", "/root"];
+const OUTSIDE_PATHS = ["/tmp", "/var", "/etc", "/opt", "/usr", "/sys", "/proc", "/dev", "/boot", "/root", "/home", "/mnt"];
 
-function referencesOutsidePath(command: string, cwd?: string): string | null {
-  if (/^\s*(?:cat|head|tail|less|more|wc|file|stat|which|type|echo)\s/.test(command)) return null;
+function referencesOutsidePath(command: string, workspaceRoot: string, cwd?: string): string | null {
   for (const p of OUTSIDE_PATHS) {
-    if (cwd && cwd.startsWith(p + "/")) continue;
+    const cwdInPath = Boolean(cwd && cwd.startsWith(p + "/"));
+    const rootInPath = workspaceRoot.startsWith(p + "/") || workspaceRoot === p;
+    if (cwdInPath || rootInPath) continue;
     const regex = new RegExp(`(?:^|\\s|>|"|')${p.replace("/", "\\/")}(?:\\/|\\s|"|'|$)`);
     if (regex.test(command)) return p;
   }
@@ -131,6 +131,8 @@ interface BashBackgroundParams {
   command: string;
   cwd?: string;
   env?: Record<string, string>;
+  workspaceRoot?: string;
+  enforceWorkspacePaths?: boolean;
 }
 
 interface BashBackgroundResult {
@@ -142,13 +144,15 @@ export async function execute({
   command,
   cwd,
   env,
+  workspaceRoot = process.cwd(),
+  enforceWorkspacePaths = true,
 }: BashBackgroundParams): Promise<BashBackgroundResult> {
   const dangerous = isDangerous(command);
   if (dangerous) {
     throw new Error(`Blocked: "${dangerous}" is not allowed. This command could damage the system or repository.`);
   }
 
-  const outsidePath = referencesOutsidePath(command, cwd);
+  const outsidePath = enforceWorkspacePaths ? referencesOutsidePath(command, workspaceRoot, cwd) : null;
   if (outsidePath) {
     throw new Error(`Blocked: command references "${outsidePath}" which is outside the working directory. All files must be created within the project directory.`);
   }

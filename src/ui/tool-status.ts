@@ -2,8 +2,37 @@
 // Tool status labels
 // ---------------------------------------------------------------------------
 
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  // File operations
+  read: "read_file",
+  "read-file": "read_file",
+  readfile: "read_file",
+  write: "write_file",
+  "write-file": "write_file",
+  writefile: "write_file",
+  edit: "edit_file",
+  "edit-file": "edit_file",
+  editfile: "edit_file",
+  // Listing/search
+  list: "ls",
+  list_dir: "ls",
+  "list-dir": "ls",
+  listdir: "ls",
+  search: "grep",
+  // Common dashed/camel variants
+  subagent: "sub_agent",
+  "sub-agent": "sub_agent",
+  websearch: "web_search",
+  "web-search": "web_search",
+};
+
+export function normalizeToolName(toolName: string): string {
+  const normalized = toolName.trim().toLowerCase();
+  return TOOL_NAME_ALIASES[normalized] || normalized;
+}
+
 export function toolStatusLabel(toolName: string, input: Record<string, unknown>): string {
-  switch (toolName) {
+  switch (normalizeToolName(toolName)) {
     case "read_file":
       return `Reading ${input.file_path || "file"}...`;
     case "write_file":

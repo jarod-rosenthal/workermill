@@ -1353,6 +1353,7 @@ export function useOrchestrator(
               const emoji = getEmoji(persona);
               const detail = formatToolCallDetail(toolName, input, nextFileSequence);
               emitLine(`[${emoji} ${persona}] ↓ ${toolName}${detail ? ` ${detail}` : ""}`);
+              incrementToolCount?.(toolName);
               if (["edit_file", "write_file", "patch"].includes(toolName)) {
                 const toolCall: ToolCallInfo = {
                   id: `orch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1501,7 +1502,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
   );
 
   // ------------------------------------------------------------------

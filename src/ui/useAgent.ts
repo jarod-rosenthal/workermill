@@ -29,7 +29,7 @@ import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registe
 import { buildSystemPrompt } from "./system-prompt.js";
 import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
-import { toolStatusLabel } from "./tool-status.js";
+import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
 import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import path from "path";
@@ -62,7 +62,7 @@ const LOOP_THRESHOLD = 4;
 // Rate limit retry config
 const MAX_RATE_LIMIT_RETRIES = 3;
 const LONG_RESPONSE_RECEIPT_MIN_CHARS = 600;
-const TOOL_COUNT_FLUSH_MS = 5000;
+const TOOL_COUNT_FLUSH_MS = 750;
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -405,7 +405,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   }, []);
 
   const queueToolCountIncrement = useCallback((toolName: string) => {
-    pendingToolCountsRef.current[toolName] = (pendingToolCountsRef.current[toolName] || 0) + 1;
+    const canonicalName = normalizeToolName(toolName);
+    pendingToolCountsRef.current[canonicalName] = (pendingToolCountsRef.current[canonicalName] || 0) + 1;
     if (toolCountFlushTimerRef.current) return;
     toolCountFlushTimerRef.current = setTimeout(() => {
       flushToolCounts();

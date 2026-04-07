@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { theme } from "./theme.js";
 import { findModelInfo } from "../provider-registry.js";
+import { normalizeToolName } from "./tool-status.js";
 
 interface StatusBarProps {
   model: string;
@@ -32,7 +33,8 @@ const TOOL_USAGE_LABELS: Record<string, string> = {
 };
 
 function toolUsageLabel(name: string): string {
-  return TOOL_USAGE_LABELS[name] || name.replace(/_/g, " ");
+  const canonical = normalizeToolName(name);
+  return TOOL_USAGE_LABELS[canonical] || canonical.replace(/_/g, " ");
 }
 
 function equalRoleModels(

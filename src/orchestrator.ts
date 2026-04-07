@@ -2429,7 +2429,8 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
     const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
-    // Read-only tools for reviewer — wrapped with output.log
+    // Read-only tools for reviewer — emit structured tool calls so UI status
+    // counters and activity indicators stay accurate during tech_lead review.
     const reviewerTools: Record<string, AnyToolDef> = {};
     for (const toolName of reviewer.tools) {
       const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
@@ -2437,7 +2438,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         reviewerTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            output.log("tech_lead", formatToolCallDisplay(toolName, input));
+            output.toolCall("tech_lead", toolName, input);
             const result = await toolDef.execute(input);
             return result;
           },
@@ -2719,11 +2720,22 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         }
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
+        const detailedReview = extractDetailedReviewText(reviewText);
+        const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
+        const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
+        const feedback = detailedReview || feedbackSummary;
+
         // Display review result with horizontal rules
         output.log("tech_lead", "\u2500".repeat(60));
         output.log("tech_lead", `::code_quality_score::${score}/10`);
         output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
         output.log("tech_lead", "\u2500".repeat(60));
+        if (feedback) {
+          output.log("tech_lead", "Fix context:");
+          for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
+            output.log("tech_lead", line);
+          }
+        }
         output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
         if (stuckOnSameBlocker) {
           output.coordinatorLog(`Loop guard: reviewer repeated the same blockers for ${repeatedBlockerCount} rounds.`);
@@ -2731,11 +2743,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Post review result to ticket — matches worker/epic/coordinator-review.ts
         if (ticketOps) {
-          // Extract the full review — everything before the decision markers is the detailed analysis
-          const detailedReview = extractDetailedReviewText(reviewText);
-          const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|```|$)/i);
-          const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
-          const feedback = detailedReview || feedbackSummary;
           if (approved) {
             const roundLabel = reviewRound > 1 ? ` after ${reviewRound - 1} revision${reviewRound > 2 ? "s" : ""}` : "";
             ticketOps.postComment(
@@ -3349,7 +3356,8 @@ export async function runStandaloneReview(
   const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
   const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
-  // Build reviewer tools — same pattern as orchestrator
+  // Build reviewer tools — emit structured tool calls so standalone /review
+  // updates the status bar tool counters in real time.
   const reviewerTools: Record<string, AnyToolDef> = {};
   for (const toolName of reviewer.tools) {
     const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
@@ -3357,7 +3365,7 @@ export async function runStandaloneReview(
       reviewerTools[toolName] = {
         ...toolDef,
         execute: async (input: Record<string, unknown>) => {
-          output.log("tech_lead", formatToolCallDisplay(toolName, input));
+          output.toolCall("tech_lead", toolName, input);
           const result = await toolDef.execute(input);
           return result;
         },
@@ -3543,10 +3551,16 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   output.log("tech_lead", `::code_quality_score::${score}/10`);
   output.log("tech_lead", `::review_decision::${decision}`);
   output.log("tech_lead", "\u2500".repeat(60));
-  output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
-
+  const detailedReview = extractDetailedReviewText(reviewText);
   const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
-  const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+  const feedback = detailedReview || (feedbackMatch ? feedbackMatch[1].trim() : "");
+  if (feedback) {
+    output.log("tech_lead", "Fix context:");
+    for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      output.log("tech_lead", line);
+    }
+  }
+  output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
 
   // Clean up temp file
   try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }

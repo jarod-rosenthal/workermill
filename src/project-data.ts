@@ -164,7 +164,11 @@ function migrateGlobalHistory(cwd?: string): void {
 
   if (!fs.existsSync(oldPath) || fs.existsSync(newPath)) return;
 
-  ensureProjectDirs(cwd);
+  // Ensure the target directory exists
+  const dir = path.dirname(newPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 
   try {
     fs.copyFileSync(oldPath, newPath);

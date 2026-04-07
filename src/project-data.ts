@@ -80,24 +80,34 @@ export function loadProjectMeta(cwd?: string): ProjectMeta {
   const metaPath = getProjectMetaPath(cwd);
   const canonicalPath = fs.realpathSync(cwd || process.cwd());
 
+  let meta: ProjectMeta;
   try {
     if (fs.existsSync(metaPath)) {
       const data = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as Partial<ProjectMeta>;
-      return {
+      meta = {
         canonicalPath: data.canonicalPath || canonicalPath,
         lastAccessed: new Date().toISOString(),
         version: data.version || "1.0",
       };
+    } else {
+      meta = {
+        canonicalPath,
+        lastAccessed: new Date().toISOString(),
+        version: "1.0",
+      };
     }
   } catch (err) {
     // Ignore errors and create new meta
+    meta = {
+      canonicalPath,
+      lastAccessed: new Date().toISOString(),
+      version: "1.0",
+    };
   }
 
-  return {
-    canonicalPath,
-    lastAccessed: new Date().toISOString(),
-    version: "1.0",
-  };
+  // Persist the metadata
+  saveProjectMeta(meta, cwd);
+  return meta;
 }
 
 /**

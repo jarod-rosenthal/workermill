@@ -3,6 +3,7 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { LIVE_VIEW_HTML } from "./ui/live-view-html.js";
+import { PRISM_JS, PRISM_THEME_CSS } from "./ui/prism-bundle.js";
 
 export type LiveViewEvent =
   | { type: "file-changed"; persona: string; storyIndex: number; storyTitle: string; filePath: string; tool: "created" | "edited"; diff: string; timestamp: number }
@@ -45,6 +46,18 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
         "Expires": "0",
       });
       res.end(LIVE_VIEW_HTML);
+    } else if (req.method === "GET" && req.url === "/prism.js") {
+      res.writeHead(200, {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      });
+      res.end(PRISM_JS);
+    } else if (req.method === "GET" && req.url === "/prism-theme.css") {
+      res.writeHead(200, {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      });
+      res.end(PRISM_THEME_CSS);
     } else if (req.method === "GET" && req.url === "/events") {
       // SSE endpoint — disable Nagle's algorithm so every write is sent
       // immediately.  Without this, small SSE frames (~300 bytes) sit in

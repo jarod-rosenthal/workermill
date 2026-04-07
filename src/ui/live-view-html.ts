@@ -1,5 +1,3 @@
-import { PRISM_JS, PRISM_THEME_CSS } from "./prism-bundle.js";
-
 export const LIVE_VIEW_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -341,8 +339,8 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       .stream-panel { padding: 10px; }
     }
 
-    __PRISM_THEME_CSS__
   </style>
+  <link rel="stylesheet" href="/prism-theme.css">
 </head>
 <body>
   <div class="header">
@@ -374,7 +372,6 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <script>__PRISM_JS__</script>
   <script>
     /* ── State ── */
     var state = {
@@ -828,4 +825,5 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     window.abortRun = abortRun;
   </script>
 </body>
-</html>`.replace('__PRISM_JS__', PRISM_JS).replace('__PRISM_THEME_CSS__', PRISM_THEME_CSS);
+  <script src="/prism.js" async></script>
+</html>`;

@@ -3,6 +3,7 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { LIVE_VIEW_HTML } from "./ui/live-view-html.js";
+import { PRISM_JS, PRISM_THEME_CSS } from "./ui/prism-bundle.js";
 
 export type LiveViewEvent =
   | { type: "file-changed"; persona: string; storyIndex: number; storyTitle: string; filePath: string; tool: "created" | "edited"; diff: string; timestamp: number }
@@ -45,6 +46,18 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
         "Expires": "0",
       });
       res.end(LIVE_VIEW_HTML);
+    } else if (req.method === "GET" && req.url === "/prism.js") {
+      res.writeHead(200, {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      });
+      res.end(PRISM_JS);
+    } else if (req.method === "GET" && req.url === "/prism-theme.css") {
+      res.writeHead(200, {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      });
+      res.end(PRISM_THEME_CSS);
     } else if (req.method === "GET" && req.url === "/events") {
       // SSE endpoint — disable Nagle's algorithm so every write is sent
       // immediately.  Without this, small SSE frames (~300 bytes) sit in
@@ -55,6 +68,7 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Cache-Control",
       });
@@ -63,6 +77,10 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
       if (typeof (res as { flushHeaders?: () => void }).flushHeaders === "function") {
         (res as { flushHeaders: () => void }).flushHeaders();
       }
+      // Send initial padding/comment + first data frame.
+      // Some browser/proxy paths buffer tiny chunks; this forces the
+      // stream to flush and lets EventSource transition off "Connecting...".
+      res.write(`:${" ".repeat(2048)}\n\n`);
       // Send a lightweight first data frame so clients that wait for
       // initial payload bytes can transition from "Connecting..." quickly.
       res.write(`data: ${JSON.stringify({ type: "ready", timestamp: Date.now() })}\n\n`);
@@ -75,7 +93,14 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
 
+      // Keep the connection warm for intermediaries that time out idle SSE.
+      const heartbeat = setInterval(() => {
+        if (res.writableEnded) return;
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      }, 15000);
+
       req.on("close", () => {
+        clearInterval(heartbeat);
         clients.delete(client);
       });
     } else if (req.method === "GET" && req.url === "/events-snapshot") {
@@ -135,8 +160,18 @@ export function createLiveViewServer(workingDir: string, _mainBranch: string): L
     }
   }
 
+  function normalizeFilePath(filePath: string): string {
+    const trimmed = filePath.trim();
+    if (!trimmed) return "";
+    const unixPath = trimmed.replaceAll("\\", "/");
+    if (!path.isAbsolute(unixPath)) return unixPath;
+    const relative = path.relative(workingDir, unixPath).replaceAll("\\", "/");
+    if (!relative || relative.startsWith("../") || relative === "..") return unixPath;
+    return relative;
+  }
+
   function getLiveDiff(filePath: string, tool: "created" | "edited"): string {
-    const normalizedPath = filePath.trim();
+    const normalizedPath = normalizeFilePath(filePath);
     if (!normalizedPath) return "";
 
     let diff = runGitDiff(["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", normalizedPath]);

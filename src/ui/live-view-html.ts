@@ -1,11 +1,9 @@
-import { PRISM_JS, PRISM_THEME_CSS } from "./prism-bundle.js";
-
 export const LIVE_VIEW_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WorkerMill Live View</title>
+  <title>WorkerMill Live Code View</title>
   <style>
     :root {
       --bg: #0e1116;
@@ -341,13 +339,13 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       .stream-panel { padding: 10px; }
     }
 
-    __PRISM_THEME_CSS__
   </style>
+  <link rel="stylesheet" href="/prism-theme.css">
 </head>
 <body>
   <div class="header">
     <div class="header-left">
-      <span class="title">WorkerMill Live View</span>
+      <span class="title">WorkerMill Live Code View</span>
       <span id="storyPill" class="pill" style="display:none"></span>
       <span id="status" class="status">Connecting...</span>
     </div>
@@ -374,7 +372,6 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <script>__PRISM_JS__</script>
   <script>
     /* ── State ── */
     var state = {
@@ -427,9 +424,10 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       return escapeHtml(code);
     }
 
-    /* ── SSE / Polling (unchanged from current) ── */
-    var eventSource = new EventSource('/events');
+    /* ── SSE / Polling (polling-first fail-safe) ── */
+    var eventSource = null;
     var sseConnected = false;
+    var pollingStarted = false;
     var pollingInterval = null;
     var lastPolledIndex = 0;
 
@@ -438,34 +436,59 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       statusEl.style.color = '#b4f3be';
     }
 
-    eventSource.onopen = function() { sseConnected = true; markConnected('Connected'); };
+    function startPolling() {
+      if (pollingStarted) return;
+      pollingStarted = true;
+      markConnected('Connected (polling)');
+      pollingInterval = setInterval(function() {
+        fetch('/events-snapshot')
+          .then(function(r) { return r.json(); })
+          .then(function(events) {
+            for (var i = lastPolledIndex; i < events.length; i++) handleEvent(events[i]);
+            lastPolledIndex = events.length;
+          })
+          .catch(function() {});
+      }, 2000);
+    }
 
-    eventSource.onerror = function() {
-      if (sseConnected) {
-        statusEl.textContent = 'Disconnected — reconnecting...';
-        statusEl.style.color = '#ffdca3';
-        setTimeout(function() { location.reload(); }, 1000);
-      }
-    };
+    // Never remain in a perpetual "Connecting..." state.
+    // Polling starts immediately; SSE is best-effort for lower latency.
+    startPolling();
 
-    eventSource.onmessage = function(e) {
-      sseConnected = true;
-      handleEvent(JSON.parse(e.data));
-    };
+    try {
+      eventSource = new EventSource('/events');
+    } catch (e) {
+      // Keep polling-only mode.
+    }
 
+    if (eventSource) {
+      eventSource.onopen = function() { sseConnected = true; markConnected('Connected'); };
+
+      eventSource.onerror = function() {
+        if (sseConnected) {
+          statusEl.textContent = 'Disconnected — reconnecting...';
+          statusEl.style.color = '#ffdca3';
+          setTimeout(function() { location.reload(); }, 1000);
+        } else {
+          try { eventSource.close(); } catch (e) {}
+        }
+      };
+
+      eventSource.onmessage = function(e) {
+        sseConnected = true;
+        try {
+          handleEvent(JSON.parse(e.data));
+        } catch (err) {
+          // Ignore malformed frames instead of freezing the live view.
+        }
+      };
+    }
+
+    // If SSE still hasn't opened after startup, stick to polling.
+    // (No-op because polling is already active.)
     setTimeout(function() {
-      if (!sseConnected) {
-        eventSource.close();
-        markConnected('Connected');
-        pollingInterval = setInterval(function() {
-          fetch('/events-snapshot')
-            .then(function(r) { return r.json(); })
-            .then(function(events) {
-              for (var i = lastPolledIndex; i < events.length; i++) handleEvent(events[i]);
-              lastPolledIndex = events.length;
-            })
-            .catch(function() {});
-        }, 2000);
+      if (!sseConnected && eventSource) {
+        try { eventSource.close(); } catch (e) {}
       }
     }, 3000);
 
@@ -736,7 +759,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
         if (line.startsWith('@@')) {
-          var m = /@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+          var m = /@@\\s+-(\\d+)(?:,\\d+)?\\s+\\+(\\d+)(?:,\\d+)?\\s+@@/.exec(line);
           if (m) { oldLine = parseInt(m[1], 10); newLine = parseInt(m[2], 10); }
           rows.push({ type: 'hunk', text: line });
           continue;
@@ -802,4 +825,5 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
     window.abortRun = abortRun;
   </script>
 </body>
-</html>`.replace('__PRISM_JS__', PRISM_JS).replace('__PRISM_THEME_CSS__', PRISM_THEME_CSS);
+  <script src="/prism.js" async></script>
+</html>`;

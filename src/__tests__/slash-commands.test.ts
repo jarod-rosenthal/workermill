@@ -34,6 +34,7 @@ vi.mock("../config.js", () => ({
   loadConfig: vi.fn(() => ({
     providers: { ollama: { model: "qwen3-coder:30b" } },
     default: "ollama",
+    experimental: true,
   })),
   saveConfig: vi.fn(),
   resolveConfig: vi.fn(),
@@ -595,7 +596,7 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/pause", ctx);
       expect(ctx.pauseOrchestrator).not.toHaveBeenCalled();
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No `/ship` orchestration is running")
+        expect.stringContaining("No `/build` orchestration is running")
       );
     });
   });
@@ -850,7 +851,7 @@ describe("handleSlashCommand", () => {
       const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       // Primary settings present
       expect(msg).toContain("Review enabled");
-      expect(msg).toContain("Live view");
+      expect(msg).toContain("Live code view");
       expect(msg).toContain("Issue tracker");
       // Advanced settings hidden
       expect(msg).not.toContain("Ollama host");
@@ -909,6 +910,57 @@ describe("handleSlashCommand", () => {
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Review enabled")
       );
+    });
+
+    it("shows clean provider names in persona routing table", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: {
+          ollama: { model: "qwen3-coder:30b" },
+          openai: { model: "gpt-5.4" },
+          openai_tech_lead: { model: "gpt-5.4" },
+          google: { model: "gemini-2.5-pro" },
+          google_planner: { model: "gemini-2.5-pro" },
+        },
+        default: "ollama",
+        routing: {
+          tech_lead: "openai_tech_lead",
+          planner: "google_planner",
+        },
+      } as any);
+
+      const ctx = createContext();
+      handleSlashCommand("/settings", ctx);
+
+      const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
+      const routingMsg = calls[calls.length - 1][0] as string;
+      expect(routingMsg).toContain("| tech_lead | openai |");
+      expect(routingMsg).toContain("| planner | google |");
+      expect(routingMsg).not.toContain("openai_tech_lead");
+      expect(routingMsg).not.toContain("google_planner");
+    });
+
+    it("shows raw routing config keys in /settings all", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: {
+          ollama: { model: "qwen3-coder:30b" },
+          openai_tech_lead: { model: "gpt-5.4" },
+          google_planner: { model: "gemini-2.5-pro" },
+        },
+        default: "ollama",
+        routing: {
+          tech_lead: "openai_tech_lead",
+          planner: "google_planner",
+        },
+      } as any);
+
+      const ctx = createContext();
+      handleSlashCommand("/settings all", ctx);
+
+      const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
+      const routingMsg = calls[calls.length - 1][0] as string;
+      expect(routingMsg).toContain("| Persona | Provider | Config key |");
+      expect(routingMsg).toContain("| tech_lead | openai | openai_tech_lead |");
+      expect(routingMsg).toContain("| planner | google | google_planner |");
     });
   });
 
@@ -1138,7 +1190,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       const ctx = createContext();
       handleSlashCommand("/init", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Analyzing codebase")
       );
       expect(ctx.submit).toHaveBeenCalledWith(
@@ -1151,7 +1204,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const ctx = createContext();
       handleSlashCommand("/init", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Validating AGENT.md")
       );
     });
@@ -1160,7 +1214,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const ctx = createContext();
       handleSlashCommand("/init --force", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Analyzing codebase")
       );
     });
@@ -1680,7 +1735,7 @@ describe("handleSlashCommand", () => {
       );
       expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(true);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Live view listening")
+        expect.stringContaining("Live code view listening")
       );
 
       vi.clearAllMocks();
@@ -1690,7 +1745,24 @@ describe("handleSlashCommand", () => {
       );
       expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(false);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Live view disabled")
+        expect.stringContaining("Live code view disabled")
+      );
+    });
+
+    it("accepts case-insensitive settings keys", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings LIVEVIEW true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ liveView: true }),
+      );
+      expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(true);
+
+      vi.clearAllMocks();
+      handleSlashCommand("/settings Review.MaxRevisions 4", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ maxRevisions: 4 }),
+        }),
       );
     });
 

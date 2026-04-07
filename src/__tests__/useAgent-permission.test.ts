@@ -285,7 +285,7 @@ describe("resolvePermission() — useAgent checkPermission decision tree", () =>
   // 5. Read-only tools — always allowed
   // -------------------------------------------------------------------------
   describe("read-only tools", () => {
-    const readTools = ["read_file", "glob", "grep", "ls", "sub_agent"];
+    const readTools = ["read_file", "view_image", "glob", "grep", "ls", "sub_agent"];
 
     for (const tool of readTools) {
       it(`allows ${tool} without any special mode`, () => {

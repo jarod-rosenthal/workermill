@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
+import { EditedFilePreview } from "./EditedFilePreview.js";
 import { PermissionPrompt } from "./PermissionPrompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { Input } from "./Input.js";
@@ -84,11 +85,16 @@ interface AppProps {
   onPauseOrchestrator?: () => void;
   /** Called when Ctrl+P is pressed to resume the orchestrator. */
   onResumeOrchestrator?: () => void;
+  /** Status-line activity animation intensity. */
+  uiActivityMode?: "off" | "minimal" | "full";
 }
 
-/** Static activity dot — no animation, no re-renders. */
-function Spinner({ color }: { color: string }): React.ReactElement {
-  return <Text color={color}>●</Text>;
+const ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const ACTIVITY_TICK_MS_FAST = 160;
+const ACTIVITY_TICK_MS_SLOW = 420;
+
+function Spinner({ color, tick }: { color: string; tick: number }): React.ReactElement {
+  return <Text color={color}>{ACTIVITY_FRAMES[tick % ACTIVITY_FRAMES.length]}</Text>;
 }
 
 const ORCHESTRATOR_CONFIRM_ACK_MS = 450;
@@ -306,6 +312,8 @@ export function App(props: AppProps): React.ReactElement {
   const [queuedInput, setQueuedInput] = useState<string | null>(null);
   const [rollbackPrefill, setRollbackPrefill] = useState<{ value: string; seq: number } | null>(null);
   const [rollbackOfferVisible, setRollbackOfferVisible] = useState(false);
+  const [activityTick, setActivityTick] = useState(0);
+  const activitySinceRef = useRef<number | null>(null);
 
   const handleQueue = useCallback((value: string) => {
     setQueuedInput((prev) => prev ?? value);
@@ -497,6 +505,30 @@ export function App(props: AppProps): React.ReactElement {
     hasLiveStatusActivity,
   );
   const shouldAddPromptInputSpacer = !hasLiveActivity;
+  const uiActivityMode = props.uiActivityMode ?? "full";
+  const animateActivity = uiActivityMode !== "off";
+
+  useEffect(() => {
+    if (!hasLiveActivity) {
+      activitySinceRef.current = null;
+      return;
+    }
+    if (activitySinceRef.current == null) {
+      activitySinceRef.current = Date.now();
+    }
+  }, [hasLiveActivity]);
+
+  useEffect(() => {
+    if (!hasLiveActivity || !animateActivity) return;
+    const tickMs = uiActivityMode === "minimal" ? ACTIVITY_TICK_MS_SLOW : ACTIVITY_TICK_MS_FAST;
+    const timer = setInterval(() => {
+      setActivityTick((t) => (t + 1) % 10_000);
+    }, tickMs);
+    return () => clearInterval(timer);
+  }, [animateActivity, hasLiveActivity, uiActivityMode]);
+
+  const elapsedSec = activitySinceRef.current ? Math.max(0, Math.floor((Date.now() - activitySinceRef.current) / 1000)) : 0;
+  const elapsedLabel = elapsedSec > 0 ? ` ${elapsedSec}s` : "";
 
   return (
     <Box flexDirection="column" width="100%">
@@ -504,8 +536,15 @@ export function App(props: AppProps): React.ReactElement {
       <Static items={props.messages}>
         {(message) => {
           // Tool-only assistant placeholders are committed with empty content.
-          // Hide them so transcript spacing stays clean and predictable.
-          if (message.role === "assistant" && !message.content.trim()) return null;
+          // Show rich inline edit snippets when we have committed tool edits.
+          if (message.role === "assistant" && !message.content.trim()) {
+            if (!message.toolCalls || message.toolCalls.length === 0) return null;
+            return (
+              <Box key={message.id} flexDirection="column" marginLeft={2}>
+                <EditedFilePreview toolCalls={message.toolCalls} />
+              </Box>
+            );
+          }
           const messageIndex = props.messages.findIndex((m) => m.id === message.id);
 
           if (message.role === "user") {
@@ -549,19 +588,19 @@ export function App(props: AppProps): React.ReactElement {
           {shouldAddLiveActivitySpacer ? <Box height={1} /> : null}
           <Box marginLeft={2} minHeight={1}>
             {hasLiveToolActivity ? (
-              <ToolCallDisplay tool={props.streamingToolCalls![props.streamingToolCalls!.length - 1]} />
+              <ToolCallDisplay tool={props.streamingToolCalls![props.streamingToolCalls!.length - 1]} tick={activityTick} animate={animateActivity} />
             ) : props.orchestratorStatus ? (
-              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.orchestratorStatus}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "thinking" ? (
-              <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} Thinking<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "streaming" ? (
-              <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+              <Text color={theme.brand}>{animateActivity ? <Spinner color={theme.brand} tick={activityTick} /> : "●"} Streaming response<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "tool_running" ? (
-              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.statusDetail || "Running tool"}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "permission" ? (
-              <Text color={theme.permission}>● Waiting for permission...</Text>
+              <Text color={theme.permission}>{animateActivity ? <Spinner color={theme.permission} tick={activityTick} /> : "●"} Waiting for permission<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.buildPreviewLine ? (
-              <Text color={theme.subtle}>{props.buildPreviewLine}</Text>
+              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} {props.buildPreviewLine}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : (
               <Text>{" "}</Text>
             )}

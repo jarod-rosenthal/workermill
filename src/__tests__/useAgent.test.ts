@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { trackAbortCost } from "../ui/useAgent.js";
+import { getLiveViewChangeTargets, trackAbortCost } from "../ui/useAgent.js";
 
 // ---------------------------------------------------------------------------
 // 1. switchModel logic (pure replication)
@@ -1073,5 +1073,51 @@ describe("trackAbortCost", () => {
 
     expect(addUsage).toHaveBeenCalledWith("agent", "google", "gemini-3.1-pro", 1200, 550);
     expect(setCost).toHaveBeenCalledWith(0.004);
+  });
+});
+
+describe("getLiveViewChangeTargets", () => {
+  it("extracts changed files for patch tool from patch_text when no input path exists", () => {
+    const patchText = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1 +1 @@",
+      "-const a = 1;",
+      "+const a = 2;",
+      "diff --git a/src/new.ts b/src/new.ts",
+      "--- /dev/null",
+      "+++ b/src/new.ts",
+      "@@ -0,0 +1 @@",
+      "+export const n = 1;",
+    ].join("\n");
+
+    const targets = getLiveViewChangeTargets(
+      "patch",
+      { patch_text: patchText },
+      {},
+      "/home/user/github/workermill",
+    );
+
+    expect(targets).toContainEqual({ filePath: "src/a.ts", tool: "edited" });
+    expect(targets).toContainEqual({ filePath: "src/new.ts", tool: "created" });
+  });
+
+  it("normalizes absolute write/edit paths to working-dir relative paths", () => {
+    const writeTargets = getLiveViewChangeTargets(
+      "write_file",
+      { path: "/home/user/github/workermill/src/new-file.ts" },
+      {},
+      "/home/user/github/workermill",
+    );
+    const editTargets = getLiveViewChangeTargets(
+      "edit_file",
+      { file_path: "/home/user/github/workermill/src/app.ts" },
+      {},
+      "/home/user/github/workermill",
+    );
+
+    expect(writeTargets).toEqual([{ filePath: "src/new-file.ts", tool: "created" }]);
+    expect(editTargets).toEqual([{ filePath: "src/app.ts", tool: "edited" }]);
   });
 });

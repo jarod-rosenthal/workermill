@@ -1,7 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { toolStatusLabel } from "../ui/tool-status.js";
+import { normalizeToolName, toolStatusLabel } from "../ui/tool-status.js";
 
 describe("toolStatusLabel", () => {
+  describe("normalizeToolName", () => {
+    it("normalizes short and dashed aliases", () => {
+      expect(normalizeToolName("read")).toBe("read_file");
+      expect(normalizeToolName("rd")).toBe("read_file");
+      expect(normalizeToolName("rf")).toBe("read_file");
+      expect(normalizeToolName("write-file")).toBe("write_file");
+      expect(normalizeToolName("wr")).toBe("write_file");
+      expect(normalizeToolName("wf")).toBe("write_file");
+      expect(normalizeToolName("EditFile")).toBe("edit_file");
+      expect(normalizeToolName("ed")).toBe("edit_file");
+      expect(normalizeToolName("ef")).toBe("edit_file");
+      expect(normalizeToolName("list_dir")).toBe("ls");
+      expect(normalizeToolName("list_files")).toBe("ls");
+      expect(normalizeToolName("sub-agent")).toBe("sub_agent");
+      expect(normalizeToolName("spawn_agent")).toBe("sub_agent");
+      expect(normalizeToolName("exec")).toBe("bash");
+      expect(normalizeToolName("shell")).toBe("bash");
+    });
+  });
+
   describe("file tools", () => {
     it("read_file with file_path", () => {
       expect(toolStatusLabel("read_file", { file_path: "/src/foo.ts" })).toBe("Reading /src/foo.ts...");

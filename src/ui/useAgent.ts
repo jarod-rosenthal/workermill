@@ -29,7 +29,7 @@ import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registe
 import { buildSystemPrompt } from "./system-prompt.js";
 import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
-import { toolStatusLabel } from "./tool-status.js";
+import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
 import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import path from "path";
@@ -62,7 +62,7 @@ const LOOP_THRESHOLD = 4;
 // Rate limit retry config
 const MAX_RATE_LIMIT_RETRIES = 3;
 const LONG_RESPONSE_RECEIPT_MIN_CHARS = 600;
-const TOOL_COUNT_FLUSH_MS = 5000;
+const TOOL_COUNT_FLUSH_MS = 750;
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -150,7 +150,7 @@ export interface UseAgentReturn {
   /** Toggle plan (read-only) mode at runtime. */
   setPlanMode: (v: boolean) => void;
   /** Push a local-only assistant message into the conversation (no LLM call). */
-  addSystemMessage: (content: string) => void;
+  addSystemMessage: (content: string, toolCalls?: ToolCallInfo[]) => void;
   /** Push a local-only user message into the conversation (no LLM call). */
   addUserMessage: (content: string) => void;
   /** Update the displayed cost (used by orchestrator for live updates). */
@@ -205,6 +205,83 @@ export function trackAbortCost(
     costTracker.addUsage(persona, provider, model, partialInputTokens, partialOutputTokens);
     setCost(costTracker.getTotalCost());
   }
+}
+
+function normalizeLiveViewPath(filePath: string, workingDir: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed || trimmed === "/dev/null") return null;
+  const withoutPrefix = trimmed.replace(/^[ab]\//, "");
+  if (!withoutPrefix) return null;
+  const unixPath = withoutPrefix.replaceAll("\\", "/");
+  if (!path.isAbsolute(unixPath)) return unixPath;
+  const rel = path.relative(workingDir, unixPath).replaceAll("\\", "/");
+  if (!rel || rel.startsWith("../") || rel === "..") return null;
+  return rel;
+}
+
+function parsePatchTargets(patchText: string, workingDir: string): Array<{ filePath: string; tool: "created" | "edited" }> {
+  const rows = patchText.replace(/\r\n/g, "\n").split("\n");
+  const targets: Array<{ filePath: string; tool: "created" | "edited" }> = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i].startsWith("--- ")) continue;
+    const oldRaw = rows[i].replace(/^---\s+/, "").trim().replace(/^[ab]\//, "");
+    const plus = rows[i + 1];
+    if (!plus || !plus.startsWith("+++ ")) continue;
+    const newRaw = plus.replace(/^\+\+\+\s+/, "").trim().replace(/^[ab]\//, "");
+
+    const isCreated = oldRaw === "/dev/null" && newRaw !== "/dev/null";
+    const candidate = isCreated ? newRaw : (newRaw === "/dev/null" ? oldRaw : newRaw);
+    const normalized = normalizeLiveViewPath(candidate, workingDir);
+    if (!normalized) continue;
+    targets.push({ filePath: normalized, tool: isCreated ? "created" : "edited" });
+  }
+  return targets;
+}
+
+/**
+ * Derive per-file live-view events from a tool call payload.
+ * This is especially important for `patch`, which often edits multiple files
+ * while not providing `path` in the tool input.
+ */
+export function getLiveViewChangeTargets(
+  toolName: string,
+  input: Record<string, unknown>,
+  result: unknown,
+  workingDir: string,
+): Array<{ filePath: string; tool: "created" | "edited" }> {
+  const byPath = new Map<string, "created" | "edited">();
+  const add = (rawPath: unknown, tool: "created" | "edited") => {
+    if (typeof rawPath !== "string") return;
+    const normalized = normalizeLiveViewPath(rawPath, workingDir);
+    if (!normalized) return;
+    const existing = byPath.get(normalized);
+    byPath.set(normalized, existing === "created" ? "created" : tool);
+  };
+
+  if (toolName === "write_file") {
+    add(input.path ?? input.file_path, "created");
+  } else if (toolName === "edit_file") {
+    add(input.path ?? input.file_path, "edited");
+  } else if (toolName === "patch") {
+    const obj = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+    const addArray = (arr: unknown, tool: "created" | "edited") => {
+      if (!Array.isArray(arr)) return;
+      for (const p of arr) add(p, tool);
+    };
+    addArray(obj?.filesCreated, "created");
+    addArray(obj?.filesModified, "edited");
+    addArray(obj?.filesDeleted, "edited");
+
+    const patchText = typeof input.patch_text === "string" ? input.patch_text : "";
+    for (const target of parsePatchTargets(patchText, workingDir)) {
+      add(target.filePath, target.tool);
+    }
+
+    // Safety fallback for atypical patch wrappers.
+    add(input.path ?? input.file_path, "edited");
+  }
+
+  return [...byPath.entries()].map(([filePath, tool]) => ({ filePath, tool }));
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +405,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   }, []);
 
   const queueToolCountIncrement = useCallback((toolName: string) => {
-    pendingToolCountsRef.current[toolName] = (pendingToolCountsRef.current[toolName] || 0) + 1;
+    const canonicalName = normalizeToolName(toolName);
+    pendingToolCountsRef.current[canonicalName] = (pendingToolCountsRef.current[canonicalName] || 0) + 1;
     if (toolCountFlushTimerRef.current) return;
     toolCountFlushTimerRef.current = setTimeout(() => {
       flushToolCounts();
@@ -408,10 +486,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const effectiveLiveView = options.liveView ?? cliConfig?.liveView;
       liveViewEnabledRef.current = effectiveLiveView === true || effectiveLiveView === "auto";
       if (liveViewEnabledRef.current) {
-        const url = startLiveView();
-        const parsedPort = Number(new URL(url).port || "0");
-        if (parsedPort > 0) pendingSystemMessagesRef.current.push(formatLiveViewUrlMessage(parsedPort));
-        else pendingSystemMessagesRef.current.push(`Live view → ${url}`);
+        startLiveView();
       }
     } catch (err) {
       logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
@@ -668,7 +743,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       execute: async () => {
         const { base64, description } = await browserScreenshot();
         if (base64) {
-          return `${description}\n[Screenshot captured — image data available for analysis]`;
+          return {
+            content: [
+              { type: "text", text: description },
+              { type: "image", image: base64, mimeType: "image/png" },
+            ],
+          };
         }
         return description;
       },
@@ -889,10 +969,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
             const liveViewServer = liveViewServerRef.current;
             if (liveViewServer && (name === "write_file" || name === "edit_file" || name === "patch")) {
-              const filePath = String(input.path || input.file_path || "").trim();
-              if (filePath) {
-                const toolType = name === "write_file" ? "created" : "edited";
-                liveViewServer.emitFileChange("worker", 1, "Interactive chat", filePath, toolType);
+              const targets = getLiveViewChangeTargets(name, input, result, workingDirRef.current);
+              for (const target of targets) {
+                liveViewServer.emitFileChange("worker", 1, "Interactive chat", target.filePath, target.tool);
               }
             }
 
@@ -1438,12 +1517,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
   // ------- Local message helpers (for slash commands) -------- //
 
-  const addSystemMessage = useCallback((content: string) => {
+  const addSystemMessage = useCallback((content: string, toolCalls?: ToolCallInfo[]) => {
     const msg: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
       content,
-      compact: true,
+      compact: content.trim().length > 0,
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, msg]);

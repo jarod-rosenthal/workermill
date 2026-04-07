@@ -49,5 +49,5 @@ export function getLiveViewUrls(port: number): LiveViewUrlSet {
 
 export function formatLiveViewUrlMessage(port: number): string {
   const urls = getLiveViewUrls(port);
-  return `Live view → ${urls.preferredUrl}`;
+  return `Live code view → ${urls.preferredUrl}`;
 }

@@ -19,6 +19,26 @@ const MIME_TYPES: Record<string, string> = {
   ".bmp": "image/bmp",
 };
 
+const IMAGE_EXTENSIONS_REGEX = "(?:png|jpg|jpeg|gif|webp|bmp)";
+const IMAGE_REFERENCE_PATTERN = new RegExp(
+  `@(?:"([^"]+\\.${IMAGE_EXTENSIONS_REGEX})"|'([^']+\\.${IMAGE_EXTENSIONS_REGEX})'|([^\\s@]+\\.${IMAGE_EXTENSIONS_REGEX}))(?=\\s|$)`,
+  "gi",
+);
+
+function isWindowsAbsolutePath(filePath: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(filePath) || /^\\\\[^\\]/.test(filePath);
+}
+
+function isAbsolutePath(filePath: string): boolean {
+  return path.isAbsolute(filePath) || isWindowsAbsolutePath(filePath);
+}
+
+function isWithinDir(candidatePath: string, rootDir: string): boolean {
+  const normalizedCandidate = path.resolve(candidatePath);
+  const normalizedRoot = path.resolve(rootDir);
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`);
+}
+
 /**
  * Parse user input for image file references.
  * Supports @path/to/image.png syntax.
@@ -31,9 +51,8 @@ export function parseImageReferences(
   const parts: ContentPart[] = [];
   let hasImages = false;
 
-  // Match @path/to/file.ext patterns
-  const atPattern = /@([\w./-]+\.(?:png|jpg|jpeg|gif|webp|bmp))\b/gi;
-  const matches = [...input.matchAll(atPattern)];
+  // Match @path/to/file.ext patterns, plus @"path with spaces.png".
+  const matches = [...input.matchAll(IMAGE_REFERENCE_PATTERN)];
 
   if (matches.length === 0) {
     return { parts: [{ type: "text", text: input }], hasImages: false };
@@ -41,14 +60,16 @@ export function parseImageReferences(
 
   let lastIndex = 0;
   for (const match of matches) {
-    const filePath = match[1];
-    const fullPath = path.isAbsolute(filePath)
+    const filePath = (match[1] || match[2] || match[3] || "").trim();
+    if (!filePath) continue;
+
+    const absoluteInputPath = isAbsolutePath(filePath);
+    const fullPath = absoluteInputPath
       ? filePath
       : path.resolve(workingDir, filePath);
 
-    // Path traversal guard — stay within working directory
-    const normalizedWork = path.resolve(workingDir);
-    if (!path.resolve(fullPath).startsWith(normalizedWork)) {
+    // Keep relative references in-bounds, but allow explicit absolute paths.
+    if (!absoluteInputPath && !isWithinDir(fullPath, workingDir)) {
       parts.push({ type: "text", text: `(blocked: ${filePath} is outside working directory)` });
       lastIndex = (match.index || 0) + match[0].length;
       continue;

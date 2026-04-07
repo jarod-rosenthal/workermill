@@ -9,6 +9,7 @@ import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
 import { handleSlashCommand as dispatchSlashCommand, getGitBranch, type SlashCommandContext } from "./slash-commands.js";
 import type { UseAgentOptions } from "./useAgent.js";
+import type { ToolCallInfo } from "./types.js";
 import { findModelInfo } from "../provider-registry.js";
 import { resolveConfig, getProviderForPersona } from "../config.js";
 
@@ -109,6 +110,9 @@ export function Root(props: RootProps): React.ReactElement {
   );
   // Role models — updates when planner/reviewer are switched via /model
   const [roleModels, setRoleModels] = useState(props.roleModels);
+  const [uiActivityMode, setUiActivityMode] = useState<"off" | "minimal" | "full">(
+    props.cliConfig?.uiActivity ?? "full",
+  );
 
   // Wrap switchModel to also update the display state
   const switchModelAndDisplay = useCallback((provider: string, model: string) => {
@@ -123,11 +127,11 @@ export function Root(props: RootProps): React.ReactElement {
 
   // Orchestrator for /build — pushes messages via agent.addSystemMessage
   const addOrchestratorMessage = useCallback(
-    (content: string, role?: "user" | "assistant") => {
+    (content: string, role?: "user" | "assistant", toolCalls?: ToolCallInfo[]) => {
       if (role === "user") {
         agent.addUserMessage(content);
       } else {
-        agent.addSystemMessage(content);
+        agent.addSystemMessage(content, toolCalls);
       }
     },
     [agent],
@@ -204,6 +208,7 @@ export function Root(props: RootProps): React.ReactElement {
         switchModel: switchModelAndDisplay,
         setLiveViewEnabled: agent.setLiveViewEnabled,
         getLiveViewUrl: agent.getLiveViewUrl,
+        setUiActivityMode: (mode: "off" | "minimal" | "full") => setUiActivityMode(mode),
         updateRoleModels: () => {
           try {
             const cfg = resolveConfig();
@@ -332,6 +337,7 @@ export function Root(props: RootProps): React.ReactElement {
       orchestratorPaused={orchestrator.paused}
       onPauseOrchestrator={orchestrator.pause}
       onResumeOrchestrator={orchestrator.resume}
+      uiActivityMode={uiActivityMode}
     />
   );
 }

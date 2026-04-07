@@ -23,6 +23,7 @@ import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state
 import { getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
+import type { ToolCallInfo } from "./types.js";
 
 const PREVIEW_THROTTLE_MS = 120;
 export const SESSION_SUMMARY_DIVIDER = "────────────────────────";
@@ -344,7 +345,7 @@ export interface UseOrchestratorReturn {
  *   (defaults to `"assistant"`).
  */
 export function useOrchestrator(
-  addMessage: (content: string, role?: "user" | "assistant") => void,
+  addMessage: (content: string, role?: "user" | "assistant", toolCalls?: ToolCallInfo[]) => void,
   setCost?: (cost: number) => void,
   /** Config with CLI overrides (e.g. --auto-revise) already applied. */
   cliConfig?: CliConfig,
@@ -647,6 +648,7 @@ export function useOrchestrator(
               emitLine(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
+              emitInlineEditPreview(toolName, toolInput);
               // Update status bar tool counts
               incrementToolCount?.(toolName);
             },
@@ -945,6 +947,7 @@ export function useOrchestrator(
               const detail = formatToolCallDetail(toolName, toolInput, nextFileSequence);
               const emoji = getEmoji(persona);
               emitLine(`[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`);
+              emitInlineEditPreview(toolName, toolInput);
               incrementToolCount?.(toolName);
             },
             updateBranch(branch: string): void {
@@ -1350,6 +1353,16 @@ export function useOrchestrator(
               const emoji = getEmoji(persona);
               const detail = formatToolCallDetail(toolName, input, nextFileSequence);
               emitLine(`[${emoji} ${persona}] ↓ ${toolName}${detail ? ` ${detail}` : ""}`);
+              incrementToolCount?.(toolName);
+              if (["edit_file", "write_file", "patch"].includes(toolName)) {
+                const toolCall: ToolCallInfo = {
+                  id: `orch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  name: toolName,
+                  input,
+                  status: "done",
+                };
+                addMessage("", "assistant", [toolCall]);
+              }
             },
             error(message: string): void { emitLine(`Error: ${message}`); },
             status(msg: string): void { setStatusMessage(msg); },
@@ -1489,7 +1502,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
+    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
   );
 
   // ------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "fs";
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -368,9 +369,8 @@ describe("commands", () => {
       // Mock execSync to simulate editor writing content to temp file
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         // The editor command includes the temp file path — extract it and write content
-        const match = String(cmd).match(/\s(\/tmp\/workermill-\d+\.md)$/);
+        const match = String(cmd).match(/\s(\S*workermill-\d+\.md)\s*$/);
         if (match) {
-          const fs = require("fs");
           fs.writeFileSync(match[1], "Fix the login bug");
         }
         return "" as any;

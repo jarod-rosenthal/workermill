@@ -18,13 +18,13 @@ export async function runModelsCommand(
   options?: { json?: boolean; provider?: string; available?: boolean }
 ): Promise<void> {
   const { json = false, provider: filterProvider, available = false } = options ?? {};
-  const { resolveConfig, loadConfig } = await import("./config.js");
+  const configModule = await import("./config.js");
   let config: CliConfig;
   try {
-    config = resolveConfig();
+    config = configModule.resolveConfig();
   } catch {
     // `wm models` should still work without an initialized CLI profile.
-    config = loadConfig() ?? { providers: {}, default: "anthropic" };
+    config = ("loadConfig" in configModule ? configModule.loadConfig() : null) ?? { providers: {}, default: "anthropic" };
   }
 
   // Handle refresh command

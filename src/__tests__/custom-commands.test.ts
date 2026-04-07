@@ -210,15 +210,20 @@ describe("loadCustomCommands()", () => {
     // Write a file that will be unreadable by removing read permissions
     const badFilePath = path.join(commandsDir, "bad.md");
     fs.writeFileSync(badFilePath, "Bad file content.", "utf-8");
-    fs.chmodSync(badFilePath, 0o000);
+    const originalReadFileSync = fs.readFileSync.bind(fs);
+    const readSpy = vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescriptor, options?: any) => {
+      if (String(filePath) === badFilePath) {
+        throw new Error("EACCES: permission denied");
+      }
+      return originalReadFileSync(filePath as any, options);
+    }) as typeof fs.readFileSync);
 
     let commands: ReturnType<Awaited<ReturnType<typeof importCustomCommands>>["loadCustomCommands"]>;
     try {
       const { loadCustomCommands } = await importCustomCommands();
       commands = loadCustomCommands();
     } finally {
-      // Restore permissions so cleanup can delete the file
-      fs.chmodSync(badFilePath, 0o644);
+      readSpy.mockRestore();
     }
 
     // Should still load the good file despite the error on the bad one

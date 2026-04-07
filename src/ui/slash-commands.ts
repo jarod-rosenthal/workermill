@@ -19,7 +19,7 @@ import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered, getMCP
 import { getRetryableRun } from "../ship-state.js";
 import { shutdown as shutdownLSP } from "../engine/tools/lsp.js";
 import { cleanupStaleWorktrees } from "../engine/tools/sub-agent.js";
-import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
+import { undoLast, undoFile, listCheckpoints, clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
 import { findModelInfo } from "../provider-registry.js";
@@ -150,7 +150,7 @@ export function getGitStatus(cwd: string): string {
 // ---------------------------------------------------------------------------
 
 export const BUILTIN_COMMANDS = new Set([
-  "allow", "as", "ask", "bell", "browser", "build", "changelog", "chrome",
+  "allow", "as", "ask", "bell", "browser", "build", "changed", "changelog", "chrome",
   "cancel", "clear", "compact", "config", "cost", "deny", "diff", "edit", "exit",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
   "memories", "memory", "model", "permissions", "personas", "q", "quit",
@@ -198,7 +198,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/settings key <provider> <key>\` | Add an API key inline |
 | \`/permissions\` | Manage tool permissions (trust/ask/allow/deny) |
 | \`/trust\` | Auto-approve all tools for this session |
-| \`/undo\` | Revert last build's changes |
+| \`/undo\` | Revert last build's changes |\n| \`/changed\` | Show files changed in this session |
 | \`/diff\` | Preview uncommitted changes |
 | \`/git\` | Git branch and status |
 | \`/personas\` | List, show, or create personas |
@@ -1354,6 +1354,18 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         } else {
           ctx.addSystemMessage(`**Restored** ${restored.length} file(s):\n${restored.map(f => `- \`${f}\``).join("\n")}`);
         }
+      }
+      break;
+    }
+
+    // ---- /changed ----
+    case "changed": {
+      const changes = getChangedFiles();
+      if (changes.length === 0) {
+        ctx.addSystemMessage("No files changed in this session.");
+      } else {
+        const lines = changes.map(tc => `- \`${path.relative(ctx.workingDir, tc.path)}\` (${tc.tool}, ${new Date(tc.timestamp).toLocaleTimeString()})`);
+        ctx.addSystemMessage(`**Changed Files** (${changes.length}):\n${lines.join("\n")}`);
       }
       break;
     }

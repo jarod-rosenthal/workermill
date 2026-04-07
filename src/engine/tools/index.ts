@@ -510,11 +510,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           ? destination
           : path.resolve(workingDir, destination);
         assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-        const result = await downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
-        if (result.success) {
-          return `File downloaded successfully: ${result.destination} (${result.size_bytes} bytes, ${result.content_type || "unknown"}, SHA-256: ${result.sha256})`;
-        }
-        return `Error: ${result.error}`;
+        return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
       },
     }),
 
@@ -768,10 +764,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                       ? destination
                       : path.resolve(workingDir, destination);
                     assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-                    const result = await downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
-                    return result.success
-                      ? `File downloaded: ${result.destination} (${result.size_bytes} bytes, SHA-256: ${result.sha256})`
-                      : `Error: ${result.error}`;
+                    return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
                   },
                 }),
               };

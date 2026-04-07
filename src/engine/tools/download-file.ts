@@ -35,7 +35,7 @@ interface DownloadFileParams {
   overwrite?: boolean;
 }
 
-interface DownloadFileResult {
+export interface DownloadFileResult {
   success: boolean;
   destination?: string;
   size_bytes?: number;

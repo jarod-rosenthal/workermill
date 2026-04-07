@@ -6,7 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-04-07
+
 ### Added
+- **Project-scoped data registry + `/projects` command** — history, sessions, learnings, and logs now resolve through a shared project registry under `~/.workermill/projects/`, with migration from older global storage paths and a new `/projects` view for registered workspaces.
+- **`download_file` tool** — agents can now fetch remote assets directly to disk with streamed writes, overwrite protection, SHA-256 reporting, HTTP status reporting, and workspace path bounds enforcement.
+- **Inline edit preview toggle** — added `ui.inlineEditPreview` so the inline edited-file viewer used in chat and `/build` can be turned on or off from `/settings`.
 - **`/program` full-spec orchestration + decomposition flow** — `/program #<parent>` can now decompose a parent issue into child cards, materialize child issues, and execute them in dependency order with persisted run-state for resume/recovery.
 - **`/doctor` diagnosis workflow** — added repo/issue-scoped health diagnosis with structured prescriptions plus follow-up commands: `/doctor report`, `/doctor show`, and `/doctor apply`.
 - **Multi-format project instructions ingestion** — instruction loading now supports additional sources and rule directories across common agent ecosystems (for example `AGENTS.md`, `.workermill/instructions.md`, `GEMINI.md`, `.cursor/rules/*`, `.windsurf/rules/*`).
@@ -14,10 +19,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **PRD decomposition phase label lock** — added shared PRD decomposition phase labels plus a test lock to keep CLI wording aligned with the full platform decomposition phases.
 
 ### Changed
+- **Native provider SDK coverage expanded** — xAI now uses the native `@ai-sdk/xai` provider and OpenRouter now uses `@openrouter/ai-sdk-provider` instead of generic OpenAI-compatible handling.
+- **xAI setup model selection refreshed** — `/setup` now shows current xAI model choices from the provider registry and defaults xAI setup to newer Grok models instead of only `grok-3`.
+- **Planner handoff strengthened** — planner output now carries richer implementation guidance such as primary patterns, integration points, assumptions, non-goals, and validation signals before work is handed to workers.
+- **Worker verification is repo-aware** — build/review workers now prefer repo-native verification commands and avoid inventing generic `tsc` or LSP checks in repos that do not actually support them.
 - **Settings surface simplified** — removed stale critic-facing settings, collapsed program controls into a clearer two-tier settings display, and filtered stale routing entries from `/settings show`.
 - **`/doctor` UX polish** — diagnosis now reports clearer progress and formatted output so prescription selection and follow-up actions are easier to run.
 
 ### Fixed
+- **Single-file CLI bundle output** — `dist` now builds as a single `index.js`, eliminating fragile hashed chunk import failures at the end of long-running `/build` runs.
+- **Injected `(thinking)` terminal prefix removed from streamed reasoning** — when models expose reasoning text, the CLI no longer prepends `(thinking)` to the visible terminal transcript.
+- **Reviewer hang handling** — `/build` and `/review` now apply bounded retry/timeout handling around Tech Lead review calls so stalled review passes fail cleanly instead of hanging indefinitely.
+- **Worker prompt context-window enforcement** — orchestration now estimates worker prompt size before dispatch, trims lower-value sections first, and retries oversized prompts when providers report prompt-length violations.
+- **Permission rule loading and persistence** — startup now loads merged local/project permission settings correctly, wildcard `bash(*)` style rules are honored, and “do not ask again” approvals persist for non-bash tools as well.
+- **Setup provider key separation** — saved OpenAI-compatible provider keys are now isolated correctly, preventing xAI keys from being reused when configuring OpenAI.
+- **Local model pseudo tool-call fallback** — local models that emit XML/tag-style pseudo tool calls now route through the normal tool execution path instead of stalling as plain text.
+- **Provider alias resolution** — role-suffixed provider aliases such as `xai_tech_lead` now resolve to the correct base provider instead of failing as unsupported.
+- **Startup banner cleanup** — removed experimental command hints from the welcome banner while leaving the commands themselves available where supported.
+- **E2E config isolation** — end-to-end tests no longer write into the user’s real `~/.workermill` directory or leave behind test-generated provider settings.
+- **GitHub workflow path drift** — the `npm audit` workflow now audits the actual repo layout instead of stale monorepo subdirectories.
 - **Live view SSE reliability** — fixed SSE stream syntax/runtime issues, disabled Nagle buffering for SSE writes, and added polling fallback when streaming is unavailable.
 - **`/ship` orchestration hardening** — improved session stability and failure handling in orchestration/live-view integration paths.
 - **ESC cancel cost accounting** — preserved partial token accounting on aborted runs.

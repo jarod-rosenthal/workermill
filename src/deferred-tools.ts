@@ -25,6 +25,7 @@ export const EAGER_TOOLS = new Set([
   "read_file",
   "write_file",
   "edit_file",
+  "multi_edit_file",
   "glob",
   "grep",
   "ls",

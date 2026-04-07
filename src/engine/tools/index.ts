@@ -10,6 +10,7 @@ import * as bashKillTool from "./bash-kill.js";
 import * as readFileTool from "./read-file.js";
 import * as writeFileTool from "./write-file.js";
 import * as editFileTool from "./edit-file.js";
+import * as multiEditFileTool from "./multi-edit-file.js";
 import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
@@ -24,7 +25,7 @@ import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
 
 // Re-export all tool modules
-export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
+export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -299,6 +300,54 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           return `File edited: ${result.path} (${result.replacements} replacement(s), ${result.linesDiff} lines)`;
         }
         return `Error: ${result.error}${result.hint ? `\nHint: ${result.hint}` : ""}`;
+      },
+    }),
+
+    multi_edit_file: tool({
+      description: multiEditFileTool.description,
+      inputSchema: z.object({
+        file_path: z
+          .string()
+          .describe("Path to the file to edit (absolute or relative to cwd)"),
+        edits: z
+          .array(
+            z.object({
+              old_string: z
+                .string()
+                .describe(
+                  "The exact text to find and replace. Must match exactly including whitespace and indentation."
+                ),
+              new_string: z
+                .string()
+                .describe(
+                  "The text to replace old_string with. Can be empty string to delete."
+                ),
+              replace_all: z
+                .boolean()
+                .optional()
+                .describe(
+                  "Replace all occurrences instead of requiring unique match (default: false)"
+                ),
+            })
+          )
+          .describe("Array of edits to apply in order"),
+      }),
+      execute: async ({ file_path: filePath, edits }) => {
+        const resolvedPath = path.isAbsolute(filePath)
+          ? filePath
+          : path.resolve(workingDir, filePath);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const result = await multiEditFileTool.execute({
+          file_path: resolvedPath,
+          edits,
+        });
+        if (result.success) {
+          return `File edited: ${result.file_path} (${result.results?.length} edits applied, ${result.linesDiff} lines)`;
+        }
+        const details = result.results
+          ?.map((r) => `  [${r.index}] ${r.status}${r.detail ? `: ${r.detail}` : ""}`)
+          .join("\n");
+        return `Error: ${result.error}${details ? `\n${details}` : ""}`;
       },
     }),
 

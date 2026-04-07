@@ -2529,7 +2529,7 @@ Write the file with write_file to AGENT.md in the project root.`,
           ctx.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
         } else {
           if (!fs.existsSync(personaDir)) fs.mkdirSync(personaDir, { recursive: true });
-          const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
+          const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, multi_edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
           fs.writeFileSync(personaPath, template, "utf-8");
           ctx.addSystemMessage(
             `**Created** \`.workermill/personas/${slug}.md\`\n\n` +

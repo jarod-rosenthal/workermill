@@ -22,6 +22,11 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   editfile: "edit_file",
   editf: "edit_file",
   ef: "edit_file",
+  multiedit: "multi_edit_file",
+  "multi-edit": "multi_edit_file",
+  "multi-edit-file": "multi_edit_file",
+  multieditfile: "multi_edit_file",
+  mef: "multi_edit_file",
   // Listing/search
   list: "ls",
   list_dir: "ls",
@@ -63,6 +68,8 @@ export function toolStatusLabel(toolName: string, input: Record<string, unknown>
       return `Writing ${input.file_path || "file"}...`;
     case "edit_file":
       return `Editing ${input.file_path || "file"}...`;
+    case "multi_edit_file":
+      return `Editing ${input.file_path || "file"} (${Array.isArray(input.edits) ? input.edits.length : "?"} edits)...`;
     case "glob":
       return `Searching files${input.pattern ? ` (${input.pattern})` : ""}...`;
     case "grep":

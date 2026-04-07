@@ -3658,6 +3658,59 @@ describe("missing declared file validation retry", () => {
     const allLogs = output.logs.join(" ");
     expect(allLogs).toMatch(/declared file|missing|retrying/i);
   });
+
+  it("does not false-retry when ::file_created:: marker includes markdown summary text", async () => {
+    const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "s1", "title": "Create file", "persona": "backend_developer", "description": "Create src/ok.ts." }
+  ]
+}
+\`\`\``;
+
+    const storyText = `Implemented.
+::file_created::src/ok.ts**
+- Added implementation details and notes.
+Done.`;
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+          text: callCount === 0 ? "plan" : storyText,
+          toolCalls: [],
+        });
+      }
+      callCount++;
+
+      if (callCount === 1) {
+        return {
+          textStream: (async function* () { yield planText; })(),
+          text: Promise.resolve(planText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+
+      fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, "src", "ok.ts"), "export const ok = true;");
+      return {
+        textStream: (async function* () { yield storyText; })(),
+        text: Promise.resolve(storyText),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = { ...createTestConfig(), review: { enabled: false } };
+    const output = createMockOutput();
+
+    await runOrchestration(config, "Create file feature", true, false, output);
+
+    // planner + one story attempt (no retry expected)
+    expect(callCount).toBe(2);
+    const allLogs = output.logs.join(" ");
+    expect(allLogs).not.toMatch(/declared file\(s\) missing|retrying/i);
+  });
 });
 
 // ---- Additional coverage: abort signal handling mid-story ----

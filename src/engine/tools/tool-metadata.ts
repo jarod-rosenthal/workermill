@@ -29,6 +29,7 @@ export const TOOL_METADATA: Record<string, ToolMeta> = {
   // Write tools — need permission but safe in acceptEdits
   write_file:  { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: false },
   edit_file:   { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: false },
+  multi_edit_file: { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: false },
   patch:       { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: false },
   todo:        { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },
   fetch:       { isReadOnly: false, isDestructive: false, acceptEditsApproved: true,  concurrencySafe: true },

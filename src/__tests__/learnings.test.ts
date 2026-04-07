@@ -21,9 +21,10 @@ describe("learnings", () => {
     tmp = createTempWorkerMillHome();
     fakeProjectDir = "/fake/learnings/project";
     expectedHash = crypto.createHash("md5").update(fakeProjectDir).digest("hex").slice(0, 8);
-    learningsFile = path.join(tmp.homeDir, ".workermill", "learnings", `${expectedHash}.json`);
+    learningsFile = path.join(tmp.homeDir, ".workermill", "projects", expectedHash, "learnings.json");
 
     vi.spyOn(process, "cwd").mockReturnValue(fakeProjectDir);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(fakeProjectDir);
     vi.resetModules();
   });
 

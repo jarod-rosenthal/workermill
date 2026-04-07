@@ -2,19 +2,53 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
+import { getProjectLogPath, ensureProjectDirs } from "./project-data.js";
 
-// Logs stored in ~/.workermill/logs/<project-hash>/cli.log
-// Keeps the working directory clean — matches Claude Code's ~/.claude/ pattern
-const projectHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
-const LOG_DIR = path.join(os.homedir(), ".workermill", "logs", projectHash);
-const LOG_FILE = path.join(LOG_DIR, "cli.log");
+// Logs stored in project-specific logs/cli.log
+const LOG_FILE = getProjectLogPath();
+const LOG_DIR = path.dirname(LOG_FILE);
 
 let logStream: fs.WriteStream | null = null;
 
-function ensureLogDir(): void {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+function migrateLegacyLogs(): void {
+  // Old path using raw cwd hash
+  const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
+  const oldLogDir = path.join(os.homedir(), ".workermill", "logs", oldHash);
+  const oldLogFile = path.join(oldLogDir, "cli.log");
+  const newLogFile = LOG_FILE;
+
+  if (!fs.existsSync(oldLogFile) || fs.existsSync(newLogFile)) return;
+
+  try {
+    // Move old log to new location
+    fs.renameSync(oldLogFile, newLogFile);
+    // Remove old dir if empty
+    try {
+      fs.rmdirSync(oldLogDir);
+      const parentDir = path.dirname(oldLogDir);
+      try { fs.rmdirSync(parentDir); } catch {} // logs dir
+    } catch {}
+  } catch (err) {
+    // If rename fails, try copy
+    try {
+      fs.copyFileSync(oldLogFile, newLogFile);
+      if (fs.readFileSync(oldLogFile, 'utf-8') === fs.readFileSync(newLogFile, 'utf-8')) {
+        fs.unlinkSync(oldLogFile);
+        try { fs.rmdirSync(oldLogDir); } catch {}
+        const parentDir = path.dirname(oldLogDir);
+        try { fs.rmdirSync(parentDir); } catch {}
+      } else {
+        try { fs.unlinkSync(newLogFile); } catch {}
+      }
+    } catch (copyErr) {
+      // Ignore migration errors
+    }
   }
+}
+
+function ensureLogDir(): void {
+  migrateLegacyLogs();
+  ensureProjectDirs();
 }
 
 function getStream(): fs.WriteStream {
@@ -66,10 +100,9 @@ export function flush(): void {
 }
 
 export function getLogPath(cwd?: string): string {
-  const dir = cwd || process.cwd();
-  const hash = crypto.createHash("md5").update(dir).digest("hex").slice(0, 8);
-  const logDir = path.join(os.homedir(), ".workermill", "logs", hash);
-  return path.join(logDir, "cli.log");
+  // Import here to avoid circular dependency? No, already imported at top.
+  // But since it's in project-data, use it.
+  return getProjectLogPath(cwd);
 }
 
 export function parseLogLine(line: string): Record<string, unknown> {

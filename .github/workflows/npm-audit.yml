@@ -12,17 +12,8 @@ permissions:
 
 jobs:
   npm-audit:
-    name: Audit (${{ matrix.dir }})
+    name: Audit
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - dir: api
-            install_args: ""
-          - dir: frontend
-            install_args: ""
-          - dir: cli
-            install_args: "--legacy-peer-deps"
     steps:
       - uses: actions/checkout@v6
 
@@ -31,7 +22,6 @@ jobs:
           node-version: 22
 
       - name: Install and audit
-        working-directory: ${{ matrix.dir }}
         run: |
-          npm ci --ignore-scripts ${{ matrix.install_args }}
+          npm ci --ignore-scripts
           npm audit --omit=dev --audit-level=high

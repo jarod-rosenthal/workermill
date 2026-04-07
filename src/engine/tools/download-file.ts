@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
+import { pipeline } from "stream/promises";
+import { Readable, Transform } from "stream";
 
 export const name = "download_file";
 
@@ -43,6 +45,25 @@ interface DownloadFileResult {
   error?: string;
 }
 
+class HashTransform extends Transform {
+  private hash = createHash("sha256");
+  private totalBytes = 0;
+
+  _transform(chunk: Buffer, encoding: string, callback: (error?: Error | null, data?: any) => void) {
+    this.hash.update(chunk);
+    this.totalBytes += chunk.length;
+    callback(null, chunk);
+  }
+
+  getDigest() {
+    return this.hash.digest("hex");
+  }
+
+  getTotalBytes() {
+    return this.totalBytes;
+  }
+}
+
 export async function execute({
   url,
   destination,
@@ -61,10 +82,8 @@ export async function execute({
       return { success: false, error: `Unsupported protocol: ${parsedUrl.protocol}. Only http and https are allowed.` };
     }
 
-    // Resolve destination path
-    const absolutePath = path.isAbsolute(destination)
-      ? destination
-      : path.resolve(process.cwd(), destination);
+    // Destination path is already absolute and bounds-checked
+    const absolutePath = destination;
 
     // Create directory if it doesn't exist
     const dirPath = path.dirname(absolutePath);
@@ -103,48 +122,17 @@ export async function execute({
     // Get content type
     const contentType = response.headers.get("content-type") || "";
 
-    // Create write stream and hash
+    // Create write stream and hash transform
+    const hashTransform = new HashTransform();
     const writeStream = fs.createWriteStream(absolutePath);
-    const hash = createHash("sha256");
-
-    let totalBytes = 0;
 
     // Stream the response body through hash and to file
-    const reader = response.body?.getReader();
-    if (!reader) {
+    if (!response.body) {
       return { success: false, error: "No response body" };
     }
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // Update hash and write to file
-        hash.update(value);
-        writeStream.write(value);
-        totalBytes += value.length;
-      }
-
-      // Close the write stream
-      writeStream.end();
-
-      // Wait for write stream to finish
-      await new Promise<void>((resolve, reject) => {
-        writeStream.on("finish", () => resolve());
-        writeStream.on("error", reject);
-      });
-
-      const sha256 = hash.digest("hex");
-
-      return {
-        success: true,
-        destination: absolutePath,
-        size_bytes: totalBytes,
-        content_type: contentType,
-        sha256,
-        status_code: response.status,
-      };
+      await pipeline(Readable.fromWeb(response.body as any), hashTransform, writeStream);
     } catch (streamError) {
       // Clean up partial file on error
       writeStream.destroy();
@@ -153,6 +141,18 @@ export async function execute({
       }
       throw streamError;
     }
+
+    const sha256 = hashTransform.getDigest();
+    const totalBytes = hashTransform.getTotalBytes();
+
+    return {
+      success: true,
+      destination: absolutePath,
+      size_bytes: totalBytes,
+      content_type: contentType,
+      sha256,
+      status_code: response.status,
+    };
   } catch (err) {
     return {
       success: false,

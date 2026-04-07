@@ -596,7 +596,7 @@ export function App(props: AppProps): React.ReactElement {
             ) : props.orchestratorStatus ? (
               <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.orchestratorStatus}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "thinking" ? (
-              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} Working<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} Thinking<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "streaming" ? (
               <Text color={theme.brand}>{animateActivity ? <Spinner color={theme.brand} tick={activityTick} /> : "●"} Streaming response<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
             ) : props.status === "tool_running" ? (

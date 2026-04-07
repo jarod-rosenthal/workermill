@@ -28,7 +28,29 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
+import * as lspTool from "./engine/tools/lsp.js";
 import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
+
+/** Run LSP diagnostics on touched files and log results. */
+async function runDiagnosticsOnTouchedFiles(
+  touchedFiles: string[],
+  workingDir: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  if (touchedFiles.length === 0) return;
+  const unique = [...new Set(touchedFiles)];
+  log(`Running diagnostics on ${unique.length} touched file(s)...`);
+  for (const filePath of unique) {
+    try {
+      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
+      if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
+      const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
+      log(r.success ? `✓ ${filePath}: ${r.content}` : `✗ ${filePath}: ${r.error}`);
+    } catch (err) {
+      log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -2057,6 +2079,9 @@ After using tools to make changes, add these metadata markers in your text outpu
 - ::file_created::path for files you created
 - ::file_modified::path for files you modified
 These markers are metadata ONLY — they do not replace actually using tools.
+
+## Diagnostics Enforcement
+Before claiming completion, run diagnostics on touched files using the lsp tool with format: "json".
 ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
@@ -2288,6 +2313,13 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
           break;
         }
       }
+
+      // --- Diagnostics enforcement ---
+      await runDiagnosticsOnTouchedFiles(
+        [...context.filesCreated, ...context.filesModified],
+        workingDir,
+        (msg) => output.log(story.persona, msg),
+      );
 
       // Check abort before completing
       if (abortSignal?.aborted) {
@@ -3192,6 +3224,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // --- Completion Summary ---
   try {
+    // Final diagnostics on all touched files
+    await runDiagnosticsOnTouchedFiles(
+      [...context.filesCreated, ...context.filesModified],
+      workingDir,
+      (msg) => output.coordinatorLog(msg),
+    );
+
     if (featureBranch) {
       // Show branch summary
       const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();

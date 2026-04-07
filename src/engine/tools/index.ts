@@ -619,16 +619,19 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             "hover: get type info for symbol at position. " +
             "symbols: list all symbols in a file."
           ),
-        file: z.string().describe("Path to the file (relative or absolute)"),
+        file: z.string().optional().describe("Path to the file (relative or absolute)"),
         line: z.number().optional().describe("1-indexed line number (required for definition, references, hover)"),
         character: z.number().optional().describe("1-indexed column number (required for definition, references, hover)"),
+        path: z.string().optional().describe("Path to file or directory (relative or absolute) - used for directory diagnostics aggregation"),
+        severity: z.enum(["error", "warning", "hint", "all"]).optional().describe("Severity level to include in diagnostics (default: error)"),
+        format: z.enum(["json", "text"]).optional().describe("Output format (default: json for programmatic reliability)"),
       }),
-      execute: async ({ action, file, line, character }) => {
-        const resolvedFile = path.isAbsolute(file)
-          ? file
-          : path.resolve(workingDir, file);
-        assertPathInBounds(resolvedFile, workingDir, pathSandboxed);
-        const result = await lspTool.execute({ action, file: resolvedFile, line, character }, workingDir);
+      execute: async ({ action, file, line, character, path: targetPath, severity, format }) => {
+        const resolvedFile = file ? (path.isAbsolute(file) ? file : path.resolve(workingDir, file)) : undefined;
+        if (file) {
+          assertPathInBounds(resolvedFile!, workingDir, pathSandboxed);
+        }
+        const result = await lspTool.execute({ action, file: resolvedFile, line, character, path: targetPath, severity, format }, workingDir);
         if (result.success) {
           return result.content || "No results.";
         }

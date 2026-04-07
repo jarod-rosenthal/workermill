@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
+import * as logger from "../../logger.js";
 
 export const name = "lsp";
 
@@ -36,8 +37,22 @@ export const parameters = {
       type: "number" as const,
       description: "1-indexed column number (required for definition, references, hover)",
     },
+    path: {
+      type: "string" as const,
+      description: "Path to file or directory (relative or absolute) - used for directory diagnostics aggregation",
+    },
+    severity: {
+      type: "string" as const,
+      enum: ["error", "warning", "hint", "all"],
+      description: "Severity level to include in diagnostics (default: error)",
+    },
+    format: {
+      type: "string" as const,
+      enum: ["json", "text"],
+      description: "Output format (default: json for programmatic reliability)",
+    },
   },
-  required: ["action", "file"] as const,
+  required: ["action"] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -456,55 +471,366 @@ function syncFile(s: ServerState, filePath: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Directory diagnostics aggregation
+// ---------------------------------------------------------------------------
+
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage", "__pycache__", ".venv", "venv", "target"]);
+
+function collectFiles(dirPath: string): string[] {
+  const files: string[] = [];
+  const walk = (currentDir: string) => {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
+          walk(path.join(currentDir, entry.name));
+        }
+      } else if (entry.isFile() && languageId(entry.name) !== "plaintext") {
+        files.push(path.join(currentDir, entry.name));
+      }
+    }
+  };
+  walk(dirPath);
+  return files;
+}
+
+async function getDirectoryDiagnostics(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all", format: "json" | "text"): Promise<LspResult> {
+  if (format === "json") {
+    return await getDirectoryDiagnosticsJson(dirPath, workingDir, severity);
+  } else {
+    // For text format, fall back to legacy behavior for each file
+    return await getDirectoryDiagnosticsText(dirPath, workingDir, severity);
+  }
+}
+
+async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
+  try {
+    const s = await ensureServer(workingDir);
+    const files = collectFiles(dirPath);
+    
+    // Collect diagnostics for all files
+    const diagnostics: {
+      file: string;
+      line: number;
+      col: number;
+      severity: "error" | "warning" | "info" | "hint";
+      message: string;
+      source?: string;
+      code?: string | number;
+    }[] = [];
+    
+    const summary = {
+      errors: 0,
+      warnings: 0,
+      hints: 0
+    };
+    
+    // Process each file
+    for (const filePath of files) {
+      const resolvedPath = path.resolve(filePath);
+      
+      // Clear any stale push diagnostics for this file
+      s.publishedDiagnostics.delete(fileUri(resolvedPath));
+      
+      // Sync file content to server
+      syncFile(s, filePath);
+      
+      // Try pull diagnostics first (LSP 3.17+)
+      try {
+        const result = await sendRequest(s, "textDocument/diagnostic", {
+          textDocument: { uri: fileUri(resolvedPath) },
+        }) as { items?: DiagnosticItem[] } | null;
+        
+        const items = result?.items || [];
+        const filteredItems = filterDiagnosticsBySeverity(items, severity);
+        
+        for (const d of filteredItems) {
+          const loc = d.range.start;
+          diagnostics.push({
+            file: path.relative(workingDir, resolvedPath),
+            line: loc.line + 1,
+            col: loc.character + 1,
+            severity: getSeverityString(d.severity),
+            message: d.message,
+            source: d.source,
+            code: d.code
+          });
+          
+          // Update summary
+          if (d.severity === 1) summary.errors++;
+          else if (d.severity === 2) summary.warnings++;
+          else summary.hints++;
+        }
+      } catch {
+        // Server doesn't support pull diagnostics — wait for push diagnostics
+        // Give the server a moment to publish diagnostics after our didOpen/didChange
+        await new Promise((r) => setTimeout(r, 1500));
+        
+        const pushed = s.publishedDiagnostics.get(fileUri(resolvedPath));
+        if (pushed && pushed.length > 0) {
+          const filteredItems = filterDiagnosticsBySeverity(pushed, severity);
+          for (const d of filteredItems) {
+            const loc = d.range.start;
+            diagnostics.push({
+              file: path.relative(workingDir, resolvedPath),
+              line: loc.line + 1,
+              col: loc.character + 1,
+              severity: getSeverityString(d.severity),
+              message: d.message,
+              source: d.source,
+              code: d.code
+            });
+            
+            // Update summary
+            if (d.severity === 1) summary.errors++;
+            else if (d.severity === 2) summary.warnings++;
+            else summary.hints++;
+          }
+        }
+      }
+    }
+    
+    const response = {
+      lsp_available: true,
+      summary,
+      diagnostics
+    };
+    
+    return { success: true, content: JSON.stringify(response) };
+  } catch (err) {
+    // If no LSP is available, return false for lsp_available
+    if (err instanceof Error && err.message.includes("No language server found")) {
+      return { success: true, content: JSON.stringify({ lsp_available: false, summary: { errors: 0, warnings: 0, hints: 0 }, diagnostics: [] }) };
+    }
+    // Handle other errors gracefully - return empty diagnostics instead of failing
+    const message = err instanceof Error ? err.message : String(err);
+    logger.debug("Directory diagnostics fallback", { error: message });
+    return { success: true, content: JSON.stringify({ lsp_available: false, error: message, summary: { errors: 0, warnings: 0, hints: 0 }, diagnostics: [] }) };
+  }
+}
+
+async function getDirectoryDiagnosticsText(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
+  try {
+    const s = await ensureServer(workingDir);
+    const files = collectFiles(dirPath);
+    
+    // Collect diagnostics for all files
+    const results: string[] = [];
+    let totalErrors = 0;
+    let totalWarnings = 0;
+    
+    // Process each file
+    for (const filePath of files) {
+      const resolvedPath = path.resolve(filePath);
+      
+      // Clear any stale push diagnostics for this file
+      s.publishedDiagnostics.delete(fileUri(resolvedPath));
+      
+      // Sync file content to server
+      syncFile(s, filePath);
+      
+      // Try pull diagnostics first (LSP 3.17+)
+      try {
+        const result = await sendRequest(s, "textDocument/diagnostic", {
+          textDocument: { uri: fileUri(resolvedPath) },
+        }) as { items?: DiagnosticItem[] } | null;
+        
+        const items = result?.items || [];
+        const filteredItems = filterDiagnosticsBySeverity(items, severity);
+        
+        if (filteredItems.length > 0) {
+          const fileDiagnostics = formatDiagnostics(filteredItems, resolvedPath);
+          results.push(fileDiagnostics);
+          
+          // Count errors and warnings
+          for (const d of filteredItems) {
+            if (d.severity === 1) totalErrors++;
+            else if (d.severity === 2) totalWarnings++;
+          }
+        }
+      } catch {
+        // Server doesn't support pull diagnostics — wait for push diagnostics
+        // Give the server a moment to publish diagnostics after our didOpen/didChange
+        await new Promise((r) => setTimeout(r, 1500));
+        
+        const pushed = s.publishedDiagnostics.get(fileUri(resolvedPath));
+        if (pushed && pushed.length > 0) {
+          const filteredItems = filterDiagnosticsBySeverity(pushed, severity);
+          if (filteredItems.length > 0) {
+            const fileDiagnostics = formatDiagnostics(filteredItems, resolvedPath);
+            results.push(fileDiagnostics);
+            
+            // Count errors and warnings
+            for (const d of filteredItems) {
+              if (d.severity === 1) totalErrors++;
+              else if (d.severity === 2) totalWarnings++;
+            }
+          }
+        }
+      }
+    }
+    
+    const header = `Directory diagnostics for: ${dirPath}\nTotal errors: ${totalErrors}, warnings: ${totalWarnings}\n`;
+    const content = header + results.join("\n");
+    
+    return { success: true, content };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Directory diagnostics failed: ${message}` };
+  }
+}
+
+function filterDiagnosticsBySeverity(diagnostics: DiagnosticItem[], severity: "error" | "warning" | "hint" | "all"): DiagnosticItem[] {
+  if (severity === "all") return diagnostics;
+  
+  const severityMap: Record<string, number> = {
+    "error": 1,
+    "warning": 2,
+    "hint": 3
+  };
+  
+  const targetSeverity = severityMap[severity];
+  
+  if (targetSeverity === undefined) return diagnostics;
+  
+  return diagnostics.filter(d => {
+    if (severity === "error") return d.severity === 1;
+    if (severity === "warning") return d.severity === 2;
+    if (severity === "hint") return d.severity === 3 || d.severity === 4;
+    return true;
+  });
+}
+
+function getSeverityString(severity: number | undefined): "error" | "warning" | "info" | "hint" {
+  switch (severity) {
+    case 1: return "error";
+    case 2: return "warning";
+    case 3: return "info";
+    case 4: return "hint";
+    default: return "error";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tool actions
 // ---------------------------------------------------------------------------
 
-async function getDiagnostics(filePath: string, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
-  const uri = fileUri(path.resolve(filePath));
-
-  // Clear any stale push diagnostics for this file
-  s.publishedDiagnostics.delete(uri);
-
-  // Sync file content to server
-  syncFile(s, filePath);
-
-  // Try pull diagnostics first (LSP 3.17+)
+async function getDiagnostics(filePath: string, workingDir: string, format: "json" | "text" = "json"): Promise<string> {
   try {
-    const result = await sendRequest(s, "textDocument/diagnostic", {
-      textDocument: { uri },
-    }) as { items?: DiagnosticItem[] } | null;
+    const s = await ensureServer(workingDir);
+    const uri = fileUri(path.resolve(filePath));
 
-    const items = result?.items || [];
-    if (items.length === 0) return "No diagnostics (errors or warnings) found.";
-    return formatDiagnostics(items, filePath);
-  } catch {
-    // Server doesn't support pull diagnostics — wait for push diagnostics
-    // Give the server a moment to publish diagnostics after our didOpen/didChange
-    await new Promise((r) => setTimeout(r, 1500));
+    // Clear any stale push diagnostics for this file
+    s.publishedDiagnostics.delete(uri);
 
-    const pushed = s.publishedDiagnostics.get(uri);
-    if (pushed && pushed.length > 0) {
-      return formatDiagnostics(pushed, filePath);
+    // Sync file content to server
+    syncFile(s, filePath);
+
+    // Try pull diagnostics first (LSP 3.17+)
+    try {
+      const result = await sendRequest(s, "textDocument/diagnostic", {
+        textDocument: { uri },
+      }) as { items?: DiagnosticItem[] } | null;
+
+      const items = result?.items || [];
+      if (items.length === 0) {
+        if (format === "json") {
+          return JSON.stringify({ lsp_available: true, diagnostics: [] });
+        }
+        return "No diagnostics (errors or warnings) found.";
+      }
+      
+      if (format === "json") {
+        const diagnostics = items.map(d => {
+          const loc = d.range.start;
+          return {
+            file: path.basename(filePath),
+            line: loc.line + 1,
+            col: loc.character + 1,
+            severity: getSeverityString(d.severity),
+            message: d.message,
+            source: d.source,
+            code: d.code
+          };
+        });
+        return JSON.stringify({ lsp_available: true, diagnostics });
+      }
+      
+      return formatDiagnostics(items, filePath);
+    } catch {
+      // Server doesn't support pull diagnostics — wait for push diagnostics
+      // Give the server a moment to publish diagnostics after our didOpen/didChange
+      await new Promise((r) => setTimeout(r, 1500));
+
+      const pushed = s.publishedDiagnostics.get(uri);
+      if (pushed && pushed.length > 0) {
+        if (format === "json") {
+          const diagnostics = pushed.map(d => {
+            const loc = d.range.start;
+            return {
+              file: path.basename(filePath),
+              line: loc.line + 1,
+              col: loc.character + 1,
+              severity: getSeverityString(d.severity),
+              message: d.message,
+              source: d.source,
+              code: d.code
+            };
+          });
+          return JSON.stringify({ lsp_available: true, diagnostics });
+        }
+        return formatDiagnostics(pushed, filePath);
+      }
+
+      // No push diagnostics arrived either — might just be clean
+      // Check if the server has published empty diagnostics (meaning it processed the file)
+      if (pushed !== undefined) {
+        if (format === "json") {
+          return JSON.stringify({ lsp_available: true, diagnostics: [] });
+        }
+        return "No diagnostics (errors or warnings) found.";
+      }
+
+      // Server hasn't responded at all — wait a bit more for large projects
+      await new Promise((r) => setTimeout(r, 2000));
+      const delayedPushed = s.publishedDiagnostics.get(uri);
+      if (delayedPushed && delayedPushed.length > 0) {
+        if (format === "json") {
+          const diagnostics = delayedPushed.map(d => {
+            const loc = d.range.start;
+            return {
+              file: path.basename(filePath),
+              line: loc.line + 1,
+              col: loc.character + 1,
+              severity: getSeverityString(d.severity),
+              message: d.message,
+              source: d.source,
+              code: d.code
+            };
+          });
+          return JSON.stringify({ lsp_available: true, diagnostics });
+        }
+        return formatDiagnostics(delayedPushed, filePath);
+      }
+      if (delayedPushed !== undefined) {
+        if (format === "json") {
+          return JSON.stringify({ lsp_available: true, diagnostics: [] });
+        }
+        return "No diagnostics (errors or warnings) found.";
+      }
+
+      if (format === "json") {
+        return JSON.stringify({ lsp_available: true, diagnostics: [] });
+      }
+      return "Diagnostics not available — the language server may still be indexing. Try again in a few seconds, or use `bash tsc --noEmit` for TypeScript.";
     }
-
-    // No push diagnostics arrived either — might just be clean
-    // Check if the server has published empty diagnostics (meaning it processed the file)
-    if (pushed !== undefined) {
-      return "No diagnostics (errors or warnings) found.";
+  } catch (err) {
+    // Handle LSP server unavailability gracefully
+    if (format === "json") {
+      const error = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({ lsp_available: false, error: error });
     }
-
-    // Server hasn't responded at all — wait a bit more for large projects
-    await new Promise((r) => setTimeout(r, 2000));
-    const delayedPushed = s.publishedDiagnostics.get(uri);
-    if (delayedPushed && delayedPushed.length > 0) {
-      return formatDiagnostics(delayedPushed, filePath);
-    }
-    if (delayedPushed !== undefined) {
-      return "No diagnostics (errors or warnings) found.";
-    }
-
-    return "Diagnostics not available — the language server may still be indexing. Try again in a few seconds, or use `bash tsc --noEmit` for TypeScript.";
+    throw err;
   }
 }
 
@@ -648,9 +974,12 @@ async function getSymbols(filePath: string, workingDir: string): Promise<string>
 
 interface LspParams {
   action: "diagnostics" | "definition" | "references" | "hover" | "symbols";
-  file: string;
+  file?: string;
   line?: number;
   character?: number;
+  path?: string;
+  severity?: "error" | "warning" | "hint" | "all";
+  format?: "json" | "text";
 }
 
 interface LspResult {
@@ -660,47 +989,86 @@ interface LspResult {
 }
 
 export async function execute(params: LspParams, workingDir: string): Promise<LspResult> {
-  const { action, file, line, character } = params;
+  const { action, file, line, character, path: targetPath, severity = "error", format = "json" } = params;
 
-  const resolvedFile = path.isAbsolute(file) ? file : path.resolve(workingDir, file);
-  if (!fs.existsSync(resolvedFile)) {
-    return { success: false, error: `File not found: ${file}` };
+  // If path is provided, we're handling directory diagnostics
+  if (targetPath) {
+    const resolvedPath = path.isAbsolute(targetPath) ? targetPath : path.resolve(workingDir, targetPath);
+    
+    // Check if it's a directory
+    try {
+      const stat = fs.statSync(resolvedPath);
+      if (stat.isDirectory()) {
+        // Handle directory diagnostics aggregation
+        return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
+      }
+    } catch {
+      // If path doesn't exist, continue with file processing
+    }
   }
 
-  if (["definition", "references", "hover"].includes(action) && (line === undefined || character === undefined)) {
-    return { success: false, error: `${action} requires line and character parameters.` };
-  }
-
-  try {
-    let content: string;
-    switch (action) {
-      case "diagnostics":
-        content = await getDiagnostics(resolvedFile, workingDir);
-        break;
-      case "definition":
-        content = await getDefinition(resolvedFile, line!, character!, workingDir);
-        break;
-      case "references":
-        content = await getReferences(resolvedFile, line!, character!, workingDir);
-        break;
-      case "hover":
-        content = await getHover(resolvedFile, line!, character!, workingDir);
-        break;
-      case "symbols":
-        content = await getSymbols(resolvedFile, workingDir);
-        break;
-    }
-    return { success: true, content };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    // If the server crashed, clean up so next call will try to restart
-    if (server && server.process.exitCode !== null) {
-      server = null;
-      initPromise = null;
+  // For file diagnostics, if file is provided, process it
+  if (file) {
+    const resolvedFile = path.isAbsolute(file) ? file : path.resolve(workingDir, file);
+    if (!fs.existsSync(resolvedFile)) {
+      return { success: false, error: `File not found: ${file}` };
     }
 
-    return { success: false, error: `LSP ${action} failed: ${message}` };
+    if (["definition", "references", "hover"].includes(action) && (line === undefined || character === undefined)) {
+      return { success: false, error: `${action} requires line and character parameters.` };
+    }
+
+    try {
+      let content: string;
+      switch (action) {
+        case "diagnostics":
+          content = await getDiagnostics(resolvedFile, workingDir, format);
+          break;
+        case "definition":
+          content = await getDefinition(resolvedFile, line!, character!, workingDir);
+          break;
+        case "references":
+          content = await getReferences(resolvedFile, line!, character!, workingDir);
+          break;
+        case "hover":
+          content = await getHover(resolvedFile, line!, character!, workingDir);
+          break;
+        case "symbols":
+          content = await getSymbols(resolvedFile, workingDir);
+          break;
+      }
+      return { success: true, content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      // If the server crashed, clean up so next call will try to restart
+      if (server && server.process.exitCode !== null) {
+        server = null;
+        initPromise = null;
+      }
+
+      return { success: false, error: `LSP ${action} failed: ${message}` };
+    }
+  } else {
+    // If no file is provided, only "diagnostics" action is valid for directory mode
+    if (action !== "diagnostics") {
+      return { success: false, error: `Action ${action} requires a file parameter.` };
+    }
+    
+    // Handle directory diagnostics without a specific file
+    if (targetPath) {
+      const resolvedPath = path.isAbsolute(targetPath) ? targetPath : path.resolve(workingDir, targetPath);
+      try {
+        const stat = fs.statSync(resolvedPath);
+        if (stat.isDirectory()) {
+          return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
+        }
+      } catch {
+        return { success: false, error: `Path not found or not a directory: ${targetPath}` };
+      }
+    }
+    
+    return { success: false, error: "No file or directory path provided." };
   }
 }
 

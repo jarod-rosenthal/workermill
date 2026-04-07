@@ -1143,33 +1143,66 @@ function extractBalancedJSON(text: string, start: number): string | null {
   return null; // Unbalanced
 }
 
-/**
- * Extract quality score from reviewer output.
- * Returns a 1-10 score. Handles both CODE_QUALITY_SCORE (1-10) and
- * legacy ::review_score:: (0-100, converted to 1-10).
- */
-function extractScore(text: string): number {
-  // 1. CODE_QUALITY_SCORE: N (1-10 scale) — preferred format
+function parseRequiredReviewOutcome(text: string): {
+  decision: "approved" | "revision_needed" | "rejected";
+  score: number;
+} {
+  const decisionMatch = text.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
+  if (!decisionMatch) {
+    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+    throw new Error(
+      `Tech Lead output missing required marker: REVIEW_DECISION. ` +
+      `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
+    );
+  }
+
   const cqsMatches = [...text.matchAll(/CODE_QUALITY_SCORE:\s*(\d+)/gi)];
-  if (cqsMatches.length > 0) {
-    const n = parseInt(cqsMatches[cqsMatches.length - 1][1], 10);
-    return Math.max(1, Math.min(10, n));
+  if (cqsMatches.length === 0) {
+    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+    throw new Error(
+      `Tech Lead output missing required marker: CODE_QUALITY_SCORE. ` +
+      `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
+    );
   }
 
-  // 2. Legacy ::review_score:: (0-100) — convert to 1-10
-  const markerMatches = [...text.matchAll(/::review_score::(\d+)/g)];
-  if (markerMatches.length > 0) {
-    const n = parseInt(markerMatches[markerMatches.length - 1][1], 10);
-    return Math.max(1, Math.min(10, Math.round(n / 10)));
+  const rawScore = parseInt(cqsMatches[cqsMatches.length - 1][1], 10);
+  const score = Math.max(1, Math.min(10, rawScore));
+  const decision = decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+  return { decision, score };
+}
+
+function extractReviewFeedback(
+  text: string,
+  decision: "approved" | "revision_needed" | "rejected",
+): string {
+  const detailedReview = extractDetailedReviewText(text);
+  const feedbackMatch = text.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
+  const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
+  const feedback = detailedReview || feedbackSummary;
+  if ((decision === "revision_needed" || decision === "rejected") && !feedback) {
+    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+    throw new Error(
+      `Tech Lead output missing required feedback context for ${decision}. ` +
+      `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
+    );
   }
+  return feedback;
+}
 
-  // 3. Fallback from decision text — return middle-of-range values,
-  // never hardcode the approval threshold. The caller compares against config.
-  if (/\bapprove/i.test(text)) return 10;
-  if (/\brevis/i.test(text)) return 5;
-  if (/\breject/i.test(text)) return 2;
-
-  return 5; // No score found — assume mediocre, let threshold decide
+export function validateTechLeadReviewOutput(
+  text: string,
+  approvalThreshold: number = 8,
+): {
+  decision: "approved" | "revision_needed" | "rejected";
+  score: number;
+  approved: boolean;
+  feedback: string;
+} {
+  const parsed = parseRequiredReviewOutcome(text);
+  const approved = parsed.score >= approvalThreshold;
+  const decision = approved ? "approved" : parsed.decision;
+  const feedback = extractReviewFeedback(text, parsed.decision);
+  return { decision, score: parsed.score, approved, feedback };
 }
 
 /**
@@ -2656,6 +2689,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // TODO: Rate limit retry for reviewer streamText — add isRateLimitError check in catch block
         // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
         let reviewerOutput = "";
+        let reviewerFinalText = "";
         const reviewStartMs = Date.now();
         const reviewStream = streamText({
           model: reviewModel,
@@ -2679,18 +2713,23 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           },
         });
         for await (const _chunk of reviewStream.textStream) { /* consumed */ }
+        reviewerFinalText = (await reviewStream.text || "").trim();
 
-        // Use accumulated step output (reviewer's own words only, no echoed prompt)
-        const reviewText = reviewerOutput;
+        // Some providers/models put the decisive final answer in stream.text
+        // rather than step chunks; prefer that when it is richer.
+        const stepText = reviewerOutput.trim();
+        const reviewText = reviewerFinalText.length > stepText.length
+          ? reviewerFinalText
+          : (stepText || reviewerFinalText);
         logger.debug("Reviewer output", { reviewRound, text: reviewText });
         const reviewUsage = await reviewStream.totalUsage;
 
         output.statusDone();
 
         // Extract review decision — 3-tier system matching WorkerMill worker
-        const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-        const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
-        const score = extractScore(reviewText);
+        const parsedReview = parseRequiredReviewOutcome(reviewText);
+        const decision = parsedReview.decision;
+        const score = parsedReview.score;
 
         // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 8;
@@ -2718,12 +2757,9 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           output.updateTokPerSec?.(`${revProvider}/${revModel}`, reviewTokPerSec);
           logger.info("Model performance", { provider: revProvider, model: revModel, tokPerSec: reviewTokPerSec });
         }
-        logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
+        logger.info(`Review round ${reviewRound} result`, { decision, score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
-        const detailedReview = extractDetailedReviewText(reviewText);
-        const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
-        const feedbackSummary = feedbackMatch ? feedbackMatch[1].trim() : "";
-        const feedback = detailedReview || feedbackSummary;
+        const feedback = extractReviewFeedback(reviewText, decision);
 
         // Display review result with horizontal rules
         output.log("tech_lead", "\u2500".repeat(60));
@@ -3200,9 +3236,9 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               // Matches worker/epic/coordinator-review.ts ensureGitHubReviewPosted()
               if (finalReviewText) {
                 try {
-                  const reviewScore = extractScore(finalReviewText);
-                  const feedbackMatch = finalReviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
-                  const feedback = feedbackMatch ? feedbackMatch[1].trim() : "";
+                  const parsedPrReview = parseRequiredReviewOutcome(finalReviewText);
+                  const reviewScore = parsedPrReview.score;
+                  const feedback = extractReviewFeedback(finalReviewText, parsedPrReview.decision);
                   const emoji = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "✅" : "🔄";
                   const reviewBody = `## ${emoji} Tech Lead Review\n\n**Code Quality Score:** ${reviewScore}/10\n\n${feedback}`;
                   const reviewFlag = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "--approve" : "--request-changes";
@@ -3210,7 +3246,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                     `gh pr review --body-file - ${reviewFlag} 2>&1`,
                     { cwd: workingDir, encoding: "utf-8", input: reviewBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
                   );
-                } catch {
+                } catch (reviewCommentErr) {
+                  logger.warn("Failed to post structured PR review comment", {
+                    error: reviewCommentErr instanceof Error ? reviewCommentErr.message : String(reviewCommentErr),
+                  });
                   // Non-critical — review comment is best-effort
                 }
               }
@@ -3489,6 +3528,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   // Stream the review — use onStepFinish to capture text between tool calls
   // This matches the orchestrator's review pattern exactly.
   let reviewerOutput = "";
+  let reviewerFinalText = "";
   let reviewText = "";
   const reviewStartMs = Date.now();
   try {
@@ -3515,7 +3555,11 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       },
     });
     for await (const _chunk of reviewStream.textStream) { /* consumed */ }
-    reviewText = reviewerOutput;
+    reviewerFinalText = (await reviewStream.text || "").trim();
+    const stepText = reviewerOutput.trim();
+    reviewText = reviewerFinalText.length > stepText.length
+      ? reviewerFinalText
+      : (stepText || reviewerFinalText);
     const reviewUsage = await reviewStream.totalUsage;
     // Track cost
     const revInputTokens = reviewUsage?.inputTokens || 0;
@@ -3540,20 +3584,18 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   output.statusDone();
 
   // Parse results — same logic as orchestrator
-  const score = extractScore(reviewText);
+  const parsedReview = parseRequiredReviewOutcome(reviewText);
+  const score = parsedReview.score;
   const threshold = config.review?.approvalThreshold ?? 8;
   const approved = score >= threshold;
-  const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-  const decision = approved ? "approved" : (decisionMatch?.[1]?.toLowerCase() as "revision_needed" | "rejected") || "revision_needed";
+  const decision = approved ? "approved" : parsedReview.decision;
 
   // Display structured result
   output.log("tech_lead", "\u2500".repeat(60));
   output.log("tech_lead", `::code_quality_score::${score}/10`);
   output.log("tech_lead", `::review_decision::${decision}`);
   output.log("tech_lead", "\u2500".repeat(60));
-  const detailedReview = extractDetailedReviewText(reviewText);
-  const feedbackMatch = reviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|```|$)/i);
-  const feedback = detailedReview || (feedbackMatch ? feedbackMatch[1].trim() : "");
+  const feedback = extractReviewFeedback(reviewText, parsedReview.decision);
   if (feedback) {
     output.log("tech_lead", "Fix context:");
     for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {

@@ -34,6 +34,7 @@ vi.mock("../config.js", () => ({
   loadConfig: vi.fn(() => ({
     providers: { ollama: { model: "qwen3-coder:30b" } },
     default: "ollama",
+    experimental: true,
   })),
   saveConfig: vi.fn(),
   resolveConfig: vi.fn(),
@@ -595,7 +596,7 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/pause", ctx);
       expect(ctx.pauseOrchestrator).not.toHaveBeenCalled();
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No `/ship` orchestration is running")
+        expect.stringContaining("No `/build` orchestration is running")
       );
     });
   });
@@ -1189,7 +1190,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       const ctx = createContext();
       handleSlashCommand("/init", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Analyzing codebase")
       );
       expect(ctx.submit).toHaveBeenCalledWith(
@@ -1202,7 +1204,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const ctx = createContext();
       handleSlashCommand("/init", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Validating AGENT.md")
       );
     });
@@ -1211,7 +1214,8 @@ describe("handleSlashCommand", () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const ctx = createContext();
       handleSlashCommand("/init --force", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+      expect(ctx.addSystemMessage).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining("Analyzing codebase")
       );
     });

@@ -112,7 +112,7 @@ vi.mock("../checkpoints.js", () => ({
 
 // ---- Imports ----
 
-import { handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.ts";
+import { formatReleaseNotesForDisplay, handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.ts";
 import { execSync } from "child_process";
 import fs from "fs";
 import { listSessions, saveSession } from "../session.js";
@@ -2101,6 +2101,26 @@ describe("handleSlashCommand", () => {
     it("handles /release-notes alias /releasenotes", () => {
       const ctx = createContext();
       expect(handleSlashCommand("/releasenotes", ctx)).toBe(true);
+    });
+
+    it("reorders release notes output so the latest release appears last in the rendered message", () => {
+      const output = formatReleaseNotesForDisplay(`# Changelog
+
+All notable changes.
+
+## [Unreleased]
+
+## [0.16.0] - 2026-04-07
+
+Latest
+
+## [0.15.101] - 2026-04-05
+
+Earlier
+`);
+
+      expect(output.indexOf("## [0.15.101]")).toBeLessThan(output.indexOf("## [0.16.0]"));
+      expect(output.indexOf("## [0.16.0]")).toBeLessThan(output.indexOf("## [Unreleased]"));
     });
   });
 });

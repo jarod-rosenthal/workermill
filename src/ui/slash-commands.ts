@@ -121,6 +121,22 @@ export function getGitBranch(): string {
   return "";
 }
 
+export function formatReleaseNotesForDisplay(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const sectionMatches = [...normalized.matchAll(/^## .*(?:\n(?!## ).*)*/gm)];
+  if (sectionMatches.length <= 1) return normalized;
+
+  const firstSectionIndex = sectionMatches[0]?.index ?? 0;
+  const preamble = normalized.slice(0, firstSectionIndex).trimEnd();
+  const sections = sectionMatches.map((match) => match[0].trimEnd());
+  const unreleased = sections.find((section) => section.startsWith("## [Unreleased]"));
+  const released = sections.filter((section) => !section.startsWith("## [Unreleased]"));
+  const reordered = [...released.reverse()];
+  if (unreleased) reordered.push(unreleased);
+
+  return `${preamble}\n\n${reordered.join("\n\n")}\n`;
+}
+
 export function getGitStatus(cwd: string): string {
   let branch = "(unknown)";
   let status = "(unable to read)";
@@ -2365,7 +2381,7 @@ Write the file with write_file to AGENT.md in the project root.`,
         }
 
         if (content) {
-          ctx.addSystemMessage(content);
+          ctx.addSystemMessage(formatReleaseNotesForDisplay(content));
         } else {
           ctx.addSystemMessage(
             "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/CHANGELOG.md"

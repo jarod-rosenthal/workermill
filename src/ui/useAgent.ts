@@ -1233,10 +1233,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               aiProviderRef.current,
               activeContextLengthRef.current,
             ),
-            ...(["openai", "xai"].includes(aiProviderRef.current)
+            ...(["openai"].includes(aiProviderRef.current)
               ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
               : {}),
-            onStepFinish({ text, toolCalls: calls, usage: stepUsage }) {
+            onStepFinish({ text, toolCalls: calls, usage: stepUsage, reasoningText }) {
               partialInputTokens += stepUsage?.inputTokens ?? 0;
               partialOutputTokens += stepUsage?.outputTokens ?? 0;
               const stepStartMs = Date.now();
@@ -1260,9 +1260,20 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                   setStreamingDurationMs,
                   totalDurationMs: Date.now() - stepStartMs,
                 });
+              } else if (ENABLE_STEP_STREAMING_TEXT && reasoningText && callCount === 0 && !text) {
+                const setStreamingStartMs = Date.now();
+                setStreamingText(`(thinking)\n${reasoningText}`);
+                const setStreamingDurationMs = Date.now() - setStreamingStartMs;
+                setStatus("thinking");
+                traceDispatch("onStepFinish:reasoning_rendered", {
+                  reasoningLength: reasoningText.length,
+                  setStreamingDurationMs,
+                  totalDurationMs: Date.now() - stepStartMs,
+                });
               } else {
                 traceDispatch("onStepFinish:skip_text_render", {
                   hasText: Boolean(text),
+                  hasReasoning: Boolean(reasoningText),
                   callCount,
                   streamingEnabled: ENABLE_STEP_STREAMING_TEXT,
                   totalDurationMs: Date.now() - stepStartMs,

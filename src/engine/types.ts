@@ -1,4 +1,4 @@
-export type AIProvider = "anthropic" | "openai" | "google" | "gemini" | "ollama" | "lmstudio";
+export type AIProvider = "anthropic" | "openai" | "google" | "gemini" | "ollama" | "lmstudio" | "xai" | "openrouter";
 
 export type ExpertPersona =
   | "architect"
@@ -34,6 +34,8 @@ export interface AIClientConfig {
     anthropic?: string;
     openai?: string;
     google?: string;
+    xai?: string;
+    openrouter?: string;
     ollamaHost?: string;
   };
 }

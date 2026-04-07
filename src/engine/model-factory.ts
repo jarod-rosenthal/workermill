@@ -2,6 +2,8 @@ import { type LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai, createOpenAI } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
+import { xai, createXai } from "@ai-sdk/xai";
+import { openrouter, createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import type { AIProvider } from "./types.js";
 
@@ -155,6 +157,12 @@ export function createModel(
       const resolvedName = googleAliases[modelName] || modelName;
       return google(resolvedName);
     }
+    case "xai": {
+      const xaiProvider = host || apiKey
+        ? createXai({ ...(host ? { baseURL: host } : {}), ...(apiKey ? { apiKey } : {}) })
+        : xai;
+      return xaiProvider(modelName as Parameters<typeof xai>[0]);
+    }
     case "ollama": {
       const ollamaHost = host || "http://localhost:11434";
       // keepAlive: "-1" prevents model unload during long tool calls (CLAUDE.md rule).
@@ -169,10 +177,15 @@ export function createModel(
       const lmStudio = createOpenAI({ baseURL: lmStudioHost, apiKey: "lm-studio" });
       return lmStudio.chat(modelName);
     }
+    case "openrouter": {
+      const openRouterProvider = host || apiKey
+        ? createOpenRouter({ ...(host ? { baseURL: host } : {}), ...(apiKey ? { apiKey } : {}) })
+        : openrouter;
+      return openRouterProvider(modelName);
+    }
     default: {
-      // OpenAI-compatible providers (xAI, Groq, DeepSeek, Mistral, etc.)
+      // OpenAI-compatible providers (Groq, DeepSeek, Mistral, etc.)
       const compatibleHosts: Record<string, string> = {
-        xai: "https://api.x.ai/v1",
         groq: "https://api.groq.com/openai/v1",
         deepseek: "https://api.deepseek.com/v1",
         mistral: "https://api.mistral.ai/v1",
@@ -181,7 +194,6 @@ export function createModel(
       if (compatHost) {
         // Map provider to its env var for API key lookup
         const envKeys: Record<string, string> = {
-          xai: "XAI_API_KEY",
           groq: "GROQ_API_KEY",
           deepseek: "DEEPSEEK_API_KEY",
           mistral: "MISTRAL_API_KEY",

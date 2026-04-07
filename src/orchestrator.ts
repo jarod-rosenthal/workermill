@@ -337,7 +337,6 @@ function needsDockerInstructions(story: Story, userTask: string): boolean {
 function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
   switch (provider) {
     case "openai":
-    case "xai":
       return { providerOptions: { openai: { reasoningSummary: "detailed" } } };
     case "google":
     case "gemini":
@@ -347,6 +346,21 @@ function buildReasoningOptions(provider: string, modelName: string): Record<stri
       return { providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192, includeThoughts: true } } } };
     default:
       return {};
+  }
+}
+
+function emitReasoningDelta(
+  emit: (line: string) => void,
+  reasoningText: string | undefined,
+  lastLengthRef: { value: number },
+): void {
+  if (!reasoningText || reasoningText.length <= lastLengthRef.value) return;
+  const delta = reasoningText.slice(lastLengthRef.value).trim();
+  lastLengthRef.value = reasoningText.length;
+  if (!delta) return;
+  const lines = delta.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    emit(`(thinking) ${line}`);
   }
 }
 
@@ -2201,6 +2215,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       // Captures representative expert text for ticket comments.
       let expertSummary = "";
       let lastSyntheticThinkingSig = "";
+      const reasoningLength = { value: 0 };
 
       // Track tool calls for structured ticket update
       const storyActions: Array<{ tool: string; detail: string }> = [];
@@ -2216,7 +2231,8 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
         timeout: { chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
-        onStepFinish({ text, toolCalls }) {
+        onStepFinish({ text, toolCalls, reasoningText }) {
+          emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, reasoningLength);
           if (toolCalls && toolCalls.length > 0) {
             // Track actions for ticket update
             for (const tc of toolCalls) {
@@ -3198,6 +3214,7 @@ Working directory: ${workingDir}`;
           try {
             // TODO: Rate limit retry for revision streamText — add isRateLimitError check in catch block
             const revisionStartMs = Date.now();
+            const revisionReasoningLength = { value: 0 };
             const revStream = streamText({
               model: storyModel,
               abortSignal,
@@ -3234,7 +3251,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               timeout: { chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
-              onStepFinish({ text, toolCalls }) {
+              onStepFinish({ text, toolCalls, reasoningText }) {
+                emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, revisionReasoningLength);
                 if (toolCalls && toolCalls.length > 0) {
                   for (const tc of toolCalls) {
                     const filePath = extractToolFilePath(tc.toolName, tc.input as Record<string, unknown>);

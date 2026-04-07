@@ -149,6 +149,7 @@ program
   .option("--continue", "Continue the most recent session")
   .option("--model <provider/model>", "Override model")
   .option("--max-steps <n>", "Cap tool/reasoning steps", parseInt)
+  .option("--full-disk", "Allow tools to access files outside working directory")
   .action(async (prompt, options) => {
     if (!prompt || prompt.length === 0) {
       console.error("Error: prompt is required");

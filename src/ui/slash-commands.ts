@@ -295,6 +295,7 @@ export interface SlashCommandContext {
   forceCompact?: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
   setLiveViewEnabled?: (enabled: boolean) => string | null;
   getLiveViewUrl?: () => string | null;
+  setUiActivityMode?: (mode: "off" | "minimal" | "full") => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,6 +1495,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const liveViewEnabled = config.liveView === true;
         const liveViewUrl = ctx.getLiveViewUrl?.() || null;
         const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
+        const uiActivity = config.uiActivity || "full";
         const bellEnabled = config.bell === true;
 
         // Primary settings — always shown
@@ -1506,6 +1508,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
+          `| UI activity | ${uiActivity} | \`/settings ui.activity <off/minimal/full>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Experimental (/orchestrate, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |`;
@@ -1549,22 +1552,73 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
         ctx.addSystemMessage(table);
 
+        const displayRoutingProvider = (persona: string, provider: string): string => {
+          // Role-specific aliases like "openai_tech_lead" are useful in config,
+          // but noisy in the settings table. Show the base provider name.
+          const suffix = `_${persona}`;
+          if (provider.endsWith(suffix)) {
+            return provider.slice(0, -suffix.length);
+          }
+          return provider;
+        };
+
         // Show routing — filter out stale entries (e.g. "critic" after removal)
         const routing = config.routing;
         const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
         const routingRows = [
-          `| default | ${config.default} |`,
-          ...validEntries.map(([persona, provider]) => `| ${persona} | ${provider} |`),
+          ...(showAll
+            ? [`| default | ${displayRoutingProvider("default", config.default)} | ${config.default} |`]
+            : [`| default | ${displayRoutingProvider("default", config.default)} |`]),
+          ...validEntries.map(([persona, provider]) =>
+            showAll
+              ? `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${provider} |`
+              : `| ${persona} | ${displayRoutingProvider(persona, provider)} |`,
+          ),
         ];
+        const routingHeader = showAll
+          ? `| Persona | Provider | Config key |\n|---|---|---|\n`
+          : `| Persona | Provider |\n|---|---|\n`;
         ctx.addSystemMessage(
           `\n**Persona Routing** (\`/settings route <persona> <provider>\`)\n\n` +
-          `| Persona | Provider |\n|---|---|\n` +
+          routingHeader +
           routingRows.join("\n"),
         );
       } else {
         // Parse key=value or key value
         const parts = arg.split(/[\s=]+/);
-        const key = parts[0];
+        const rawKey = parts[0];
+        const keyAliases: Record<string, string> = {
+          "ollama.host": "ollama.host",
+          "ollama.context": "ollama.context",
+          "review.enabled": "review.enabled",
+          "review.maxrevisions": "review.maxRevisions",
+          "review.threshold": "review.threshold",
+          "review.autorevise": "review.autoRevise",
+          "review.autobranch": "review.autoBranch",
+          "program.maxissues": "program.maxIssues",
+          "program.maxautoretries": "program.maxAutoRetries",
+          "program.gatemode": "program.gateMode",
+          "doctor.maxhighriskmodules": "doctor.maxHighRiskModules",
+          "doctor.risktroublethreshold": "doctor.riskTroubleThreshold",
+          "doctor.healthfunctioningthreshold": "doctor.healthFunctioningThreshold",
+          "doctor.healthtroublethreshold": "doctor.healthTroubleThreshold",
+          "doctor.deadcodeenabled": "doctor.deadCodeEnabled",
+          "doctor.deadcodemindays": "doctor.deadCodeMinDays",
+          "doctor.deadcodemaxcandidates": "doctor.deadCodeMaxCandidates",
+          "sandbox": "sandbox",
+          "liveview": "liveView",
+          "bell": "bell",
+          "ui.activity": "ui.activity",
+          "experimental": "experimental",
+          "tickets": "tickets",
+          "jira.url": "jira.url",
+          "jira.email": "jira.email",
+          "jira.token": "jira.token",
+          "linear.key": "linear.key",
+          "route": "route",
+          "key": "key",
+        };
+        const key = keyAliases[rawKey.toLowerCase()] ?? rawKey;
         const value = parts.slice(1).join(" ");
 
         if (!value) {
@@ -1737,6 +1791,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.bell = boolVal(value);
             break;
           }
+          case "ui.activity": {
+            const normalized = value.toLowerCase();
+            if (normalized !== "off" && normalized !== "minimal" && normalized !== "full") {
+              ctx.addSystemMessage("Invalid value for `ui.activity`. Use `off`, `minimal`, or `full`.");
+              settingApplied = false;
+              break;
+            }
+            config.uiActivity = normalized;
+            break;
+          }
           case "experimental": {
             config.experimental = boolVal(value);
             break;
@@ -1824,7 +1888,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "bell", "ui.activity", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
           if (key === "liveView" && ctx.setLiveViewEnabled) {
@@ -1838,6 +1902,12 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
               ctx.addSystemMessage("Live view enabled.");
             } else {
               ctx.addSystemMessage("Live view disabled.");
+            }
+          }
+          if (key === "ui.activity" && ctx.setUiActivityMode) {
+            const normalized = value.toLowerCase();
+            if (normalized === "off" || normalized === "minimal" || normalized === "full") {
+              ctx.setUiActivityMode(normalized);
             }
           }
         }

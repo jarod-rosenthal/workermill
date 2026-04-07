@@ -46,6 +46,8 @@ function extractDetail(input: Record<string, unknown>): string {
 
 interface ToolCallDisplayProps {
   tool: ToolCallInfo;
+  tick?: number;
+  animate?: boolean;
 }
 
 /**
@@ -57,7 +59,7 @@ interface ToolCallDisplayProps {
  * - Done: green checkmark
  * - Denied: red cross
  */
-export function ToolCallDisplay({ tool }: ToolCallDisplayProps): React.ReactElement {
+export function ToolCallDisplay({ tool, tick = 0, animate = true }: ToolCallDisplayProps): React.ReactElement {
   const label = LABELS[tool.name] || tool.name;
   const detail = extractDetail(tool.input);
   const labelColor = toolColors[label] || theme.blue;
@@ -71,7 +73,7 @@ export function ToolCallDisplay({ tool }: ToolCallDisplayProps): React.ReactElem
       statusIcon = <Text color={theme.error}>{"\u2717"}</Text>;
       break;
     case "running": {
-      const frame = SPINNER_FRAMES[Math.floor(Date.now() / 100) % SPINNER_FRAMES.length];
+      const frame = animate ? SPINNER_FRAMES[tick % SPINNER_FRAMES.length] : "●";
       statusIcon = <Text color={theme.warning}>{frame}</Text>;
       break;
     }

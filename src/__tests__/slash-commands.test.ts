@@ -910,6 +910,57 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("Review enabled")
       );
     });
+
+    it("shows clean provider names in persona routing table", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: {
+          ollama: { model: "qwen3-coder:30b" },
+          openai: { model: "gpt-5.4" },
+          openai_tech_lead: { model: "gpt-5.4" },
+          google: { model: "gemini-2.5-pro" },
+          google_planner: { model: "gemini-2.5-pro" },
+        },
+        default: "ollama",
+        routing: {
+          tech_lead: "openai_tech_lead",
+          planner: "google_planner",
+        },
+      } as any);
+
+      const ctx = createContext();
+      handleSlashCommand("/settings", ctx);
+
+      const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
+      const routingMsg = calls[calls.length - 1][0] as string;
+      expect(routingMsg).toContain("| tech_lead | openai |");
+      expect(routingMsg).toContain("| planner | google |");
+      expect(routingMsg).not.toContain("openai_tech_lead");
+      expect(routingMsg).not.toContain("google_planner");
+    });
+
+    it("shows raw routing config keys in /settings all", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: {
+          ollama: { model: "qwen3-coder:30b" },
+          openai_tech_lead: { model: "gpt-5.4" },
+          google_planner: { model: "gemini-2.5-pro" },
+        },
+        default: "ollama",
+        routing: {
+          tech_lead: "openai_tech_lead",
+          planner: "google_planner",
+        },
+      } as any);
+
+      const ctx = createContext();
+      handleSlashCommand("/settings all", ctx);
+
+      const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
+      const routingMsg = calls[calls.length - 1][0] as string;
+      expect(routingMsg).toContain("| Persona | Provider | Config key |");
+      expect(routingMsg).toContain("| tech_lead | openai | openai_tech_lead |");
+      expect(routingMsg).toContain("| planner | google | google_planner |");
+    });
   });
 
   // ---- /permissions ----
@@ -1691,6 +1742,23 @@ describe("handleSlashCommand", () => {
       expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(false);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Live view disabled")
+      );
+    });
+
+    it("accepts case-insensitive settings keys", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings LIVEVIEW true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ liveView: true }),
+      );
+      expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(true);
+
+      vi.clearAllMocks();
+      handleSlashCommand("/settings Review.MaxRevisions 4", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ maxRevisions: 4 }),
+        }),
       );
     });
 

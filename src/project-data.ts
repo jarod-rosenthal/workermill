@@ -1,0 +1,164 @@
+import fs from "fs";
+import path from "path";
+import os from "os";
+import crypto from "crypto";
+
+// Project-scoped data stored in ~/.workermill/projects/<project-hash>/
+const PROJECTS_DIR = path.join(os.homedir(), ".workermill", "projects");
+
+/**
+ * Get the canonical project ID by resolving the realpath of the current working directory.
+ * This ensures that symlinked paths resolve to the same ID.
+ */
+function getProjectId(cwd?: string): string {
+  const dir = cwd || process.cwd();
+  try {
+    const canonicalPath = fs.realpathSync(dir);
+    return crypto.createHash("md5").update(canonicalPath).digest("hex").slice(0, 8);
+  } catch (err) {
+    // Fallback to raw cwd if realpath fails (e.g., non-existent directory)
+    return crypto.createHash("md5").update(dir).digest("hex").slice(0, 8);
+  }
+}
+
+/**
+ * Get the root directory for project-scoped data.
+ */
+export function getProjectRootDir(cwd?: string): string {
+  const projectId = getProjectId(cwd);
+  return path.join(PROJECTS_DIR, projectId);
+}
+
+/**
+ * Get the path to the project's history file.
+ */
+export function getProjectHistoryPath(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "history");
+}
+
+/**
+ * Get the path to the project's sessions directory.
+ */
+export function getProjectSessionsDir(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "sessions");
+}
+
+/**
+ * Get the path to the project's learnings file.
+ */
+export function getProjectLearningsPath(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "learnings.json");
+}
+
+/**
+ * Get the path to the project's log file.
+ */
+export function getProjectLogPath(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "logs", "cli.log");
+}
+
+/**
+ * Get the path to the project's meta file.
+ */
+export function getProjectMetaPath(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "meta.json");
+}
+
+/**
+ * Project metadata interface.
+ */
+export interface ProjectMeta {
+  canonicalPath: string;
+  lastAccessed: string;
+  version: string;
+}
+
+/**
+ * Load project metadata, creating it if it doesn't exist.
+ */
+export function loadProjectMeta(cwd?: string): ProjectMeta {
+  const metaPath = getProjectMetaPath(cwd);
+  const canonicalPath = fs.realpathSync(cwd || process.cwd());
+
+  try {
+    if (fs.existsSync(metaPath)) {
+      const data = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as Partial<ProjectMeta>;
+      return {
+        canonicalPath: data.canonicalPath || canonicalPath,
+        lastAccessed: new Date().toISOString(),
+        version: data.version || "1.0",
+      };
+    }
+  } catch (err) {
+    // Ignore errors and create new meta
+  }
+
+  return {
+    canonicalPath,
+    lastAccessed: new Date().toISOString(),
+    version: "1.0",
+  };
+}
+
+/**
+ * Save project metadata.
+ */
+export function saveProjectMeta(meta: ProjectMeta, cwd?: string): void {
+  const metaPath = getProjectMetaPath(cwd);
+  const metaDir = path.dirname(metaPath);
+
+  if (!fs.existsSync(metaDir)) {
+    fs.mkdirSync(metaDir, { recursive: true });
+  }
+
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * List all known projects with their metadata.
+ */
+export function listProjects(): Array<ProjectMeta & { id: string }> {
+  const projects: Array<ProjectMeta & { id: string }> = [];
+
+  if (!fs.existsSync(PROJECTS_DIR)) {
+    return projects;
+  }
+
+  try {
+    const projectDirs = fs.readdirSync(PROJECTS_DIR).filter(dir =>
+      fs.statSync(path.join(PROJECTS_DIR, dir)).isDirectory()
+    );
+
+    for (const projectId of projectDirs) {
+      const metaPath = path.join(PROJECTS_DIR, projectId, "meta.json");
+      try {
+        if (fs.existsSync(metaPath)) {
+          const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as ProjectMeta;
+          projects.push({ ...meta, id: projectId });
+        }
+      } catch (err) {
+        // Skip invalid meta files
+      }
+    }
+  } catch (err) {
+    // Return empty list if directory operations fail
+  }
+
+  // Sort by lastAccessed descending
+  return projects.sort((a, b) => new Date(b.lastAccessed).getTime() - new Date(a.lastAccessed).getTime());
+}
+
+/**
+ * Ensure the project directory structure exists.
+ */
+export function ensureProjectDirs(cwd?: string): void {
+  const rootDir = getProjectRootDir(cwd);
+  const sessionsDir = getProjectSessionsDir(cwd);
+  const logsDir = path.dirname(getProjectLogPath(cwd));
+
+  [rootDir, sessionsDir, logsDir].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+}

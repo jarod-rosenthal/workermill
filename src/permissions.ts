@@ -33,7 +33,7 @@ export class PermissionManager {
     toolInput: Record<string, unknown>
   ): Promise<boolean> {
     // Dangerous command check
-    if (toolName === "bash") {
+    if (toolName === "bash" || toolName === "bash_background") {
       const cmd = String(toolInput.command || "");
       const danger = isDangerous(cmd);
       if (danger) {
@@ -121,6 +121,7 @@ export class PermissionManager {
   private formatToolCall(toolName: string, input: Record<string, unknown>): string {
     switch (toolName) {
       case "bash":
+      case "bash_background":
         return String(input.command || "");
       case "write_file":
       case "edit_file":

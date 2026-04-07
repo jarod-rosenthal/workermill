@@ -22,6 +22,7 @@ import {
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../engine/tools/bash.js";
+import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
@@ -1464,6 +1465,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       abortRef.current.abort();
       abortRef.current = null;
       killActiveProcess();
+      cleanupAllBackgroundProcesses();
     }
     // Commit any completed tool calls to Static before clearing.
     const currentToolCalls = streamingToolCallsRef.current;

@@ -4,6 +4,9 @@ import { z } from "zod";
 import path from "path";
 
 import * as bashTool from "./bash.js";
+import * as bashBackgroundTool from "./bash-background.js";
+import * as bashOutputTool from "./bash-output.js";
+import * as bashKillTool from "./bash-kill.js";
 import * as readFileTool from "./read-file.js";
 import * as writeFileTool from "./write-file.js";
 import * as editFileTool from "./edit-file.js";
@@ -21,7 +24,7 @@ import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
+export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -82,6 +85,80 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         if (result.stdout) parts.push(result.stdout);
         if (result.error) parts.push(result.error);
         return `Error: ${parts.join("\n")}`.trim();
+      },
+    }),
+
+    bash_background: tool({
+      description: bashBackgroundTool.description,
+      inputSchema: z.object({
+        command: z.string().describe("The bash command to execute in the background"),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Working directory for the command (optional)"),
+        env: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Environment variables to set (optional)"),
+      }),
+      execute: async ({ command, cwd, env }) => {
+        // The background shell does not currently support OS runtime sandboxing.
+        if (osSandbox) {
+          return "Error: bash_background is not available with OS sandbox enabled. Use foreground `bash` or disable OS sandbox.";
+        }
+        const resolvedCwd = cwd
+          ? path.isAbsolute(cwd)
+            ? cwd
+            : path.resolve(workingDir, cwd)
+          : workingDir;
+        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
+        const result = await bashBackgroundTool.execute({
+          command,
+          cwd: resolvedCwd,
+          env: env as Record<string, string> | undefined,
+          workspaceRoot: workingDir,
+          enforceWorkspacePaths: pathSandboxed,
+        });
+        return `Shell started: ${result.shellId}, PID: ${result.pid}`;
+      },
+    }),
+
+    bash_output: tool({
+      description: bashOutputTool.description,
+      inputSchema: z.object({
+        shellId: z.string().describe("The shell ID returned by bash_background"),
+        wait: z
+          .boolean()
+          .optional()
+          .describe("Whether to wait for the process to exit (optional)"),
+      }),
+      execute: async ({ shellId, wait }) => {
+        const result = await bashOutputTool.execute({
+          shellId,
+          wait,
+        });
+        if (result.done) {
+          return `Process ${result.status} (exit code: ${result.exitCode})\n${result.output}`;
+        }
+        return `Process ${result.status}\n${result.output}`;
+      },
+    }),
+
+    bash_kill: tool({
+      description: bashKillTool.description,
+      inputSchema: z.object({
+        shellId: z.string().describe("The shell ID returned by bash_background"),
+        signal: z
+          .enum(["SIGTERM", "SIGKILL"])
+          .optional()
+          .describe("Signal to send (default: SIGTERM)"),
+      }),
+      execute: async ({ shellId, signal }) => {
+        const result = await bashKillTool.execute({
+          shellId,
+          signal,
+        });
+        return result.killed ? "Process terminated" : "Process not found or already terminated";
       },
     }),
 

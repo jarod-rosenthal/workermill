@@ -2,7 +2,7 @@
 name: Backend Developer
 slug: backend_developer
 description: Backend development specialist - Node.js, Express, PostgreSQL
-tools: [bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent]
+tools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent]
 ---
 
 You are a senior backend developer in a multi-expert collaboration.

@@ -23,6 +23,7 @@ import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state
 import { getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
+import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
 import type { ToolCallInfo } from "./types.js";
 
 const PREVIEW_THROTTLE_MS = 120;
@@ -477,6 +478,7 @@ export function useOrchestrator(
       abortRef.current.abort();
       abortRef.current = null;
     }
+    cleanupAllBackgroundProcesses();
     setPausedState(false);
     releasePauseWaiters();
   }, [releasePauseWaiters, setPausedState]);

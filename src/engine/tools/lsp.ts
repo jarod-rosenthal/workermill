@@ -8,6 +8,7 @@ export const name = "lsp";
 export const description =
   "Query the language server for code intelligence: diagnostics (type errors/warnings), " +
   "go-to-definition, find-references, hover info, and workspace symbols. " +
+  "Agents should prefer semantic reference tools (symbol_references) over grep when changing symbol usages. " +
   "Auto-detects and spawns the correct language server (TypeScript, Python, Go, Rust). " +
   "For TypeScript, auto-provisions via npx. Other languages require a globally installed server. " +
   "Use after editing files to check for type errors without running a full build.";
@@ -17,13 +18,14 @@ export const parameters = {
   properties: {
     action: {
       type: "string" as const,
-      enum: ["diagnostics", "definition", "references", "hover", "symbols"],
+      enum: ["diagnostics", "definition", "references", "hover", "symbols", "symbol_references"],
       description:
         "diagnostics: get errors/warnings for a file. " +
         "definition: go to definition of symbol at position. " +
         "references: find all references to symbol at position. " +
         "hover: get type info for symbol at position. " +
-        "symbols: list all symbols in a file.",
+        "symbols: list all symbols in a file. " +
+        "symbol_references: find all references to a symbol by name.",
     },
     file: {
       type: "string" as const,
@@ -50,6 +52,14 @@ export const parameters = {
       type: "string" as const,
       enum: ["json", "text"],
       description: "Output format (default: json for programmatic reliability)",
+    },
+    symbol: {
+      type: "string" as const,
+      description: "Symbol name (required for symbol_references)",
+    },
+    include_declaration: {
+      type: "boolean" as const,
+      description: "Include declaration in references (default: false for symbol_references)",
     },
   },
   required: ["action"] as const,
@@ -968,18 +978,150 @@ async function getSymbols(filePath: string, workingDir: string): Promise<string>
   return lines.join("\n");
 }
 
+async function getSymbolReferences(symbol: string, targetPath: string | undefined, includeDeclaration: boolean, workingDir: string): Promise<string> {
+  const s = await ensureServer(workingDir);
+
+  try {
+    // Send workspace/symbol request to find the symbol
+    const symbolResult = (await sendRequest(s, "workspace/symbol", {
+      query: symbol,
+    })) as Array<Record<string, unknown>> | null;
+
+    if (!symbolResult || symbolResult.length === 0) {
+      // No matching symbol found
+      return JSON.stringify({
+        lsp_available: true,
+        symbol,
+        references: []
+      });
+    }
+
+    // Filter for exact name matches
+    const exactMatches = symbolResult.filter((sym) => sym.name === symbol);
+
+    if (exactMatches.length === 0) {
+      return JSON.stringify({
+        lsp_available: true,
+        symbol,
+        references: []
+      });
+    }
+
+    // For now, take the first exact match. In a real implementation, we might want to handle multiple declarations.
+    const declarationSymbol = exactMatches[0];
+
+    // Extract the location using the same resilient checking as getSymbols
+    function getLocation(sym: Record<string, unknown>): { uri: string; range: { start: { line: number; character: number } } } | null {
+      // DocumentSymbol format: { range: { start: { line, character } }, uri? }
+      const range = sym.range as { start?: { line?: number; character?: number } } | undefined;
+      if (range?.start?.line !== undefined && range?.start?.character !== undefined) {
+        const uri = (sym as any).uri as string || (sym.location as any)?.uri as string;
+        if (uri) {
+          return { uri, range: { start: { line: range.start.line, character: range.start.character } } };
+        }
+      }
+
+      // SymbolInformation format: { location: { uri, range: { start: { line, character } } } }
+      const location = sym.location as { uri?: string; range?: { start?: { line?: number; character?: number } } } | undefined;
+      if (location?.uri && location?.range?.start?.line !== undefined && location?.range?.start?.character !== undefined) {
+        return { uri: location.uri, range: { start: { line: location.range.start.line, character: location.range.start.character } } };
+      }
+
+      return null;
+    }
+
+    const location = getLocation(declarationSymbol);
+    if (!location) {
+      return JSON.stringify({
+        lsp_available: true,
+        symbol,
+        references: []
+      });
+    }
+
+    // Get references using textDocument/references
+    // Always set includeDeclaration: false since declaration is handled separately
+    const referencesResult = (await sendRequest(s, "textDocument/references", {
+      textDocument: { uri: location.uri },
+      position: { line: location.range.start.line, character: location.range.start.character },
+      context: { includeDeclaration: false },
+    })) as LocationResult[] | null;
+
+    // Build the response
+    const response: {
+      lsp_available: boolean;
+      symbol: string;
+      declaration: { file: string; line: number; col: number };
+      references: Array<{ file: string; line: number; col: number; preview: string }>;
+    } = {
+      lsp_available: true,
+      symbol,
+      declaration: {
+        file: path.relative(workingDir, location.uri.replace("file://", "")),
+        line: location.range.start.line + 1,
+        col: location.range.start.character + 1,
+      },
+      references: []
+    };
+
+    // Process each reference, optionally filter by path
+    const resolvedTargetPath = targetPath ? (path.isAbsolute(targetPath) ? targetPath : path.resolve(workingDir, targetPath)) : null;
+    if (referencesResult && referencesResult.length > 0) {
+      for (const ref of referencesResult) {
+        const refFile = ref.uri.replace("file://", "");
+        if (resolvedTargetPath && !refFile.startsWith(resolvedTargetPath)) {
+          continue; // Skip references outside the scope
+        }
+        const relFile = path.relative(workingDir, refFile);
+
+        // Read the file to get the preview
+        try {
+          const content = fs.readFileSync(refFile, "utf-8");
+          const lines = content.split("\n");
+          const lineIndex = ref.range.start.line;
+          const preview = lines[lineIndex]?.trim() || "";
+          response.references.push({
+            file: relFile,
+            line: ref.range.start.line + 1,
+            col: ref.range.start.character + 1,
+            preview
+          });
+        } catch {
+          // If we can't read the file, just add without preview
+          response.references.push({
+            file: relFile,
+            line: ref.range.start.line + 1,
+            col: ref.range.start.character + 1,
+            preview: ""
+          });
+        }
+      }
+    }
+
+    return JSON.stringify(response);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return JSON.stringify({
+      lsp_available: false,
+      error: message
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main execute
 // ---------------------------------------------------------------------------
 
 interface LspParams {
-  action: "diagnostics" | "definition" | "references" | "hover" | "symbols";
+  action: "diagnostics" | "definition" | "references" | "hover" | "symbols" | "symbol_references";
   file?: string;
   line?: number;
   character?: number;
   path?: string;
   severity?: "error" | "warning" | "hint" | "all";
   format?: "json" | "text";
+  symbol?: string;
+  include_declaration?: boolean;
 }
 
 interface LspResult {
@@ -989,7 +1131,7 @@ interface LspResult {
 }
 
 export async function execute(params: LspParams, workingDir: string): Promise<LspResult> {
-  const { action, file, line, character, path: targetPath, severity = "error", format = "json" } = params;
+  const { action, file, line, character, path: targetPath, severity = "error", format = "json", symbol, include_declaration = false } = params;
 
   // If path is provided, we're handling directory diagnostics
   if (targetPath) {
@@ -1018,6 +1160,10 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
       return { success: false, error: `${action} requires line and character parameters.` };
     }
 
+    if (action === "symbol_references" && !symbol) {
+      return { success: false, error: `symbol_references requires symbol parameter.` };
+    }
+
     try {
       let content: string;
       switch (action) {
@@ -1036,6 +1182,12 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
         case "symbols":
           content = await getSymbols(resolvedFile, workingDir);
           break;
+        case "symbol_references":
+          if (!symbol) {
+            throw new Error("symbol_references requires symbol parameter.");
+          }
+          content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir);
+          break;
       }
       return { success: true, content };
     } catch (err) {
@@ -1050,25 +1202,36 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
       return { success: false, error: `LSP ${action} failed: ${message}` };
     }
   } else {
-    // If no file is provided, only "diagnostics" action is valid for directory mode
-    if (action !== "diagnostics") {
+    // If no file is provided, handle actions that don't require a file
+    if (action === "symbol_references") {
+      if (!symbol) {
+        return { success: false, error: `symbol_references requires symbol parameter.` };
+      }
+      try {
+        const content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir);
+        return { success: true, content };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: `LSP ${action} failed: ${message}` };
+      }
+    } else if (action === "diagnostics") {
+      // Handle directory diagnostics without a specific file
+      if (targetPath) {
+        const resolvedPath = path.isAbsolute(targetPath) ? targetPath : path.resolve(workingDir, targetPath);
+        try {
+          const stat = fs.statSync(resolvedPath);
+          if (stat.isDirectory()) {
+            return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
+          }
+        } catch {
+          return { success: false, error: `Path not found or not a directory: ${targetPath}` };
+        }
+      }
+
+      return { success: false, error: "No file or directory path provided." };
+    } else {
       return { success: false, error: `Action ${action} requires a file parameter.` };
     }
-    
-    // Handle directory diagnostics without a specific file
-    if (targetPath) {
-      const resolvedPath = path.isAbsolute(targetPath) ? targetPath : path.resolve(workingDir, targetPath);
-      try {
-        const stat = fs.statSync(resolvedPath);
-        if (stat.isDirectory()) {
-          return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
-        }
-      } catch {
-        return { success: false, error: `Path not found or not a directory: ${targetPath}` };
-      }
-    }
-    
-    return { success: false, error: "No file or directory path provided." };
   }
 }
 

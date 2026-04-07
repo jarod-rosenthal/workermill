@@ -151,4 +151,39 @@ describe("LSP tool", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("requires line and character");
   });
+
+  it("returns symbol references for a symbol name", async () => {
+    if (skipIfNoLS()) return;
+
+    const result = await execute(
+      { action: "symbol_references", symbol: "add" },
+      tempDir,
+    );
+
+    expect(result.success).toBe(true);
+    const parsed = JSON.parse(result.content!);
+    expect(parsed.lsp_available).toBe(true);
+    expect(parsed.symbol).toBe("add");
+    expect(parsed.declaration).toBeDefined();
+    expect(parsed.declaration.file).toContain("math.ts");
+    expect(Array.isArray(parsed.references)).toBe(true);
+    // Should have at least the declaration and the usage in app.ts
+    expect(parsed.references.length).toBeGreaterThanOrEqual(2);
+    expect(parsed.references.some((ref: any) => ref.file.includes("app.ts"))).toBe(true);
+  });
+
+  it("returns empty references for non-existent symbol", async () => {
+    if (skipIfNoLS()) return;
+
+    const result = await execute(
+      { action: "symbol_references", symbol: "nonExistentFunction" },
+      tempDir,
+    );
+
+    expect(result.success).toBe(true);
+    const parsed = JSON.parse(result.content!);
+    expect(parsed.lsp_available).toBe(true);
+    expect(parsed.symbol).toBe("nonExistentFunction");
+    expect(parsed.references).toEqual([]);
+  });
 });

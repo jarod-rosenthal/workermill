@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "prebuild": "find src -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; find src/ui -maxdepth 1 -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; true",
+    "prebuild": "find src -type f \\( -name '*.js' -o -name '*.d.ts' \\) -delete 2>/dev/null; true",
     "build": "tsup",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",

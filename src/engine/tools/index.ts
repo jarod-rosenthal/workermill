@@ -611,13 +611,14 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
     lsp: tool({
       description: lspTool.description,
       inputSchema: z.object({
-        action: z.enum(["diagnostics", "definition", "references", "hover", "symbols"])
+        action: z.enum(["diagnostics", "definition", "references", "hover", "symbols", "symbol_references"])
           .describe(
             "diagnostics: get errors/warnings for a file. " +
             "definition: go to definition of symbol at position. " +
             "references: find all references to symbol at position. " +
             "hover: get type info for symbol at position. " +
-            "symbols: list all symbols in a file."
+            "symbols: list all symbols in a file. " +
+            "symbol_references: find all references to a symbol by name."
           ),
         file: z.string().optional().describe("Path to the file (relative or absolute)"),
         line: z.number().optional().describe("1-indexed line number (required for definition, references, hover)"),
@@ -625,13 +626,15 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         path: z.string().optional().describe("Path to file or directory (relative or absolute) - used for directory diagnostics aggregation"),
         severity: z.enum(["error", "warning", "hint", "all"]).optional().describe("Severity level to include in diagnostics (default: error)"),
         format: z.enum(["json", "text"]).optional().describe("Output format (default: json for programmatic reliability)"),
+        symbol: z.string().optional().describe("Symbol name (required for symbol_references)"),
+        include_declaration: z.boolean().optional().describe("Include declaration in references (default: false for symbol_references)"),
       }),
-      execute: async ({ action, file, line, character, path: targetPath, severity, format }) => {
+      execute: async ({ action, file, line, character, path: targetPath, severity, format, symbol, include_declaration }) => {
         const resolvedFile = file ? (path.isAbsolute(file) ? file : path.resolve(workingDir, file)) : undefined;
         if (file) {
           assertPathInBounds(resolvedFile!, workingDir, pathSandboxed);
         }
-        const result = await lspTool.execute({ action, file: resolvedFile, line, character, path: targetPath, severity, format }, workingDir);
+        const result = await lspTool.execute({ action, file: resolvedFile, line, character, path: targetPath, severity, format, symbol, include_declaration }, workingDir);
         if (result.success) {
           return result.content || "No results.";
         }

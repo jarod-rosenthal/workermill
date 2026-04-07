@@ -3,7 +3,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WorkerMill Live View</title>
+  <title>WorkerMill Live Code View</title>
   <style>
     :root {
       --bg: #0e1116;
@@ -345,7 +345,7 @@ export const LIVE_VIEW_HTML = `<!DOCTYPE html>
 <body>
   <div class="header">
     <div class="header-left">
-      <span class="title">WorkerMill Live View</span>
+      <span class="title">WorkerMill Live Code View</span>
       <span id="storyPill" class="pill" style="display:none"></span>
       <span id="status" class="status">Connecting...</span>
     </div>

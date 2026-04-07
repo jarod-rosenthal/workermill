@@ -1507,7 +1507,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
           `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
-          `| Live view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
+          `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| UI activity | ${uiActivity} | \`/settings ui.activity <off/minimal/full>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
           `| Experimental (/orchestrate, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
@@ -1897,11 +1897,11 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             if (enabled && url) {
               const isWsl = process.platform === "linux" && (Boolean(process.env.WSL_DISTRO_NAME) || Boolean(process.env.WSL_INTEROP));
               const wslHint = isWsl ? " (WSL: open this URL in your Windows browser)" : "";
-              ctx.addSystemMessage(`Live view listening: \`${url}\`${wslHint}`);
+              ctx.addSystemMessage(`Live code view listening: \`${url}\`${wslHint}`);
             } else if (enabled) {
-              ctx.addSystemMessage("Live view enabled.");
+              ctx.addSystemMessage("Live code view enabled.");
             } else {
-              ctx.addSystemMessage("Live view disabled.");
+              ctx.addSystemMessage("Live code view disabled.");
             }
           }
           if (key === "ui.activity" && ctx.setUiActivityMode) {

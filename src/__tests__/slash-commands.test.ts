@@ -850,7 +850,7 @@ describe("handleSlashCommand", () => {
       const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       // Primary settings present
       expect(msg).toContain("Review enabled");
-      expect(msg).toContain("Live view");
+      expect(msg).toContain("Live code view");
       expect(msg).toContain("Issue tracker");
       // Advanced settings hidden
       expect(msg).not.toContain("Ollama host");
@@ -1731,7 +1731,7 @@ describe("handleSlashCommand", () => {
       );
       expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(true);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Live view listening")
+        expect.stringContaining("Live code view listening")
       );
 
       vi.clearAllMocks();
@@ -1741,7 +1741,7 @@ describe("handleSlashCommand", () => {
       );
       expect(ctx.setLiveViewEnabled).toHaveBeenCalledWith(false);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Live view disabled")
+        expect.stringContaining("Live code view disabled")
       );
     });
 

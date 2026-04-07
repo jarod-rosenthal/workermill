@@ -4,7 +4,7 @@ import { createToolDefinitions } from "./engine/tools/index.js";
 import { formatProjectInstructions } from "./instructions.js";
 import { loadLearnings } from "./learnings.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
-import { resolveSandboxMode, type SandboxSetting } from "./sandbox-mode.js";
+import type { SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
@@ -23,6 +23,33 @@ export interface RunOptions {
   sandboxed?: SandboxSetting;
 }
 
+export function resolveRunModelSelection(
+  config: CliConfig,
+  overrideModel?: string,
+): { provider: string; model: string } {
+  const baseProviderInfo = getProviderForPersona(config);
+  let providerToUse = baseProviderInfo.provider;
+  let modelToUse = baseProviderInfo.model;
+
+  if (!overrideModel) {
+    return { provider: providerToUse, model: modelToUse };
+  }
+
+  if (overrideModel.includes("/")) {
+    const [overrideProvider, overrideProviderModel] = overrideModel.split("/", 2);
+    if (!config.providers[overrideProvider]) {
+      throw new Error(
+        `Provider ${overrideProvider} not configured. Configure it first with /setup or /settings key ${overrideProvider} <api-key>.`,
+      );
+    }
+    providerToUse = overrideProvider;
+    modelToUse = overrideProviderModel;
+    return { provider: providerToUse, model: modelToUse };
+  }
+
+  return { provider: providerToUse, model: overrideModel };
+}
+
 export async function runCommand(options: RunOptions, config: CliConfig, workingDir: string): Promise<void> {
   const startTime = Date.now();
 
@@ -32,10 +59,17 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     process.exit(2);
   }
 
-  // Get provider and model (may be overridden in config)
-  const baseProviderInfo = getProviderForPersona(config);
-  let providerToUse = baseProviderInfo.provider;
-  let modelToUse = baseProviderInfo.model;
+  // Resolve provider/model selection explicitly for headless runs.
+  let providerToUse: string;
+  let modelToUse: string;
+  try {
+    const selection = resolveRunModelSelection(config, options.model);
+    providerToUse = selection.provider;
+    modelToUse = selection.model;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
 
   let session: Session;
   let messages: ChatMessage[];
@@ -93,7 +127,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     await startAllMCPServers(mcpConfig);
   }
 
-  const aiModel = createModel(provider as any, modelToUse, host, contextLength);
+  const aiModel = createModel(provider as any, modelToUse, host, contextLength, apiKey);
   const baseTools = createToolDefinitions(workingDir, aiModel, options.sandboxed || false);
   const mcpToolDefs = getMCPToolDefinitions();
   const tools = { ...baseTools, ...mcpToolDefs };

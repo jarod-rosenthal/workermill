@@ -110,14 +110,7 @@ async function loadCliConfig(options: Record<string, unknown>) {
     config.default = options.provider as string;
   }
   if (options.model) {
-    if ((options.model as string).includes('/')) {
-      const [prov, mod] = (options.model as string).split('/', 2);
-      config.default = prov;
-      const providerConfig = config.providers[config.default];
-      if (providerConfig) {
-        providerConfig.model = mod;
-      }
-    } else {
+    if (!(options.model as string).includes('/')) {
       const providerConfig = config.providers[config.default];
       if (providerConfig) {
         providerConfig.model = options.model as string;

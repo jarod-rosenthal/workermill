@@ -12,6 +12,7 @@ import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig, loadProjectSettings, saveProjectSettings, loadLocalSettings, PermissionRuleConfig } from "../config.js";
+import { listProjects } from "../project-data.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
@@ -153,7 +154,7 @@ export const BUILTIN_COMMANDS = new Set([
   "allow", "as", "ask", "bell", "browser", "build", "changed", "changelog", "chrome",
   "cancel", "clear", "compact", "config", "cost", "deny", "diff", "edit", "exit",
   "forget", "git", "h", "help", "hooks", "init", "key", "log", "mcp",
-  "memories", "memory", "model", "permissions", "personas", "q", "quit",
+  "memories", "memory", "model", "permissions", "personas", "projects", "q", "quit",
   "pause", "release-notes", "releasenotes", "remember", "reset", "retry", "review",
   "route", "sandbox", "schedule", "sessions", "settings", "setup", "ship",
   "skills", "status", "trust", "undo", "update", "voice",
@@ -202,6 +203,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/diff\` | Preview uncommitted changes |
 | \`/git\` | Git branch and status |
 | \`/personas\` | List, show, or create personas |
+| \`/projects\` | List known projects |
 | \`/remember <text>\` | Save a project memory |
 | \`/forget <id>\` | Remove a memory |
 | \`/memories\` | View saved memories |
@@ -2679,6 +2681,27 @@ Write the file with write_file to AGENT.md in the project root.`,
           }
         }
       })();
+      break;
+    }
+
+    // ---- /projects ----
+    case "projects": {
+      const projects = listProjects();
+      if (projects.length === 0) {
+        ctx.addSystemMessage("No known projects found. Projects are tracked when you work in them.");
+      } else {
+        const rows = projects.map((p) => {
+          const date = new Date(p.lastAccessed).toLocaleString();
+          const pathShort = p.canonicalPath.length > 50 ? p.canonicalPath.slice(0, 47) + "..." : p.canonicalPath;
+          return `| \`${p.id}\` | \`${pathShort}\` | ${date} |`;
+        });
+        ctx.addSystemMessage(
+          `**Known Projects** (${projects.length})\n\n` +
+          `| ID | Path | Last Accessed |\n` +
+          `|---|---|---|\n` +
+          rows.join("\n")
+        );
+      }
       break;
     }
 

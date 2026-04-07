@@ -12,6 +12,7 @@ import type { UseAgentOptions } from "./useAgent.js";
 import type { ToolCallInfo } from "./types.js";
 import { findModelInfo } from "../provider-registry.js";
 import { resolveConfig, getProviderForPersona } from "../config.js";
+import { getProjectHistoryPath } from "../project-data.js";
 
 /**
  * Resolve context window for a model.
@@ -31,14 +32,13 @@ function resolveContextWindow(provider: string, model: string, configContextLeng
 // History persistence
 // ---------------------------------------------------------------------------
 
-const HISTORY_DIR = path.join(os.homedir(), ".workermill");
-const HISTORY_FILE = path.join(HISTORY_DIR, "history");
 const MAX_HISTORY = 1000;
 
-function loadHistory(): string[] {
+function loadHistory(workingDir: string): string[] {
   try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      const raw = fs.readFileSync(HISTORY_FILE, "utf-8").trim();
+    const historyFile = getProjectHistoryPath(workingDir);
+    if (fs.existsSync(historyFile)) {
+      const raw = fs.readFileSync(historyFile, "utf-8").trim();
       if (!raw) return [];
       return raw.split("\n").slice(-MAX_HISTORY);
     }
@@ -48,12 +48,14 @@ function loadHistory(): string[] {
   return [];
 }
 
-function appendHistory(line: string): void {
+function appendHistory(line: string, workingDir: string): void {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    const historyFile = getProjectHistoryPath(workingDir);
+    const historyDir = path.dirname(historyFile);
+    if (!fs.existsSync(historyDir)) {
+      fs.mkdirSync(historyDir, { recursive: true });
     }
-    fs.appendFileSync(HISTORY_FILE, line + "\n", "utf-8");
+    fs.appendFileSync(historyFile, line + "\n", "utf-8");
   } catch {
     // Ignore write errors — history is best-effort.
   }
@@ -155,7 +157,7 @@ export function Root(props: RootProps): React.ReactElement {
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
 
-  const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory());
+  const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory(props.workingDir));
   // Poll git branch every 5s (immediate refresh happens via onBashComplete)
   useEffect(() => {
     const id = setInterval(refreshGitBranch, 5_000);
@@ -168,8 +170,8 @@ export function Root(props: RootProps): React.ReactElement {
       const next = [...prev, line].slice(-MAX_HISTORY);
       return next;
     });
-    appendHistory(line);
-  }, []);
+    appendHistory(line, props.workingDir);
+  }, [props.workingDir]);
 
   // ------- Slash-command handler ------- //
 

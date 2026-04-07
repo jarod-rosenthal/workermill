@@ -648,7 +648,6 @@ export function useOrchestrator(
               emitLine(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
-              emitInlineEditPreview(toolName, toolInput);
               // Update status bar tool counts
               incrementToolCount?.(toolName);
             },
@@ -947,7 +946,6 @@ export function useOrchestrator(
               const detail = formatToolCallDetail(toolName, toolInput, nextFileSequence);
               const emoji = getEmoji(persona);
               emitLine(`[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`);
-              emitInlineEditPreview(toolName, toolInput);
               incrementToolCount?.(toolName);
             },
             updateBranch(branch: string): void {

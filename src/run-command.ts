@@ -32,21 +32,10 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     process.exit(2);
   }
 
-  // Get base provider and model
+  // Get provider and model (may be overridden in config)
   const baseProviderInfo = getProviderForPersona(config);
-  const baseProvider = baseProviderInfo.provider;
-  const baseModel = baseProviderInfo.model;
-
-  // Parse model override
-  let providerToUse = baseProvider;
-  let modelToUse = baseModel;
-  if (options.model) {
-    if (options.model.includes('/')) {
-      [providerToUse, modelToUse] = options.model.split('/', 2);
-    } else {
-      modelToUse = options.model;
-    }
-  }
+  let providerToUse = baseProviderInfo.provider;
+  let modelToUse = baseProviderInfo.model;
 
   let session: Session;
   let messages: ChatMessage[];
@@ -77,7 +66,8 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
       session = createSession(providerToUse, modelToUse);
     }
 
-    // Override model if specified
+    // Override provider and model if specified
+    session.provider = providerToUse;
     session.model = modelToUse;
 
     // Add user message to session
@@ -87,7 +77,11 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
   }
 
   // Get provider config
-  const providerConfig = getProviderForPersona(config);
+  const providerConfig = config.providers[providerToUse];
+  if (!providerConfig) {
+    console.error(`Provider ${providerToUse} not configured`);
+    process.exit(2);
+  }
   const provider = providerToUse;
   const apiKey = providerConfig.apiKey;
   const host = providerConfig.host;

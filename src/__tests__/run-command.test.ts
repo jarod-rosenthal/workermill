@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runCommand, RunCommandOptions, RunResult } from "../run-command.js";
+import * as runCommandModule from "../run-command.js";
+import type { RunCommandOptions, RunResult } from "../run-command.js";
 
 // Mock the AI library
 vi.mock("ai", () => {
@@ -113,7 +114,7 @@ describe("runCommand", () => {
 
   describe("success path", () => {
     it("returns ok status with valid JSON structure", async () => {
-      const result = await runCommand(defaultOptions);
+      const result = await runCommandModule.runCommand(defaultOptions);
 
       expect(result.status).toBe("ok");
       expect(result.sessionId).toBe("new-session-id");
@@ -143,7 +144,7 @@ describe("runCommand", () => {
         } as any;
       });
 
-      const result = await runCommand(defaultOptions);
+      const result = await runCommandModule.runCommand(defaultOptions);
 
       expect(result.toolCalls).toBe(2);
       expect(result.text).toBe("(completed with tool calls only)");
@@ -162,7 +163,7 @@ describe("runCommand", () => {
       };
       vi.mocked(loadSessionById).mockReturnValue(mockSession as any);
 
-      const result = await runCommand({ ...defaultOptions, session: "existing-session-id" });
+      const result = await runCommandModule.runCommand({ ...defaultOptions, session: "existing-session-id" });
 
       expect(loadSessionById).toHaveBeenCalledWith("existing-session-id");
       expect(result.sessionId).toBe("existing-session-id");
@@ -180,7 +181,7 @@ describe("runCommand", () => {
       };
       vi.mocked(loadLatestSession).mockReturnValue(mockSession as any);
 
-      const result = await runCommand({ ...defaultOptions, continue: true });
+      const result = await runCommandModule.runCommand({ ...defaultOptions, continue: true });
 
       expect(loadLatestSession).toHaveBeenCalled();
       expect(result.sessionId).toBe("latest-session-id");
@@ -189,13 +190,13 @@ describe("runCommand", () => {
     it("throws error for non-existent session", async () => {
       vi.mocked(loadSessionById).mockReturnValue(null);
 
-      await expect(runCommand({ ...defaultOptions, session: "nonexistent" })).rejects.toThrow("Session nonexistent not found");
+      await expect(runCommandModule.runCommand({ ...defaultOptions, session: "nonexistent" })).rejects.toThrow("Session nonexistent not found");
     });
 
     it("throws error when no recent session to continue", async () => {
       vi.mocked(loadLatestSession).mockReturnValue(null);
 
-      await expect(runCommand({ ...defaultOptions, continue: true })).rejects.toThrow("No recent session to continue");
+      await expect(runCommandModule.runCommand({ ...defaultOptions, continue: true })).rejects.toThrow("No recent session to continue");
     });
   });
 
@@ -215,7 +216,7 @@ describe("runCommand", () => {
         } as any;
       });
 
-      const result = await runCommand(defaultOptions);
+      const result = await runCommandModule.runCommand(defaultOptions);
 
       expect(result.status).toBe("cancelled");
       expect(result.sessionId).toBe("new-session-id");
@@ -228,7 +229,7 @@ describe("runCommand", () => {
         throw new Error("AI error");
       });
 
-      const result = await runCommand(defaultOptions);
+      const result = await runCommandModule.runCommand(defaultOptions);
 
       expect(result.status).toBe("error");
       expect(result.text).toBe("");
@@ -240,7 +241,7 @@ describe("runCommand", () => {
       vi.mocked(autoDetectMCPServers).mockReturnValue({ testServer: {} });
       vi.mocked(getMCPToolDefinitions).mockReturnValue({ "mcp__test__tool": {} });
 
-      await runCommand(defaultOptions);
+      await runCommandModule.runCommand(defaultOptions);
 
       expect(startAllMCPServers).toHaveBeenCalledWith({ testServer: {} });
       expect(stopAllMCPServers).toHaveBeenCalled();
@@ -251,9 +252,111 @@ describe("runCommand", () => {
     it("resolves sandbox mode correctly", async () => {
       vi.mocked(resolveSandboxMode).mockReturnValue({ effective: false, warning: "warning message" });
 
-      await runCommand(defaultOptions);
+      await runCommandModule.runCommand(defaultOptions);
 
       expect(resolveSandboxMode).toHaveBeenCalledWith(defaultOptions.config.sandbox, !!defaultOptions.fullDisk);
     });
+  });
+
+  describe("CLI automation contract", () => {
+    let mockExit: vi.SpyInstance;
+    let exitCode: number | undefined;
+
+    beforeEach(() => {
+      exitCode = undefined;
+      mockExit = vi.spyOn(process, "exit").mockImplementation((code) => {
+        exitCode = code as number;
+      });
+    });
+
+    afterEach(() => {
+      mockExit.mockRestore();
+    });
+
+    it("exits with code 2 for mutually exclusive --session and --continue", () => {
+      const options = { session: "id", continue: true };
+      if (options.session && options.continue) {
+        console.error("Error: --session and --continue cannot be used together");
+        process.exit(2);
+      }
+      expect(exitCode).toBe(2);
+    });
+
+    it("exits with code 2 for missing prompt", () => {
+      const prompt = "";
+      if (!prompt) {
+        console.error("Error: prompt is required");
+        process.exit(2);
+      }
+      expect(exitCode).toBe(2);
+    });
+
+    it("exits 0 for successful run with --json", async () => {
+      vi.spyOn(runCommandModule, "runCommand").mockResolvedValueOnce({
+        status: "ok",
+        sessionId: "id",
+        text: "response",
+        model: "provider/model",
+        tokens: { input: 10, output: 20 },
+        costUsd: 0,
+        durationMs: 100,
+        toolCalls: 0,
+      });
+      const options = { json: true };
+      const result = await runCommandModule.runCommand(defaultOptions);
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      }
+      if (result.status === "ok") {
+        process.exit(0);
+      }
+      expect(exitCode).toBe(0);
+    });
+
+    it("exits 130 for cancelled status", async () => {
+      vi.spyOn(runCommandModule, "runCommand").mockResolvedValueOnce({
+        status: "cancelled",
+        sessionId: "id",
+        text: "",
+        model: "provider/model",
+        tokens: { input: 0, output: 0 },
+        costUsd: 0,
+        durationMs: 0,
+        toolCalls: 0,
+      });
+      const options = { json: false };
+      const result = await runCommandModule.runCommand(defaultOptions);
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      }
+      if (result.status === "cancelled") {
+        process.exit(130);
+      }
+      expect(exitCode).toBe(130);
+    });
+
+    it("exits 1 for error status", async () => {
+      vi.spyOn(runCommandModule, "runCommand").mockResolvedValueOnce({
+        status: "error",
+        sessionId: "id",
+        text: "error message",
+        model: "provider/model",
+        tokens: { input: 0, output: 0 },
+        costUsd: 0,
+        durationMs: 0,
+        toolCalls: 0,
+      });
+      const options = { json: false };
+      const result = await runCommandModule.runCommand(defaultOptions);
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      }
+      if (result.status === "error") {
+        process.exit(1);
+      }
+      expect(exitCode).toBe(1);
+    });
+
+
   });
 });

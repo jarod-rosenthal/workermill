@@ -246,6 +246,61 @@ describe("config", () => {
 
       expect(() => getProviderForPersona(config, "planner")).toThrow('Provider "nonexistent" not found');
     });
+
+    it("maps role-suffixed xai provider alias to xai", async () => {
+      const { getProviderForPersona } = await importConfig();
+      const config = {
+        providers: {
+          xai_tech_lead: { model: "grok-4.20-0309-reasoning", apiKey: "xai-key" },
+        },
+        default: "xai_tech_lead",
+      } as any;
+
+      const result = getProviderForPersona(config);
+      expect(result.provider).toBe("xai");
+      expect(result.model).toBe("grok-4.20-0309-reasoning");
+    });
+
+    it("maps role-suffixed aliases for all OpenAI-compatible providers", async () => {
+      const { getProviderForPersona } = await importConfig();
+
+      const cases = [
+        { key: "xai_backend_developer", expected: "xai" },
+        { key: "groq_frontend_developer", expected: "groq" },
+        { key: "deepseek_data_engineer", expected: "deepseek" },
+        { key: "mistral_security_engineer", expected: "mistral" },
+      ];
+
+      for (const c of cases) {
+        const config = {
+          providers: {
+            [c.key]: { model: "test-model", apiKey: "test-key" },
+          },
+          default: c.key,
+        } as any;
+
+        const result = getProviderForPersona(config);
+        expect(result.provider).toBe(c.expected);
+      }
+    });
+
+    it("inherits host/apiKey/context from base provider for role aliases", async () => {
+      const { getProviderForPersona } = await importConfig();
+      const config = {
+        providers: {
+          mycustomai: { model: "base-model", host: "https://my.api.example.com/v1", apiKey: "custom-key", contextLength: 131072 },
+          mycustomai_tech_lead: { model: "review-model" },
+        },
+        default: "mycustomai_tech_lead",
+      } as any;
+
+      const result = getProviderForPersona(config);
+      expect(result.provider).toBe("openai");
+      expect(result.model).toBe("review-model");
+      expect(result.host).toBe("https://my.api.example.com/v1");
+      expect(result.apiKey).toBe("custom-key");
+      expect(result.contextLength).toBe(131072);
+    });
   });
 
   describe("loadProjectConfig()", () => {

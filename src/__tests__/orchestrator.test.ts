@@ -237,14 +237,26 @@ const DEFAULT_PLANNER_TEXT = `Here is the plan:
 
 Done.`;
 
+/** Simulate a write_file tool call so the narration-detection guard doesn't fire */
+const FAKE_TOOL_CALL = { toolName: "write_file", input: { file_path: "src/impl.ts", content: "// impl" } };
+
 function restoreDefaultStreamTextMock() {
+  let defaultCallCount = 0;
   vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
     mockStreamTextCalls.push(opts);
+    defaultCallCount++;
+    const isPlanner = defaultCallCount === 1;
     if (typeof opts.onStepFinish === "function") {
-      (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+      (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
         text: "Working on the implementation.",
-        toolCalls: [],
+        toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
       });
+    }
+    // Write a file so git diff is non-empty for story workers
+    if (!isPlanner) {
+      const cwd = process.cwd();
+      fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+      fs.writeFileSync(path.join(cwd, "src", "impl.ts"), "// impl");
     }
     return {
       textStream: (async function* () { yield DEFAULT_PLANNER_TEXT; })(),
@@ -753,11 +765,17 @@ describe("topologicalSort (via runOrchestration with dependencies)", () => {
     let callCount = 0;
     vi.mocked(mockST).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
+      const isPlanner = callCount === 0;
       if (typeof opts.onStepFinish === "function") {
-        (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
           text: "Step done.",
-          toolCalls: [],
+          toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
         });
+      }
+      if (!isPlanner) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", `impl-${callCount}.ts`), "// impl");
       }
       callCount++;
       const text = callCount === 1 ? planWithDeps : "Implementation complete.";
@@ -2308,13 +2326,19 @@ FEEDBACK: Well done.`;
     let callCount = 0;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
+      callCount++;
+      const isWorker = callCount === 2 || callCount === 4; // story worker or revision worker
       if (typeof opts.onStepFinish === "function") {
-        (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
           text: "done",
-          toolCalls: [],
+          toolCalls: isWorker ? [FAKE_TOOL_CALL] : [],
         });
       }
-      callCount++;
+      if (isWorker) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", `impl-${callCount}.ts`), "// impl");
+      }
       let text: string;
       if (callCount === 1) text = planText;             // planner
       else if (callCount === 2) text = "Work done.";    // story worker
@@ -2362,13 +2386,19 @@ FEEDBACK: Missing tests.`;
     let callCount = 0;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
+      callCount++;
+      const isWorker = callCount === 2;
       if (typeof opts.onStepFinish === "function") {
-        (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
           text: "done",
-          toolCalls: [],
+          toolCalls: isWorker ? [FAKE_TOOL_CALL] : [],
         });
       }
-      callCount++;
+      if (isWorker) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", "impl.ts"), "// impl");
+      }
       let text: string;
       if (callCount === 1) text = planText;
       else if (callCount === 2) text = "Work done.";
@@ -2467,6 +2497,19 @@ ACTIONABLE_FIX: persist model configuration`;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
       callCount++;
+      const isWorker = callCount === 2 || callCount === 4; // story worker or revision worker
+
+      if (isWorker) {
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text: callCount === 2 ? "Initial implementation." : "Revision attempt.",
+            toolCalls: [FAKE_TOOL_CALL],
+          });
+        }
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", `impl-${callCount}.ts`), "// impl");
+      }
 
       if (callCount === 1) {
         return {
@@ -2484,7 +2527,7 @@ ACTIONABLE_FIX: persist model configuration`;
       }
       if (callCount === 3 || callCount === 5) {
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
             text: repeatedReviewerText,
             toolCalls: [],
           });
@@ -3287,11 +3330,19 @@ FEEDBACK: Great work.`;
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
       mockStreamTextCalls.push(opts);
       callCount++;
+      const isWorker = callCount === 2 || callCount === 3 || callCount === 5;
+
+      // Write files for story workers so narration-detection doesn't trigger
+      if (isWorker) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", `impl-${callCount}.ts`), "// impl");
+      }
 
       if (callCount === 1) {
         // Planner — fire onStepFinish with "done"
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({ text: "done", toolCalls: [] });
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text: "done", toolCalls: [] });
         }
         return {
           textStream: (async function* () { yield planText; })(),
@@ -3301,7 +3352,7 @@ FEEDBACK: Great work.`;
       } else if (callCount === 2) {
         // Story 1 worker
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({ text: "Story 1 done.", toolCalls: [] });
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text: "Story 1 done.", toolCalls: [FAKE_TOOL_CALL] });
         }
         return {
           textStream: (async function* () { yield "Story 1 done."; })(),
@@ -3311,7 +3362,7 @@ FEEDBACK: Great work.`;
       } else if (callCount === 3) {
         // Story 2 worker
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({ text: "Story 2 done.", toolCalls: [] });
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text: "Story 2 done.", toolCalls: [FAKE_TOOL_CALL] });
         }
         return {
           textStream: (async function* () { yield "Story 2 done."; })(),
@@ -3319,10 +3370,9 @@ FEEDBACK: Great work.`;
           totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
         };
       } else if (callCount === 4) {
-        // Reviewer round 1 — must fire onStepFinish with the full reviewer text
-        // (reviewerOutput is accumulated from onStepFinish, not textStream)
+        // Reviewer round 1
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
             text: reviewerText,
             toolCalls: [],
           });
@@ -3335,7 +3385,7 @@ FEEDBACK: Great work.`;
       } else if (callCount === 5) {
         // Story 2 revision worker
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({ text: "Story 2 revised.", toolCalls: [] });
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text: "Story 2 revised.", toolCalls: [FAKE_TOOL_CALL] });
         }
         return {
           textStream: (async function* () { yield "Story 2 revised."; })(),
@@ -3345,7 +3395,7 @@ FEEDBACK: Great work.`;
       } else {
         // Reviewer round 2 (approved)
         if (typeof opts.onStepFinish === "function") {
-          (opts.onStepFinish as (step: { text: string; toolCalls: never[] }) => void)({
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
             text: approvedText,
             toolCalls: [],
           });

@@ -2120,7 +2120,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       ctx.exit?.();
       // Force process exit — Ink's exit() only stops rendering but
       // dangling listeners (stdin, timers) can keep the process alive.
-      setTimeout(() => process.exit(0), 100);
+      // Skip in test environment to avoid vitest "process.exit unexpectedly called" errors.
+      if (typeof process.env.VITEST === "undefined") {
+        setTimeout(() => process.exit(0), 100);
+      }
       break;
     }
 

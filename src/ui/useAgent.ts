@@ -19,6 +19,7 @@ import {
   forkSession,
   type Session,
 } from "../session.js";
+import { loadProjectMeta } from "../project-data.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../engine/tools/bash.js";
@@ -631,6 +632,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     } else {
       sessionRef.current = createSession(options.provider, options.model);
     }
+
+    // Ensure project metadata is loaded/created for tracking
+    loadProjectMeta(workingDirRef.current);
   }
 
   // Push restored messages into React state after first render.

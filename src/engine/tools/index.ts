@@ -15,6 +15,7 @@ import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
 import * as fetchTool from "./fetch.js";
+import * as downloadFileTool from "./download-file.js";
 import * as gitTool from "./git.js";
 import * as patchTool from "./patch.js";
 import * as subAgentTool from "./sub-agent.js";
@@ -25,7 +26,7 @@ import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
 
 // Re-export all tool modules
-export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
+export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -497,6 +498,22 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
       },
     }),
 
+    download_file: tool({
+      description: downloadFileTool.description,
+      inputSchema: z.object({
+        url: z.string().describe("The URL to download from"),
+        destination: z.string().describe("Path to save the file (absolute or relative to cwd)"),
+        overwrite: z.boolean().optional().describe("Whether to overwrite existing files (default: false)"),
+      }),
+      execute: async ({ url, destination, overwrite }) => {
+        const resolvedPath = path.isAbsolute(destination)
+          ? destination
+          : path.resolve(workingDir, destination);
+        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
+      },
+    }),
+
     git: tool({
       description: gitTool.description,
       inputSchema: z.object({
@@ -733,6 +750,21 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                     assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
                     const result = await lsTool.execute({ path: resolvedPath, maxDepth });
                     return result.success ? result.tree : `Error: ${result.error}`;
+                  },
+                }),
+                download_file: tool({
+                  description: downloadFileTool.description,
+                  inputSchema: z.object({
+                    url: z.string().describe("The URL to download from"),
+                    destination: z.string().describe("Path to save the file (absolute or relative to cwd)"),
+                    overwrite: z.boolean().optional().describe("Whether to overwrite existing files (default: false)"),
+                  }),
+                  execute: async ({ url, destination, overwrite }) => {
+                    const resolvedPath = path.isAbsolute(destination)
+                      ? destination
+                      : path.resolve(workingDir, destination);
+                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+                    return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
                   },
                 }),
               };

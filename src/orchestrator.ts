@@ -1736,7 +1736,7 @@ function extractReviewFeedback(
 
 export function validateTechLeadReviewOutput(
   text: string,
-  approvalThreshold: number = 8,
+  approvalThreshold: number = 9,
 ): {
   decision: "approved" | "revision_needed" | "rejected";
   score: number;
@@ -3255,14 +3255,14 @@ You MUST write your detailed feedback FIRST, THEN add the decision markers at th
 **2. Then add these markers at the end:**
 
 REVIEW_DECISION: approved (or revision_needed or rejected)
-CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
+CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 9}
 FEEDBACK: One-line summary of your decision
 
 For REVISION_NEEDED decisions, also include:
 BLOCKING_EVIDENCE: concrete proof from this code state (repro step, failing command, or exact missing/wrong implementation)
 ACTIONABLE_FIX: minimal specific change required to get approval
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 8} means you found real blocking issues; ${config.review?.approvalThreshold ?? 8}+ means no blocking issues remain.
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 9}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 9} means you found real blocking issues; ${config.review?.approvalThreshold ?? 9}+ means no blocking issues remain.
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
@@ -3362,7 +3362,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const score = parsedReview.score;
 
         // Score must meet threshold — the model's decision marker alone is not enough.
-        const threshold = config.review?.approvalThreshold ?? 8;
+        const threshold = config.review?.approvalThreshold ?? 9;
         const approved = score >= threshold;
         const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
         if (!approved) {
@@ -3882,9 +3882,9 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                   const parsedPrReview = parseRequiredReviewOutcome(finalReviewText);
                   const reviewScore = parsedPrReview.score;
                   const feedback = extractReviewFeedback(finalReviewText, parsedPrReview.decision);
-                  const emoji = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "✅" : "🔄";
+                  const emoji = reviewScore >= (config.review?.approvalThreshold ?? 9) ? "✅" : "🔄";
                   const reviewBody = `## ${emoji} Tech Lead Review\n\n**Code Quality Score:** ${reviewScore}/10\n\n${feedback}`;
-                  const reviewFlag = reviewScore >= (config.review?.approvalThreshold ?? 8) ? "--approve" : "--request-changes";
+                  const reviewFlag = reviewScore >= (config.review?.approvalThreshold ?? 9) ? "--approve" : "--request-changes";
                   execSync(
                     `gh pr review --body-file - ${reviewFlag} 2>&1`,
                     { cwd: workingDir, encoding: "utf-8", input: reviewBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
@@ -4162,11 +4162,11 @@ REVIEW_DECISION: revision_needed
 
 Then add:
 \`\`\`
-CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 8}
+CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 9}
 FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
 \`\`\`
 
-**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 8}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 8} means you found real blocking issues; ${config.review?.approvalThreshold ?? 8}+ means no blocking issues remain.`;
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 9}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 9} means you found real blocking issues; ${config.review?.approvalThreshold ?? 9}+ means no blocking issues remain.`;
 
   // Stream the review — use onStepFinish to capture text between tool calls
   // This matches the orchestrator's review pattern exactly.
@@ -4260,7 +4260,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   // Parse results — same logic as orchestrator
   const parsedReview = parseRequiredReviewOutcome(reviewText);
   const score = parsedReview.score;
-  const threshold = config.review?.approvalThreshold ?? 8;
+  const threshold = config.review?.approvalThreshold ?? 9;
   const approved = score >= threshold;
   const decision = approved ? "approved" : parsedReview.decision;
 

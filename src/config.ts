@@ -34,7 +34,7 @@ export interface ReviewConfig {
   maxRevisions?: number;
   /** Auto-revise without prompting user (default: false — prompts each time) */
   autoRevise?: boolean;
-  /** Score threshold for auto-approval, 1-10 scale (default: 8) */
+  /** Score threshold for auto-approval, 1-10 scale (default: 9) */
   approvalThreshold?: number;
   /** Have the planner generate verification commands per story, run them before review (default: false) */
   verifyEnabled?: boolean;

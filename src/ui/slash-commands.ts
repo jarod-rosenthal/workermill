@@ -1505,7 +1505,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         // Gather primary values
         const reviewEnabled = config.review?.enabled !== false;
         const maxRevisions = config.review?.maxRevisions ?? 3;
-        const approvalThreshold = config.review?.approvalThreshold ?? 8;
+        const approvalThreshold = config.review?.approvalThreshold ?? 9;
         const liveViewEnabled = config.liveView === true;
         const liveViewUrl = ctx.getLiveViewUrl?.() || null;
         const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);

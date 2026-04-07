@@ -124,7 +124,7 @@ Controls the `/build` review pipeline.
 "review": {
   "enabled": true,
   "maxRevisions": 3,
-  "approvalThreshold": 8,
+  "approvalThreshold": 9,
   "autoRevise": false,
   "useCritic": false,
   "criticThreshold": 8,
@@ -137,7 +137,7 @@ Controls the `/build` review pipeline.
 |---|---|---|
 | `enabled` | `true` | Run tech lead review after workers finish. Set to `false` to skip review entirely. |
 | `maxRevisions` | `3` | Max review → revise cycles before giving up |
-| `approvalThreshold` | `8` | Review score (1-10) at or above which the code is approved |
+| `approvalThreshold` | `9` | Review score (1-10) at or above which the code is approved |
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
 | `useCritic` | `false` | Run a planning critic before execution — scores the plan 1-10 and refines it before workers start |
 | `criticThreshold` | `8` | Plan score (1-10) at or above which the critic approves the plan |
@@ -461,7 +461,7 @@ A project-local `.workermill/config.json` overrides the global config for fields
     "deny": ["bash(docker *)"]
   },
   "review": {
-    "approvalThreshold": 9
+    "approvalThreshold": 10
   }
 }
 ```

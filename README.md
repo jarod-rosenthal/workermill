@@ -1,44 +1,68 @@
-<p align="center">
-  <h1 align="center">WorkerMill</h1>
-  <p align="center">Point at a ticket. Get a pull request.<br/>A single model writes bad code and approves its own bad code. WorkerMill separates planning, coding, and review — each with a different model, different strengths, different blind spots.</p>
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/v/workermill?color=blue" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/dw/workermill?color=blue" alt="npm downloads"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue" alt="License"></a>
-</p>
+# WorkerMill
 
-<h3 align="center">
-  <a href="https://workermill.com">Website</a> ·
-  <a href="https://workermill.com/docs">Docs</a> ·
-  <a href="https://github.com/jarod-rosenthal/workermill/discussions">Discussions</a> ·
-  <a href="https://www.npmjs.com/package/workermill">npm</a>
-</h3>
+### Free local models write the code. Smart models plan and review. You pay pennies instead of dollars.
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=ZXpksHXxQMQ">
-    <img src=".github/assets/demo-preview.jpg" alt="WorkerMill Demo" width="100%" />
-  </a>
-</p>
+<br>
 
-## Get Started
+Most AI coding tools run every token through an expensive cloud model. WorkerMill flips that. A team of specialist AI personas — each routable to a different provider — handles the heavy lifting on local models or affordable cloud APIs. You only burn premium tokens on planning and review. Same quality, fraction of the cost.
+
+Point it at a ticket. Get a pull request — planned, built by experts, and independently reviewed.
+
+<br>
+
+[![npm version](https://img.shields.io/npm/v/workermill?color=blue)](https://www.npmjs.com/package/workermill)
+[![npm downloads](https://img.shields.io/npm/dw/workermill?color=blue)](https://www.npmjs.com/package/workermill)
+![Node.js](https://img.shields.io/badge/Node.js_20+-339933?style=flat&logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+[![GitHub stars](https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social)](https://github.com/jarod-rosenthal/workermill/stargazers)
+[![License](https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue)](https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE)
+
+<br>
+
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Providers](#ai-provider-support) · [Docs](https://workermill.com/docs)
+
+<br>
+
+<a href="https://www.youtube.com/watch?v=ZXpksHXxQMQ">
+  <img src=".github/assets/demo-preview.jpg" alt="WorkerMill Demo" width="100%" />
+</a>
+
+</div>
+
+---
+
+## Quick Start
 
 ```bash
 npx workermill
 ```
 
-No API key required — select Ollama during setup to run fully local. Or bring your own keys for **Anthropic**, **OpenAI**, **Google**, **LM Studio**, or [any OpenAI-compatible provider](#ai-provider-support). Setup takes 60 seconds.
+No API key required — select Ollama during setup to run fully local. Or bring your own keys for Anthropic, OpenAI, Google, xAI, or [any OpenAI-compatible provider](#ai-provider-support). Setup takes 60 seconds.
+
+```bash
+# Or install globally
+npm install -g workermill
+
+# Check your setup
+wm doctor
+```
+
+No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
+
+**Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
 
 ---
 
-## Point at a ticket. Get a pull request.
+## What It Does
+
+### Point at a ticket. Get a pull request.
 
 Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
 
 ```
-> /ship #42
+> /build #42
 
  coordinator  Fetched #42: Add product export to CSV
 
@@ -58,7 +82,7 @@ Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the wo
  backend_developer  Fixed N+1 with selectinload, updated tests
  frontend_developer Fixed JSX structure, verified build
 
- tech_lead  Score: 8/10 — approved
+ tech_lead  Score: 9/10 — approved
 
  system  Branch: workermill/add-product-export (4 commits)
          Push and open PR? (y/n)
@@ -67,7 +91,7 @@ Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the wo
 
 The reviewer caught a real N+1 database query. The workers fixed it. The re-review passed. No human intervention. That's the difference between one model approving its own work and a team with independent review.
 
-Works with **GitHub Issues** (`/ship #42`), **Jira** (`/ship PROJ-123`), **Linear** (`/ship TEAM-42`), spec files (`/ship spec.md`), or just a description (`/ship add dark mode`).
+Works with **GitHub Issues** (`/build #42`), **Jira** (`/build PROJ-123`), **Linear** (`/build TEAM-42`), spec files (`/build spec.md`), or just a description (`/build add dark mode`).
 
 ### Review didn't pass? `/retry` picks up where you left off
 
@@ -88,7 +112,7 @@ Works with **GitHub Issues** (`/ship #42`), **Jira** (`/ship PROJ-123`), **Linea
 
 ### Review your code. Fix what it finds.
 
-`/review` runs a standalone Tech Lead review on your current work. If it finds issues, WorkerMill offers to create a GitHub issue with the findings and immediately kicks off `/ship` to fix them.
+`/review` runs a standalone Tech Lead review on your current work. If it finds issues, WorkerMill offers to create a GitHub issue with the findings and immediately kicks off `/build` to fix them.
 
 ```
 > /review branch
@@ -130,8 +154,9 @@ Unlike single-model tools, WorkerMill never lets the same model review its own c
 
 1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
 2. **A critic** (optional) scores the plan 1-10 on completeness, feasibility, and risk — refining it up to 3 times until it passes. Bad plans get caught before a single line of code is written.
-3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run locally via Ollama (free) or on any cloud provider.
-4. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
+3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run on local models, affordable cloud APIs, or any provider you choose.
+4. **Quality gates** run after each story — your tests, linter, LSP diagnostics. Failures get injected into the reviewer's context.
+5. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
 
 ```json
 {
@@ -152,6 +177,31 @@ Use expensive models for judgment. Free local models for volume.
 
 ---
 
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Expert Orchestration** | `/build` decomposes tasks into stories and assigns specialist personas — backend, frontend, devops, security, QA |
+| **Independent Code Review** | Reviewer runs on a separate model. Never approves its own code. Rejects with specific feedback and code examples |
+| **11 Built-in Personas** | architect, backend, frontend, mobile, devops, security, QA, data/ML, tech writer, planner, tech lead |
+| **Quality Gates** | Tests, linter, and LSP diagnostics run after each story — failures block review |
+| **LSP Integration** | Language server diagnostics, go-to-definition, find-references, hover info, workspace symbols — semantic code intelligence |
+| **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
+| **Model Routing** | Different provider per role — expensive models for planning/review, free local models for coding |
+| **12 Providers** | Anthropic, OpenAI, Google, xAI, Ollama, LM Studio, OpenRouter, Groq, DeepSeek, Mistral, AWS Bedrock, Azure |
+| **Hot-Swap Models** | `/model provider/model` mid-session — switch without restarting |
+| **MCP Support** | Connect external tools via Model Context Protocol — auto-detects Docker Desktop |
+| **Hooks** | Pre/post tool hooks with blocking, lifecycle events, HTTP webhooks |
+| **Custom Personas** | Drop `.md` files in `.workermill/personas/` — project-level or global |
+| **Custom Commands** | `.workermill/skills/` for project-specific slash commands |
+| **Project Memory** | `/remember` saves context that persists across sessions — corrections, preferences, learnings |
+| **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
+| **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
+| **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |
+| **Permission System** | Granular tool allow/deny rules, `/trust` for session-wide approval |
+
+---
+
 ## AI Provider Support
 
 Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK](https://sdk.vercel.ai) — any compatible provider works out of the box.
@@ -159,84 +209,88 @@ Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK]
 | Provider | Models | Notes |
 |----------|--------|-------|
 | **Ollama** | Any local model | Auto-detected, including WSL. Fully offline |
-| **LM Studio** | Any local model | Auto-detected |
+| **LM Studio** | Any local model | Auto-detected on localhost:1234 |
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | |
-| **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
-| **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
+| **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.4 Pro, Codex | |
+| **Google** | Gemini 3.1 Pro, Gemini 3.1 Flash Lite, Gemini 2.5 Pro/Flash | |
 | **xAI** | Grok 4.20, Grok 4.1 Fast, Grok Code Fast | 2M context, reasoning models |
+| **AWS Bedrock** | Claude Sonnet 4.6, Haiku 4.5, Amazon Nova | Enterprise cross-region |
+| **Azure** | GPT-5.4, GPT-5.4 Mini, o4-mini | Azure AI Foundry deployments |
+| **OpenRouter** | Any model on OpenRouter | Aggregator — access all providers |
+| **Groq** | Llama 3.3 70B, Qwen3 32B | Ultra-fast inference |
+| **DeepSeek** | DeepSeek Chat, Reasoner, V4 | Up to 1M context |
+| **Mistral** | Mistral Large, Codestral, Devstral | |
 
-Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, Fireworks, or your own custom endpoint.
-
----
-
-## Install
-
-```bash
-# Run without installing (recommended)
-npx workermill
-
-# Or install globally
-npm install -g workermill
-
-# Check your setup
-wm doctor
-```
-
-No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
-
-**Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
+Any provider with an OpenAI-compatible API also works — just add a `host` field in your config.
 
 ---
+
+## Commands
 
 <details>
-<summary><strong>All Commands</strong></summary>
-
-**Build**
+<summary><strong>Build</strong></summary>
 
 | Command | What it does |
 |---------|-------------|
-| `/ship <task>` | Full team: plan, execute with experts, review, commit to branch |
-| `/ship spec.md` | Same, but read the task from a file |
-| `/ship GH-42` / `PROJ-123` / `TEAM-42` | Fetch a ticket from GitHub Issues, Jira, or Linear |
+| `/build <task>` | Full team: plan, execute with experts, review, commit to branch |
+| `/build spec.md` | Same, but read the task from a file |
+| `/build #42` / `PROJ-123` / `TEAM-42` | Fetch a ticket from GitHub Issues, Jira, or Linear |
 | `/as <persona> <task>` | One expert, full tools, no planning overhead |
-| `/retry` | Resume last `/ship` — skips planning, picks up from the first incomplete story |
+| `/retry` | Resume last `/build` — skips planning, picks up from the first incomplete story |
 | `/review branch` | Tech lead review of feature branch diff vs main |
 | `/review diff` | Review uncommitted changes only |
 | `/review #42` | Review a GitHub PR by number |
 
-**Session**
+</details>
+
+<details>
+<summary><strong>Session</strong></summary>
 
 | Command | What it does |
 |---------|-------------|
-| `/model provider/model [ctx]` | Hot-swap model mid-session (e.g. `/model google/gemini-3.1-pro`) |
+| `/model provider/model` | Hot-swap model mid-session (e.g. `/model google/gemini-3.1-pro`) |
+| `/model planner` / `/model reviewer` | Switch planner or reviewer model specifically |
 | `/compact [focus]` | Compress conversation — optionally preserve specific context |
 | `/cost` | Session cost estimate and token usage |
 | `/sessions` | List past conversations (resume with `--resume <id>` on next launch) |
+| `/status` | Current session info |
 | `/clear` | Reset the conversation |
-| `/editor` | Open `$EDITOR` for longer input |
+| `/edit` | Open `$EDITOR` for longer input |
+| `/log` | View CLI log entries |
 
-**Project**
+</details>
+
+<details>
+<summary><strong>Project</strong></summary>
 
 | Command | What it does |
 |---------|-------------|
-| `/init` | Generate `WORKERMILL.md` from codebase analysis |
+| `/init` | Generate `AGENT.md` from codebase analysis |
 | `/remember <text>` | Save a persistent memory |
 | `/forget <id>` | Remove a memory |
 | `/memories` | View all saved project memories |
 | `/personas` | List, view, or create expert personas |
-| `/skills` | List custom skills from `.workermill/skills/` |
+| `/skills` | List custom commands from `.workermill/skills/` |
+| `/projects` | List known projects |
 
-**Safety**
+</details>
+
+<details>
+<summary><strong>Safety</strong></summary>
 
 | Command | What it does |
 |---------|-------------|
 | `/undo` | Revert file changes — per-file, per-step, or everything |
 | `/diff` | Preview uncommitted changes |
+| `/changed` | Show files changed in this session |
 | `/git` | Branch and status |
 | `/permissions` | Manage tool allow/deny rules |
 | `/trust` | Auto-approve all tools for this session |
 
-**Config**
+</details>
+
+<details>
+<summary><strong>Config</strong></summary>
 
 | Command | What it does |
 |---------|-------------|
@@ -246,34 +300,148 @@ No server, no Docker, no account. First run walks you through provider setup —
 | `/hooks` | View configured pre/post tool hooks |
 | `/mcp` | MCP server connection status |
 
-**Experimental**
+</details>
+
+<details>
+<summary><strong>Experimental</strong></summary>
+
+Requires `"experimental": true` in your config.
 
 | Command | What it does |
 |---------|-------------|
 | `/chrome` | Headless Chrome for testing and scraping |
 | `/voice` | Voice input — speak your task |
 | `/schedule` | Scheduled recurring tasks |
+| `/orchestrate` | Epic decomposition — break parent issues into child issues and execute |
+| `/doctor` | Code health diagnosis with prescriptions |
+
+</details>
 
 **Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
 
-</details>
+---
+
+## Built-in Personas
+
+WorkerMill ships with 11 specialist personas. Each has its own system prompt, tool restrictions, and domain expertise — and each can be routed to a different provider via the `routing` config — run workers on Ollama for free, on affordable cloud models like Groq or DeepSeek, or on any provider you prefer.
+
+| Persona | Role |
+|---------|------|
+| `planner` | Reads your codebase, decomposes tasks into scoped stories |
+| `tech_lead` | Reviews code against specs, scores quality, rejects or approves |
+| `architect` | System design, architecture decisions, technical strategy |
+| `backend_developer` | APIs, databases, server-side logic |
+| `frontend_developer` | UI components, state management, styling |
+| `mobile_developer` | React Native, mobile platform specifics |
+| `devops_engineer` | CI/CD, Docker, infrastructure, deployment |
+| `security_engineer` | Vulnerability audits, auth, injection, OWASP |
+| `qa_engineer` | Test strategy, integration tests, coverage |
+| `data_ml_engineer` | Data pipelines, ML models, analytics |
+| `tech_writer` | Documentation, API docs, READMEs |
+
+Create your own by dropping a `.md` file in `.workermill/personas/` (project) or `~/.workermill/personas/` (global). See all available personas with `/personas`.
+
+---
+
+## Tools
+
+WorkerMill gives its agents 17 tools — file operations, shell, search, git, web, and code intelligence:
+
+| Tool | What it does |
+|------|-------------|
+| `read_file` | Read files with line ranges |
+| `write_file` | Create new files |
+| `edit_file` / `multi_edit_file` | Surgical edits with diff-based patching |
+| `glob` | Find files by pattern |
+| `grep` | Search file contents with regex |
+| `ls` | Directory listing |
+| `bash` | Shell command execution (sandboxed) |
+| `bash_background` / `bash_output` / `bash_kill` | Long-running processes |
+| `git` | Branch, commit, diff, log operations |
+| `lsp` | Language server — diagnostics, definitions, references, hover, symbols |
+| `web_search` | Search the web |
+| `fetch` | HTTP requests |
+| `download_file` | Download files with checksum verification |
+| `sub_agent` | Spawn isolated workers in git worktrees |
+| `view_image` | Send images to vision models |
+| `todo` | Track tasks within a session |
+| `verify` | Run quality gate commands |
+
+Plus any tools connected via [MCP servers](#mcp-support).
+
+---
+
+## MCP Support
+
+Connect external tools via the [Model Context Protocol](https://modelcontextprotocol.io). WorkerMill supports stdio, HTTP, and SSE transports with lazy initialization — servers only spawn when their tools are first used.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "my-server": {
+        "command": "npx",
+        "args": ["-y", "my-mcp-server"]
+      }
+    }
+  }
+}
+```
+
+Auto-detects Docker Desktop MCP tools when available. Check status with `/mcp`.
+
+---
+
+## Configuration
+
+WorkerMill stores config at `~/.workermill/cli.json` with project-level overrides in `.workermill/config.json`.
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "model": "claude-sonnet-4-6",
+      "apiKey": "{env:ANTHROPIC_API_KEY}"
+    },
+    "ollama": {
+      "model": "qwen3-coder:30b",
+      "host": "http://localhost:11434",
+      "contextLength": 65536
+    }
+  },
+  "default": "ollama",
+  "routing": {
+    "planner": "anthropic",
+    "tech_lead": "anthropic",
+    "backend_developer": "ollama",
+    "frontend_developer": "ollama"
+  }
+}
+```
+
+API keys support `{env:VAR_NAME}` syntax to read from environment variables. See [Configuration docs](docs/configuration.md) for every field.
 
 ---
 
 ## Documentation
 
-Deeper reference material, extension guides, and workflow recipes:
+- **[Commands](docs/commands.md)** — every slash command, subcommand, and flag
+- **[Configuration](docs/configuration.md)** — every field in `~/.workermill/cli.json` with examples
+- **[Personas](docs/personas.md)** — writing custom expert roles, tool restrictions, per-project overrides
+- **[Hooks & Custom Commands](docs/hooks-and-skills.md)** — shell hooks around tool calls, lifecycle events, custom slash commands
+- **[Quality Gates](docs/quality-gates.md)** — how verification commands, LSP diagnostics, and spec checks work
+- **[Recipes](docs/recipes.md)** — concrete workflows: mixed-provider teams, quality gates, local-only setups
+- **[Troubleshooting](docs/troubleshooting.md)** — common issues, diagnostics, and fixes
+- **[Architecture](docs/architecture.md)** — how the CLI is put together
+- **[Contributing](docs/contributing.md)** — dev setup and PR guidelines
 
-- **[Commands](cli/docs/commands.md)** — every slash command, subcommand, and flag
-- **[Configuration](cli/docs/configuration.md)** — every field in `~/.workermill/cli.json` with examples
-- **[Personas](cli/docs/personas.md)** — writing custom expert roles, tool restrictions, per-project overrides
-- **[Hooks & Custom Commands](cli/docs/hooks-and-skills.md)** — shell hooks around tool calls, lifecycle events, custom slash commands
-- **[Recipes](cli/docs/recipes.md)** — concrete workflows: mixed-provider teams, quality gates, local-only setups, custom deploys
-- **[Troubleshooting](cli/docs/troubleshooting.md)** — common issues, diagnostics, and fixes
-- **[Architecture](cli/docs/architecture.md)** — how the CLI is put together
-- **[Contributing](cli/docs/contributing.md)** — dev setup and PR guidelines
+---
 
-Also available on [workermill.com/docs/cli/reference](https://workermill.com/docs/cli/reference).
+## Contributing
+
+PRs welcome. See [Contributing](docs/contributing.md) for dev setup and guidelines.
+
+Join the conversation in [Discussions](https://github.com/jarod-rosenthal/workermill/discussions).
 
 ---
 
@@ -284,7 +452,5 @@ Also available on [workermill.com/docs/cli/reference](https://workermill.com/doc
   <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml/badge.svg" alt="npm audit"></a>
   <a href="https://github.com/jarod-rosenthal/workermill/security/dependabot"><img src="https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot" alt="Dependabot"></a>
 </p>
-
-For teams that need a web dashboard, VS Code extension, and managed cloud workers, see the [WorkerMill Platform](PLATFORM.md).
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.

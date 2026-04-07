@@ -57,7 +57,7 @@ Config lives at `~/.workermill/cli.json`:
   "review": {
     "enabled": true,
     "maxRevisions": 3,
-    "approvalThreshold": 8
+    "approvalThreshold": 9
   },
   "permissions": {
     "allow": ["bash(git *)", "read_file(*)"],

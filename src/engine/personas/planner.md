@@ -23,3 +23,5 @@ Output format:
 - Note any learnings with ::learning:: markers
 
 Be specific. Don't say "update the component" — say exactly what to change and why.
+
+When planning changes, include a diagnostics step: workers should run `lsp` with `format: "json"` on all touched files before claiming completion.

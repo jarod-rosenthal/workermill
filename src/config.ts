@@ -311,19 +311,49 @@ export function getProviderForPersona(
     throw new Error(`Provider "${providerName}" not found in configuration. Run \`workermill\` to set up this provider or check your routing config.`);
   }
 
-  // Map OpenAI-compatible providers to "openai" for the model factory
-  const knownProviders = new Set(["ollama", "anthropic", "openai", "google", "gemini", "lmstudio"]);
-  const resolvedProvider = knownProviders.has(providerName) || knownProviders.has(providerName.replace(/_.*$/, ""))
-    ? providerName.replace(/_.*$/, "") // strip _planner/_reviewer suffix
-    : providerConfig.host ? "openai" : providerName; // has baseURL → OpenAI-compatible
+  const baseProviderCandidates: string[] = [];
+  let cursor = providerName;
+  while (cursor.includes("_")) {
+    cursor = cursor.replace(/_[^_]+$/, "");
+    baseProviderCandidates.push(cursor);
+  }
+
+  const inheritedBaseProviderName = baseProviderCandidates.find((candidate) => !!config.providers[candidate]);
+  const inheritedBaseProviderConfig = inheritedBaseProviderName ? config.providers[inheritedBaseProviderName] : undefined;
+  const effectiveProviderConfig = inheritedBaseProviderConfig
+    ? { ...inheritedBaseProviderConfig, ...providerConfig }
+    : providerConfig;
+
+  // Providers natively supported by createModel.
+  const nativeProviders = new Set(["ollama", "anthropic", "openai", "google", "gemini", "lmstudio"]);
+
+  // OpenAI-compatible providers supported by createModel default branch.
+  const openAICompatibleProviders = new Set(["xai", "groq", "deepseek", "mistral"]);
+
+  // Resolve provider name for model factory:
+  // 1) native providers (direct or any role/persona suffix aliases)
+  // 2) known OpenAI-compatible providers (direct or any role/persona suffix aliases)
+  // 3) any provider with an explicit host (direct or inherited from base alias)
+  // 4) fallback to raw provider name (will throw with a clear error if unsupported)
+  const resolvedProvider = nativeProviders.has(providerName)
+    ? providerName
+    : openAICompatibleProviders.has(providerName)
+      ? providerName
+      : (() => {
+          for (const candidate of baseProviderCandidates) {
+            if (nativeProviders.has(candidate) || openAICompatibleProviders.has(candidate)) return candidate;
+            if (config.providers[candidate]?.host) return "openai";
+          }
+          return effectiveProviderConfig.host ? "openai" : providerName;
+        })();
 
   return {
     provider: resolvedProvider,
-    model: providerConfig.model,
-    apiKey: providerConfig.apiKey?.startsWith("{env:")
-      ? process.env[providerConfig.apiKey.slice(5, -1)] || undefined
-      : providerConfig.apiKey,
-    host: providerConfig.host,
-    contextLength: providerConfig.contextLength,
+    model: effectiveProviderConfig.model,
+    apiKey: effectiveProviderConfig.apiKey?.startsWith("{env:")
+      ? process.env[effectiveProviderConfig.apiKey.slice(5, -1)] || undefined
+      : effectiveProviderConfig.apiKey,
+    host: effectiveProviderConfig.host,
+    contextLength: effectiveProviderConfig.contextLength,
   };
 }

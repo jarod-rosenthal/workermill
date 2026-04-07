@@ -28,7 +28,29 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 import { extractGithubIssueNumber } from "./ticket-ops.js";
 import { withConcurrencyControl } from "./tool-concurrency.js";
+import * as lspTool from "./engine/tools/lsp.js";
 import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
+
+/** Run LSP diagnostics on touched files and log results. */
+async function runDiagnosticsOnTouchedFiles(
+  touchedFiles: string[],
+  workingDir: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  if (touchedFiles.length === 0) return;
+  const unique = [...new Set(touchedFiles)];
+  log(`Running diagnostics on ${unique.length} touched file(s)...`);
+  for (const filePath of unique) {
+    try {
+      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
+      if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
+      const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
+      log(r.success ? `✓ ${filePath}: ${r.content}` : `✗ ${filePath}: ${r.error}`);
+    } catch (err) {
+      log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -2049,9 +2071,17 @@ When summarizing your work at the end, describe decisions in plain language. The
 - Only run commands that complete and exit: npm install, npm test, npx tsc --noEmit, etc.
 - If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
 
-When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
-When you create a file, include ::file_created::path markers.
-When you modify a file, include ::file_modified::path markers.
+## How you deliver work
+**You MUST use tools (edit_file, write_file, multi_edit_file, patch) to make every code change.** Describing what you would change in prose is NOT work — only tool calls that modify files on disk count. If you finish without having called any file-writing tool, you have failed the task.
+
+After using tools to make changes, add these metadata markers in your text output so the system can track what happened:
+- ::decision:: for decisions that affect other parts of the system
+- ::file_created::path for files you created
+- ::file_modified::path for files you modified
+These markers are metadata ONLY — they do not replace actually using tools.
+
+## Diagnostics Enforcement
+Before claiming completion, run diagnostics on touched files using the lsp tool with format: "json".
 ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
@@ -2244,6 +2274,52 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
           }
         }
       }
+
+      // Detect stories that still produced no real file changes on disk.
+      // This catches both pure narration and failed/no-op write tool attempts.
+      {
+        const fileActions = storyActions.filter(a => a.tool === "created" || a.tool === "edited");
+        const canCheckGitChanges = isGitRepo(workingDir);
+        let hasDiskChanges = false;
+        if (canCheckGitChanges) {
+          try {
+            const diffOut = execSync("git diff HEAD --name-only", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+            const untrackedOut = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+            hasDiskChanges = diffOut.length > 0 || untrackedOut.length > 0;
+          } catch { /* best effort */ }
+        }
+
+        if (outTokens > 0 && canCheckGitChanges && !hasDiskChanges) {
+          logger.info("Story produced output but no file changes on disk", {
+            persona: story.persona,
+            outTokens,
+            fileActionCount: fileActions.length,
+          });
+
+          if (revision < 2) {
+            output.log(story.persona, "No file changes detected — retrying with stronger guidance");
+            const guidance = fileActions.length === 0
+              ? "You described what to do but did NOT actually use tools to write code."
+              : "You called file-edit tools, but they did not produce any persisted file changes.";
+            revisionFeedback = `\n\n## No Changes Written\n${guidance} Your previous response left zero tracked or untracked file changes on disk.\n\n**You MUST use the edit_file, write_file, or multi_edit_file tools to make real edits.** Describing changes with ::file_modified:: markers is NOT the same as making them. Actually write the code now and ensure files are changed on disk.`;
+            continue;
+          }
+
+          const reason = fileActions.length === 0
+            ? "model narrated changes but never wrote code"
+            : "model called write tools but produced no persisted file changes";
+          output.error(`Story ${i + 1} failed: ${reason} after 3 attempts`);
+          failedStories.add(story.id);
+          break;
+        }
+      }
+
+      // --- Diagnostics enforcement ---
+      await runDiagnosticsOnTouchedFiles(
+        [...context.filesCreated, ...context.filesModified],
+        workingDir,
+        (msg) => output.log(story.persona, msg),
+      );
 
       // Check abort before completing
       if (abortSignal?.aborted) {
@@ -3148,6 +3224,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // --- Completion Summary ---
   try {
+    // Final diagnostics on all touched files
+    await runDiagnosticsOnTouchedFiles(
+      [...context.filesCreated, ...context.filesModified],
+      workingDir,
+      (msg) => output.coordinatorLog(msg),
+    );
+
     if (featureBranch) {
       // Show branch summary
       const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();

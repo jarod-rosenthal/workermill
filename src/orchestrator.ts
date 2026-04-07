@@ -31,25 +31,41 @@ import { withConcurrencyControl } from "./tool-concurrency.js";
 import * as lspTool from "./engine/tools/lsp.js";
 import { getPrdDecompositionPhaseLabel } from "./prd-decomposition-phases.js";
 
-/** Run LSP diagnostics on touched files and log results. */
+/** Run LSP diagnostics on touched files. Returns error count (0 = clean, -1 = no LSP). */
 async function runDiagnosticsOnTouchedFiles(
   touchedFiles: string[],
   workingDir: string,
   log: (msg: string) => void,
-): Promise<void> {
-  if (touchedFiles.length === 0) return;
+): Promise<number> {
+  if (touchedFiles.length === 0) return 0;
   const unique = [...new Set(touchedFiles)];
   log(`Running diagnostics on ${unique.length} touched file(s)...`);
+  let totalErrors = 0;
+  let lspAvailable = true;
   for (const filePath of unique) {
     try {
       const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
       if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
       const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
-      log(r.success ? `✓ ${filePath}: ${r.content}` : `✗ ${filePath}: ${r.error}`);
+      if (r.success && r.content) {
+        try {
+          const parsed = JSON.parse(r.content);
+          if (parsed.lsp_available === false) { lspAvailable = false; continue; }
+          const errors = parsed.summary?.errors ?? parsed.diagnostics?.filter((d: { severity: string }) => d.severity === "error").length ?? 0;
+          totalErrors += errors;
+          log(errors > 0 ? `✗ ${filePath}: ${errors} error(s)` : `✓ ${filePath}: clean`);
+        } catch {
+          log(`✓ ${filePath}: ${r.content}`);
+        }
+      } else {
+        log(`✗ ${filePath}: ${r.error}`);
+      }
     } catch (err) {
       log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  if (!lspAvailable && totalErrors === 0) return -1;
+  return totalErrors;
 }
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
@@ -2315,7 +2331,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       }
 
       // --- Diagnostics enforcement ---
-      await runDiagnosticsOnTouchedFiles(
+      const diagnosticErrors = await runDiagnosticsOnTouchedFiles(
         [...context.filesCreated, ...context.filesModified],
         workingDir,
         (msg) => output.log(story.persona, msg),
@@ -2377,10 +2393,12 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       }
 
       // Commit story changes — creates a checkpoint on the feature branch
-      // From worker/epic/executor.ts post-execution commit pattern
-      if (featureBranch) {
+      // Gate: don't commit if LSP found errors (diagnosticErrors === -1 means no LSP, allow commit)
+      if (featureBranch && diagnosticErrors <= 0) {
         const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
         if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
+      } else if (diagnosticErrors > 0) {
+        output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — commit skipped, will be caught in review`);
       }
 
       const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;

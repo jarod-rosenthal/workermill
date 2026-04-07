@@ -8,7 +8,7 @@ import React from "react";
 import { render } from "ink";
 import chalk from "chalk";
 import { Command } from "commander";
-import { loadConfig, getProviderForPersona } from "./config.js";
+import { loadConfig, resolveConfig as resolveMergedConfig, getProviderForPersona } from "./config.js";
 import { findProjectInstructionSource } from "./instructions.js";
 import { runSetup } from "./setup.js";
 import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
@@ -89,13 +89,23 @@ function addSharedOptions(cmd: Command): Command {
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
-async function resolveConfig(options: Record<string, unknown>) {
-  let config = loadConfig();
+async function loadCliConfig(options: Record<string, unknown>) {
+  let config;
   let isFirstRun = false;
-  if (!config) {
-    config = await runSetup();
-    isFirstRun = true;
+
+  try {
+    config = resolveMergedConfig();
+  } catch {
+    const globalConfig = loadConfig();
+    if (!globalConfig) {
+      await runSetup();
+      isFirstRun = true;
+      config = resolveMergedConfig();
+    } else {
+      throw new Error("Failed to resolve configuration.");
+    }
   }
+
   if (options.provider) {
     config.default = options.provider as string;
   }
@@ -128,7 +138,7 @@ const defaultCmd = program
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
   .action(async (options) => {
-    const { config, isFirstRun } = await resolveConfig(options);
+    const { config, isFirstRun } = await loadCliConfig(options);
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
     const workingDir = process.cwd();
     const roleModels = getRoleModelsFromConfig(config);

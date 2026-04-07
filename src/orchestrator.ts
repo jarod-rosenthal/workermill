@@ -156,6 +156,52 @@ function resolveTaskInput(task: string, workingDir: string): string {
   return task;
 }
 
+function normalizeDeclaredFilePathLine(line: string): string {
+  let cleaned = line.trim();
+  if (!cleaned) return "";
+
+  // Strip common markdown wrappers/prefixes from worker summaries.
+  cleaned = cleaned.replace(/^[-*]\s+/, "");
+  cleaned = cleaned.replace(/^`+|`+$/g, "");
+  cleaned = cleaned.replace(/^\*+|\*+$/g, "");
+
+  // Support markdown links: [label](path/to/file.ts)
+  const mdLink = cleaned.match(/\]\(([^)]+)\)/);
+  if (mdLink?.[1]) cleaned = mdLink[1].trim();
+
+  // If prose follows the path on the same line, take the first token.
+  cleaned = cleaned.split(/\s+/)[0] || "";
+
+  // Remove trailing punctuation/formatting artifacts.
+  cleaned = cleaned.replace(/[),.;:]+$/g, "").replace(/^\(+|\)+$/g, "");
+  cleaned = cleaned.replace(/^`+|`+$/g, "").replace(/^\*+|\*+$/g, "");
+
+  return cleaned;
+}
+
+function looksLikeFilePath(value: string): boolean {
+  if (!value) return false;
+  if (value.includes("::")) return false;
+  if (value.startsWith("```")) return false;
+  // Typical repo-relative or absolute path patterns.
+  return /[\\/]/.test(value) || /\.[a-z0-9]{1,12}$/i.test(value);
+}
+
+function extractDeclaredFileMarkers(text: string, marker: "file_created" | "file_modified"): string[] {
+  const regex = new RegExp(`::${marker}::([\\s\\S]*?)(?=::\\w+::|$)`, "g");
+  const paths: string[] = [];
+  for (const match of text.matchAll(regex)) {
+    const payload = match[1] ?? "";
+    const lines = payload
+      .split(/\r?\n/)
+      .map((line) => normalizeDeclaredFilePathLine(line))
+      .filter(Boolean);
+    const pathLine = lines.find(looksLikeFilePath);
+    if (pathLine) paths.push(pathLine);
+  }
+  return paths;
+}
+
 export interface OrchestrationOutput {
   /** Log a message from a persona */
   log: (persona: string, message: string) => void;
@@ -369,7 +415,7 @@ export async function checkToolPermission(
   }
 
   // Dangerous file path check for write operations
-  if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
+  if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
     const filePath = extractToolFilePath(toolName, toolInput);
     const fileDanger = isDangerousFile(filePath);
     if (fileDanger && !isBypass) {
@@ -2049,7 +2095,7 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
               if (name === "write_file" && filePath) {
                 storyActions.push({ tool: "created", detail: filePath });
                 if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
-              } else if ((name === "edit_file" || name === "patch") && filePath) {
+              } else if ((name === "edit_file" || name === "multi_edit_file" || name === "patch") && filePath) {
                 storyActions.push({ tool: "edited", detail: filePath });
                 if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
               } else if (name === "bash" && input.command) {
@@ -2148,19 +2194,8 @@ ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL
       // ("follows best practices", "implementation is production-ready") that
       // pollute the memory system. Re-enable when we have quality filtering.
 
-      const fileCreatedMatches = text.match(/::file_created::(.*?)(?=::\w+::|$)/gs);
-      if (fileCreatedMatches) {
-        for (const m of fileCreatedMatches) {
-          context.filesCreated.push(m.replace("::file_created::", "").trim());
-        }
-      }
-
-      const fileModifiedMatches = text.match(/::file_modified::(.*?)(?=::\w+::|$)/gs);
-      if (fileModifiedMatches) {
-        for (const m of fileModifiedMatches) {
-          context.filesModified.push(m.replace("::file_modified::", "").trim());
-        }
-      }
+      context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
+      context.filesModified.push(...extractDeclaredFileMarkers(text, "file_modified"));
 
       // Track cost
       const inTokens = usage?.inputTokens || 0;
@@ -3023,7 +3058,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                     if (!filePath) continue;
                     if (tc.toolName === "write_file") {
                       if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
-                    } else if (tc.toolName === "edit_file" || tc.toolName === "patch") {
+                    } else if (tc.toolName === "edit_file" || tc.toolName === "multi_edit_file" || tc.toolName === "patch") {
                       if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
                     }
                   }

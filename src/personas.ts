@@ -41,7 +41,7 @@ function parsePersonaFile(content: string): Persona | null {
     name: meta.name as string,
     slug: meta.slug as string,
     description: (meta.description as string) || "",
-    tools: (meta.tools as string[]) || ["bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "patch", "glob", "grep", "ls", "fetch", "sub_agent"],
+    tools: (meta.tools as string[]) || ["bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "multi_edit_file", "patch", "glob", "grep", "ls", "fetch", "sub_agent"],
     provider: meta.provider as string | undefined,
     model: meta.model as string | undefined,
     systemPrompt: body,
@@ -78,7 +78,7 @@ export function loadPersona(slug: string): Persona | null {
     name: slug.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
     slug,
     description: `${slug} specialist`,
-    tools: ["bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "patch", "glob", "grep", "ls", "fetch", "sub_agent"],
+    tools: ["bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "multi_edit_file", "patch", "glob", "grep", "ls", "fetch", "sub_agent"],
     systemPrompt: `You are a senior ${slug.replace(/_/g, " ")} in a product built to ship reliable code with minimal back-and-forth.
 
 Be proactive, direct, and useful.

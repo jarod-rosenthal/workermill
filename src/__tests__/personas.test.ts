@@ -16,7 +16,7 @@ vi.mock("../logger.js", () => ({
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TOOLS = [
-  "bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "patch",
+  "bash", "bash_background", "bash_output", "bash_kill", "read_file", "write_file", "edit_file", "multi_edit_file", "patch",
   "glob", "grep", "ls", "fetch", "sub_agent",
 ];
 

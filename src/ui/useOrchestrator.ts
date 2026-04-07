@@ -478,10 +478,23 @@ export function useOrchestrator(
       abortRef.current.abort();
       abortRef.current = null;
     }
+    // If orchestration is waiting on a confirm/prompt promise, resolve it so
+    // the async run can unwind instead of keeping the UI in a stale "running" state.
+    setConfirmRequest((req) => {
+      if (req) req.resolve(false);
+      return null;
+    });
+    setPromptRequest((req) => {
+      if (req) req.resolve("");
+      return null;
+    });
+    setRunning(false);
+    setStatusMessage("");
+    clearPreviewLine();
     cleanupAllBackgroundProcesses();
     setPausedState(false);
     releasePauseWaiters();
-  }, [releasePauseWaiters, setPausedState]);
+  }, [clearPreviewLine, releasePauseWaiters, setPausedState, setStatusMessage]);
 
   // ------------------------------------------------------------------
   // start()

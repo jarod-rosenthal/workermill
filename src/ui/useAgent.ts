@@ -263,6 +263,8 @@ export function getLiveViewChangeTargets(
     add(input.path ?? input.file_path, "created");
   } else if (toolName === "edit_file") {
     add(input.path ?? input.file_path, "edited");
+  } else if (toolName === "multi_edit_file") {
+    add(input.file_path, "edited");
   } else if (toolName === "patch") {
     const obj = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
     const addArray = (arr: unknown, tool: "created" | "edited") => {
@@ -633,7 +635,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       return isDangerous(String(toolInput.command ?? ""));
     }
     // Dangerous file paths for write operations
-    if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch") {
+    if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
       const filePath = String(toolInput.path || toolInput.file_path || "");
       if (filePath) return isDangerousFile(filePath);
     }
@@ -968,8 +970,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-            if ((name === "write_file" || name === "edit_file") && input.path) {
-              const filePath = String(input.path);
+            if ((name === "write_file" || name === "edit_file" || name === "multi_edit_file") && (input.path || input.file_path)) {
+              const filePath = String(input.path || input.file_path);
               const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
               checkpoint(resolved);
             }
@@ -1007,7 +1009,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             logger.info("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
             const liveViewServer = liveViewServerRef.current;
-            if (liveViewServer && (name === "write_file" || name === "edit_file" || name === "patch")) {
+            if (liveViewServer && (name === "write_file" || name === "edit_file" || name === "patch" || name === "multi_edit_file")) {
               const targets = getLiveViewChangeTargets(name, input, result, workingDirRef.current);
               for (const target of targets) {
                 liveViewServer.emitFileChange("worker", 1, "Interactive chat", target.filePath, target.tool);

@@ -223,6 +223,7 @@ function matchesRule(rule: string, toolName: string, value: string): boolean {
   const prefixMatch = pattern.match(/^(.+):\*$/);
   if (prefixMatch) {
     const prefix = prefixMatch[1]!;
+    if (prefix === "*") return true;
     return value === prefix || value.startsWith(prefix + " ");
   }
 

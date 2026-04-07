@@ -150,6 +150,12 @@ describe("safety", () => {
       expect(checkPermissionRules("bash", { command: "rm -rf /" }, rules)).toBe("none");
     });
 
+    it("treats wildcard prefix rules as unconditional bash allow", () => {
+      const rules = { allow: ["bash(*:*)"] };
+      expect(checkPermissionRules("bash", { command: "npm test" }, rules)).toBe("allow");
+      expect(checkPermissionRules("bash", { command: "git status" }, rules)).toBe("allow");
+    });
+
     it("matches write_file path glob patterns", () => {
       const rules = { deny: ["write_file(*.env)"] };
       expect(checkPermissionRules("write_file", { path: ".env" }, rules)).toBe("deny");

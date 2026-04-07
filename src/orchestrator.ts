@@ -2143,10 +2143,18 @@ Do NOT modify files outside this scope unless absolutely necessary for shared ty
 
 Before you finish:
 1. Verify your implementation addresses every point from your story description above
-2. Run the project's build/compile command to confirm your code compiles (e.g. \`npx tsc --noEmit\`, \`go build ./...\`)
-3. Run the project's test command if tests exist (e.g. \`npm test\`, \`go test ./...\`)
-4. Run lint if configured (e.g. \`npm run lint\`)
-5. Fix any errors you find — do not leave broken code for the next expert
+2. Prefer the repository's own verification commands first: existing package scripts, documented CI commands, or commands already used in the repo
+3. Only run stack-specific compile/typecheck commands when the repo actually supports them. Examples: run \`npx tsc --noEmit\` only when TypeScript is configured, \`go build ./...\` only when a Go module exists, and similar for other ecosystems
+4. Run the project's test command if tests exist and are relevant to your change
+5. Run lint if configured and relevant to your change
+6. If the repo does not expose a heavier compile/test command, run the smallest valid verification for the actual stack instead (for example \`node -c\` for a simple JavaScript entry file)
+7. Fix any errors you find — do not leave broken code for the next expert
+
+Verification rules:
+- Do NOT invent generic verification commands. Derive them from the actual repo/toolchain in front of you.
+- Do NOT run \`npx tsc --noEmit\` in plain JavaScript repos that do not have TypeScript configured.
+- Do NOT treat missing toolchains as blockers if they are not part of the repo's actual stack.
+- If a verification command fails because the toolchain is absent or not applicable, choose a smaller repo-appropriate verification instead of repeating the same bad command.
 
 If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
 
@@ -2162,7 +2170,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 ## Critical rules
 - NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, webpack serve, etc.). These block execution indefinitely.
 - NEVER run interactive commands that wait for user input.
-- Only run commands that complete and exit: npm install, npm test, npx tsc --noEmit, etc.
+- Only run commands that complete and exit.
 - If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
 
 ## How you deliver work
@@ -2175,7 +2183,7 @@ After using tools to make changes, add these metadata markers in your text outpu
 These markers are metadata ONLY — they do not replace actually using tools.
 
 ## Diagnostics Enforcement
-Before claiming completion, run diagnostics on touched files using the lsp tool with format: "json".
+Run diagnostics on touched files only when the workspace and language server support them for this repo. If LSP is unavailable or not applicable to the stack, do not invent diagnostics workarounds; use the repo's actual verification commands instead.
 ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {

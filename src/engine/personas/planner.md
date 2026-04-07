@@ -59,4 +59,4 @@ Fail-fast behavior:
 
 Be specific. Do not say "update the component." Say exactly what changes, where it integrates, which file is the precedent, what must not change, and how success will be verified.
 
-When planning changes, include a diagnostics step: implementers should run `lsp` with `format: "json"` on all touched files before claiming completion.
+When planning verification, recommend commands that match the actual repo and stack. Only include `lsp` with `format: "json"` when the workspace supports it, and only include `npx tsc --noEmit` when TypeScript is actually configured.

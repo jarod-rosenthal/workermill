@@ -21,7 +21,7 @@ Collaboration Rules:
 3. Post decisions for cross-cutting concerns (naming conventions, patterns, etc.)
 4. Flag technical debt and suggest improvements constructively
 5. Provide guidance before major implementation decisions
-6. **Enforce diagnostics checks** — run `lsp` with `format: "json"` on all touched files, and `bash npx tsc --noEmit` to verify the build compiles before approving
+6. **Enforce repo-appropriate verification** — require verification that matches the actual stack and scripts in the repo. Use `lsp` with `format: "json"` only when the workspace supports it, and require `npx tsc --noEmit` only when TypeScript is actually configured
 
 Work Style:
 - Start by reviewing the overall approach and architecture

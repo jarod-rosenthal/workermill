@@ -130,6 +130,26 @@ function getProjectDisplayName(cwd?: string): string {
 }
 
 /**
+ * Calculate input and output tokens from a session.
+ * Sessions with costByModel have accurate split, others use totalTokens.
+ */
+function getSessionTokenBreakdown(session: Session): { inputTokens: number; outputTokens: number } {
+  if (session.costByModel && session.costByModel.length > 0) {
+    // Use the accurate breakdown from costByModel
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for (const model of session.costByModel) {
+      inputTokens += model.inputTokens;
+      outputTokens += model.outputTokens;
+    }
+    return { inputTokens, outputTokens };
+  }
+  // Fallback: totalTokens is the sum, we can't split it retroactively
+  // Report as all input for backward compatibility
+  return { inputTokens: session.totalTokens || 0, outputTokens: 0 };
+}
+
+/**
  * Aggregate session data into stats.
  */
 function aggregateSessions(sessions: Session[]): StatsSummary {
@@ -149,6 +169,11 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
   let totalCostUsd = 0;
 
   for (const session of sessions) {
+    // Count tokens properly using the breakdown function
+    const tokenBreakdown = getSessionTokenBreakdown(session);
+    totalInputTokens += tokenBreakdown.inputTokens;
+    totalOutputTokens += tokenBreakdown.outputTokens;
+
     if (session.totalCostUsd !== undefined) {
       sessionsWithCostData++;
       totalCostUsd += session.totalCostUsd;
@@ -198,9 +223,6 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
       }
     }
 
-    // Count tokens from totalTokens field
-    totalInputTokens += session.totalTokens || 0;
-
     // Aggregate by project
     const cwd = session.cwd || process.cwd();
     const projectKey = cwd;
@@ -208,20 +230,19 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
     if (!existingProject) {
       byProject.set(projectKey, {
         sessions: 1,
-        costUsd: session.totalCostUsd || 0,
-        inputTokens: session.totalTokens || 0,
-        outputTokens: 0,
+        costUsd: session.totalCostUsd ?? 0,
+        inputTokens: tokenBreakdown.inputTokens,
+        outputTokens: tokenBreakdown.outputTokens,
       });
     } else {
       existingProject.sessions += 1;
-      existingProject.costUsd += session.totalCostUsd || 0;
-      existingProject.inputTokens += session.totalTokens || 0;
+      existingProject.costUsd += session.totalCostUsd ?? 0;
+      existingProject.inputTokens += tokenBreakdown.inputTokens;
+      existingProject.outputTokens += tokenBreakdown.outputTokens;
     }
   }
 
-  // Note: totalInputTokens from session.totalTokens includes both input and output tokens
-  // We can't split them retroactively, so we use totalTokens as "total"
-  const totalTokens = totalInputTokens;
+  const totalTokens = totalInputTokens + totalOutputTokens;
 
   const avgCostPerSession = sessionsWithCostData > 0
     ? totalCostUsd / sessionsWithCostData
@@ -259,8 +280,8 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
       withCostData: sessionsWithCostData,
     },
     tokens: {
-      input: totalTokens, // Note: this is totalTokens from session, not split
-      output: 0,
+      input: totalInputTokens,
+      output: totalOutputTokens,
       total: totalTokens,
     },
     costUsd: totalCostUsd,
@@ -366,7 +387,7 @@ function renderStats(stats: StatsSummary, days: number | null): string {
     lines.push(dim("    (Note: " + (stats.sessions.total - stats.sessions.withCostData) + " session(s) have no cost data)"));
   }
   lines.push("  Total cost       " + formatCurrency(stats.costUsd));
-  lines.push("  Total tokens     " + formatTokens(stats.tokens.total));
+  lines.push("  Total tokens     " + formatTokensDetailed(stats.tokens.input, stats.tokens.output));
   if (stats.sessions.withCostData > 0) {
     lines.push("  Avg per session  " + formatCurrency(stats.avgCostPerSessionUsd));
   }
@@ -448,13 +469,13 @@ export function runStatsCommand(options: {
   const stats = aggregateSessions(sessions);
 
   if (options.json) {
-    // Output JSON
+    // Output JSON with proper precision (6 decimal places for cost values)
     const jsonStats: Record<string, unknown> = {
       period: stats.period,
       sessions: stats.sessions,
       tokens: stats.tokens,
-      cost_usd: Math.round(stats.costUsd * 100) / 100,
-      avg_cost_per_session_usd: Math.round(stats.avgCostPerSessionUsd * 100) / 100,
+      cost_usd: Number(stats.costUsd.toFixed(6)),
+      avg_cost_per_session_usd: Number(stats.avgCostPerSessionUsd.toFixed(6)),
       by_model: stats.byModel,
       by_role: stats.byRole,
       by_project: stats.byProject,

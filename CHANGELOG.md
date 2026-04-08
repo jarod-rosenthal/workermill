@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **Ollama not discovered in WSL** — model listing and model factory now detect the WSL gateway IP automatically, so Ollama running on the Windows host is reachable without an explicit `host` in config.
+- **LSP directory diagnostics caused /review to hang** — directory scans processed files sequentially (5+ min) and returned 200KB of false-positive diagnostics from tsconfig-excluded test files. Now uses parallel batching (12s), respects tsconfig excludes, and tries workspace/diagnostic (LSP 3.17+) first.
+- **Review failures not logged** — standalone `/review` and `/build` review catch blocks now log the actual provider error with stack trace, instead of silently returning 0 tokens.
 
 ## [0.16.0] - 2026-04-07
 

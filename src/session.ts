@@ -132,7 +132,7 @@ export function addMessage(session: Session, role: "user" | "assistant", content
   });
 }
 
-export function listSessions(max: number = -1): SessionSummary[] {
+export function listSessions(max: number = 20): SessionSummary[] {
   ensureSessionsDir();
   try {
     let files = fs.readdirSync(SESSIONS_DIR)

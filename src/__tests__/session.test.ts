@@ -127,6 +127,19 @@ describe("session", () => {
       const list = listSessions();
       expect(list[0].preview).toContain("Fix the login bug");
     });
+
+    it("keeps the default recent-session cap while allowing explicit list-all", async () => {
+      const { createSession, saveSession, listSessions } = await importSession();
+
+      for (let i = 0; i < 25; i++) {
+        const session = createSession("ollama", `test-${i}`);
+        session.name = `Session ${i}`;
+        saveSession(session);
+      }
+
+      expect(listSessions()).toHaveLength(20);
+      expect(listSessions(-1)).toHaveLength(25);
+    });
   });
 
   describe("deleteSession()", () => {

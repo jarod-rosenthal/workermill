@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { z } from "zod";
 import * as logger from "./logger.js";
 
 export interface ProviderConfig {
@@ -357,3 +358,113 @@ export function getProviderForPersona(
     contextLength: effectiveProviderConfig.contextLength,
   };
 }
+
+// ── Zod Schema for JSON Schema Generation ──
+
+export const ProviderConfigSchema = z.object({
+  model: z.string(),
+  apiKey: z.string().optional(),
+  host: z.string().optional(),
+  contextLength: z.number().optional(),
+});
+
+export const MCPServerConfigSchema = z.object({
+  transport: z.enum(["stdio", "http", "sse"]).optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  url: z.string().optional(),
+  headers: z.record(z.string()).optional(),
+});
+
+export const QualityGateCommandSchema = z.object({
+  name: z.string(),
+  commands: z.array(z.string()),
+});
+
+export const ReviewConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  maxRevisions: z.number().optional(),
+  autoRevise: z.boolean().optional(),
+  approvalThreshold: z.number().optional(),
+  verifyEnabled: z.boolean().optional(),
+  specCheck: z.boolean().optional(),
+  autoBranch: z.boolean().optional(),
+});
+
+export const ProgramConfigSchema = z.object({
+  maxIssues: z.number().optional(),
+  maxAutoRetries: z.number().optional(),
+  gateMode: z.enum(["required", "advisory"]).optional(),
+  gates: z.array(z.string()).optional(),
+  // Legacy fields kept for backwards compat when reading old configs
+  minSubIssues: z.number().optional(),
+  maxSubIssues: z.number().optional(),
+  maxEpics: z.number().optional(),
+  epicPrompt: z.enum(["ask", "always"]).optional(),
+});
+
+export const DoctorConfigSchema = z.object({
+  maxHighRiskModules: z.number().optional(),
+  riskTroubleThreshold: z.number().optional(),
+  healthFunctioningThreshold: z.number().optional(),
+  healthTroubleThreshold: z.number().optional(),
+  deadCodeEnabled: z.boolean().optional(),
+  deadCodeMinDays: z.number().optional(),
+  deadCodeMaxCandidates: z.number().optional(),
+});
+
+export const HookConfigSchema = z.object({
+  command: z.string().optional(),
+  url: z.string().optional(),
+  type: z.enum(["command", "http"]).optional(),
+  tools: z.array(z.string()).optional(),
+});
+
+export const HooksConfigSchema = z.object({
+  pre: z.array(HookConfigSchema).optional(),
+  post: z.array(HookConfigSchema).optional(),
+  on: z.record(z.array(HookConfigSchema)).optional(),
+});
+
+export const GitConfigSchema = z.object({}).passthrough();
+
+export const PermissionRuleConfigSchema = z.object({
+  allow: z.array(z.string()).optional(),
+  ask: z.array(z.string()).optional(),
+  deny: z.array(z.string()).optional(),
+});
+
+export const JiraConfigSchema = z.object({
+  baseUrl: z.string(),
+  email: z.string(),
+  apiToken: z.string(),
+});
+
+export const LinearConfigSchema = z.object({
+  apiKey: z.string(),
+});
+
+export const CliConfigSchema = z.object({
+  providers: z.record(z.string(), ProviderConfigSchema),
+  default: z.string(),
+  routing: z.record(z.string()).optional(),
+  mcp: z.record(z.string(), MCPServerConfigSchema).optional(),
+  review: ReviewConfigSchema.optional(),
+  hooks: HooksConfigSchema.optional(),
+  git: GitConfigSchema.optional(),
+  sandbox: z.union([z.boolean(), z.literal("os")]).optional(),
+  bell: z.boolean().optional(),
+  permissions: PermissionRuleConfigSchema.optional(),
+  ticketSystem: z.enum(["github", "jira", "linear", "none"]).optional(),
+  jira: JiraConfigSchema.optional(),
+  linear: LinearConfigSchema.optional(),
+  qualityGates: z.array(QualityGateCommandSchema).optional(),
+  disableModelAutoUpdate: z.boolean().optional(),
+  editor: z.enum(["vim", "nano", "auto"]).optional(),
+  program: ProgramConfigSchema.optional(),
+  doctor: DoctorConfigSchema.optional(),
+  liveView: z.union([z.boolean(), z.literal("auto")]).optional(),
+  inlineEditPreview: z.boolean().optional(),
+  experimental: z.boolean().optional(),
+});

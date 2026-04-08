@@ -498,4 +498,14 @@ sessionCmd
     handleSessionDelete(idOrPrefix, options);
   });
 
+// ── Schema command: emit JSON Schema for config ──
+program
+  .command("schema")
+  .description("Emit JSON Schema for global cli.json configuration")
+  .option("--out <path>", "Write schema to file instead of stdout")
+  .action(async (options) => {
+    const { runSchemaCommand } = await import("./schema-command.js");
+    runSchemaCommand(options);
+  });
+
 program.parse();

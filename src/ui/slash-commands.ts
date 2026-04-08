@@ -54,11 +54,6 @@ function detectTicketRef(input: string): { system: "github" | "external"; key: s
   return null;
 }
 
-function doctorArtifactPath(workingDir: string, issueRef?: string): string {
-  const issueKey = (issueRef || "local").replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(workingDir, ".workermill", "doctor", issueKey, "latest.json");
-}
-
 // ---------------------------------------------------------------------------
 // Session goodbye — prints a brief summary on exit
 // ---------------------------------------------------------------------------
@@ -209,7 +204,6 @@ Creates a feature branch for all changes — your current branch stays clean.
 |---|---|
 | \`/build <task>\` | Multi-expert orchestration — plan, execute, review, ship |
 | \`/orchestrate <#issue>\` | **[experimental]** Full-spec orchestration across epic sub-issues |
-| \`/doctor [#issue\\|report\\|show\\|apply]\` | **[experimental]** Diagnose test health, view report, inspect or apply prescriptions |
 | \`/pause\` | Pause or resume a running \`/build\` orchestration |
 | \`/cancel\` | Cancel the current running operation (same as \`ESC\`) |
 | \`/as <persona> <task>\` | Run a task with a specific expert (\`/as security_engineer audit auth\`) |
@@ -317,7 +311,6 @@ export interface SlashCommandContext {
     options?: { onComplete?: (result: { success: boolean; cancelled?: boolean; error?: string }) => void },
   ) => void;
   startProgram?: (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => void;
-  startDoctor?: (issueRef?: string) => void;
   retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => void;
   lastBuildTask: string | null;
@@ -698,604 +691,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
-    // ---- /doctor ----
-    case "doctor": {
-      const docConfig = loadConfig();
-      if (!docConfig?.experimental) {
-        ctx.addSystemMessage("`/doctor` is an experimental feature. Enable it with `/settings experimental true`.");
-        break;
-      }
-      if (!ctx.startDoctor) {
-        ctx.addSystemMessage("`/doctor` is not available in this runtime.");
-        break;
-      }
-      if (ctx.orchestratorRunning) {
-        ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
-        break;
-      }
-      if (!arg) {
-        ctx.addUserMessage("/doctor");
-        ctx.startDoctor();
-        break;
-      }
-      const [subcommand, ...restParts] = arg.split(/\s+/);
-      const rest = restParts.join(" ").trim();
-      const severityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
-      const normalizeSeverity = (raw?: string): "high" | "medium" | "low" | "unknown" => {
-        const s = (raw || "").toLowerCase();
-        if (s === "high" || s === "medium" || s === "low") return s;
-        return "unknown";
-      };
-
-      if (subcommand === "report") {
-        let issueKey: string | undefined;
-        if (rest) {
-          const ref = detectTicketRef(rest);
-          if (!ref || ref.system !== "github") {
-            ctx.addSystemMessage("`/doctor report` supports GitHub issue refs only (`#123` or `GH-123`).");
-            break;
-          }
-          issueKey = ref.key;
-        }
-        const artifact = doctorArtifactPath(ctx.workingDir, issueKey);
-        if (!fs.existsSync(artifact)) {
-          ctx.addSystemMessage(`No doctor report found at \`${artifact}\`. Run \`/doctor${issueKey ? ` ${issueKey}` : ""}\` first.`);
-          break;
-        }
-        try {
-          const parsed = JSON.parse(fs.readFileSync(artifact, "utf-8")) as {
-            generatedAt?: string;
-            issueRef?: string;
-            summary?: string[];
-            coverageSnapshot?: {
-              source?: string;
-              reportPath?: string | null;
-              linePercent?: number | null;
-              branchPercent?: number | null;
-              fileCount?: number;
-            };
-            healthSnapshot?: {
-              totalModules?: number;
-              functioning?: number;
-              trouble?: number;
-              dead?: number;
-              unknown?: number;
-            };
-            healthDelta?: {
-              improved?: number;
-              regressed?: number;
-              unchanged?: number;
-              newModules?: number;
-            };
-            moduleHealth?: Array<{
-              filePath?: string;
-              status?: string;
-              confidence?: string;
-              healthScore?: number;
-              riskScore?: number;
-              lineCoveragePercent?: number | null;
-              lineCount?: number;
-              churn30d?: number;
-              evidence?: string[];
-            }>;
-            highRiskUntestedModules?: Array<{
-              filePath?: string;
-              lineCount?: number;
-              complexityScore?: number;
-              churn30d?: number;
-              lineCoveragePercent?: number;
-              branchCoveragePercent?: number | null;
-              riskScore?: number;
-              coverageConfidence?: string;
-              reasons?: string[];
-            }>;
-            deadCodeCandidates?: Array<{
-              filePath?: string;
-              reason?: string;
-              lastTouchedDays?: number | null;
-              inboundReferences?: number;
-              lineCoveragePercent?: number | null;
-              confidence?: string;
-            }>;
-            ciFailureSignals?: Array<{
-              runId?: number;
-              workflow?: string;
-              createdAt?: string;
-              signature?: string;
-              classification?: string;
-              filePaths?: string[];
-              details?: string;
-            }>;
-            qualityEvidence?: Array<{ command?: string; status?: string; output?: string }>;
-            appliedPrescriptionIds?: string[];
-            delta?: { newGaps?: number; resolvedGaps?: number; persistingGaps?: number };
-            gaps?: Array<{
-              id?: string;
-              severity?: string;
-              title?: string;
-              evidence?: string[];
-              prescription?: string;
-              buildTask?: string;
-              problemClass?: string;
-              targetFiles?: string[];
-              verificationCommands?: string[];
-              successCriteria?: string[];
-              cureStatus?: string;
-              riskScore?: number;
-              priority?: number;
-              dependsOn?: string[];
-            }>;
-          };
-          const summary = parsed.summary || [];
-          const gaps = parsed.gaps || [];
-          const grouped = new Map<"high" | "medium" | "low" | "unknown", typeof gaps>();
-          grouped.set("high", []);
-          grouped.set("medium", []);
-          grouped.set("low", []);
-          grouped.set("unknown", []);
-          for (const gap of gaps) {
-            const severity = normalizeSeverity(gap.severity);
-            grouped.get(severity)?.push(gap);
-          }
-
-          const lines: string[] = [
-            `**Doctor Report**${parsed.issueRef ? ` (${parsed.issueRef})` : ""}`,
-            `Generated: ${parsed.generatedAt || "unknown"}`,
-            `Artifact: \`${artifact}\``,
-            "",
-          ];
-          if (parsed.delta) {
-            lines.push(
-              `Delta: +${parsed.delta.newGaps || 0} new · ${parsed.delta.persistingGaps || 0} persisting · ${parsed.delta.resolvedGaps || 0} resolved`,
-            );
-          }
-          if ((parsed.appliedPrescriptionIds || []).length > 0) {
-            lines.push(`Applied prescriptions tracked: ${(parsed.appliedPrescriptionIds || []).length}`);
-          }
-          if (parsed.delta || (parsed.appliedPrescriptionIds || []).length > 0) lines.push("");
-          if (summary.length > 0) {
-            lines.push(...summary.map((s) => `- ${s}`));
-            lines.push("");
-          }
-          if (parsed.coverageSnapshot) {
-            lines.push("**Coverage Snapshot**");
-            lines.push(
-              `- Source: ${parsed.coverageSnapshot.source || "unknown"}${parsed.coverageSnapshot.reportPath ? ` (${parsed.coverageSnapshot.reportPath})` : ""}`,
-            );
-            lines.push(
-              `- Lines: ${parsed.coverageSnapshot.linePercent ?? "n/a"}% · Branches: ${parsed.coverageSnapshot.branchPercent ?? "n/a"}% · Files: ${parsed.coverageSnapshot.fileCount ?? 0}`,
-            );
-            lines.push("");
-          }
-          if (parsed.healthSnapshot) {
-            lines.push("**Module Health**");
-            lines.push(
-              `- Total: ${parsed.healthSnapshot.totalModules ?? 0} · Functioning: ${parsed.healthSnapshot.functioning ?? 0} · Trouble: ${parsed.healthSnapshot.trouble ?? 0} · Dead: ${parsed.healthSnapshot.dead ?? 0} · Unknown: ${parsed.healthSnapshot.unknown ?? 0}`,
-            );
-            if (parsed.healthDelta) {
-              lines.push(
-                `- Delta: +${parsed.healthDelta.improved ?? 0} improved · ${parsed.healthDelta.regressed ?? 0} regressed · ${parsed.healthDelta.unchanged ?? 0} unchanged · ${parsed.healthDelta.newModules ?? 0} new`,
-              );
-            }
-            lines.push("");
-          }
-          const highRiskModules = parsed.highRiskUntestedModules || [];
-          if (highRiskModules.length > 0) {
-            lines.push(`**Top High-Risk Untested Modules** (${highRiskModules.length})`);
-            highRiskModules.forEach((mod, idx) => {
-              lines.push(
-                `${idx + 1}. ${mod.filePath || "unknown file"} · risk ${mod.riskScore ?? "n/a"} · coverage ${mod.lineCoveragePercent ?? 0}% · ${mod.lineCount ?? 0} lines · churn ${mod.churn30d ?? 0}/30d`,
-              );
-              if (mod.reasons && mod.reasons.length > 0) {
-                lines.push(`   Reasons: ${mod.reasons.join(", ")}`);
-              }
-            });
-            lines.push("");
-          }
-          const moduleHealth = parsed.moduleHealth || [];
-          if (moduleHealth.length > 0) {
-            const troubled = moduleHealth.filter((mod) => (mod.status || "").toLowerCase() === "trouble").slice(0, 5);
-            if (troubled.length > 0) {
-              lines.push(`**Top Troubled Modules** (${troubled.length})`);
-              troubled.forEach((mod, idx) => {
-                lines.push(
-                  `${idx + 1}. ${mod.filePath || "unknown"} · health ${mod.healthScore ?? "n/a"} · risk ${mod.riskScore ?? "n/a"} · coverage ${mod.lineCoveragePercent ?? "n/a"}% · churn ${mod.churn30d ?? 0}/30d`,
-                );
-              });
-              lines.push("");
-            }
-          }
-          const deadCandidates = parsed.deadCodeCandidates || [];
-          if (deadCandidates.length > 0) {
-            lines.push(`**Dead-Code Candidates** (${deadCandidates.length})`);
-            deadCandidates.forEach((candidate, idx) => {
-              lines.push(
-                `${idx + 1}. ${candidate.filePath || "unknown"} · confidence ${candidate.confidence || "unknown"} · ` +
-                `inbound ${candidate.inboundReferences ?? "n/a"} · stale ${candidate.lastTouchedDays ?? "unknown"}d`,
-              );
-              if (candidate.reason) {
-                lines.push(`   Reason: ${candidate.reason}`);
-              }
-            });
-            lines.push("");
-          } else if (moduleHealth.length > 0) {
-            const dead = moduleHealth.filter((mod) => (mod.status || "").toLowerCase() === "dead").slice(0, 5);
-            if (dead.length > 0) {
-              lines.push(`**Dead-Code Candidates** (${dead.length})`);
-              dead.forEach((mod, idx) => {
-                lines.push(`${idx + 1}. ${mod.filePath || "unknown"} · confidence ${mod.confidence || "unknown"} · health ${mod.healthScore ?? "n/a"}`);
-              });
-              lines.push("");
-            }
-          }
-          const ciSignals = parsed.ciFailureSignals || [];
-          if (ciSignals.length > 0) {
-            lines.push(`**Recent CI Failure Signals** (${ciSignals.length})`);
-            ciSignals.forEach((signal, idx) => {
-              lines.push(
-                `${idx + 1}. [${signal.classification || "unknown"}] ${signal.workflow || "workflow"} run ${signal.runId ?? "?"}: ${signal.signature || "no signature"}`,
-              );
-              if (signal.filePaths && signal.filePaths.length > 0) {
-                lines.push(`   Files: ${signal.filePaths.join(", ")}`);
-              }
-            });
-            lines.push("");
-          }
-          const qualityEvidence = parsed.qualityEvidence || [];
-          if (qualityEvidence.length > 0) {
-            lines.push("**Quality Evidence**");
-            qualityEvidence.forEach((entry) => {
-              lines.push(`- [${entry.status || "unknown"}] ${entry.command || "unknown"}${entry.output ? ` — ${entry.output}` : ""}`);
-            });
-            lines.push("");
-          }
-          if (gaps.length > 0) {
-            const highCount = grouped.get("high")?.length || 0;
-            const mediumCount = grouped.get("medium")?.length || 0;
-            const lowCount = grouped.get("low")?.length || 0;
-            const unknownCount = grouped.get("unknown")?.length || 0;
-            lines.push(
-              `Prescriptions: ${gaps.length} total ` +
-              `(${highCount} high · ${mediumCount} medium · ${lowCount} low` +
-              `${unknownCount > 0 ? ` · ${unknownCount} unknown` : ""})`,
-            );
-            lines.push("");
-
-            const orderedKeys: Array<"high" | "medium" | "low" | "unknown"> = ["high", "medium", "low", "unknown"];
-            for (const key of orderedKeys) {
-              const items = grouped.get(key) || [];
-              if (items.length === 0) continue;
-              const heading = key === "unknown" ? "Unknown Severity" : `${key[0].toUpperCase()}${key.slice(1)} Severity`;
-              lines.push(`**${heading}**`);
-              const sorted = [...items].sort((a, b) => {
-                const aRank = severityRank[normalizeSeverity(a.severity) as "high" | "medium" | "low"] ?? 3;
-                const bRank = severityRank[normalizeSeverity(b.severity) as "high" | "medium" | "low"] ?? 3;
-                if (aRank !== bRank) return aRank - bRank;
-                const aPriority = a.priority ?? a.riskScore ?? 0;
-                const bPriority = b.priority ?? b.riskScore ?? 0;
-                if (aPriority !== bPriority) return bPriority - aPriority;
-                return (a.title || "").localeCompare(b.title || "");
-              });
-              sorted.forEach((g, idx) => {
-                const statusLabel = g.cureStatus ? ` [${g.cureStatus}]` : "";
-                lines.push(`${idx + 1}. ${g.title || "Untitled gap"}${statusLabel}`);
-                if (g.problemClass) lines.push(`   Class: ${g.problemClass}`);
-                if (g.evidence && g.evidence.length > 0) lines.push(`   Evidence: ${g.evidence[0]}`);
-                if (g.prescription) lines.push(`   Prescription: ${g.prescription}`);
-                if (g.buildTask) lines.push(`   Build task: ${g.buildTask}`);
-                if (g.targetFiles && g.targetFiles.length > 0) lines.push(`   Target files: ${g.targetFiles.join(", ")}`);
-                if (g.verificationCommands && g.verificationCommands.length > 0) {
-                  lines.push(`   Verify: ${g.verificationCommands.join(" && ")}`);
-                }
-                if (g.successCriteria && g.successCriteria.length > 0) {
-                  lines.push(`   Success: ${g.successCriteria[0]}`);
-                }
-                if (typeof g.riskScore === "number") lines.push(`   Risk score: ${g.riskScore}`);
-                if (g.dependsOn && g.dependsOn.length > 0) lines.push(`   Depends on: ${g.dependsOn.join(", ")}`);
-              });
-              lines.push("");
-            }
-          } else {
-            lines.push("No prescriptions in this report.");
-          }
-          ctx.addSystemMessage(lines.join("\n"));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          ctx.addSystemMessage(`Failed to read doctor report: ${msg}`);
-        }
-        break;
-      }
-
-      if (subcommand === "show") {
-        let issueKey: string | undefined;
-        let requestedIndex: number | undefined;
-        const showTokens = rest.split(/\s+/).filter(Boolean);
-        if (showTokens.length > 0) {
-          const maybeRef = detectTicketRef(showTokens[0]);
-          if (maybeRef && maybeRef.system === "github") {
-            issueKey = maybeRef.key;
-            if (showTokens[1]) {
-              const idx = Number.parseInt(showTokens[1], 10);
-              if (Number.isNaN(idx) || idx < 1) {
-                ctx.addSystemMessage("Usage: `/doctor show [#123] <index>`");
-                break;
-              }
-              requestedIndex = idx;
-            }
-          } else {
-            const idx = Number.parseInt(showTokens[0], 10);
-            if (Number.isNaN(idx) || idx < 1) {
-              ctx.addSystemMessage("Usage: `/doctor show [#123] <index>`");
-              break;
-            }
-            requestedIndex = idx;
-          }
-        }
-        if (!requestedIndex) {
-          ctx.addSystemMessage("Usage: `/doctor show [#123] <index>` — specify which prescription to view.");
-          break;
-        }
-
-        const artifact = doctorArtifactPath(ctx.workingDir, issueKey);
-        if (!fs.existsSync(artifact)) {
-          ctx.addSystemMessage(`No doctor report found at \`${artifact}\`. Run \`/doctor${issueKey ? ` ${issueKey}` : ""}\` first.`);
-          break;
-        }
-        try {
-          const parsed = JSON.parse(fs.readFileSync(artifact, "utf-8")) as {
-            appliedPrescriptionIds?: string[];
-            gaps?: Array<{
-              id?: string;
-              severity?: string;
-              title?: string;
-              evidence?: string[];
-              prescription?: string;
-              buildTask?: string;
-              problemClass?: string;
-              targetFiles?: string[];
-              verificationCommands?: string[];
-              successCriteria?: string[];
-              cureStatus?: string;
-              riskScore?: number;
-              priority?: number;
-              dependsOn?: string[];
-            }>;
-          };
-          const gaps = parsed.gaps || [];
-          if (gaps.length === 0) {
-            ctx.addSystemMessage("No prescriptions in the doctor report.");
-            break;
-          }
-          // Sort identically to /doctor report so indices match
-          const sorted = [...gaps].sort((a, b) => {
-            const aRank = severityRank[normalizeSeverity(a.severity) as "high" | "medium" | "low"] ?? 3;
-            const bRank = severityRank[normalizeSeverity(b.severity) as "high" | "medium" | "low"] ?? 3;
-            if (aRank !== bRank) return aRank - bRank;
-            const aPriority = a.priority ?? a.riskScore ?? 0;
-            const bPriority = b.priority ?? b.riskScore ?? 0;
-            if (aPriority !== bPriority) return bPriority - aPriority;
-            return (a.title || "").localeCompare(b.title || "");
-          });
-          if (requestedIndex > sorted.length) {
-            ctx.addSystemMessage(`Index ${requestedIndex} is out of range. There are ${sorted.length} prescriptions.`);
-            break;
-          }
-          const g = sorted[requestedIndex - 1];
-          const applied = (parsed.appliedPrescriptionIds || []).includes(g.id || "");
-          const lines: string[] = [
-            `**Prescription ${requestedIndex}/${sorted.length}**${g.id ? ` (${g.id})` : ""}`,
-            "",
-            `**${g.title || "Untitled"}**`,
-            "",
-            `Severity: ${normalizeSeverity(g.severity)}${typeof g.riskScore === "number" ? ` · Risk score: ${g.riskScore}` : ""}${typeof g.priority === "number" ? ` · Priority: ${g.priority}` : ""}`,
-            `Status: ${g.cureStatus || "open"}${applied ? " (applied)" : ""}`,
-          ];
-          if (g.problemClass) lines.push(`Class: ${g.problemClass}`);
-          lines.push("");
-          if (g.evidence && g.evidence.length > 0) {
-            lines.push("**Evidence**");
-            g.evidence.forEach((e) => lines.push(`- ${e}`));
-            lines.push("");
-          }
-          if (g.prescription) {
-            lines.push("**Prescription**");
-            lines.push(g.prescription);
-            lines.push("");
-          }
-          if (g.buildTask) {
-            lines.push("**Build Task**");
-            lines.push(g.buildTask);
-            lines.push("");
-          }
-          if (g.targetFiles && g.targetFiles.length > 0) {
-            lines.push("**Target Files**");
-            g.targetFiles.forEach((f) => lines.push(`- ${f}`));
-            lines.push("");
-          }
-          if (g.verificationCommands && g.verificationCommands.length > 0) {
-            lines.push("**Verification Commands**");
-            g.verificationCommands.forEach((cmd) => lines.push(`- \`${cmd}\``));
-            lines.push("");
-          }
-          if (g.successCriteria && g.successCriteria.length > 0) {
-            lines.push("**Success Criteria**");
-            g.successCriteria.forEach((c) => lines.push(`- ${c}`));
-            lines.push("");
-          }
-          if (g.dependsOn && g.dependsOn.length > 0) {
-            lines.push(`**Depends On:** ${g.dependsOn.join(", ")}`);
-            lines.push("");
-          }
-          lines.push(`Run \`/doctor apply${issueKey ? ` ${issueKey}` : ""} ${requestedIndex}\` to execute this prescription.`);
-          ctx.addSystemMessage(lines.join("\n"));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          ctx.addSystemMessage(`Failed to read doctor report: ${msg}`);
-        }
-        break;
-      }
-
-      if (subcommand === "apply") {
-        if (!ctx.startOrchestrator) {
-          ctx.addSystemMessage("`/doctor apply` is not available in this runtime.");
-          break;
-        }
-        const applyTokens = rest.split(/\s+/).filter(Boolean);
-        let issueKey: string | undefined;
-        let requestedIndex: number | undefined;
-
-        if (applyTokens.length >= 1) {
-          const maybeRef = detectTicketRef(applyTokens[0]);
-          if (maybeRef && maybeRef.system === "github") {
-            issueKey = maybeRef.key;
-            if (applyTokens[1]) {
-              const idx = Number.parseInt(applyTokens[1], 10);
-              if (Number.isNaN(idx) || idx < 1) {
-                ctx.addSystemMessage("Usage: `/doctor apply [#123] [index]`");
-                break;
-              }
-              requestedIndex = idx;
-            }
-          } else {
-            const idx = Number.parseInt(applyTokens[0], 10);
-            if (Number.isNaN(idx) || idx < 1) {
-              ctx.addSystemMessage("Usage: `/doctor apply [#123] [index]`");
-              break;
-            }
-            requestedIndex = idx;
-          }
-        }
-
-        const artifact = doctorArtifactPath(ctx.workingDir, issueKey);
-        if (!fs.existsSync(artifact)) {
-          ctx.addSystemMessage(`No doctor report found at \`${artifact}\`. Run \`/doctor${issueKey ? ` ${issueKey}` : ""}\` first.`);
-          break;
-        }
-
-        type DoctorArtifact = {
-          gaps?: Array<{
-            id?: string;
-            severity?: string;
-            title?: string;
-            evidence?: string[];
-            prescription?: string;
-            buildTask?: string;
-            problemClass?: string;
-            targetFiles?: string[];
-            verificationCommands?: string[];
-            successCriteria?: string[];
-            cureStatus?: string;
-            riskScore?: number;
-            priority?: number;
-            dependsOn?: string[];
-          }>;
-          appliedPrescriptionIds?: string[];
-        };
-
-        const parsed = JSON.parse(fs.readFileSync(artifact, "utf-8")) as DoctorArtifact;
-        const gaps = (parsed.gaps || []).filter((gap) => !!(gap.id || gap.title));
-        if (gaps.length === 0) {
-          ctx.addSystemMessage("No prescriptions found in the doctor report.");
-          break;
-        }
-
-        const sorted = [...gaps].sort((a, b) => {
-          const aRank = severityRank[normalizeSeverity(a.severity) as "high" | "medium" | "low"] ?? 3;
-          const bRank = severityRank[normalizeSeverity(b.severity) as "high" | "medium" | "low"] ?? 3;
-          if (aRank !== bRank) return aRank - bRank;
-          const aPriority = a.priority ?? a.riskScore ?? 0;
-          const bPriority = b.priority ?? b.riskScore ?? 0;
-          if (aPriority !== bPriority) return bPriority - aPriority;
-          return (a.title || "").localeCompare(b.title || "");
-        });
-
-        const appliedSet = new Set((parsed.appliedPrescriptionIds || []).filter(Boolean));
-        const findById = new Map(sorted.map((gap) => [gap.id || "", gap]));
-        const depsSatisfied = (gap: (typeof sorted)[number]): boolean => {
-          if (!gap.dependsOn || gap.dependsOn.length === 0) return true;
-          return gap.dependsOn.every((id) => appliedSet.has(id) || !findById.has(id));
-        };
-
-        let selected: (typeof sorted)[number] | undefined;
-        if (requestedIndex !== undefined) {
-          selected = sorted[requestedIndex - 1];
-          if (!selected) {
-            ctx.addSystemMessage(`Prescription index out of range. Report has ${sorted.length} prescriptions.`);
-            break;
-          }
-        } else {
-          selected = sorted.find((gap) => {
-            const id = gap.id || "";
-            return !appliedSet.has(id) && depsSatisfied(gap);
-          });
-          if (!selected) {
-            selected = sorted.find((gap) => !appliedSet.has(gap.id || ""));
-          }
-          if (!selected) selected = sorted[0];
-        }
-
-        if (!selected) {
-          ctx.addSystemMessage("No doctor prescription selected.");
-          break;
-        }
-
-        const buildTask =
-          selected.buildTask ||
-          selected.prescription ||
-          `Resolve doctor prescription: ${selected.title || selected.id || "untitled prescription"}`;
-        const selectedId = selected.id || "unknown";
-        const display = `/doctor apply${issueKey ? ` ${issueKey}` : ""}${requestedIndex ? ` ${requestedIndex}` : ""}`;
-        ctx.addUserMessage(display);
-        ctx.addSystemMessage(
-          `Applying doctor prescription ${selectedId} (${normalizeSeverity(selected.severity)}${selected.problemClass ? ` · ${selected.problemClass}` : ""}): ${selected.title || "untitled"}\n` +
-          `${selected.targetFiles && selected.targetFiles.length > 0 ? `Target files: ${selected.targetFiles.join(", ")}\n` : ""}` +
-          `Build task: ${buildTask}` +
-          `${selected.verificationCommands && selected.verificationCommands.length > 0 ? `\nVerify: ${selected.verificationCommands.join(" && ")}` : ""}`,
-        );
-
-        ctx.setLastBuildTask(buildTask);
-        ctx.startOrchestrator(buildTask, ctx.isTrustAll, ctx.sandboxed ?? "os", undefined, {
-          onComplete: (result) => {
-            if (!selected?.id) return;
-            if (!result.success) {
-              ctx.addSystemMessage(
-                `Doctor prescription ${selected.id} was not marked as applied because the build did not complete successfully.`,
-              );
-              return;
-            }
-            try {
-              const freshRaw = fs.readFileSync(artifact, "utf-8");
-              const freshParsed = JSON.parse(freshRaw) as DoctorArtifact;
-              const nextApplied = [...(freshParsed.appliedPrescriptionIds || []), selected.id];
-              freshParsed.appliedPrescriptionIds = [...new Set(nextApplied)];
-              fs.writeFileSync(artifact, JSON.stringify(freshParsed, null, 2) + "\n", "utf-8");
-              ctx.addSystemMessage(`Marked doctor prescription ${selected.id} as applied.`);
-            } catch (error) {
-              const msg = error instanceof Error ? error.message : String(error);
-              ctx.addSystemMessage(`Build succeeded, but failed to update doctor artifact: ${msg}`);
-            }
-          },
-        });
-        break;
-      }
-
-      const ref = detectTicketRef(arg);
-      if (!ref || ref.system !== "github") {
-        ctx.addSystemMessage(
-          "`/doctor` usage:\n" +
-          "- `/doctor` (local repo diagnosis)\n" +
-          "- `/doctor #123` (issue-scoped diagnosis)\n" +
-          "- `/doctor report [#123]`\n" +
-          "- `/doctor show [#123] <index>` (full details for one prescription)\n" +
-          "- `/doctor apply [#123] [index]`",
-        );
-        break;
-      }
-      ctx.addUserMessage(`/doctor ${ref.key}`);
-      ctx.startDoctor(ref.key);
-      break;
-    }
-
     // ---- /pause ----
     case "pause": {
       if (!ctx.orchestratorRunning) {
@@ -1542,6 +937,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const reviewEnabled = config.review?.enabled !== false;
         const maxRevisions = config.review?.maxRevisions ?? 3;
         const approvalThreshold = config.review?.approvalThreshold ?? 9;
+        const qaParticipation = config.qa?.participation ?? "auto";
         const liveViewEnabled = config.liveView === true;
         const liveViewUrl = ctx.getLiveViewUrl?.() || null;
         const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
@@ -1556,11 +952,12 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
           `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
           `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
+          `| QA participation | ${qaParticipation} | \`/settings qa.participation <off/auto/always>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| Inline edit preview | ${inlineEditPreview} | \`/settings ui.inlineEditPreview <true/false>\` |\n` +
           `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
-          `| Experimental (/orchestrate, /doctor) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
+          `| Experimental (/orchestrate) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
           `| API keys | — | \`/settings key <provider> <api-key>\` |`;
 
         if (showAll) {
@@ -1648,16 +1045,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "review.threshold": "review.threshold",
           "review.autorevise": "review.autoRevise",
           "review.autobranch": "review.autoBranch",
+          "qa.participation": "qa.participation",
           "program.maxissues": "program.maxIssues",
           "program.maxautoretries": "program.maxAutoRetries",
           "program.gatemode": "program.gateMode",
-          "doctor.maxhighriskmodules": "doctor.maxHighRiskModules",
-          "doctor.risktroublethreshold": "doctor.riskTroubleThreshold",
-          "doctor.healthfunctioningthreshold": "doctor.healthFunctioningThreshold",
-          "doctor.healthtroublethreshold": "doctor.healthTroubleThreshold",
-          "doctor.deadcodeenabled": "doctor.deadCodeEnabled",
-          "doctor.deadcodemindays": "doctor.deadCodeMinDays",
-          "doctor.deadcodemaxcandidates": "doctor.deadCodeMaxCandidates",
           "sandbox": "sandbox",
           "liveview": "liveView",
           "ui.inlineeditpreview": "ui.inlineEditPreview",
@@ -1723,6 +1114,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.review = { ...config.review, autoBranch: boolVal(value) };
             break;
           }
+          case "qa.participation": {
+            const normalized = value.toLowerCase();
+            if (!["off", "auto", "always"].includes(normalized)) {
+              ctx.addSystemMessage("Invalid value for `qa.participation`. Use `off`, `auto`, or `always`.");
+              settingApplied = false;
+              break;
+            }
+            config.qa = { ...(config.qa || {}), participation: normalized as "off" | "auto" | "always" };
+            break;
+          }
           case "program.maxIssues": {
             const n = parseIntSetting(value, "program.maxIssues", 1);
             if (n === null) {
@@ -1749,64 +1150,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
               break;
             }
             config.program = { ...(config.program || {}), gateMode: normalized as "required" | "advisory" };
-            break;
-          }
-          case "doctor.maxHighRiskModules": {
-            const n = parseIntSetting(value, "doctor.maxHighRiskModules", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), maxHighRiskModules: n };
-            break;
-          }
-          case "doctor.riskTroubleThreshold": {
-            const n = parseIntSetting(value, "doctor.riskTroubleThreshold", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), riskTroubleThreshold: n };
-            break;
-          }
-          case "doctor.healthFunctioningThreshold": {
-            const n = parseIntSetting(value, "doctor.healthFunctioningThreshold", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), healthFunctioningThreshold: n };
-            break;
-          }
-          case "doctor.healthTroubleThreshold": {
-            const n = parseIntSetting(value, "doctor.healthTroubleThreshold", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), healthTroubleThreshold: n };
-            break;
-          }
-          case "doctor.deadCodeEnabled": {
-            config.doctor = { ...(config.doctor || {}), deadCodeEnabled: boolVal(value) };
-            break;
-          }
-          case "doctor.deadCodeMinDays": {
-            const n = parseIntSetting(value, "doctor.deadCodeMinDays", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), deadCodeMinDays: n };
-            break;
-          }
-          case "doctor.deadCodeMaxCandidates": {
-            const n = parseIntSetting(value, "doctor.deadCodeMaxCandidates", 0);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.doctor = { ...(config.doctor || {}), deadCodeMaxCandidates: n };
             break;
           }
           case "sandbox": {
@@ -1975,7 +1318,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
           if (key === "route") {

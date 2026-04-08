@@ -44,9 +44,6 @@ No API key required — select Ollama during setup to run fully local. Or bring 
 ```bash
 # Or install globally
 npm install -g workermill
-
-# Check your setup
-wm doctor
 ```
 
 No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
@@ -313,7 +310,6 @@ Requires `"experimental": true` in your config.
 | `/voice` | Voice input — speak your task |
 | `/schedule` | Scheduled recurring tasks |
 | `/orchestrate` | Epic decomposition — break parent issues into child issues and execute |
-| `/doctor` | Code health diagnosis with prescriptions |
 
 </details>
 

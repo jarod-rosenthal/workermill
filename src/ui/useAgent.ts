@@ -299,6 +299,56 @@ export function trackAbortCost(
   }
 }
 
+/**
+ * Populates cost and usage metadata from CostTracker into a session before saving.
+ * Called before saveSession() to persist usage data to session files.
+ */
+export function populateSessionCostData(
+  session: Session,
+  costTracker: CostTracker,
+  finished: boolean = false,
+): void {
+  const summary = costTracker.getUsageSummary();
+
+  // Total cost
+  session.totalCostUsd = summary.total.cost;
+
+  // Per-model breakdown
+  session.costByModel = summary.byModel.map((m) => ({
+    key: m.key,
+    provider: m.provider,
+    model: m.model,
+    inputTokens: m.inputTokens,
+    outputTokens: m.outputTokens,
+    costUsd: m.cost,
+    roles: m.roles,
+  }));
+
+  // Per-role breakdown
+  session.costByRole = {
+    worker: {
+      inputTokens: summary.byRole.worker.inputTokens,
+      outputTokens: summary.byRole.worker.outputTokens,
+      costUsd: summary.byRole.worker.cost,
+    },
+    planner: {
+      inputTokens: summary.byRole.planner.inputTokens,
+      outputTokens: summary.byRole.planner.outputTokens,
+      costUsd: summary.byRole.planner.cost,
+    },
+    reviewer: {
+      inputTokens: summary.byRole.reviewer.inputTokens,
+      outputTokens: summary.byRole.reviewer.outputTokens,
+      costUsd: summary.byRole.reviewer.cost,
+    },
+  };
+
+  // Set finishedAt only when session ends cleanly
+  if (finished) {
+    session.finishedAt = new Date().toISOString();
+  }
+}
+
 function normalizeLiveViewPath(filePath: string, workingDir: string): string | null {
   const trimmed = filePath.trim();
   if (!trimmed || trimmed === "/dev/null") return null;
@@ -617,6 +667,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         // Fork: copy session with new ID, leaving original untouched
         const session = options.fork ? forkSession(loaded) : loaded;
         if (options.fork) {
+          populateSessionCostData(session, costTrackerRef.current);
           saveSession(session);
           logger.info("Forked session", { originalId: loaded.id, forkId: session.id });
         } else {
@@ -635,6 +686,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             content: m.content,
             timestamp: session.messages[i]?.timestamp ?? new Date().toISOString(),
           }));
+          populateSessionCostData(session, costTrackerRef.current);
           saveSession(session);
           logger.info("Micro-compacted resumed session", { charsSaved });
         }
@@ -652,10 +704,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         (sessionRef as { current: Session & { _restored?: Message[] } }).current._restored =
           restored as never;
       } else {
-        sessionRef.current = createSession(options.provider, options.model);
+        sessionRef.current = createSession(options.provider, options.model, process.cwd());
       }
     } else {
-      sessionRef.current = createSession(options.provider, options.model);
+      sessionRef.current = createSession(options.provider, options.model, process.cwd());
     }
 
     // Ensure project metadata is loaded/created for tracking
@@ -1465,6 +1517,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
 
+          // Populate cost data from CostTracker before saving session
+          populateSessionCostData(session, costTrackerRef.current);
+
           // Save session to disk.
           saveSession(session);
 
@@ -1495,6 +1550,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                 content: m.content,
                 timestamp: new Date().toISOString(),
               }));
+              populateSessionCostData(session, costTrackerRef.current);
               saveSession(session);
             }
           } else if (compactionResult.level === "soft" || compactionResult.level === "hard") {
@@ -1519,6 +1575,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               content: m.content,
               timestamp: new Date().toISOString(),
             }));
+            populateSessionCostData(session, costTrackerRef.current);
             saveSession(session);
             notifyIfEnabled(bellEnabledRef.current, "WorkerMill", "Auto-compaction complete");
           }
@@ -1644,6 +1701,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const popped = session.messages.pop();
       restoredInput = popped?.content ?? undefined;
     }
+    populateSessionCostData(session, costTrackerRef.current);
     saveSession(session);
 
     // Also remove from the committed messages UI list
@@ -1797,6 +1855,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       content: m.content,
       timestamp: new Date().toISOString(),
     }));
+    populateSessionCostData(session, costTrackerRef.current);
     saveSession(session);
 
     const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);

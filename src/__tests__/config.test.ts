@@ -390,6 +390,7 @@ describe("config", () => {
         default: "ollama",
         routing: { planner: "ollama" },
         review: { enabled: true, maxRevisions: 3 },
+        qa: { participation: "auto" },
       };
       fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
 
@@ -400,6 +401,7 @@ describe("config", () => {
         providers: { anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
         routing: { reviewer: "anthropic" },
         review: { maxRevisions: 5 },
+        qa: { participation: "always" },
       };
       fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify(projectConfig), "utf-8");
 
@@ -418,6 +420,8 @@ describe("config", () => {
       // Review is merged
       expect(resolved.review?.enabled).toBe(true);
       expect(resolved.review?.maxRevisions).toBe(5);
+      // QA config is merged
+      expect(resolved.qa?.participation).toBe("always");
     });
 
     it("merges hooks arrays (global + project)", async () => {

@@ -432,6 +432,86 @@ Done.`;
       );
     });
 
+    it("adds a qa_engineer story when qa participation is always", async () => {
+      const config = {
+        providers: {
+          ollama: { model: "test-model", host: "http://localhost:11434", contextLength: 4096 },
+        },
+        default: "ollama",
+        qa: { participation: "always" },
+        review: { enabled: false },
+      };
+      const output = createMockOutput();
+
+      const result = await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      const qaStory = result.stories.find((story) => story.persona === "qa_engineer");
+      expect(qaStory).toBeDefined();
+      expect(qaStory?.dependsOn).toContain("setup-api");
+    });
+
+    it("removes qa_engineer stories when qa participation is off", async () => {
+      const output = createMockOutput();
+      const config = {
+        providers: {
+          ollama: { model: "test-model", host: "http://localhost:11434", contextLength: 4096 },
+        },
+        default: "ollama",
+        qa: { participation: "off" },
+        review: { enabled: false },
+      };
+
+      const plan = `Here is the plan:
+\`\`\`json
+{
+  "stories": [
+    {
+      "id": "setup-api",
+      "title": "Set up API endpoint",
+      "persona": "backend_developer",
+      "description": "Create the API endpoint with proper routing."
+    },
+    {
+      "id": "qa-flow",
+      "title": "Validate workflow",
+      "persona": "qa_engineer",
+      "description": "Add cross-cutting QA coverage.",
+      "dependsOn": ["setup-api"]
+    }
+  ]
+}
+\`\`\`
+
+Done.`;
+
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? plan : "Implemented the backend story.\n::file_modified::src/impl.ts";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text,
+            toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
+          });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "// impl");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      const result = await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      expect(result.stories.some((story) => story.persona === "qa_engineer")).toBe(false);
+    });
+
     it("includes provider/model in worker ticket comments", async () => {
       const config = {
         providers: {

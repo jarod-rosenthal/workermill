@@ -12,7 +12,7 @@ import { findModelInfo } from "./provider-registry.js";
 import * as logger from "./logger.js";
 import { runGate } from "./gate-runner.js";
 import { CostTracker, type UsageSummary } from "./cost-tracker.js";
-import type { CliConfig, HooksConfig } from "./config.js";
+import type { CliConfig, HooksConfig, QaParticipationMode } from "./config.js";
 import { getProviderForPersona, loadConfig, saveConfig } from "./config.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
 import {
@@ -813,6 +813,77 @@ export interface Story {
   verificationCommands?: string[];
 }
 
+function getQaParticipationMode(config: CliConfig): QaParticipationMode {
+  return config.qa?.participation ?? "auto";
+}
+
+function stripMissingDependencies(stories: Story[]): Story[] {
+  const ids = new Set(stories.map((story) => story.id));
+  return stories.map((story) => ({
+    ...story,
+    dependsOn: story.dependsOn?.filter((id) => ids.has(id)),
+  }));
+}
+
+function buildAlwaysQaStory(stories: Story[]): Story {
+  const existingIds = new Set(stories.map((story) => story.id));
+  let qaId = "qa-validation";
+  let suffix = 2;
+  while (existingIds.has(qaId)) {
+    qaId = `qa-validation-${suffix++}`;
+  }
+
+  const implementationStoryIds = stories
+    .filter((story) => story.persona !== "qa_engineer")
+    .map((story) => story.id);
+
+  return {
+    id: qaId,
+    title: "Cross-cutting QA validation",
+    persona: "qa_engineer",
+    description: "Validate the changed behavior end-to-end, add or update regression coverage for the changed workflows, and report any remaining verification gaps.",
+    dependsOn: implementationStoryIds,
+    targetFiles: ["tests", "src"],
+    integrationPoints: implementationStoryIds.map((id) => `depends on story: ${id}`),
+    nonGoals: ["Do not re-implement product logic owned by non-QA stories."],
+    implementationNotes: "Use the completed implementation stories as the contract. Add or update the narrowest regression tests that prove the changed behavior, prefer real workflows over mocked assumptions, and document any uncovered gaps as blockers.",
+    validationSignal: "Regression coverage exists for the changed behavior and the critical workflow validation passes or any blocker is explicitly documented.",
+  };
+}
+
+function applyQaParticipationMode(stories: Story[], config: CliConfig): Story[] {
+  const qaMode = getQaParticipationMode(config);
+
+  if (qaMode === "off") {
+    return stripMissingDependencies(stories.filter((story) => story.persona !== "qa_engineer"));
+  }
+
+  if (qaMode !== "always") {
+    return stories;
+  }
+
+  const implementationStoryIds = stories
+    .filter((story) => story.persona !== "qa_engineer")
+    .map((story) => story.id);
+
+  if (implementationStoryIds.length === 0) {
+    return stories;
+  }
+
+  const qaStories = stories.filter((story) => story.persona === "qa_engineer");
+  if (qaStories.length === 0) {
+    return [...stories, buildAlwaysQaStory(stories)];
+  }
+
+  return stories.map((story) => {
+    if (story.persona !== "qa_engineer") return story;
+    const dependsOn = new Set(story.dependsOn || []);
+    for (const id of implementationStoryIds) dependsOn.add(id);
+    dependsOn.delete(story.id);
+    return { ...story, dependsOn: [...dependsOn] };
+  });
+}
+
 interface SharedContext {
   filesCreated: string[];
   filesModified: string[];
@@ -1314,7 +1385,16 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 
 **Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
 
-Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead${config.review?.verifyEnabled !== false ? `
+Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead
+
+## QA Participation Mode
+
+QA participation for this run is \`${getQaParticipationMode(config)}\`.
+${getQaParticipationMode(config) === "off"
+  ? "Do NOT create qa_engineer stories. Keep tests with the implementation stories."
+  : getQaParticipationMode(config) === "always"
+    ? "Every code-changing plan MUST include a qa_engineer story for cross-cutting validation. That QA story should depend on all non-QA implementation stories, focus on regression coverage and workflow validation, and must not replace unit/integration tests owned by the implementation stories."
+    : "Use qa_engineer only when it adds clear value for cross-cutting validation, workflow E2E coverage, or explicit QA/testing work. Keep unit and integration tests with the implementation stories."}${config.review?.verifyEnabled !== false ? `
 
 ## Verification Commands
 
@@ -1452,7 +1532,7 @@ Rules:
     };
   }
 
-  let stories = parseStoriesFromText(planText, output);
+  let stories = applyQaParticipationMode(parseStoriesFromText(planText, output), config);
 
   logger.info("Planner completed", { storiesFound: stories.length, planTextLength: planText.length });
 
@@ -1498,7 +1578,7 @@ Rules:
         abortSignal,
       });
 
-      const retryStories = parseStoriesFromText(extractionResult.text, output);
+      const retryStories = applyQaParticipationMode(parseStoriesFromText(extractionResult.text, output), config);
       if (retryStories.length > 0) {
         output.log("planner", `Extracted ${retryStories.length} stories from plan text.`);
         const retryUsage = extractionResult.usage;

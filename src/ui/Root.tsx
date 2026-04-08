@@ -205,7 +205,6 @@ export function Root(props: RootProps): React.ReactElement {
         isBusy: orchestrator.running || agent.status !== "idle",
         startOrchestrator: orchestrator.start,
         startProgram: orchestrator.startProgram,
-        startDoctor: orchestrator.startDoctor,
         retryOrchestrator: orchestrator.retry,
         startReview: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => orchestrator.review(trustAll, sandboxed, target),
         lastBuildTask: lastBuildTask.current,

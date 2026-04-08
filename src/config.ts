@@ -68,23 +68,6 @@ export interface ProgramConfig {
   epicPrompt?: "ask" | "always";
 }
 
-export interface DoctorConfig {
-  /** Number of top high-risk modules to surface (default: 5) */
-  maxHighRiskModules?: number;
-  /** Risk score threshold where zero-coverage modules are considered trouble (default: 55) */
-  riskTroubleThreshold?: number;
-  /** Health score threshold to classify a module as functioning (default: 72) */
-  healthFunctioningThreshold?: number;
-  /** Health score threshold to classify a module as trouble (default: 45) */
-  healthTroubleThreshold?: number;
-  /** Enable dead-code candidate detection (default: true) */
-  deadCodeEnabled?: boolean;
-  /** Minimum stale age (days) for dead-code candidates (default: 45) */
-  deadCodeMinDays?: number;
-  /** Maximum number of dead-code candidates to report (default: 6) */
-  deadCodeMaxCandidates?: number;
-}
-
 export interface HookConfig {
   /** Shell command to run (for "command" type, default) */
   command?: string;
@@ -130,12 +113,20 @@ export interface LinearConfig {
   apiKey: string;
 }
 
+export type QaParticipationMode = "off" | "auto" | "always";
+
+export interface QaConfig {
+  /** How often the planner should assign a dedicated qa_engineer story. */
+  participation?: QaParticipationMode;
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
   routing?: Record<string, string>;
   mcp?: Record<string, MCPServerConfig>;
   review?: ReviewConfig;
+  qa?: QaConfig;
   hooks?: HooksConfig;
   git?: GitConfig;
   /** Restrict file/bash tools to the working directory (default: true). Set to "os" for OS-level sandboxing via @anthropic-ai/sandbox-runtime. */
@@ -158,13 +149,11 @@ export interface CliConfig {
   editor?: "vim" | "nano" | "auto";
   /** /program orchestration preferences */
   program?: ProgramConfig;
-  /** /doctor triage thresholds */
-  doctor?: DoctorConfig;
   /** Enable live browser diff view during /build runs ("auto", true, or false) */
   liveView?: boolean | "auto";
   /** Show inline edited-file previews for committed tool edits (default: true). */
   inlineEditPreview?: boolean;
-  /** Enable experimental features: /doctor, /orchestrate (default: false) */
+  /** Enable experimental features: /orchestrate (default: false) */
   experimental?: boolean;
 }
 
@@ -280,6 +269,7 @@ export function resolveConfig(): CliConfig {
     routing: { ...global.routing, ...(project?.routing || {}) },
     mcp: { ...global.mcp, ...(project?.mcp || {}) },
     review: { ...global.review, ...(project?.review || {}) },
+    qa: { ...global.qa, ...(project?.qa || {}) },
     hooks: {
       pre: [...(global.hooks?.pre || []), ...(project?.hooks?.pre || [])],
       post: [...(global.hooks?.post || []), ...(project?.hooks?.post || [])],
@@ -294,7 +284,6 @@ export function resolveConfig(): CliConfig {
     qualityGates: project?.qualityGates ?? global.qualityGates,
     disableModelAutoUpdate: project?.disableModelAutoUpdate ?? global.disableModelAutoUpdate ?? (process.env.WM_DISABLE_MODEL_AUTO_UPDATE === '1'),
     program: { ...global.program, ...(project?.program || {}) },
-    doctor: { ...global.doctor, ...(project?.doctor || {}) },
     liveView: project?.liveView ?? global.liveView,
     inlineEditPreview: project?.inlineEditPreview ?? global.inlineEditPreview,
     experimental: project?.experimental ?? global.experimental,
@@ -392,6 +381,10 @@ export const ReviewConfigSchema = z.object({
   autoBranch: z.boolean().optional(),
 });
 
+export const QaConfigSchema = z.object({
+  participation: z.enum(["off", "auto", "always"]).optional(),
+});
+
 export const ProgramConfigSchema = z.object({
   maxIssues: z.number().optional(),
   maxAutoRetries: z.number().optional(),
@@ -402,16 +395,6 @@ export const ProgramConfigSchema = z.object({
   maxSubIssues: z.number().optional(),
   maxEpics: z.number().optional(),
   epicPrompt: z.enum(["ask", "always"]).optional(),
-});
-
-export const DoctorConfigSchema = z.object({
-  maxHighRiskModules: z.number().optional(),
-  riskTroubleThreshold: z.number().optional(),
-  healthFunctioningThreshold: z.number().optional(),
-  healthTroubleThreshold: z.number().optional(),
-  deadCodeEnabled: z.boolean().optional(),
-  deadCodeMinDays: z.number().optional(),
-  deadCodeMaxCandidates: z.number().optional(),
 });
 
 export const HookConfigSchema = z.object({
@@ -451,6 +434,7 @@ export const CliConfigSchema = z.object({
   routing: z.record(z.string(), z.string()).optional(),
   mcp: z.record(z.string(), MCPServerConfigSchema).optional(),
   review: ReviewConfigSchema.optional(),
+  qa: QaConfigSchema.optional(),
   hooks: HooksConfigSchema.optional(),
   git: GitConfigSchema.optional(),
   sandbox: z.union([z.boolean(), z.literal("os")]).optional(),
@@ -463,7 +447,6 @@ export const CliConfigSchema = z.object({
   disableModelAutoUpdate: z.boolean().optional(),
   editor: z.enum(["vim", "nano", "auto"]).optional(),
   program: ProgramConfigSchema.optional(),
-  doctor: DoctorConfigSchema.optional(),
   liveView: z.union([z.boolean(), z.literal("auto")]).optional(),
   inlineEditPreview: z.boolean().optional(),
   experimental: z.boolean().optional(),

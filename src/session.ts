@@ -14,15 +14,40 @@ export interface SessionMessage {
   timestamp: string;
 }
 
+export interface SessionCostModel {
+  key: string;       // "provider/model"
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  roles: string[];   // ["worker", "planner", etc.]
+}
+
+export interface SessionRoleCost {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
 export interface Session {
   id: string;
   name?: string;
+  cwd?: string;                     // current working directory or future project identifier
   messages: SessionMessage[];
   provider: string;
   model: string;
   startedAt: string;
   updatedAt: string;
+  finishedAt?: string;              // ISO timestamp when session ended cleanly
   totalTokens: number;
+  totalCostUsd?: number;            // sum of all cost entries
+  costByModel?: SessionCostModel[]; // per-model breakdown from CostTracker
+  costByRole?: {                    // worker / planner / reviewer split
+    worker: SessionRoleCost;
+    planner: SessionRoleCost;
+    reviewer: SessionRoleCost;
+  };
 }
 
 export interface SessionSummary {
@@ -79,13 +104,14 @@ function ensureSessionsDir(): void {
   ensureProjectDirs();
 }
 
-export function createSession(provider: string, model: string): Session {
+export function createSession(provider: string, model: string, cwd?: string): Session {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     messages: [],
     provider,
     model,
+    cwd,
     startedAt: now,
     updatedAt: now,
     totalTokens: 0,

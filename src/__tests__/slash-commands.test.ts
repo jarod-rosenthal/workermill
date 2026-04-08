@@ -172,7 +172,6 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     isBusy: false,
     startOrchestrator: vi.fn(),
     startProgram: vi.fn(),
-    startDoctor: vi.fn(),
     retryOrchestrator: vi.fn().mockReturnValue(false),
     startReview: vi.fn(),
     lastBuildTask: null,
@@ -437,150 +436,6 @@ describe("handleSlashCommand", () => {
       expect(ctx.startProgram).not.toHaveBeenCalled();
     });
 
-  });
-
-  // ---- /doctor ----
-
-  describe("/doctor", () => {
-    it("starts doctor without issue ref", () => {
-      const startDoctor = vi.fn();
-      const ctx = createContext({ startDoctor });
-      handleSlashCommand("/doctor", ctx);
-      expect(startDoctor).toHaveBeenCalledWith();
-    });
-
-    it("starts doctor with GitHub issue ref", () => {
-      const startDoctor = vi.fn();
-      const ctx = createContext({ startDoctor });
-      handleSlashCommand("/doctor #120", ctx);
-      expect(ctx.addUserMessage).toHaveBeenCalledWith("/doctor #120");
-      expect(startDoctor).toHaveBeenCalledWith("#120");
-    });
-
-    it("shows usage for invalid /doctor arg", () => {
-      const startDoctor = vi.fn();
-      const ctx = createContext({ startDoctor });
-      handleSlashCommand("/doctor PROJ-22", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("`/doctor` usage")
-      );
-      expect(startDoctor).not.toHaveBeenCalled();
-    });
-
-    it("runs /doctor report for local artifact", () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(true);
-      vi.mocked(fs.readFileSync).mockReturnValueOnce(
-        JSON.stringify({
-          generatedAt: "2026-04-06T12:00:00Z",
-          summary: ["Languages: typescript"],
-          gaps: [{ severity: "high", title: "No ETE coverage", evidence: ["No e2e tests"], prescription: "Add ETE coverage" }],
-        }),
-      );
-      const ctx = createContext();
-      handleSlashCommand("/doctor report", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Doctor Report")
-      );
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No ETE coverage")
-      );
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("High Severity")
-      );
-    });
-
-    it("reports missing /doctor report artifact", () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(false);
-      const ctx = createContext();
-      handleSlashCommand("/doctor report #120", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No doctor report found")
-      );
-    });
-
-    it("starts /doctor apply via /build path using report buildTask", () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(true);
-      vi.mocked(fs.readFileSync).mockReturnValueOnce(
-        JSON.stringify({
-          gaps: [
-            {
-              id: "missing-ete",
-              severity: "high",
-              title: "No ETE coverage",
-              prescription: "Add ETE tests",
-              buildTask: "Add ETE tests for core checkout and auth flows",
-            },
-          ],
-          appliedPrescriptionIds: [],
-        }),
-      );
-      const startOrchestrator = vi.fn();
-      const ctx = createContext({ startOrchestrator });
-      handleSlashCommand("/doctor apply #120", ctx);
-      expect(ctx.addUserMessage).toHaveBeenCalledWith("/doctor apply #120");
-      expect(startOrchestrator).toHaveBeenCalledTimes(1);
-      expect(startOrchestrator.mock.calls[0][0]).toBe("Add ETE tests for core checkout and auth flows");
-      expect(startOrchestrator.mock.calls[0][2]).toBe(false);
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
-
-      const onComplete = startOrchestrator.mock.calls[0][4]?.onComplete as ((result: { success: boolean }) => void) | undefined;
-      expect(typeof onComplete).toBe("function");
-      vi.mocked(fs.readFileSync).mockReturnValueOnce(
-        JSON.stringify({
-          gaps: [{ id: "missing-ete", severity: "high", title: "No ETE coverage" }],
-          appliedPrescriptionIds: [],
-        }),
-      );
-      onComplete?.({ success: true });
-      expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not mark prescription as applied when build fails", () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(true);
-      vi.mocked(fs.readFileSync).mockReturnValueOnce(
-        JSON.stringify({
-          gaps: [
-            {
-              id: "missing-unit-tests",
-              severity: "high",
-              title: "No unit tests",
-              buildTask: "Add unit tests",
-            },
-          ],
-          appliedPrescriptionIds: [],
-        }),
-      );
-      const startOrchestrator = vi.fn();
-      const ctx = createContext({ startOrchestrator });
-      handleSlashCommand("/doctor apply", ctx);
-      const onComplete = startOrchestrator.mock.calls[0][4]?.onComplete as ((result: { success: boolean }) => void) | undefined;
-      onComplete?.({ success: false });
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("was not marked as applied")
-      );
-    });
-
-    it("fails /doctor apply when report artifact is missing", () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(false);
-      const startOrchestrator = vi.fn();
-      const ctx = createContext({ startOrchestrator });
-      handleSlashCommand("/doctor apply #120", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No doctor report found")
-      );
-      expect(startOrchestrator).not.toHaveBeenCalled();
-    });
-
-    it("validates /doctor apply args", () => {
-      const startOrchestrator = vi.fn();
-      const ctx = createContext({ startOrchestrator });
-      handleSlashCommand("/doctor apply PROJ-99", ctx);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Usage: `/doctor apply [#123] [index]`")
-      );
-      expect(startOrchestrator).not.toHaveBeenCalled();
-    });
   });
 
   // ---- /pause ----
@@ -866,6 +721,7 @@ describe("handleSlashCommand", () => {
       const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       // Primary settings present
       expect(msg).toContain("Review enabled");
+      expect(msg).toContain("QA participation");
       expect(msg).toContain("Live code view");
       expect(msg).toContain("Issue tracker");
       // Advanced settings hidden
@@ -1724,6 +1580,25 @@ describe("handleSlashCommand", () => {
           review: expect.objectContaining({ autoRevise: true }),
         }),
       );
+    });
+
+    it("updates qa.participation", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings qa.participation always", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          qa: expect.objectContaining({ participation: "always" }),
+        }),
+      );
+    });
+
+    it("rejects invalid qa.participation", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings qa.participation maybe", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid value for `qa.participation`"),
+      );
+      expect(saveConfig).not.toHaveBeenCalled();
     });
 
     it("updates program.maxIssues", () => {

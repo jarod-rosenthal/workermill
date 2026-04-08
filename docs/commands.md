@@ -383,12 +383,6 @@ wm logs --cwd /path/to/repo    # Read log for a specific project directory
 
 **Note:** `/log` inside a session shows a quick tail of recent entries. `wm logs --follow` from a separate terminal gives a live stream while a session is running.
 
-### `wm doctor`
-
-Health check: Node version, git, config file validity, API key status, Ollama connectivity, project instructions, and saved learnings.
-
----
-
 ## CLI Launch Flags
 
 Flags passed when starting the CLI from the shell.

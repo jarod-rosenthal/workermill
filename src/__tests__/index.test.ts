@@ -355,8 +355,8 @@ describe("resolveConfig() — config loading and CLI overrides", () => {
 // index.ts calls program.parse() at module load time, which means we cannot
 // safely import it mid-test without controlling argv.  Instead we verify the
 // Commander contract at the structural level: the program exposes a `chat`
-// default command and a `doctor` command.  We instantiate a fresh Command tree
-// that mirrors index.ts's declarations and assert its shape.
+// default command. We instantiate a fresh Command tree that mirrors index.ts's
+// declarations and assert its shape.
 
 describe("Commander program structure", () => {
   it("defines a chat command marked as default", () => {
@@ -393,19 +393,6 @@ describe("Commander program structure", () => {
     expect(optionNames).toContain("--prompt");
     expect(optionNames).toContain("--resume");
     expect(optionNames).toContain("--plan");
-  });
-
-  it("defines a doctor command", () => {
-    const { Command } = require("commander");
-    const program = new Command().name("wm").description("test");
-
-    program
-      .command("doctor")
-      .description("Check your WorkerMill setup for issues");
-
-    const doctorCmd = program.commands.find((c: { name: () => string }) => c.name() === "doctor");
-    expect(doctorCmd).toBeDefined();
-    expect(doctorCmd!.description()).toContain("Check");
   });
 
   it("program name is 'wm'", () => {

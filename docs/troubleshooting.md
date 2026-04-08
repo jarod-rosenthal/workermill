@@ -2,13 +2,9 @@
 
 ## Setup
 
-### `wm doctor` — start here
+### Start with config and logs
 
-Run this first for any setup issue. It checks Node.js version, Git, the config file, provider credentials, and local model availability.
-
-```bash
-wm doctor
-```
+For setup issues, first confirm your config in `~/.workermill/cli.json`, then use `/log` inside the CLI or `wm logs --tail 100` from another terminal to inspect what failed.
 
 ### "No configuration found"
 
@@ -127,10 +123,10 @@ Per-role, per-provider breakdown of input/output tokens and estimated cost.
 
 ## Getting Help
 
-1. Run `wm doctor` and include the output in your report
+1. Gather the relevant log output with `/log` or `wm logs --tail 100`
 2. Check [GitHub Issues](https://github.com/jarod-rosenthal/workermill/issues) for similar problems
 3. Open an issue with:
-   - `wm doctor` output
+   - relevant `wm logs` or `/log` output
    - OS and Node version
    - Steps to reproduce
    - Relevant log excerpt from `~/.workermill/logs/`

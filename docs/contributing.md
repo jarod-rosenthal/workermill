@@ -148,7 +148,6 @@ The CLI is published to npm as `workermill`.
 
 ## Reporting Issues
 
-- Run `wm doctor` and include the output
 - Include OS, Node version, CLI version (`wm --version`)
 - Reproduction steps and relevant log excerpt from `~/.workermill/logs/`
 

@@ -205,6 +205,15 @@ describe("personas", () => {
   // -------------------------------------------------------------------------
 
   describe("loadPersona()", () => {
+    it("loads built-in personas from the single shipped personas directory", async () => {
+      const { loadPersona } = await importPersonas();
+      const persona = loadPersona("tech_lead");
+
+      expect(persona).not.toBeNull();
+      expect(persona!.name).toBe("Tech Lead");
+      expect(persona!.systemPrompt).toContain("Code Review");
+    });
+
     it("loads from project .workermill/personas/ directory", async () => {
       vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 

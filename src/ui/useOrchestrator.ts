@@ -311,8 +311,6 @@ export interface UseOrchestratorReturn {
   ) => void;
   /** Start full-spec program orchestration from a parent issue. */
   startProgram: (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => void;
-  /** Run doctor analysis and emit a diagnosis + prescriptions. */
-  startDoctor: (issueRef?: string) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
   retry: (trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => boolean;
   /** Run a standalone Tech Lead review. Target: "branch", "diff", or "#42" (PR number). */
@@ -1193,92 +1191,6 @@ export function useOrchestrator(
   );
 
   // ------------------------------------------------------------------
-  // startDoctor() — analyze repo test health and generate prescriptions
-  // ------------------------------------------------------------------
-
-  const startDoctor = useCallback(
-    (issueRef?: string) => {
-      if (running) return;
-
-      setRunning(true);
-      setPausedState(false);
-      setStatusMessage("Doctor analyzing repository...");
-      clearPreviewLine();
-      setConfirmRequest(null);
-
-      void (async () => {
-        try {
-          const { runDoctorAssessment } = await import("../doctor.js");
-          const report = await runDoctorAssessment(process.cwd(), issueRef, (step) => {
-            setStatusMessage(`Doctor: ${step}`);
-            setPreviewLineThrottled(step);
-          });
-
-          addSessionSummaryDivider(addMessage, true);
-
-          // ── Summary header (always shown) ──
-          const highGaps = report.gaps.filter((g) => g.severity === "high").length;
-          const medGaps = report.gaps.filter((g) => g.severity === "medium").length;
-          const passedCmds = report.qualityEvidence.filter((e) => e.status === "passed").length;
-          const failedCmds = report.qualityEvidence.filter((e) => e.status === "failed").length;
-
-          const healthLabel = highGaps === 0 && failedCmds === 0
-            ? "Healthy" : highGaps <= 2 ? "Needs attention" : "Unhealthy";
-
-          addMessage(
-            `**Doctor Report${issueRef ? ` — ${issueRef}` : ""}**\n\n` +
-            `**Verdict: ${healthLabel}** — ${report.gaps.length} issue${report.gaps.length !== 1 ? "s" : ""} found` +
-            ` (${highGaps} high, ${medGaps} medium)\n\n` +
-            `| Metric | Value |\n` +
-            `|---|---|\n` +
-            `| Languages | ${report.languages.join(", ") || "unknown"} |\n` +
-            `| Test frameworks | ${report.frameworks.join(", ") || "none"} |\n` +
-            `| Test files | ${report.unitFileCount} unit · ${report.integrationFileCount} integration · ${report.e2eFileCount} E2E |\n` +
-            `| Quality commands | ${passedCmds} passed · ${failedCmds} failed |\n` +
-            `| Module health | ${report.healthSnapshot.functioning} ok · ${report.healthSnapshot.trouble} trouble · ${report.healthSnapshot.dead} dead |\n` +
-            `| High-risk untested | ${report.highRiskUntestedModules.length} module${report.highRiskUntestedModules.length !== 1 ? "s" : ""} |\n` +
-            `| Coverage | ${report.coverageSnapshot.linePercent != null ? `${report.coverageSnapshot.linePercent}% lines` : "not found"} |`,
-          );
-
-          // ── Prescriptions (only if there are gaps) ──
-          if (report.gaps.length > 0) {
-            const prescriptionLines = report.gaps.map((gap, idx) =>
-              `${idx + 1}. **[${gap.severity.toUpperCase()}]** ${gap.title}\n` +
-              `   ${gap.prescription}`,
-            ).join("\n");
-            addMessage(`\n**Prescriptions**\n\n${prescriptionLines}\n\nRun \`/doctor apply\` to fix the top issue, or \`/doctor apply ${issueRef || ""} N\` for a specific one.`);
-          } else {
-            addMessage("No critical issues found.");
-          }
-
-          // ── High-risk modules (compact) ──
-          if (report.highRiskUntestedModules.length > 0) {
-            const moduleLines = report.highRiskUntestedModules.slice(0, 5).map((m, i) =>
-              `${i + 1}. \`${m.filePath}\` — risk ${m.riskScore}, ${m.lineCount} lines, ${m.lineCoveragePercent}% covered`,
-            ).join("\n");
-            addMessage(`\n**High-Risk Untested Modules**\n\n${moduleLines}`);
-          }
-
-          addMessage(`\nFull report: \`${report.artifactPath}\``);
-
-          notifyIfEnabled(cliConfig?.bell, "WorkerMill", "Doctor analysis complete");
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          addMessage(`**Doctor failed:** ${msg}`);
-        } finally {
-          setRunning(false);
-          setPausedState(false);
-          setStatusMessage("");
-          clearPreviewLine();
-          setConfirmRequest(null);
-          releasePauseWaiters();
-        }
-      })();
-    },
-    [addMessage, clearPreviewLine, cliConfig?.bell, releasePauseWaiters, running],
-  );
-
-  // ------------------------------------------------------------------
   // retry() — read persisted state, resume from first incomplete story
   // ------------------------------------------------------------------
 
@@ -1531,5 +1443,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, paused, start, startProgram, startDoctor, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
+  return { running, paused, start, startProgram, retry, review, pause, resume, cancel, statusMessage, previewLine, confirmRequest, promptRequest };
 }

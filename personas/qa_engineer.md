@@ -25,6 +25,8 @@ Work Style:
 - Write tests before or alongside implementation
 - Focus on critical paths first
 - Document test coverage and gaps
+- When code behavior changes, add or update the narrowest regression tests that prove the new behavior
+- Treat missing verification for changed behavior as incomplete work, not optional follow-up
 
 ## ABSOLUTE RULE — NEVER Flag Language/Runtime Versions as Invalid
 

@@ -10,7 +10,6 @@ const BUILTIN_COMMANDS = [
   { name: "/build", desc: "Multi-expert orchestration" },
   { name: "/ship", desc: "Alias for /build" },
   { name: "/orchestrate", desc: "Full-spec orchestration" },
-  { name: "/doctor", desc: "Code health diagnosis" },
   { name: "/retry", desc: "Re-run last build" },
   { name: "/init", desc: "Generate AGENT.md" },
   { name: "/setup", desc: "Re-run provider setup wizard" },

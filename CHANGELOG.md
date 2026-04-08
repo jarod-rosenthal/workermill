@@ -4,7 +4,7 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.0.0] - 2026-04-08
 
 ### Fixed
 - **Ollama not discovered in WSL** — model listing and model factory now detect the WSL gateway IP automatically, so Ollama running on the Windows host is reachable without an explicit `host` in config.

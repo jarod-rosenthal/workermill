@@ -508,4 +508,17 @@ program
     runSchemaCommand(options);
   });
 
+// ── Stats command: cross-session usage and cost analytics ──
+program
+  .command("stats")
+  .description("Show usage and cost analytics across sessions")
+  .option("--days <n>", "Look back N days (default: 30)", parseInt)
+  .option("--all", "Include all sessions regardless of age")
+  .option("--cwd", "Scope to sessions from the current working directory only")
+  .option("--json", "Emit raw JSON for scripting")
+  .action(async (options) => {
+    const { runStatsCommand } = await import("./stats-command.js");
+    runStatsCommand(options);
+  });
+
 program.parse();

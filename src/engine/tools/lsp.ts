@@ -515,7 +515,7 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "co
  * outside the project program and will produce false-positive diagnostics
  * (e.g., test files missing vitest types when only @types/node is in tsconfig).
  */
-function loadTsconfigExcludes(workingDir: string): RegExp[] {
+export function loadTsconfigExcludes(workingDir: string): RegExp[] {
   const tsconfigPath = path.join(workingDir, "tsconfig.json");
   if (!fs.existsSync(tsconfigPath)) return [];
   try {

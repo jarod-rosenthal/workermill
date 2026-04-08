@@ -38,12 +38,21 @@ async function runDiagnosticsOnTouchedFiles(
   touchedFiles: string[],
   workingDir: string,
   log: (msg: string) => void,
-): Promise<number> {
-  if (touchedFiles.length === 0) return 0;
-  const unique = [...new Set(touchedFiles)];
+): Promise<{ errorCount: number; section: string }> {
+  if (touchedFiles.length === 0) return { errorCount: 0, section: "" };
+
+  // Filter out tsconfig-excluded files (test files produce false-positive diagnostics)
+  const excludes = lspTool.loadTsconfigExcludes(workingDir);
+  const unique = [...new Set(touchedFiles)].filter((f) => {
+    const rel = path.isAbsolute(f) ? path.relative(workingDir, f) : f;
+    return !excludes.some((re) => re.test(rel));
+  });
+  if (unique.length === 0) return { errorCount: 0, section: "" };
+
   log(`Running diagnostics on ${unique.length} touched file(s)...`);
   let totalErrors = 0;
   let lspAvailable = true;
+  const lines: string[] = [];
   for (const filePath of unique) {
     try {
       const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
@@ -55,7 +64,16 @@ async function runDiagnosticsOnTouchedFiles(
           if (parsed.lsp_available === false) { lspAvailable = false; continue; }
           const errors = parsed.summary?.errors ?? parsed.diagnostics?.filter((d: { severity: string }) => d.severity === "error").length ?? 0;
           totalErrors += errors;
-          log(errors > 0 ? `✗ ${filePath}: ${errors} error(s)` : `✓ ${filePath}: clean`);
+          const status = errors > 0 ? `✗ ${filePath}: ${errors} error(s)` : `✓ ${filePath}: clean`;
+          log(status);
+          lines.push(status);
+          // Include first few error details for reviewer context
+          if (errors > 0 && parsed.diagnostics) {
+            for (const d of parsed.diagnostics.slice(0, 5)) {
+              lines.push(`    ${d.line}:${d.col} ${d.message}`);
+            }
+            if (parsed.diagnostics.length > 5) lines.push(`    ... and ${parsed.diagnostics.length - 5} more`);
+          }
         } catch {
           log(`✓ ${filePath}: ${r.content}`);
         }
@@ -66,8 +84,16 @@ async function runDiagnosticsOnTouchedFiles(
       log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (!lspAvailable && totalErrors === 0) return -1;
-  return totalErrors;
+  if (!lspAvailable && totalErrors === 0) return { errorCount: -1, section: "" };
+
+  // Build a section for the reviewer
+  const section = totalErrors > 0
+    ? `\n\n## LSP Diagnostics — ${totalErrors} ERROR(S)\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n\nThese type errors were found in touched files. Factor them into your review — request revision if they indicate real bugs.`
+    : lines.length > 0
+      ? `\n\n## LSP Diagnostics — CLEAN\n\n${lines.map(l => `- ${l}`).join("\n")}`
+      : "";
+
+  return { errorCount: totalErrors, section };
 }
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
@@ -2780,11 +2806,12 @@ export async function runOrchestration(
       }
 
       // --- Diagnostics enforcement ---
-      const diagnosticErrors = await runDiagnosticsOnTouchedFiles(
+      const diagResult = await runDiagnosticsOnTouchedFiles(
         [...context.filesCreated, ...context.filesModified],
         workingDir,
         (msg) => output.log(story.persona, msg),
       );
+      const diagnosticErrors = diagResult.errorCount;
 
       // Check abort before completing
       if (abortSignal?.aborted) {
@@ -3032,6 +3059,18 @@ export async function runOrchestration(
       gateResultsSection =
         "\n\n## Quality Gate Results — ALL PASSED\n\n" +
         passed.map(r => `- ✓ ${r.name}`).join("\n");
+    }
+  }
+
+  // Run LSP diagnostics on touched files BEFORE review — so the reviewer sees type errors
+  if (completedStoryIds.length > 0) {
+    const diagResult = await runDiagnosticsOnTouchedFiles(
+      [...context.filesCreated, ...context.filesModified],
+      workingDir,
+      (msg) => output.coordinatorLog(msg),
+    );
+    if (diagResult.section) {
+      gateResultsSection += diagResult.section;
     }
   }
 
@@ -3755,13 +3794,6 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // --- Completion Summary ---
   try {
-    // Final diagnostics on all touched files
-    await runDiagnosticsOnTouchedFiles(
-      [...context.filesCreated, ...context.filesModified],
-      workingDir,
-      (msg) => output.coordinatorLog(msg),
-    );
-
     if (featureBranch) {
       // Show branch summary
       const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();

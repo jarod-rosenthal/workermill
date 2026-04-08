@@ -189,7 +189,7 @@ Use expensive models for judgment. Free local models for volume.
 | **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
 | **Model Routing** | Different provider per role — expensive models for planning/review, free local models for coding |
 | **12 Providers** | Anthropic, OpenAI, Google, xAI, Ollama, LM Studio, OpenRouter, Groq, DeepSeek, Mistral, AWS Bedrock, Azure |
-| **Hot-Swap Models** | `/model provider/model` mid-session — switch without restarting |
+| **Hot-Swap Models** | `/model provider/model [context]` mid-session — e.g. `/model ollama/qwen3-coder:30b 256k` |
 | **MCP Support** | Connect external tools via Model Context Protocol — auto-detects Docker Desktop |
 | **Hooks** | Pre/post tool hooks with blocking, lifecycle events, HTTP webhooks |
 | **Custom Personas** | Drop `.md` files in `.workermill/personas/` — project-level or global |
@@ -248,7 +248,7 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 
 | Command | What it does |
 |---------|-------------|
-| `/model provider/model` | Hot-swap model mid-session (e.g. `/model google/gemini-3.1-pro`) |
+| `/model provider/model [context]` | Hot-swap model mid-session (e.g. `/model ollama/qwen3-coder:30b 256k`) |
 | `/model planner` / `/model reviewer` | Switch planner or reviewer model specifically |
 | `/compact [focus]` | Compress conversation — optionally preserve specific context |
 | `/cost` | Session cost estimate and token usage |
@@ -318,6 +318,36 @@ Requires `"experimental": true` in your config.
 </details>
 
 **Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
+
+---
+
+## Context Windows
+
+WorkerMill supports a shorthand context argument on `/model` commands. You do not pass a separate flag. Just append the context size after the model:
+
+```bash
+/model ollama/qwen3-coder:30b 32k
+/model ollama/qwen3-coder:30b 256k
+/model lmstudio/deepseek-coder-v2 64k
+/model planner anthropic/claude-sonnet-4-6 256k
+```
+
+Accepted formats include values like `32k`, `128k`, `256k`, and `1m`.
+
+For local providers like Ollama and LM Studio, this is the easiest way to raise or lower the working context without editing config by hand. If you prefer to set it in config, use the numeric `contextLength` field:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "model": "qwen3-coder:30b",
+      "contextLength": 131072
+    }
+  }
+}
+```
+
+The slash command shorthand and the config value represent the same setting; the command just lets you express it in a human-friendly form.
 
 ---
 

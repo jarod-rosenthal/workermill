@@ -353,6 +353,11 @@ Verification rules:
 - Do NOT treat missing toolchains as blockers if they are not part of the repo's actual stack.
 - If a verification command fails because the toolchain is absent or not applicable, choose a smaller repo-appropriate verification instead of repeating the same bad command.
 
+Dependency rules:
+- NEVER downgrade a dependency version. If a package is at v4.x, do not change it to v3.x. Downgrades break peer dependencies and CI.
+- NEVER change dependency versions in package.json unless your story specifically requires adding a new dependency or the task explicitly asks for a version change.
+- If you encounter a compatibility issue with an existing dependency, work within the current version — do not downgrade to an older API.
+
 If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
 
 Working directory: ${workingDir}

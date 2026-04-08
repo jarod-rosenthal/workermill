@@ -468,6 +468,104 @@ A project-local `.workermill/config.json` overrides the global config for fields
 
 The project file is merged with the global config — unspecified fields fall through to global values.
 
+## Generating Configuration Schema
+
+The `wm schema` command generates a JSON Schema for `~/.workermill/cli.json` based on the runtime Zod schema definition. This provides programmatic validation and editor support for your configuration files.
+
+### Usage
+
+```bash
+# Print schema to stdout
+wm schema
+
+# Write schema to a file
+wm schema --out .workermill.schema.json
+
+# Combine with jq for schema inspection
+wm schema | jq '.properties.ticketSystem.enum'
+```
+
+### Schema Metadata
+
+The generated schema includes stable metadata for versioning and identification:
+
+```json
+{
+  "$id": "https://workermill.com/schema/cli-config-v1.json",
+  "version": "1.0.0",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
+```
+
+- **`$id`**: Unique identifier that tooling can use to cache or reference the schema
+- **`version`**: Schema version for compatibility tracking
+- **Output is deterministic**: Running the command multiple times produces identical output, enabling snapshot testing in CI
+
+### Editor Validation (VS Code)
+
+To enable IntelliSense and validation in VS Code:
+
+1. Generate the schema:
+   ```bash
+   wm schema > ~/.workermill/schema/cli-config.schema.json
+   ```
+
+2. Add a `.vscode/settings.json` to your project or global VS Code settings:
+   ```json
+   {
+     "json.schemas": [
+       {
+         "fileMatch": ["~/.workermill/cli.json", ".workermill/config.json"],
+         "url": "file://~/.workermill/schema/cli-config.schema.json"
+       }
+     ]
+   }
+   ```
+
+3. Reload VS Code. You now get autocomplete, type validation, and hover documentation when editing config files.
+
+### CI Validation
+
+Validate your config files before committing:
+
+```bash
+# Using ajv (npm install ajv ajv-cli)
+wm schema | ajv validate --spec draft7 --stdin-code -- ajv-cli stdin:config.json
+
+# Or with node
+node -e "
+  const Ajv = require('ajv');
+  const ajv = new Ajv();
+  const schema = $(wm schema);
+  const config = $(cat ~/.workermill/cli.json);
+  const validate = ajv.compile(schema);
+  const valid = validate(config);
+  if (!valid) {
+    console.error(validate.errors);
+    process.exit(1);
+  }
+"
+```
+
+### Use Cases
+
+- **Editor validation** — Get autocomplete and type checking when editing `cli.json`
+- **CI validation** — Catch malformed configs before they break your workflow
+- **Schema evolution** — Pin to `cli-config-v1.json` in automation scripts to detect breaking changes
+- **Tooling integration** — Feed the schema to config editors, linters, or migration tools
+
+### What the Schema Covers
+
+The schema describes the **global CLI config** (`~/.workermill/cli.json`):
+
+- All top-level properties (`providers`, `default`, `routing`, `review`, etc.)
+- Required vs optional fields
+- Enum constraints (e.g., `ticketSystem` values: `"github"`, `"jira"`, `"linear"`, `"none"`)
+- Nested object structures
+- Type constraints (strings, booleans, arrays, objects)
+
+**Note:** The schema is generated from the Zod runtime definition, so it always matches the current CLI implementation. It does not cover project-local `.workermill/config.json` specific fields beyond what's already in the global schema.
+
 ## Where to find your config
 
 ```bash

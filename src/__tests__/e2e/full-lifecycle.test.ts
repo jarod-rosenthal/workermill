@@ -983,4 +983,139 @@ describe("CLI E2E — full lifecycle", () => {
       expect(result.error).toBeDefined();
     });
   });
+
+  // =========================================================================
+  // 6. Stats Command Validation
+  // =========================================================================
+  describe("stats command validation", () => {
+    it("should aggregate cost data across sessions and report tokens correctly", async () => {
+      if (!ollamaAvailable) {
+        console.log("Skipping: Ollama not available");
+        return;
+      }
+
+      const tempDir = cloneTestRepo();
+      process.chdir(tempDir);
+
+      const config = buildOllamaConfig();
+      // Disable review to speed up
+      config.review = { enabled: false };
+
+      const { output, logs } = buildOrchestrationOutput();
+
+      // Run orchestration to create a session with cost data
+      const result = await runOrchestration(
+        config,
+        "Add a simple comment to the README.md file.",
+        true, // trustAll
+        true, // sandboxed
+        output,
+      );
+
+      expect(result.stories.length).toBeGreaterThan(0);
+
+      // Now run the stats command
+      const { runStatsCommand } = await import("../../stats-command.js");
+
+      // Test human-readable output
+      let capturedOutput = "";
+      const originalLog = console.log;
+      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
+
+      try {
+        runStatsCommand({ json: false });
+      } finally {
+        console.log = originalLog;
+      }
+
+      // Should contain cost and token information
+      expect(capturedOutput).toContain("Total cost");
+      expect(capturedOutput).toContain("Total tokens");
+      expect(capturedOutput).toMatch(/\d+ in \/ \d+ out/); // Input / output tokens
+
+      // Test JSON output
+      capturedOutput = "";
+      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
+
+      try {
+        runStatsCommand({ json: true });
+      } finally {
+        console.log = originalLog;
+      }
+
+      // Should be valid JSON with expected structure
+      const statsJson = JSON.parse(capturedOutput.trim());
+      expect(statsJson).toHaveProperty("sessions");
+      expect(statsJson).toHaveProperty("tokens");
+      expect(statsJson.tokens).toHaveProperty("input");
+      expect(statsJson.tokens).toHaveProperty("output");
+      expect(statsJson.tokens).toHaveProperty("total");
+      expect(statsJson).toHaveProperty("cost_usd");
+      expect(typeof statsJson.cost_usd).toBe("number");
+
+      // Verify sessions have cost data
+      expect(statsJson.sessions.total).toBeGreaterThan(0);
+      expect(statsJson.sessions.withCostData).toBeGreaterThan(0);
+    });
+
+    it("should filter stats by current working directory with --cwd flag", async () => {
+      if (!ollamaAvailable) {
+        console.log("Skipping: Ollama not available");
+        return;
+      }
+
+      const tempDir = cloneTestRepo();
+      process.chdir(tempDir);
+
+      const config = buildOllamaConfig();
+      config.review = { enabled: false };
+
+      const { output } = buildOrchestrationOutput();
+
+      // Run orchestration in the test directory
+      await runOrchestration(
+        config,
+        "Add a comment to package.json.",
+        true,
+        true,
+        output,
+      );
+
+      // Change to a different directory
+      const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-other-"));
+      tempDirs.push(otherDir);
+      process.chdir(otherDir);
+
+      const { runStatsCommand } = await import("../../stats-command.js");
+
+      let capturedOutput = "";
+      const originalLog = console.log;
+      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
+
+      try {
+        // Test --cwd flag to scope to the original directory
+        runStatsCommand({ cwd: true, json: true });
+      } finally {
+        console.log = originalLog;
+      }
+
+      const statsJson = JSON.parse(capturedOutput.trim());
+      // Should still find sessions from the --cwd directory
+      expect(statsJson.sessions.total).toBeGreaterThan(0);
+
+      // Without --cwd, should not include sessions from other directories
+      capturedOutput = "";
+      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
+
+      try {
+        runStatsCommand({ json: true });
+      } finally {
+        console.log = originalLog;
+      }
+
+      const globalStatsJson = JSON.parse(capturedOutput.trim());
+      // In the other directory, should not find the sessions
+      expect(globalStatsJson.sessions.total).toBe(0);
+    });
+  });
 });

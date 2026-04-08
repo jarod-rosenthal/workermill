@@ -11,7 +11,16 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../session.js";
-import { loadConfig, saveConfig, loadProjectSettings, saveProjectSettings, loadLocalSettings, PermissionRuleConfig } from "../config.js";
+import {
+  loadConfig,
+  saveConfig,
+  loadProjectSettings,
+  saveProjectSettings,
+  loadLocalSettings,
+  resolveConfig,
+  getProviderForPersona,
+  PermissionRuleConfig,
+} from "../config.js";
 import { listProjects } from "../project-data.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
@@ -309,7 +318,11 @@ export interface SlashCommandContext {
   setLastBuildTask: (task: string) => void;
   sandboxed?: boolean | "os";
   exit?: () => void;
-  switchModel?: (provider: string, model: string) => void;
+  switchModel?: (
+    provider: string,
+    model: string,
+    providerConfig?: { host?: string; contextLength?: number; apiKey?: string },
+  ) => void;
   updateRoleModels?: () => void;
   forceCompact?: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
   setLiveViewEnabled?: (enabled: boolean) => string | null;
@@ -570,7 +583,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "| `/review branch` | Full diff of the current feature branch vs main |\n" +
           "| `/review diff` | Uncommitted changes only |\n" +
           "| `/review #42` | A GitHub PR by number |\n\n" +
-          "Uses your configured reviewer model (`/settings route tech_lead <provider>`)."
+          "Uses your configured reviewer model (`/settings route tech_lead <provider>/<model>`)."
         );
         break;
       }
@@ -1592,25 +1605,28 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           return provider;
         };
+        const displayRoutingModel = (provider: string): string => {
+          return config.providers?.[provider]?.model || "(unknown)";
+        };
 
         // Show routing — filter out stale entries (e.g. "critic" after removal)
         const routing = config.routing;
         const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
         const routingRows = [
           ...(showAll
-            ? [`| default | ${displayRoutingProvider("default", config.default)} | ${config.default} |`]
-            : [`| default | ${displayRoutingProvider("default", config.default)} |`]),
+            ? [`| default | ${displayRoutingProvider("default", config.default)} | ${displayRoutingModel(config.default)} | ${config.default} |`]
+            : [`| default | ${displayRoutingProvider("default", config.default)} | ${displayRoutingModel(config.default)} |`]),
           ...validEntries.map(([persona, provider]) =>
             showAll
-              ? `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${provider} |`
-              : `| ${persona} | ${displayRoutingProvider(persona, provider)} |`,
+              ? `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${displayRoutingModel(provider)} | ${provider} |`
+              : `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${displayRoutingModel(provider)} |`,
           ),
         ];
         const routingHeader = showAll
-          ? `| Persona | Provider | Config key |\n|---|---|---|\n`
-          : `| Persona | Provider |\n|---|---|\n`;
+          ? `| Persona | Provider | Model | Config key |\n|---|---|---|---|\n`
+          : `| Persona | Provider | Model |\n|---|---|---|\n`;
         ctx.addSystemMessage(
-          `\n**Persona Routing** (\`/settings route <persona> <provider>\`)\n\n` +
+          `\n**Persona Routing** (\`/settings route <persona> <provider>/<model>\`)\n\n` +
           routingHeader +
           routingRows.join("\n"),
         );
@@ -1863,19 +1879,58 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
           }
           case "route": {
-            // /settings route <persona> <provider>
+            // /settings route <persona> <provider>/<model>
             const routeParts = value.split(/\s+/);
             if (routeParts.length < 2) {
-              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>`\n\nExample: `/settings route backend_developer anthropic`");
+              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>/<model>`\n\nExample: `/settings route backend_developer anthropic/claude-sonnet-4-6`");
               break;
             }
-            const [persona, provider] = routeParts;
+            const [persona, routeTarget] = routeParts;
+            const targetParts = routeTarget.split("/");
+            if (targetParts.length < 2) {
+              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>/<model>`\n\nExample: `/settings route qa_engineer xai/grok-code-fast-1`");
+              settingApplied = false;
+              break;
+            }
+            const provider = targetParts[0];
+            const model = targetParts.slice(1).join("/");
             if (!config.providers[provider]) {
               ctx.addSystemMessage(`Provider \`${provider}\` not found in config. Available: ${Object.keys(config.providers).join(", ")}\n\nTo add a provider first: \`/settings key ${provider} <api-key>\``);
               settingApplied = false;
               break;
             }
-            config.routing = { ...config.routing, [persona]: provider };
+            const envKeyMap: Record<string, string> = {
+              anthropic: "ANTHROPIC_API_KEY",
+              openai: "OPENAI_API_KEY",
+              google: "GOOGLE_GENERATIVE_AI_API_KEY",
+              xai: "XAI_API_KEY",
+              groq: "GROQ_API_KEY",
+              deepseek: "DEEPSEEK_API_KEY",
+              mistral: "MISTRAL_API_KEY",
+            };
+            const needsKey = !!envKeyMap[provider];
+            const envVar = envKeyMap[provider];
+            const hasConfigKey = !!config.providers[provider]?.apiKey;
+            const hasEnvKey = !!(envVar && process.env[envVar]);
+            if (needsKey && !hasConfigKey && !hasEnvKey) {
+              ctx.addSystemMessage(
+                `**Cannot route \`${persona}\` to \`${provider}/${model}\`** — no API key found.\n\n` +
+                `Add your key: \`/settings key ${provider} <your-api-key>\`\n` +
+                `Then run \`/settings route ${persona} ${provider}/${model}\` again.`
+              );
+              settingApplied = false;
+              break;
+            }
+            const roleProviderKey = `${provider}_${persona}`;
+            const baseEntry = config.providers[provider];
+            const apiKey = baseEntry?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
+            config.providers[roleProviderKey] = {
+              model,
+              ...(apiKey ? { apiKey } : {}),
+              ...(baseEntry?.host ? { host: baseEntry.host } : {}),
+              ...(baseEntry?.contextLength ? { contextLength: baseEntry.contextLength } : {}),
+            };
+            config.routing = { ...config.routing, [persona]: roleProviderKey };
             break;
           }
           case "key": {
@@ -1917,6 +1972,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", "doctor.maxHighRiskModules", "doctor.riskTroubleThreshold", "doctor.healthFunctioningThreshold", "doctor.healthTroubleThreshold", "doctor.deadCodeEnabled", "doctor.deadCodeMinDays", "doctor.deadCodeMaxCandidates"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
+          if (key === "route") {
+            ctx.updateRoleModels?.();
+          }
           if (key === "liveView" && ctx.setLiveViewEnabled) {
             const enabled = boolVal(value);
             const url = ctx.setLiveViewEnabled(enabled);
@@ -2452,6 +2510,23 @@ Write the file with write_file to AGENT.md in the project root.`,
         if (!p) {
           ctx.addSystemMessage(`Persona \`${personaSlug}\` not found. Use \`/personas\` to list all.`);
         } else {
+          if (ctx.switchModel) {
+            try {
+              const config = resolveConfig();
+              const routed = getProviderForPersona(config, p.provider || personaSlug);
+              ctx.switchModel(routed.provider, routed.model, {
+                apiKey: routed.apiKey,
+                host: routed.host,
+                contextLength: routed.contextLength,
+              });
+            } catch (error) {
+              logger.warn("Failed to resolve routed model for /as persona; continuing with current session model", {
+                persona: personaSlug,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
           // Prepend persona context to the task so the agent adopts the role
           const personaPrefix =
             `[Acting as **${p.name}** — ${p.description}]\n\n` +

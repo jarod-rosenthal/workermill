@@ -227,7 +227,11 @@ export interface UseAgentReturn {
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec: Record<string, number>;
   /** Switch the active model at runtime. */
-  switchModel: (provider: string, model: string) => void;
+  switchModel: (
+    provider: string,
+    model: string,
+    providerConfig?: { host?: string; contextLength?: number; apiKey?: string },
+  ) => void;
   /** Force a compaction of the conversation. */
   forceCompact: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
   /** Enable or disable interactive live view for this session. Returns active URL when enabled. */
@@ -1718,9 +1722,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
   // ------- switchModel() — hot-swap provider/model mid-session -------- //
 
-  const switchModel = useCallback((newProvider: string, newModel: string) => {
-    const config = resolveConfig();
-    const providerConfig = config?.providers?.[newProvider];
+  const switchModel = useCallback((
+    newProvider: string,
+    newModel: string,
+    explicitProviderConfig?: { host?: string; contextLength?: number; apiKey?: string },
+  ) => {
+    const providerConfig = explicitProviderConfig ?? resolveConfig()?.providers?.[newProvider];
     const host = providerConfig?.host;
     const contextLength = providerConfig?.contextLength;
 

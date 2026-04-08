@@ -37,7 +37,22 @@ vi.mock("../config.js", () => ({
     experimental: true,
   })),
   saveConfig: vi.fn(),
-  resolveConfig: vi.fn(),
+  resolveConfig: vi.fn(() => ({
+    providers: { ollama: { model: "qwen3-coder:30b" } },
+    default: "ollama",
+    experimental: true,
+  })),
+  getProviderForPersona: vi.fn((config: any, persona?: string) => {
+    const providerKey = (persona && config.routing?.[persona]) || config.default;
+    const providerConfig = config.providers?.[providerKey];
+    return {
+      provider: providerKey?.startsWith("xai") ? "xai" : providerKey,
+      model: providerConfig?.model || config.providers?.[config.default]?.model,
+      apiKey: providerConfig?.apiKey,
+      host: providerConfig?.host,
+      contextLength: providerConfig?.contextLength,
+    };
+  }),
   loadProjectSettings: vi.fn(() => null),
   loadLocalSettings: vi.fn(() => null),
   saveProjectSettings: vi.fn(),
@@ -116,7 +131,7 @@ import { formatReleaseNotesForDisplay, handleSlashCommand, type SlashCommandCont
 import { execSync } from "child_process";
 import fs from "fs";
 import { listSessions, saveSession } from "../session.js";
-import { loadConfig, saveConfig } from "../config.js";
+import { loadConfig, saveConfig, resolveConfig, getProviderForPersona } from "../config.js";
 import { undoLast, undoFile, listCheckpoints } from "../checkpoints.js";
 import { loadCustomCommands } from "../custom-commands.js";
 import { listAvailablePersonas, loadPersona } from "../personas.js";
@@ -933,8 +948,8 @@ describe("handleSlashCommand", () => {
 
       const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
       const routingMsg = calls[calls.length - 1][0] as string;
-      expect(routingMsg).toContain("| tech_lead | openai |");
-      expect(routingMsg).toContain("| planner | google |");
+      expect(routingMsg).toContain("| tech_lead | openai | gpt-5.4 |");
+      expect(routingMsg).toContain("| planner | google | gemini-2.5-pro |");
       expect(routingMsg).not.toContain("openai_tech_lead");
       expect(routingMsg).not.toContain("google_planner");
     });
@@ -958,9 +973,9 @@ describe("handleSlashCommand", () => {
 
       const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls;
       const routingMsg = calls[calls.length - 1][0] as string;
-      expect(routingMsg).toContain("| Persona | Provider | Config key |");
-      expect(routingMsg).toContain("| tech_lead | openai | openai_tech_lead |");
-      expect(routingMsg).toContain("| planner | google | google_planner |");
+      expect(routingMsg).toContain("| Persona | Provider | Model | Config key |");
+      expect(routingMsg).toContain("| tech_lead | openai | gpt-5.4 | openai_tech_lead |");
+      expect(routingMsg).toContain("| planner | google | gemini-2.5-pro | google_planner |");
     });
   });
 
@@ -1356,6 +1371,46 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/as backend_engineer review the auth middleware", ctx);
       expect(ctx.submit).toHaveBeenCalledWith(
         expect.stringContaining("review the auth middleware"),
+        expect.any(String),
+      );
+    });
+
+    it("switches to the routed persona model before submit", () => {
+      vi.mocked(resolveConfig).mockReturnValueOnce({
+        providers: {
+          ollama: { model: "qwen3-coder:30b" },
+          xai_qa_engineer: {
+            model: "grok-code-fast-1",
+            apiKey: "xai-test-key",
+            host: "https://api.x.ai/v1",
+            contextLength: 262144,
+          },
+        },
+        routing: { qa_engineer: "xai_qa_engineer" },
+        default: "ollama",
+        experimental: true,
+      } as any);
+      vi.mocked(getProviderForPersona).mockReturnValueOnce({
+        provider: "xai",
+        model: "grok-code-fast-1",
+        apiKey: "xai-test-key",
+        host: "https://api.x.ai/v1",
+        contextLength: 262144,
+      });
+      const switchModel = vi.fn();
+      const ctx = createContext({ switchModel } as any);
+      handleSlashCommand("/as qa_engineer verify the dashboard flow", ctx);
+      expect(switchModel).toHaveBeenCalledWith(
+        "xai",
+        "grok-code-fast-1",
+        {
+          apiKey: "xai-test-key",
+          host: "https://api.x.ai/v1",
+          contextLength: 262144,
+        },
+      );
+      expect(ctx.submit).toHaveBeenCalledWith(
+        expect.stringContaining("verify the dashboard flow"),
         expect.any(String),
       );
     });
@@ -1820,23 +1875,29 @@ describe("handleSlashCommand", () => {
       );
     });
 
-    it("routes persona to provider", () => {
+    it("routes persona to an explicit provider/model alias", () => {
       vi.mocked(loadConfig).mockReturnValueOnce({
         providers: { ollama: { model: "qwen3-coder:30b" }, anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
         default: "ollama",
       } as any);
       const ctx = createContext();
-      handleSlashCommand("/settings route backend_developer anthropic", ctx);
+      handleSlashCommand("/settings route backend_developer anthropic/claude-opus-4-1", ctx);
       expect(saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
-          routing: expect.objectContaining({ backend_developer: "anthropic" }),
+          routing: expect.objectContaining({ backend_developer: "anthropic_backend_developer" }),
+          providers: expect.objectContaining({
+            anthropic_backend_developer: expect.objectContaining({
+              model: "claude-opus-4-1",
+              apiKey: "sk-test",
+            }),
+          }),
         }),
       );
     });
 
     it("rejects route to nonexistent provider", () => {
       const ctx = createContext();
-      handleSlashCommand("/settings route backend_developer nonexistent", ctx);
+      handleSlashCommand("/settings route backend_developer nonexistent/some-model", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("not found"),
       );
@@ -1847,6 +1908,19 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/settings route backend_developer", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Usage"),
+      );
+    });
+
+    it("shows usage when route omits the model", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: { anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
+        default: "anthropic",
+      } as any);
+      const ctx = createContext();
+      handleSlashCommand("/settings route backend_developer anthropic", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("/settings route <persona> <provider>/<model>"),
       );
     });
   });

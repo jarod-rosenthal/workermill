@@ -117,14 +117,19 @@ export function Root(props: RootProps): React.ReactElement {
   );
 
   // Wrap switchModel to also update the display state
-  const switchModelAndDisplay = useCallback((provider: string, model: string) => {
-    agent.switchModel(provider, model);
+  const switchModelAndDisplay = useCallback((
+    provider: string,
+    model: string,
+    providerConfig?: { host?: string; contextLength?: number; apiKey?: string },
+  ) => {
+    agent.switchModel(provider, model, providerConfig);
     setActiveProvider(provider);
     setActiveModel(model);
-    // Re-resolve context from config (switchModel may have updated it)
-    const cfg = resolveConfig();
-    const provCfg = cfg?.providers?.[provider];
-    setActiveContext(resolveContextWindow(provider, model, provCfg?.contextLength));
+    setActiveContext(resolveContextWindow(
+      provider,
+      model,
+      providerConfig?.contextLength ?? resolveConfig()?.providers?.[provider]?.contextLength,
+    ));
   }, [agent]);
 
   // Orchestrator for /build — pushes messages via agent.addSystemMessage

@@ -999,7 +999,7 @@ export async function runSpecCheck(
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
 
-  const model = createModel(provider as AIProvider, modelName, host, contextLength);
+  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
   let gaps: Array<{ question: string; suggestion: string }> = [];
 
@@ -1075,7 +1075,7 @@ export async function classifyComplexity(
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
 
-  const model = createModel(provider as AIProvider, modelName, host, contextLength);
+  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
   try {
     const result = await generateObject({
@@ -1157,20 +1157,17 @@ async function planStories(
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
   const planner = loadPersona("planner");
 
-  const { provider: pProvider, model: pModel, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
-  if (pProvider) {
-    const pApiKey = config.providers[pProvider]?.apiKey;
-    if (pApiKey) {
+  const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
+  if (pProvider && pApiKey) {
       const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
       const envVar = envMap[pProvider];
       if (envVar && !process.env[envVar]) {
         const key = pApiKey.startsWith("{env:") ? process.env[pApiKey.slice(5, -1)] : pApiKey;
         if (key) process.env[envVar] = key;
       }
-    }
   }
 
-  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost, pCtx);
+  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost, pCtx, pApiKey);
   const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed);
 
   const readOnlyTools: Record<string, AnyToolDef> = {};
@@ -2371,7 +2368,7 @@ export async function runOrchestration(
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
 
-    const model = createModel(provider as AIProvider, modelName, host, contextLength);
+    const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
     // Build tools filtered by persona's allowed tools
     const allTools = createToolDefinitions(workingDir, model, sandboxed);
@@ -3088,12 +3085,11 @@ export async function runOrchestration(
   let finalReviewText = ""; // Captures the approved review for use in PR body
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
-    const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(
+    const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
       "tech_lead"
     );
 
-    const revApiKey = config.providers[revProvider]?.apiKey;
     if (revApiKey) {
       const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
       const envVar = envMap[revProvider];
@@ -3101,7 +3097,7 @@ export async function runOrchestration(
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
 
-    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
+    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
     const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
     // Read-only tools for reviewer — emit structured tool calls so UI status
@@ -3572,19 +3568,16 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           const storyPersona = loadPersona(story.persona);
           if (!storyPersona) continue;
 
-          const { provider: sProvider, model: sModel, host: sHost, contextLength: sCtx } = getProviderForPersona(
+          const { provider: sProvider, model: sModel, apiKey: sApiKey, host: sHost, contextLength: sCtx } = getProviderForPersona(
             config, storyPersona.provider || story.persona
           );
-          if (sProvider) {
-            const sApiKey = config.providers[sProvider]?.apiKey;
-            if (sApiKey) {
+          if (sProvider && sApiKey) {
               const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
               const envVar = envMap[sProvider];
               if (envVar && !process.env[envVar]) {
                 const key = sApiKey.startsWith("{env:") ? process.env[sApiKey.slice(5, -1)] : sApiKey;
                 if (key) process.env[envVar] = key;
               }
-            }
           }
 
           // Build per-story feedback: use AFFECTED_REASONS if available, otherwise full review text
@@ -3609,7 +3602,7 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           output.status(`${story.persona}: revising...`);
 
-          const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx);
+          const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx, sApiKey);
           const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
           const storyTools: Record<string, AnyToolDef> = {};
           for (const toolName of storyPersona.tools) {
@@ -4063,10 +4056,9 @@ export async function runStandaloneReview(
   }
 
   const workingDir = process.cwd();
-  const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
+  const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
 
   // Set API key
-  const revApiKey = config.providers[revProvider]?.apiKey;
   if (revApiKey) {
     const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
     const envVar = envMap[revProvider];
@@ -4079,7 +4071,7 @@ export async function runStandaloneReview(
   output.status("Reviewer -- Checking code quality");
 
   const sandboxed = config.sandbox ?? true;
-  const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
+  const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
   const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
   // Build reviewer tools — emit structured tool calls so standalone /review

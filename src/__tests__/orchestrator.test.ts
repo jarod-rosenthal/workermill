@@ -166,6 +166,7 @@ import {
   type OrchestrationOutput,
 } from "../orchestrator.ts";
 import { streamText, generateText } from "ai";
+import { createModel } from "../engine/model-factory.js";
 
 // ---- Helpers ----
 
@@ -337,6 +338,72 @@ describe("orchestrator", () => {
       await expect(
         runOrchestration(config, "Add a health check endpoint", true, false, output)
       ).resolves.not.toThrow();
+    });
+
+    it("passes API keys through for routed provider aliases", async () => {
+      const output = createMockOutput();
+      const config = {
+        providers: {
+          ollama: { model: "test-model", host: "http://localhost:11434", contextLength: 4096 },
+          xai: { model: "grok-code-fast-1", apiKey: "xai-test-key", host: "https://api.x.ai/v1" },
+          xai_qa_engineer: { model: "grok-code-fast-1", apiKey: "xai-test-key", host: "https://api.x.ai/v1" },
+        },
+        default: "ollama",
+        routing: { qa_engineer: "xai_qa_engineer" },
+        review: { enabled: false },
+      };
+
+      const plan = `Here is the plan:
+\`\`\`json
+{
+  "stories": [
+    {
+      "id": "verify-stats",
+      "title": "Verify stats command and persistence",
+      "persona": "qa_engineer",
+      "description": "Add end-to-end coverage for stats behavior.",
+      "targetFiles": ["src/__tests__/e2e/stats-command.test.ts"],
+      "referenceFiles": [],
+      "implementationNotes": "Use existing e2e patterns."
+    }
+  ]
+}
+\`\`\`
+
+Done.`;
+
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? plan : "Added the regression test.\n::file_modified::src/impl.ts";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text: isPlanner ? "Planning complete." : "Added the regression test.",
+            toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
+          });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "// impl");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      await runOrchestration(config as any, "Add stats verification", true, false, output);
+
+      expect(vi.mocked(createModel)).toHaveBeenCalledWith(
+        "xai",
+        "grok-code-fast-1",
+        "https://api.x.ai/v1",
+        undefined,
+        "xai-test-key",
+      );
     });
 
     it("calls streamText for planning", async () => {

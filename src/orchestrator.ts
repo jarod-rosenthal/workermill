@@ -3339,6 +3339,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               provider: revProvider,
               model: revModel,
               reason: err instanceof Error ? err.message : String(err),
+              stack: err instanceof Error ? err.stack : undefined,
             });
           } finally {
             timedAbort.dispose();
@@ -3739,7 +3740,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
           continue;
         }
         const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error("Review failed", { error: errMsg, provider: revProvider, model: revModel });
+        logger.error("Review failed", {
+          error: errMsg,
+          stack: err instanceof Error ? err.stack : undefined,
+          provider: revProvider,
+          model: revModel,
+          reviewRound,
+        });
         output.log("system", `Review skipped: ${errMsg}`);
         break;
       }
@@ -4225,6 +4232,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           provider: revProvider,
           model: revModel,
           reason: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
         });
       } finally {
         timedAbort.dispose();
@@ -4250,6 +4258,14 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Standalone review failed", {
+      provider: revProvider,
+      model: revModel,
+      error: msg,
+      stack: err instanceof Error ? err.stack : undefined,
+      reviewerOutputLength: reviewerOutput.length,
+      reviewerFinalTextLength: reviewerFinalText.length,
+    });
     output.error(`Review failed: ${msg}`);
     output.statusDone();
     return null;

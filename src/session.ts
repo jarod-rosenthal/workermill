@@ -21,6 +21,7 @@ export interface Session {
   provider: string;
   model: string;
   startedAt: string;
+  updatedAt: string;
   totalTokens: number;
 }
 
@@ -28,6 +29,7 @@ export interface SessionSummary {
   id: string;
   name?: string;
   startedAt: string;
+  updatedAt: string;
   messageCount: number;
   totalTokens: number;
   preview: string;
@@ -78,18 +80,21 @@ function ensureSessionsDir(): void {
 }
 
 export function createSession(provider: string, model: string): Session {
+  const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     messages: [],
     provider,
     model,
-    startedAt: new Date().toISOString(),
+    startedAt: now,
+    updatedAt: now,
     totalTokens: 0,
   };
 }
 
 export function saveSession(session: Session): void {
   ensureSessionsDir();
+  session.updatedAt = new Date().toISOString();
   const filePath = path.join(SESSIONS_DIR, `${session.id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(session, null, 2), "utf-8");
 }
@@ -107,8 +112,12 @@ export function loadLatestSession(): Session | null {
 
     if (files.length === 0) return null;
 
-    const content = fs.readFileSync(path.join(SESSIONS_DIR, files[0].name), "utf-8");
-    return JSON.parse(content) as Session;
+    const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, files[0].name), "utf-8")) as Partial<Session>;
+    // Add updatedAt if missing for backwards compatibility
+    if (!content.updatedAt) {
+      content.updatedAt = content.startedAt || new Date().toISOString();
+    }
+    return content as Session;
   } catch (err) {
     logger.error("Failed to load latest session", { error: err instanceof Error ? err.message : String(err) });
     return null;
@@ -123,27 +132,35 @@ export function addMessage(session: Session, role: "user" | "assistant", content
   });
 }
 
-export function listSessions(max = 20): SessionSummary[] {
+export function listSessions(max: number = -1): SessionSummary[] {
   ensureSessionsDir();
   try {
-    const files = fs.readdirSync(SESSIONS_DIR)
+    let files = fs.readdirSync(SESSIONS_DIR)
       .filter(f => f.endsWith(".json"))
       .map(f => ({
         name: f,
         mtime: fs.statSync(path.join(SESSIONS_DIR, f)).mtimeMs,
       }))
-      .sort((a, b) => b.mtime - a.mtime)
-      .slice(0, max);
+      .sort((a, b) => b.mtime - a.mtime);
+
+    // Only limit if max is a positive number
+    if (max > 0) {
+      files = files.slice(0, max);
+    }
 
     return files.map(f => {
-      const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f.name), "utf-8")) as Session;
-      const firstUserMsg = content.messages.find(m => m.role === "user");
+      const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f.name), "utf-8")) as Partial<Session>;
+      const firstUserMsg = content.messages?.find(m => m.role === "user");
+      // Use updatedAt if present, otherwise fall back to startedAt for backwards compatibility
+      const startedAt = content.startedAt || new Date().toISOString();
+      const updatedAt = content.updatedAt || startedAt;
       return {
-        id: content.id,
+        id: content.id || "",
         name: content.name,
-        startedAt: content.startedAt,
-        messageCount: content.messages.length,
-        totalTokens: content.totalTokens,
+        startedAt: startedAt,
+        updatedAt: updatedAt,
+        messageCount: content.messages?.length || 0,
+        totalTokens: content.totalTokens || 0,
         preview: firstUserMsg ? firstUserMsg.content.slice(0, 50) : "(empty)",
       };
     });
@@ -158,12 +175,22 @@ export function loadSessionById(id: string): Session | null {
   try {
     const filePath = path.join(SESSIONS_DIR, `${id}.json`);
     if (fs.existsSync(filePath)) {
-      return JSON.parse(fs.readFileSync(filePath, "utf-8")) as Session;
+      const content = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<Session>;
+      // Add updatedAt if missing for backwards compatibility
+      if (!content.updatedAt) {
+        content.updatedAt = content.startedAt || new Date().toISOString();
+      }
+      return content as Session;
     }
     // Try partial ID match
     const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.startsWith(id));
     if (files.length === 1) {
-      return JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, files[0]), "utf-8")) as Session;
+      const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, files[0]), "utf-8")) as Partial<Session>;
+      // Add updatedAt if missing for backwards compatibility
+      if (!content.updatedAt) {
+        content.updatedAt = content.startedAt || new Date().toISOString();
+      }
+      return content as Session;
     }
   } catch (err) {
     logger.debug("Failed to load session by id", { id, error: err instanceof Error ? err.message : String(err) });
@@ -172,12 +199,14 @@ export function loadSessionById(id: string): Session | null {
 }
 
 export function forkSession(session: Session): Session {
+  const now = new Date().toISOString();
   return {
     ...session,
     id: crypto.randomUUID(),
     name: session.name ? `${session.name} (fork)` : "fork",
     messages: session.messages.map(m => ({ ...m })),
-    startedAt: new Date().toISOString(),
+    startedAt: now,
+    updatedAt: now,
   };
 }
 

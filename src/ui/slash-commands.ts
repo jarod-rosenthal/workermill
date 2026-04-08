@@ -272,6 +272,7 @@ export interface SlashCommandContext {
     messages: any[];
     totalTokens: number;
     startedAt: string;
+    updatedAt: string;
     name?: string;
     provider: string;
     model: string;

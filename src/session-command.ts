@@ -77,6 +77,7 @@ function formatSessionSummary(summary: SessionSummary): object {
     messageCount: summary.messageCount,
     totalTokens: summary.totalTokens,
     startedAt: summary.startedAt,
+    updatedAt: summary.updatedAt,
     preview: summary.preview,
   };
 }
@@ -96,6 +97,7 @@ function formatSession(session: Session): object {
     provider: session.provider,
     model: session.model,
     startedAt: session.startedAt,
+    updatedAt: session.updatedAt,
     totalTokens: session.totalTokens,
     messageCount: session.messages.length,
   };
@@ -107,7 +109,7 @@ function formatSession(session: Session): object {
  * List all sessions
  */
 export function handleSessionList(options: { json?: boolean }): void {
-  const sessions = listSessions(100); // List all sessions, not just 20
+  const sessions = listSessions(-1); // List all sessions (-1 means no limit)
 
   if (options.json) {
     console.log(JSON.stringify(sessions.map(formatSessionSummary), null, 2));

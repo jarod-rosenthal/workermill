@@ -1047,15 +1047,15 @@ describe("CLI E2E — full lifecycle", () => {
       const statsJson = JSON.parse(capturedOutput.trim());
       expect(statsJson).toHaveProperty("sessions");
       expect(statsJson).toHaveProperty("tokens");
-      expect(statsJson.tokens).toHaveProperty("input");
-      expect(statsJson.tokens).toHaveProperty("output");
-      expect(statsJson.tokens).toHaveProperty("total");
+      expect(statsJson.tokens).toHaveProperty("input_tokens");
+      expect(statsJson.tokens).toHaveProperty("output_tokens");
+      expect(statsJson.tokens).toHaveProperty("total_tokens");
       expect(statsJson).toHaveProperty("cost_usd");
       expect(typeof statsJson.cost_usd).toBe("number");
 
       // Verify sessions have cost data
       expect(statsJson.sessions.total).toBeGreaterThan(0);
-      expect(statsJson.sessions.withCostData).toBeGreaterThan(0);
+      expect(statsJson.sessions.with_cost_data).toBeGreaterThan(0);
     });
 
     it("should filter stats by current working directory with --cwd flag", async () => {

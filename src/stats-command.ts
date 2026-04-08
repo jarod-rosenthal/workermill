@@ -473,8 +473,15 @@ export function runStatsCommand(options: {
     // Convert to snake_case schema
     const jsonStats: Record<string, unknown> = {
       period: stats.period,
-      sessions: stats.sessions,
-      tokens: stats.tokens,
+      sessions: {
+        total: stats.sessions.total,
+        with_cost_data: stats.sessions.withCostData,
+      },
+      tokens: {
+        input_tokens: stats.tokens.input,
+        output_tokens: stats.tokens.output,
+        total_tokens: stats.tokens.total,
+      },
       cost_usd: Number(stats.costUsd.toFixed(6)),
       avg_cost_per_session_usd: Number(stats.avgCostPerSessionUsd.toFixed(6)),
       by_model: stats.byModel.map(m => ({

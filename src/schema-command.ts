@@ -29,7 +29,8 @@ export interface WorkerMillJsonSchema extends Record<string, unknown> {
  */
 export function runSchemaCommand(options: SchemaCommandOptions): void {
   // Generate schema from Zod using zod-to-json-schema package
-  let schema: WorkerMillJsonSchema = zodToJsonSchema(CliConfigSchema, {
+  // Cast needed: zod-to-json-schema 3.x types expect zod 3, but works at runtime with zod 4
+  let schema: WorkerMillJsonSchema = zodToJsonSchema(CliConfigSchema as any, {
     name: "CliConfig",
     target: "jsonSchema7",
   }) as WorkerMillJsonSchema;

@@ -372,9 +372,9 @@ export const MCPServerConfigSchema = z.object({
   transport: z.enum(["stdio", "http", "sse"]).optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   url: z.string().optional(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 
 export const QualityGateCommandSchema = z.object({
@@ -424,7 +424,7 @@ export const HookConfigSchema = z.object({
 export const HooksConfigSchema = z.object({
   pre: z.array(HookConfigSchema).optional(),
   post: z.array(HookConfigSchema).optional(),
-  on: z.record(z.array(HookConfigSchema)).optional(),
+  on: z.record(z.string(), z.array(HookConfigSchema)).optional(),
 });
 
 export const GitConfigSchema = z.object({}).passthrough();
@@ -448,7 +448,7 @@ export const LinearConfigSchema = z.object({
 export const CliConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema),
   default: z.string(),
-  routing: z.record(z.string()).optional(),
+  routing: z.record(z.string(), z.string()).optional(),
   mcp: z.record(z.string(), MCPServerConfigSchema).optional(),
   review: ReviewConfigSchema.optional(),
   hooks: HooksConfigSchema.optional(),

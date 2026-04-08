@@ -205,12 +205,14 @@ function filterSessions(
 /**
  * Aggregate statistics from a list of sessions
  */
-function aggregateStats(sessions: Array<{ session: Session; cwd: string }>): StatsOutput {
+function aggregateStats(
+  sessions: Array<{ session: Session; cwd: string }>,
+  options: StatsOptions
+): StatsOutput {
   const now = new Date().toISOString();
-  const options: StatsOptions = {}; // Will be passed in actual use
   
   // Calculate date range
-  const days = options.days ?? 30;
+  const days = options.all ? 999999 : options.days ?? 30;
   const from = new Date(now);
   from.setDate(from.getDate() - days);
   
@@ -245,8 +247,24 @@ function aggregateStats(sessions: Array<{ session: Session; cwd: string }>): Sta
     projectEntry.sessions += 1;
     
     // Count tokens (always, even without cost data)
-    totalInputTokens += session.totalTokens || 0;
-    totalOutputTokens += session.totalTokens || 0;
+    // Only use per-model or per-role token data when available; totalTokens is the sum
+    if (session.costByModel) {
+      for (const model of session.costByModel) {
+        totalInputTokens += model.inputTokens || 0;
+        totalOutputTokens += model.outputTokens || 0;
+      }
+    } else if (session.costByRole) {
+      const costByRole = session.costByRole;
+      totalInputTokens += (costByRole.worker?.inputTokens || 0) +
+                          (costByRole.planner?.inputTokens || 0) +
+                          (costByRole.reviewer?.inputTokens || 0);
+      totalOutputTokens += (costByRole.worker?.outputTokens || 0) +
+                           (costByRole.planner?.outputTokens || 0) +
+                           (costByRole.reviewer?.outputTokens || 0);
+    } else if (session.inputTokens !== undefined && session.outputTokens !== undefined) {
+      totalInputTokens += session.inputTokens || 0;
+      totalOutputTokens += session.outputTokens || 0;
+    }
     
     // Count cost data if available
     if (session.totalCostUsd !== undefined) {
@@ -452,9 +470,12 @@ function renderJson(stats: StatsOutput): string {
  */
 function handleEmptyStats(options: StatsOptions): void {
   if (options.json) {
+    const days = options.all ? 999999 : options.days ?? 30;
     const period: StatsPeriod = {
-      days: options.days ?? 30,
-      from: new Date(Date.now() - ((options.days ?? 30) * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10),
+      days: days,
+      from: days >= 999999 
+        ? new Date(0).toISOString().slice(0, 10)
+        : new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10),
       to: new Date().toISOString().slice(0, 10),
     };
     
@@ -519,7 +540,7 @@ export function handleStatsCommand(options: StatsOptions): void {
   }
   
   // Aggregate stats
-  const stats = aggregateStats(filteredSessions);
+  const stats = aggregateStats(filteredSessions, options);
   
   // Output
   if (options.json) {

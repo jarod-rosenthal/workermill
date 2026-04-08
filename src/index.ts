@@ -401,9 +401,14 @@ program
     console.log();
   });
 
-// ── Models command: list available AI models ──
-program
-  .command("models [filter]")
+// ── Models command group ──
+const modelsCmd = program
+  .command("models")
+  .description("Manage AI models");
+
+// ── Models list (default): list available AI models ──
+modelsCmd
+  .command("list [filter]", { isDefault: true })
   .description("List available AI models with live provider discovery")
   .option("--json", "Emit as JSON array")
   .option("--provider <name>", "Filter to a single provider")
@@ -411,6 +416,17 @@ program
   .action(async (filter, options) => {
     const { runModelsCommand } = await import("./models-command.js");
     await runModelsCommand(filter, options);
+  });
+
+// ── Models update subcommand: explicit model catalog update ──
+modelsCmd
+  .command("update [source]")
+  .description("Explicitly update the model catalog from a source")
+  .option("--force", "Bypass cache/ETag and force refresh")
+  .option("--json", "Output machine-readable JSON result")
+  .action(async (source, options) => {
+    const { runModelsUpdateCommand } = await import("./models-command.js");
+    await runModelsUpdateCommand(source, options);
   });
 
 // ── Logs command: stream or tail log entries ──

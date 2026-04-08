@@ -1,4 +1,5 @@
 import { listProviders, fetchLiveModels, fetchRemoteModels } from "./provider-registry.js";
+import { updateModelCatalog, type ModelUpdateResult } from "./remote-models.js";
 import type { CliConfig } from "./config.js";
 
 interface ModelEntry {
@@ -8,6 +9,63 @@ interface ModelEntry {
   source: "cloud" | "live";
   host?: string;
   reachable?: boolean;
+}
+
+/**
+ * Run the `wm models update` command.
+ */
+export async function runModelsUpdateCommand(
+  source?: string,
+  options?: { force?: boolean; json?: boolean }
+): Promise<void> {
+  const { force = false, json = false } = options ?? {};
+
+  try {
+    const result: ModelUpdateResult = await updateModelCatalog(source, force);
+
+    if (json) {
+      // JSON output for automation
+      const output: Record<string, unknown> = {
+        status: result.status,
+        source: result.source,
+        modelsCount: result.modelsCount,
+        cacheFile: result.cacheFile,
+        updatedAt: result.updatedAt,
+      };
+      if (result.etag) output.etag = result.etag;
+      if (result.error) output.error = result.error;
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      // Human-readable output
+      if (result.status === "updated") {
+        console.log(`✓ Model catalog updated from "${result.source}"`);
+        console.log(`  Models: ${result.modelsCount}`);
+        console.log(`  Cache: ${result.cacheFile}`);
+      } else if (result.status === "unchanged") {
+        console.log(`✓ Model catalog unchanged (cached from "${result.source}")`);
+        console.log(`  Models: ${result.modelsCount}`);
+      } else {
+        console.log(`✗ Failed to update model catalog`);
+        if (result.error) {
+          console.log(`  Error: ${result.error}`);
+        }
+        process.exit(1);
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (json) {
+      console.log(JSON.stringify({
+        status: "failed" as const,
+        source: source || "default",
+        modelsCount: 0,
+        error: message,
+      }, null, 2));
+    } else {
+      console.log(`✗ Error updating model catalog: ${message}`);
+    }
+    process.exit(1);
+  }
 }
 
 /**

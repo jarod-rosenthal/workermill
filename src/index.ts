@@ -427,4 +427,59 @@ program
     runLogsCommand(options);
   });
 
+// ── Session command: manage conversation sessions ──
+const sessionCmd = program
+  .command("session")
+  .description("Manage conversation sessions");
+
+// ── Session list: list all sessions ──
+sessionCmd
+  .command("list")
+  .description("List all sessions")
+  .option("--json", "Emit as JSON array")
+  .action(async (options) => {
+    const { handleSessionList } = await import("./session-command.js");
+    handleSessionList(options);
+  });
+
+// ── Session show: show a session by ID or prefix ──
+sessionCmd
+  .command("show <idOrPrefix>")
+  .description("Show a session by ID or unique prefix")
+  .option("--json", "Emit as JSON object")
+  .action(async (idOrPrefix, options) => {
+    const { handleSessionShow } = await import("./session-command.js");
+    handleSessionShow(idOrPrefix, options);
+  });
+
+// ── Session last: show the last session ──
+sessionCmd
+  .command("last")
+  .description("Show the most recent session")
+  .option("--json", "Emit as JSON object")
+  .action(async (options) => {
+    const { handleSessionLast } = await import("./session-command.js");
+    handleSessionLast(options);
+  });
+
+// ── Session rename: rename a session ──
+sessionCmd
+  .command("rename <idOrPrefix> <name>")
+  .description("Rename a session by ID or unique prefix")
+  .option("--json", "Emit as JSON object")
+  .action(async (idOrPrefix, newName, options) => {
+    const { handleSessionRename } = await import("./session-command.js");
+    handleSessionRename(idOrPrefix, newName, options);
+  });
+
+// ── Session delete: delete a session ──
+sessionCmd
+  .command("delete <idOrPrefix>")
+  .description("Delete a session by ID or unique prefix")
+  .option("--json", "Emit as JSON object")
+  .action(async (idOrPrefix, options) => {
+    const { handleSessionDelete } = await import("./session-command.js");
+    handleSessionDelete(idOrPrefix, options);
+  });
+
 program.parse();

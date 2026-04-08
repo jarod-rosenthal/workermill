@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import type { CliConfig } from "./config.js";
 import * as providersNamespace from "./providers/index.js";
 
@@ -37,6 +38,18 @@ export { fetchRemoteModels } from "./remote-models.js";
 const OLLAMA_DEFAULT_HOST = "http://localhost:11434";
 const LMSTUDIO_DEFAULT_HOST = "http://localhost:1234";
 
+/** Detect WSL gateway IP for reaching Windows-side services. */
+function getWslGatewayIp(): string | undefined {
+  try {
+    if (process.platform !== "linux") return undefined;
+    if (!process.env.WSL_DISTRO_NAME && !process.env.WSL_INTEROP) return undefined;
+    const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
+    return gateway || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Fetch live models from local providers (Ollama, LM Studio).
  *
@@ -56,13 +69,33 @@ export async function fetchLiveModels(
 }>> {
   const { probeDefaults = false } = options ?? {};
 
-  const ollamaHost = config?.providers?.ollama?.host ?? (probeDefaults ? OLLAMA_DEFAULT_HOST : undefined);
+  const explicitOllamaHost = config?.providers?.ollama?.host;
+  const ollamaConfigured = Boolean(config?.providers?.ollama);
   const rawLmHost = config?.providers?.lmstudio?.host ?? (probeDefaults ? LMSTUDIO_DEFAULT_HOST : undefined);
   const lmHost = rawLmHost?.replace(/\/v1\/?$/, "");
 
+  // Build list of Ollama hosts to probe: explicit config, then defaults.
+  // In WSL, also try Windows host via gateway IP (Ollama runs on Windows).
+  // Probe defaults when: explicitly asked (probeDefaults) OR ollama is a configured
+  // provider but has no host set (user ran setup, wants ollama, just didn't save a host).
+  const ollamaHosts: string[] = [];
+  if (explicitOllamaHost) {
+    ollamaHosts.push(explicitOllamaHost);
+  } else if (probeDefaults || ollamaConfigured) {
+    ollamaHosts.push(OLLAMA_DEFAULT_HOST);
+    const gateway = getWslGatewayIp();
+    if (gateway) ollamaHosts.push(`http://${gateway}:11434`);
+  }
+
   const results = await Promise.allSettled([
-    ollamaHost ? fetchOllamaModels(ollamaHost) : Promise.resolve([]),
-    lmHost     ? fetchLMStudioModels(lmHost)   : Promise.resolve([]),
+    (async () => {
+      for (const host of ollamaHosts) {
+        const models = await fetchOllamaModels(host);
+        if (models.some(m => m.reachable)) return models;
+      }
+      return ollamaHosts.length ? [{ provider: "ollama", id: "", host: ollamaHosts[0], reachable: false }] : [];
+    })(),
+    lmHost ? fetchLMStudioModels(lmHost) : Promise.resolve([]),
   ]);
 
   return results.flatMap(r => r.status === "fulfilled" ? r.value : []);

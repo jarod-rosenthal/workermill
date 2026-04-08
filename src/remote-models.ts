@@ -348,7 +348,7 @@ export async function updateModelCatalog(source: string | undefined, force: bool
         // Save to cache (only models and etag, per original interface)
         saveCache({ models: data, etag });
         
-        // Determine if truly updated (different model count or content)
+        // Determine if updated based on different model count
         status = data.length !== previousCount ? "updated" : "unchanged";
         models = data;
         sourceDisplay = "remote";

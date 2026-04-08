@@ -660,6 +660,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
     // Ensure project metadata is loaded/created for tracking
     loadProjectMeta(workingDirRef.current);
+
+    // Set finishedAt on clean exit
+    process.on('exit', () => {
+      const session = sessionRef.current;
+      if (session && !session.finishedAt) {
+        session.finishedAt = new Date().toISOString();
+        saveSession(session);
+      }
+    });
   }
 
   // Push restored messages into React state after first render.

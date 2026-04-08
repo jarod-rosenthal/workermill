@@ -3,7 +3,7 @@ import os from "os";
 import fs from "fs";
 import chalk from "chalk";
 import { Session, SessionCostModel, SessionCostByRole } from "./session.js";
-import { getProjectSessionsDir, getProjectRootDir } from "./project-data.js";
+import { getProjectSessionsDir } from "./project-data.js";
 
 /**
  * Stats aggregation types for cross-session analytics.
@@ -470,15 +470,46 @@ export function runStatsCommand(options: {
 
   if (options.json) {
     // Output JSON with proper precision (6 decimal places for cost values)
+    // Convert to snake_case schema
     const jsonStats: Record<string, unknown> = {
       period: stats.period,
       sessions: stats.sessions,
       tokens: stats.tokens,
       cost_usd: Number(stats.costUsd.toFixed(6)),
       avg_cost_per_session_usd: Number(stats.avgCostPerSessionUsd.toFixed(6)),
-      by_model: stats.byModel,
-      by_role: stats.byRole,
-      by_project: stats.byProject,
+      by_model: stats.byModel.map(m => ({
+        key: m.key,
+        provider: m.provider,
+        model: m.model,
+        input_tokens: m.inputTokens,
+        output_tokens: m.outputTokens,
+        cost_usd: Number(m.costUsd.toFixed(6)),
+        roles: m.roles,
+      })),
+      by_role: {
+        worker: {
+          input_tokens: stats.byRole.worker.inputTokens,
+          output_tokens: stats.byRole.worker.outputTokens,
+          cost_usd: Number(stats.byRole.worker.costUsd.toFixed(6)),
+        },
+        planner: {
+          input_tokens: stats.byRole.planner.inputTokens,
+          output_tokens: stats.byRole.planner.outputTokens,
+          cost_usd: Number(stats.byRole.planner.costUsd.toFixed(6)),
+        },
+        reviewer: {
+          input_tokens: stats.byRole.reviewer.inputTokens,
+          output_tokens: stats.byRole.reviewer.outputTokens,
+          cost_usd: Number(stats.byRole.reviewer.costUsd.toFixed(6)),
+        },
+      },
+      by_project: stats.byProject.map(p => ({
+        cwd: p.cwd,
+        sessions: p.sessions,
+        cost_usd: Number(p.costUsd.toFixed(6)),
+        input_tokens: p.inputTokens,
+        output_tokens: p.outputTokens,
+      })),
     };
     console.log(JSON.stringify(jsonStats, null, 2));
   } else {

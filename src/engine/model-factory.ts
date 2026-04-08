@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import { type LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai, createOpenAI } from "@ai-sdk/openai";
@@ -6,6 +7,17 @@ import { xai, createXai } from "@ai-sdk/xai";
 import { openrouter, createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import type { AIProvider } from "./types.js";
+
+/** Resolve localhost host for a local provider, using WSL gateway if in WSL. */
+function resolveLocalProviderHost(port: number): string {
+  if (process.platform === "linux" && (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP)) {
+    try {
+      const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
+      if (gateway) return `http://${gateway}:${port}`;
+    } catch { /* fall through */ }
+  }
+  return `http://localhost:${port}`;
+}
 
 /**
  * Build providerOptions for passing num_ctx to Ollama.
@@ -164,14 +176,14 @@ export function createModel(
       return xaiProvider(modelName as Parameters<typeof xai>[0]);
     }
     case "ollama": {
-      const ollamaHost = host || "http://localhost:11434";
+      const ollamaHost = host || resolveLocalProviderHost(11434);
       // keepAlive: "-1" prevents model unload during long tool calls (CLAUDE.md rule).
       // Type cast needed — property works at runtime but missing from package types.
       const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, compatibility: "strict", keepAlive: "-1" } as any);
       return ollamaProvider(modelName);
     }
     case "lmstudio": {
-      const lmStudioHost = host || "http://localhost:1234/v1";
+      const lmStudioHost = host || `${resolveLocalProviderHost(1234)}/v1`;
       // LM Studio exposes an OpenAI-compatible API but doesn't require an API key.
       // Pass a dummy key to satisfy the SDK's validation.
       const lmStudio = createOpenAI({ baseURL: lmStudioHost, apiKey: "lm-studio" });

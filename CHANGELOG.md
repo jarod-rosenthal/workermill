@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Ollama not discovered in WSL** — model listing and model factory now detect the WSL gateway IP automatically, so Ollama running on the Windows host is reachable without an explicit `host` in config.
+
 ## [0.16.0] - 2026-04-07
 
 ### Added

@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { CliConfigSchema } from "../config.js";
+import { generateCliConfigJsonSchema } from "../schema-command.js";
+
+function getCliConfigNode(schema: any) {
+  return schema.definitions?.CliConfig ?? schema;
+}
 
 describe("schema command", () => {
   let tmpDir: string;
@@ -22,27 +26,17 @@ describe("schema command", () => {
 
   describe("schema generation", () => {
     it("generates valid JSON schema from CliConfigSchema", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
+      const schema = generateCliConfigJsonSchema();
+      const cliConfig = getCliConfigNode(schema);
 
       expect(schema).toBeDefined();
-      expect(schema.$ref).toBe("#/definitions/CliConfig");
-      expect(schema.definitions).toBeDefined();
-      expect(schema.definitions.CliConfig).toBeDefined();
-      expect(schema.definitions.CliConfig.type).toBe("object");
+      expect(cliConfig).toBeDefined();
+      expect(cliConfig.type).toBe("object");
     });
 
     it("includes all expected top-level properties", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
-
-      const props = schema.definitions.CliConfig.properties;
+      const schema = generateCliConfigJsonSchema();
+      const props = getCliConfigNode(schema).properties;
       expect(props.providers).toBeDefined();
       expect(props.default).toBeDefined();
       expect(props.routing).toBeDefined();
@@ -66,47 +60,27 @@ describe("schema command", () => {
     });
 
     it("marks providers and default as required", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
-
-      const required = schema.definitions.CliConfig.required;
+      const schema = generateCliConfigJsonSchema();
+      const required = getCliConfigNode(schema).required;
       expect(required).toContain("providers");
       expect(required).toContain("default");
     });
 
     it("includes enum values for ticketSystem", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
-
-      const ticketSystem = schema.definitions.CliConfig.properties.ticketSystem;
+      const schema = generateCliConfigJsonSchema();
+      const ticketSystem = getCliConfigNode(schema).properties.ticketSystem;
       expect(ticketSystem.enum).toEqual(["github", "jira", "linear", "none"]);
     });
 
     it("includes enum values for MCPServerConfig transport", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
-
-      const mcpTransport = schema.definitions.CliConfig.properties.mcp?.additionalProperties?.properties?.transport;
+      const schema = generateCliConfigJsonSchema();
+      const mcpTransport = getCliConfigNode(schema).properties.mcp?.additionalProperties?.properties?.transport;
       expect(mcpTransport?.enum).toEqual(["stdio", "http", "sse"]);
     });
 
     it("includes union type for liveView (boolean | 'auto')", () => {
-      const schema = zodToJsonSchema(CliConfigSchema, {
-        name: "CliConfig",
-        $ref: true,
-        target: "jsonSchema7",
-      });
-
-      const liveView = schema.definitions.CliConfig.properties.liveView;
+      const schema = generateCliConfigJsonSchema();
+      const liveView = getCliConfigNode(schema).properties.liveView;
       expect(liveView.anyOf).toBeDefined();
     });
   });
@@ -146,7 +120,7 @@ describe("schema command", () => {
         const content = fs.readFileSync(outPath, "utf-8");
         const parsed = JSON.parse(content);
         expect(parsed.$id).toBe("https://workermill.com/schema/cli-config-v1.json");
-        expect(parsed.definitions.CliConfig).toBeDefined();
+        expect(getCliConfigNode(parsed).properties).toBeDefined();
       } finally {
         console.log = originalLog;
       }
@@ -207,7 +181,7 @@ describe("schema command", () => {
       const result = CliConfigSchema.safeParse(invalidConfig);
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errors = result.error.errors.map((e: any) => e.path.join("."));
+        const errors = result.error.issues.map((e: any) => e.path.join("."));
         expect(errors).toContain("providers");
       }
     });

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toJSONSchema } from "zod";
 import { CliConfigSchema } from "./config.js";
 
 const SCHEMA_ID = "https://workermill.com/schema/cli-config-v1.json";
@@ -27,19 +27,20 @@ export interface WorkerMillJsonSchema extends Record<string, unknown> {
 /**
  * Generate JSON Schema for the global cli.json config.
  */
-export function runSchemaCommand(options: SchemaCommandOptions): void {
-  // Generate schema from Zod using zod-to-json-schema package
-  // Cast needed: zod-to-json-schema 3.x types expect zod 3, but works at runtime with zod 4
-  let schema: WorkerMillJsonSchema = zodToJsonSchema(CliConfigSchema as any, {
-    name: "CliConfig",
-    target: "jsonSchema7",
-  }) as WorkerMillJsonSchema;
+export function generateCliConfigJsonSchema(): WorkerMillJsonSchema {
+  const schema = toJSONSchema(CliConfigSchema, {
+    target: "draft-07",
+  }) as unknown as WorkerMillJsonSchema;
 
-  // Add stable metadata
   schema.$id = SCHEMA_ID;
   schema.version = SCHEMA_VERSION;
   schema.title = "WorkerMill CLI Configuration";
   schema.description = "JSON Schema for WorkerMill global CLI configuration (~/.workermill/cli.json)";
+  return schema;
+}
+
+export function runSchemaCommand(options: SchemaCommandOptions): void {
+  const schema = generateCliConfigJsonSchema();
 
   // Output to file or stdout
   const output = JSON.stringify(schema, null, 2);

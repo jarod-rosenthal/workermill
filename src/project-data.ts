@@ -4,7 +4,7 @@ import os from "os";
 import crypto from "crypto";
 
 // Project-scoped data stored in ~/.workermill/projects/<project-hash>/
-const PROJECTS_DIR = path.join(os.homedir(), ".workermill", "projects");
+const getProjectsDir = () => path.join(os.homedir(), ".workermill", "projects");
 
 /**
  * Get the canonical project ID by resolving the realpath of the current working directory.
@@ -26,7 +26,7 @@ function getProjectId(cwd?: string): string {
  */
 export function getProjectRootDir(cwd?: string): string {
   const projectId = getProjectId(cwd);
-  return path.join(PROJECTS_DIR, projectId);
+  return path.join(getProjectsDir(), projectId);
 }
 
 /**

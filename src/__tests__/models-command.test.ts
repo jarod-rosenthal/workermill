@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runModelsCommand } from "../models-command.js";
+import { runModelsCommand, runModelsUpdateCommand } from "../models-command.js";
 
 // ---- Mocks (must be declared before imports) ----
 
@@ -13,13 +13,19 @@ vi.mock("../config.js", () => ({
   resolveConfig: vi.fn(),
 }));
 
+vi.mock("../remote-models.js", () => ({
+  updateModelCatalog: vi.fn(),
+}));
+
 import * as providerRegistry from "../provider-registry.js";
 import { resolveConfig } from "../config.js";
+import { updateModelCatalog } from "../remote-models.js";
 
 const mockListProviders = vi.mocked(providerRegistry.listProviders);
 const mockFetchLiveModels = vi.mocked(providerRegistry.fetchLiveModels);
 const mockFetchRemoteModels = vi.mocked(providerRegistry.fetchRemoteModels);
 const mockResolveConfig = vi.mocked(resolveConfig);
+const mockUpdateModelCatalog = vi.mocked(updateModelCatalog);
 
 let mockConsoleLog: any;
 
@@ -62,6 +68,13 @@ describe("models-command", () => {
 
     // Mock remote models (empty by default — unit tests cover remote-models.ts separately)
     mockFetchRemoteModels.mockResolvedValue([]);
+    mockUpdateModelCatalog.mockResolvedValue({
+      status: "updated",
+      source: "remote",
+      modelsCount: 3,
+      cacheFile: "/mock/.workermill/models-cache.json",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    });
   });
 
   afterEach(() => {
@@ -148,6 +161,39 @@ describe("models-command", () => {
     it("shows no models message when filtered to nothing", async () => {
       await runModelsCommand("nonexistent");
       expect(mockConsoleLog).toHaveBeenCalledWith("No models found matching the criteria.");
+    });
+  });
+
+  describe("runModelsUpdateCommand", () => {
+    it("outputs JSON for automation", async () => {
+      await runModelsUpdateCommand("embedded", { json: true });
+      const jsonCall = mockConsoleLog.mock.calls.find(call => String(call[0]).startsWith("{"));
+      expect(jsonCall).toBeDefined();
+      expect(JSON.parse(jsonCall![0])).toEqual({
+        status: "updated",
+        source: "remote",
+        modelsCount: 3,
+        cacheFile: "/mock/.workermill/models-cache.json",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      });
+    });
+
+    it("exits non-zero on failed updates", async () => {
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+        throw new Error("process.exit");
+      }) as any);
+      mockUpdateModelCatalog.mockResolvedValueOnce({
+        status: "failed",
+        source: "https://example.com/models.json",
+        modelsCount: 0,
+        cacheFile: "/mock/.workermill/models-cache.json",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+        error: "Network error",
+      });
+
+      await expect(runModelsUpdateCommand("https://example.com/models.json")).rejects.toThrow("process.exit");
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      exitSpy.mockRestore();
     });
   });
 });

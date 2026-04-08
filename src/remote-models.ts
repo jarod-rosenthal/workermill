@@ -136,9 +136,14 @@ export interface ModelUpdateResult {
   error?: string;
 }
 
+type CatalogSourceKind = "remote" | "url" | "file" | "embedded";
+
 interface CacheData {
   models: RemoteModelInfo[];
   etag?: string;
+  source?: string;
+  sourceKind?: CatalogSourceKind;
+  updatedAt?: string;
 }
 
 function getConfigDir(): string {
@@ -169,6 +174,88 @@ function saveCache(data: CacheData): void {
   fs.writeFileSync(cacheFile, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
+function getDefaultRemoteSource(): string {
+  return getModelsUrl();
+}
+
+function getCacheSource(cache: CacheData | null): { kind: CatalogSourceKind; source: string } {
+  if (cache?.sourceKind && cache.source) {
+    return { kind: cache.sourceKind, source: cache.source };
+  }
+  return { kind: "remote", source: getDefaultRemoteSource() };
+}
+
+function catalogsEqual(a: RemoteModelInfo[] | undefined, b: RemoteModelInfo[] | undefined): boolean {
+  return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+}
+
+function isUrlSource(source: string): boolean {
+  return source.startsWith("http://") || source.startsWith("https://");
+}
+
+function normalizeFileSource(filePath: string): string {
+  return path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+}
+
+interface UrlFetchResult {
+  models: RemoteModelInfo[];
+  etag?: string;
+  notModified: boolean;
+}
+
+async function fetchCatalogFromUrl(
+  url: string,
+  options?: { force?: boolean; etag?: string },
+): Promise<UrlFetchResult> {
+  const { force = false, etag } = options ?? {};
+  const headers: Record<string, string> = {};
+  if (!force && etag) {
+    headers["If-None-Match"] = etag;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await globalThis.fetch(url, {
+      signal: controller.signal,
+      headers,
+    });
+
+    if (res.status === 304) {
+      return { models: [], etag, notModified: true };
+    }
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch from ${url}: HTTP ${res.status}`);
+    }
+
+    const models = await res.json() as RemoteModelInfo[];
+    return {
+      models,
+      etag: res.headers.get("etag") || undefined,
+      notModified: false,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function saveCatalogCache(data: {
+  models: RemoteModelInfo[];
+  etag?: string;
+  source: string;
+  sourceKind: CatalogSourceKind;
+  updatedAt: string;
+}): void {
+  saveCache({
+    models: data.models,
+    etag: data.etag,
+    source: data.source,
+    sourceKind: data.sourceKind,
+    updatedAt: data.updatedAt,
+  });
+}
+
 /**
  * Fetch remote model catalog from GitHub (jarod-rosenthal/workermill)
  * with ETag-based caching. Returns models or empty array on failure.
@@ -180,34 +267,35 @@ export async function fetchRemoteModels(config: CliConfig, forceRefresh = false)
   }
 
   const cache = loadCache();
+  const cacheSource = getCacheSource(cache);
 
-  const headers: Record<string, string> = {};
-  if (!forceRefresh && cache?.etag) {
-    headers["If-None-Match"] = cache.etag;
+  if (cacheSource.kind === "embedded" || cacheSource.kind === "file") {
+    return cache?.models || [];
   }
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-    const res = await globalThis.fetch(getModelsUrl(), {
-      signal: controller.signal,
-      headers
+    const result = await fetchCatalogFromUrl(cacheSource.source, {
+      force: forceRefresh,
+      etag: cache?.etag,
     });
-    clearTimeout(timeout);
 
-    if (res.status === 304 && cache) {
+    if (result.notModified && cache) {
       return cache.models;
     }
 
-    if (res.ok) {
-      const data = await res.json() as RemoteModelInfo[];
-      const etag = res.headers.get("etag") || undefined;
+    if (result.models.length > 0) {
       try {
-        saveCache({ models: data, etag });
+        saveCatalogCache({
+          models: result.models,
+          etag: result.etag,
+          source: cacheSource.source,
+          sourceKind: cacheSource.kind,
+          updatedAt: new Date().toISOString(),
+        });
       } catch {
         // Ignore cache write errors
       }
-      return data;
+      return result.models;
     }
   } catch {
     // On error, return cached if available
@@ -220,7 +308,7 @@ export async function fetchRemoteModels(config: CliConfig, forceRefresh = false)
  * Load model catalog from a local file path.
  */
 export async function loadModelsFromFile(filePath: string): Promise<RemoteModelInfo[]> {
-  const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+  const absolutePath = normalizeFileSource(filePath);
   
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`File not found: ${absolutePath}`);
@@ -248,48 +336,11 @@ export async function loadModelsFromFile(filePath: string): Promise<RemoteModelI
  */
 export async function loadModelsFromUrl(url: string, forceRefresh = false): Promise<RemoteModelInfo[]> {
   const cache = loadCache();
-  const cachedModels = cache?.models || [];
-  const cachedEtag = cache?.etag;
-
-  // For custom URLs, don't rely on cached etag since it's only valid for the default URL
-  const headers: Record<string, string> = {};
-  if (!forceRefresh && cachedEtag) {
-    // Only use cached etag if we're fetching from the same default URL
-    // Custom URLs bypass etag caching
-    const defaultUrl = getModelsUrl();
-    if (url === defaultUrl) {
-      headers["If-None-Match"] = cachedEtag;
-    }
-  }
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await globalThis.fetch(url, {
-      signal: controller.signal,
-      headers
-    });
-    clearTimeout(timeout);
-
-    if (res.status === 304 && cachedModels.length > 0) {
-      return cachedModels;
-    }
-
-    if (res.ok) {
-      const data = await res.json() as RemoteModelInfo[];
-      const etag = res.headers.get("etag") || undefined;
-      return data;
-    }
-
-    throw new Error(`Failed to fetch from ${url}: HTTP ${res.status}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("abort") || message.includes("fetch")) {
-      // Network error - return cached if available
-      return cachedModels;
-    }
-    throw err;
-  }
+  const result = await fetchCatalogFromUrl(url, {
+    force: forceRefresh,
+    etag: cache?.sourceKind === "url" && cache.source === url ? cache.etag : undefined,
+  });
+  return result.notModified ? (cache?.models || []) : result.models;
 }
 
 /**
@@ -309,6 +360,8 @@ export function loadEmbeddedModels(): RemoteModelInfo[] {
 export async function updateModelCatalog(source: string | undefined, force: boolean = false): Promise<ModelUpdateResult> {
   const cacheFile = getCacheFile();
   const now = new Date().toISOString();
+  const previousCache = loadCache();
+  const previousSource = getCacheSource(previousCache);
   
   let models: RemoteModelInfo[] = [];
   let etag: string | undefined;
@@ -318,61 +371,92 @@ export async function updateModelCatalog(source: string | undefined, force: bool
 
   try {
     if (source === undefined || source === "remote") {
-      // Fetch from default remote source
-      const cache = loadCache();
-      const headers: Record<string, string> = {};
-      if (!force && cache?.etag) {
-        headers["If-None-Match"] = cache.etag;
-      }
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await globalThis.fetch(getModelsUrl(), {
-        signal: controller.signal,
-        headers
+      const remoteSource = getDefaultRemoteSource();
+      const result = await fetchCatalogFromUrl(remoteSource, {
+        force,
+        etag: previousSource.kind === "remote" ? previousCache?.etag : undefined,
       });
-      clearTimeout(timeout);
+      sourceDisplay = "remote";
 
-      if (res.status === 304 && cache?.models) {
-        // Not modified - unchanged
+      if (result.notModified && previousCache?.models) {
         status = "unchanged";
-        models = cache.models;
-        etag = cache.etag;
-        sourceDisplay = "remote (cached)";
-      } else if (res.ok) {
-        const data = await res.json() as RemoteModelInfo[];
-        etag = res.headers.get("etag") || undefined;
-        const previousCache = loadCache();
-        const previousCount = previousCache?.models?.length || 0;
-        
-        // Save to cache (only models and etag, per original interface)
-        saveCache({ models: data, etag });
-        
-        // Determine if updated based on different model count
-        status = data.length !== previousCount ? "updated" : "unchanged";
-        models = data;
-        sourceDisplay = "remote";
+        models = previousCache.models;
+        etag = previousCache.etag;
       } else {
-        throw new Error(`HTTP ${res.status}`);
+        models = result.models;
+        etag = result.etag;
+        status =
+          previousSource.kind === "remote" &&
+          previousSource.source === remoteSource &&
+          catalogsEqual(previousCache?.models, models)
+            ? "unchanged"
+            : "updated";
+        saveCatalogCache({
+          models,
+          etag,
+          source: remoteSource,
+          sourceKind: "remote",
+          updatedAt: now,
+        });
       }
     } else if (source === "embedded") {
-      // Load embedded catalog
       models = loadEmbeddedModels();
-      saveCache({ models }); // No etag for embedded
-      status = "updated";
       sourceDisplay = "embedded";
-    } else if (source.startsWith("http://") || source.startsWith("https://")) {
-      // Load from URL
-      models = await loadModelsFromUrl(source, force);
-      saveCache({ models }); // No etag for custom URLs
-      status = "updated";
+      status =
+        previousSource.kind === "embedded" &&
+        catalogsEqual(previousCache?.models, models)
+          ? "unchanged"
+          : "updated";
+      saveCatalogCache({
+        models,
+        source: "embedded",
+        sourceKind: "embedded",
+        updatedAt: now,
+      });
+    } else if (isUrlSource(source)) {
+      const result = await fetchCatalogFromUrl(source, {
+        force,
+        etag: previousSource.kind === "url" && previousSource.source === source ? previousCache?.etag : undefined,
+      });
       sourceDisplay = source;
+
+      if (result.notModified && previousCache?.models && previousSource.kind === "url" && previousSource.source === source) {
+        status = "unchanged";
+        models = previousCache.models;
+        etag = previousCache.etag;
+      } else {
+        models = result.models;
+        etag = result.etag;
+        status =
+          previousSource.kind === "url" &&
+          previousSource.source === source &&
+          catalogsEqual(previousCache?.models, models)
+            ? "unchanged"
+            : "updated";
+        saveCatalogCache({
+          models,
+          etag,
+          source,
+          sourceKind: "url",
+          updatedAt: now,
+        });
+      }
     } else {
-      // Treat as file path
-      models = await loadModelsFromFile(source);
-      saveCache({ models }); // No etag for file paths
-      status = "updated";
+      const normalizedSource = normalizeFileSource(source);
+      models = await loadModelsFromFile(normalizedSource);
       sourceDisplay = source;
+      status =
+        previousSource.kind === "file" &&
+        previousSource.source === normalizedSource &&
+        catalogsEqual(previousCache?.models, models)
+          ? "unchanged"
+          : "updated";
+      saveCatalogCache({
+        models,
+        source: normalizedSource,
+        sourceKind: "file",
+        updatedAt: now,
+      });
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);

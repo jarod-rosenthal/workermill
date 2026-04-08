@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { fetchRemoteModels } from "../remote-models";
+import { fetchRemoteModels, updateModelCatalog } from "../remote-models";
 import type { CliConfig } from "../config.js";
 
 // Mock fetch globally
@@ -16,8 +16,38 @@ vi.mock("path");
 vi.mock("os");
 
 // Set up mocks before module import
-vi.mocked(path.join).mockImplementation((...args) => args.join("/"));
-vi.mocked(os.homedir).mockReturnValue("/mock");
+function applyPathMocks(): void {
+  vi.mocked(path.join).mockImplementation((...args) => args.join("/"));
+  vi.mocked(path.resolve).mockImplementation((...args) => args.join("/"));
+  vi.mocked(path.isAbsolute).mockImplementation((value) => String(value).startsWith("/"));
+  vi.mocked(os.homedir).mockReturnValue("/mock");
+}
+
+applyPathMocks();
+
+const mockModels = [
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6",
+    contextWindow: 1000000,
+    inputRate: 0.003,
+    outputRate: 0.015,
+    tier: "balanced",
+  },
+];
+
+const updatedButSameCountModels = [
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6 Updated",
+    contextWindow: 1000000,
+    inputRate: 0.003,
+    outputRate: 0.015,
+    tier: "balanced",
+  },
+];
 
 describe("fetchRemoteModels", () => {
   it("function exists", () => {
@@ -34,31 +64,20 @@ describe("fetchRemoteModels", () => {
     disableModelAutoUpdate: true,
   };
 
-  const mockModels = [
-    {
-      provider: "anthropic",
-      id: "claude-sonnet-4-6",
-      displayName: "Claude Sonnet 4.6",
-      contextWindow: 1000000,
-      inputRate: 0.003,
-      outputRate: 0.015,
-      tier: "balanced",
-    },
-  ];
-
   const mockEtag = '"abc123"';
-  const cacheDir = "/mock/.workermill";
   const cacheFile = "/mock/.workermill/models-cache.json";
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockReset();
+    applyPathMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.writeFileSync).mockReset();
+    vi.mocked(fs.mkdirSync).mockReset();
 
     // Mock fs.existsSync
     vi.mocked(fs.existsSync).mockReturnValue(false);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it("returns empty array when disabled", async () => {
@@ -81,11 +100,31 @@ describe("fetchRemoteModels", () => {
 
     expect(mockFetch).toHaveBeenCalledWith("https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json", expect.any(Object));
     expect(result).toEqual(mockModels);
-    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
-      cacheFile,
-      JSON.stringify({ models: mockModels, etag: mockEtag }, null, 2) + "\n",
-      "utf-8"
-    );
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    expect(writeCall?.[0]).toBe(cacheFile);
+    expect(writeCall?.[2]).toBe("utf-8");
+    expect(JSON.parse(String(writeCall?.[1]))).toEqual(expect.objectContaining({
+      models: mockModels,
+      etag: mockEtag,
+      source: "https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json",
+      sourceKind: "remote",
+      updatedAt: expect.any(String),
+    }));
+  });
+
+  it("returns pinned embedded catalog without fetching remote", async () => {
+    const cachedData = {
+      source: "embedded",
+      sourceKind: "embedded",
+      models: mockModels,
+    };
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(cachedData));
+
+    const result = await fetchRemoteModels(mockConfig);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result).toEqual(mockModels);
   });
 
   it("uses cached data on 304 Not Modified", async () => {
@@ -227,5 +266,84 @@ describe("fetchRemoteModels", () => {
       headers: {}, // No If-None-Match header
       signal: expect.any(AbortSignal),
     });
+  });
+});
+
+describe("updateModelCatalog", () => {
+  const cacheFile = "/mock/.workermill/models-cache.json";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    applyPathMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.writeFileSync).mockReset();
+    vi.mocked(fs.mkdirSync).mockReset();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  it("marks remote updates as updated when content changes but count stays the same", async () => {
+    const cachedData = {
+      source: "https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json",
+      sourceKind: "remote",
+      etag: '"old"',
+      models: mockModels,
+    };
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(cachedData));
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: {
+        get: vi.fn().mockReturnValue('"new"'),
+      },
+      json: vi.fn().mockResolvedValue(updatedButSameCountModels),
+    });
+
+    const result = await updateModelCatalog(undefined, false);
+    expect(result.status).toBe("updated");
+    expect(result.modelsCount).toBe(1);
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    expect(writeCall?.[0]).toBe(cacheFile);
+    expect(JSON.parse(String(writeCall?.[1]))).toEqual(expect.objectContaining({
+      models: updatedButSameCountModels,
+      etag: '"new"',
+      sourceKind: "remote",
+    }));
+  });
+
+  it("fails custom URL updates instead of silently reusing stale cached models", async () => {
+    const cachedData = {
+      source: "embedded",
+      sourceKind: "embedded",
+      models: mockModels,
+    };
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(cachedData));
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+    const result = await updateModelCatalog("https://example.com/models.json", false);
+
+    expect(result.status).toBe("failed");
+    expect(result.modelsCount).toBe(0);
+    expect(result.error).toContain("Network error");
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled();
+  });
+
+  it("persists file-sourced catalogs as a pinned cached source", async () => {
+    vi.mocked(fs.existsSync).mockImplementation((file) => String(file).endsWith("/catalog.json"));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockModels));
+
+    const result = await updateModelCatalog("catalog.json", false);
+    expect(result.status).toBe("updated");
+    expect(result.source).toBe("catalog.json");
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    expect(writeCall?.[0]).toBe(cacheFile);
+    expect(JSON.parse(String(writeCall?.[1]))).toEqual(expect.objectContaining({
+      models: mockModels,
+      sourceKind: "file",
+    }));
+    expect(String(JSON.parse(String(writeCall?.[1])).source)).toMatch(/catalog\.json$/);
   });
 });

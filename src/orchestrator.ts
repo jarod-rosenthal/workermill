@@ -2861,7 +2861,7 @@ export async function runOrchestration(
         }
 
         ticketOps.postComment(
-          `### ${story.persona} — ${story.title} (${i + 1}/${sorted.length})\n\n${updateParts.join("\n")}`
+          `### ${story.persona} (${provider}/${modelName}) — ${story.title} (${i + 1}/${sorted.length})\n\n${updateParts.join("\n")}`
         ).catch(() => {});
       }
 

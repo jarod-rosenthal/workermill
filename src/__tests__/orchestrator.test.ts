@@ -156,6 +156,31 @@ vi.mock("../safety.js", () => ({
   checkPermissionRules: vi.fn(() => "none"),
 }));
 
+const mockTicketPostComment = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../ticket-ops.js", () => ({
+  TicketOps: class {
+    isAvailable() { return true; }
+    fetchTicket() {
+      return Promise.resolve({
+        title: "Mock ticket",
+        body: "Implement the requested change.",
+        labels: [],
+      });
+    }
+    postComment(comment: string) {
+      return mockTicketPostComment(comment);
+    }
+    transitionTo() {
+      return Promise.resolve();
+    }
+  },
+  extractGithubIssueNumber: vi.fn((input: string) => {
+    const match = input.match(/\d+/);
+    return match ? Number(match[0]) : null;
+  }),
+}));
+
 // Now import the functions under test
 import {
   runOrchestration,
@@ -296,6 +321,7 @@ describe("orchestrator", () => {
     originalCwd = process.cwd();
     process.chdir(repoDir);
     mockStreamTextCalls.length = 0;
+    mockTicketPostComment.mockClear();
     vi.clearAllMocks();
     restoreDefaultStreamTextMock();
   });
@@ -403,6 +429,24 @@ Done.`;
         "https://api.x.ai/v1",
         undefined,
         "xai-test-key",
+      );
+    });
+
+    it("includes provider/model in worker ticket comments", async () => {
+      const config = {
+        providers: {
+          ollama: { model: "test-model", host: "http://localhost:11434", contextLength: 4096 },
+        },
+        default: "ollama",
+        ticketSystem: "github",
+        review: { enabled: false },
+      };
+      const output = createMockOutput();
+
+      await runOrchestration(config as any, "Implement a ticketed change", true, false, output, undefined, undefined, "#123");
+
+      expect(mockTicketPostComment).toHaveBeenCalledWith(
+        expect.stringContaining("### backend_developer (ollama/test-model) — Set up API endpoint (1/1)"),
       );
     });
 

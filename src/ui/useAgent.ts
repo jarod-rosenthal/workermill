@@ -173,6 +173,14 @@ export interface UseAgentOptions {
   liveView?: boolean | "auto";
 }
 
+export interface TurnModelOverride {
+  provider: string;
+  model: string;
+  apiKey?: string;
+  host?: string;
+  contextLength?: number;
+}
+
 export interface UseAgentReturn {
   /** Committed (finished) messages for rendering. */
   messages: Message[];
@@ -193,7 +201,7 @@ export interface UseAgentReturn {
   /** The underlying session object (for status display). */
   session: Session;
   /** Send a user message and start the agent loop. Optional displayText controls what the user sees (full input still sent to model). */
-  submit: (input: string, displayText?: string) => void;
+  submit: (input: string, displayText?: string, options?: { modelOverride?: TurnModelOverride }) => void;
   /** Cancel the running stream / tool execution. */
   cancel: () => void;
   /** Roll back the last user+assistant exchange and restore prior user input. */
@@ -238,6 +246,33 @@ export interface UseAgentReturn {
   setLiveViewEnabled: (enabled: boolean) => string | null;
   /** Current live view URL (if running). */
   getLiveViewUrl: () => string | null;
+}
+
+function resolveApiKey(apiKey?: string): string | undefined {
+  if (!apiKey) return undefined;
+  return apiKey.startsWith("{env:")
+    ? process.env[apiKey.slice(5, -1)] || undefined
+    : apiKey;
+}
+
+function setProviderApiKeyEnv(provider: string, apiKey?: string): string | undefined {
+  const resolvedKey = resolveApiKey(apiKey);
+  if (!resolvedKey) return undefined;
+
+  const envMap: Record<string, string> = {
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    google: "GOOGLE_GENERATIVE_AI_API_KEY",
+    xai: "XAI_API_KEY",
+    groq: "GROQ_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+  };
+  const envVar = envMap[provider] || "OPENAI_API_KEY";
+  if (envVar) {
+    process.env[envVar] = resolvedKey;
+  }
+  return resolvedKey;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,21 +562,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     initDoneRef.current = true;
 
     // Set API keys in process.env when provided via options.
-    if (options.apiKey) {
-      const envMap: Record<string, string> = {
-        anthropic: "ANTHROPIC_API_KEY",
-        openai: "OPENAI_API_KEY",
-        google: "GOOGLE_GENERATIVE_AI_API_KEY",
-        xai: "XAI_API_KEY",
-        groq: "GROQ_API_KEY",
-        deepseek: "DEEPSEEK_API_KEY",
-        mistral: "MISTRAL_API_KEY",
-      };
-      const envVar = envMap[options.provider];
-      if (envVar && !process.env[envVar]) {
-        process.env[envVar] = options.apiKey;
-      }
-    }
+    setProviderApiKeyEnv(options.provider, options.apiKey);
 
     aiProviderRef.current = options.provider as AIProvider;
 
@@ -1155,10 +1176,19 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- submit() -------- //
 
   const submit = useCallback(
-    (input: string, displayText?: string) => {
+    (input: string, displayText?: string, submitOptions?: { modelOverride?: TurnModelOverride }) => {
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
         const session = sessionRef.current;
+        const turnOverride = submitOptions?.modelOverride;
+        const turnProvider = (turnOverride?.provider ?? aiProviderRef.current) as AIProvider;
+        const turnModelName = turnOverride?.model ?? activeModelNameRef.current;
+        const turnHost = turnOverride?.host;
+        const turnContextLength = turnOverride?.contextLength ?? activeContextLengthRef.current;
+        const turnApiKey = setProviderApiKeyEnv(turnProvider, turnOverride?.apiKey);
+        const turnModel = turnOverride
+          ? createModel(turnProvider, turnModelName, turnHost, turnContextLength, turnApiKey)
+          : modelRef.current!;
 
         // Resolve @file, @folder/, and @url references
         let resolvedInput = resolveFileReferences(input, workingDirRef.current);
@@ -1208,7 +1238,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         let partialInputTokens = 0;
         let partialOutputTokens = 0;
         try {
-          const model = modelRef.current!;
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
           const activeTools = (await getActiveTools()) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
@@ -1221,15 +1250,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           }
           const systemPrompt = systemPromptRef.current;
           logger.info("Starting streamText", {
-            provider: aiProviderRef.current,
-            model: options.model,
+            provider: turnProvider,
+            model: turnModelName,
             toolCount: Object.keys(activeTools).length,
             tools: Object.keys(activeTools).join(", "),
             messageCount: session.messages.length,
           });
           const agentStreamStartMs = Date.now();
           const stream = streamText({
-            model,
+            model: turnModel,
             system: systemPrompt,
             messages: session.messages.map((m) => {
               if (m.role === "user") {
@@ -1245,10 +1274,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             stopWhen: stepCountIs(100),
             abortSignal: controller.signal,
             ...buildOllamaOptions(
-              aiProviderRef.current,
-              activeContextLengthRef.current,
+              turnProvider,
+              turnContextLength,
             ),
-            ...(["openai"].includes(aiProviderRef.current)
+            ...(["openai"].includes(turnProvider)
               ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
               : {}),
             onStepFinish({ text, toolCalls: calls, usage: stepUsage, reasoningText }) {
@@ -1371,8 +1400,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const totalCostBefore = costTrackerRef.current.getTotalCost();
           costTrackerRef.current.addUsage(
             "agent",
-            aiProviderRef.current,
-            activeModelNameRef.current,
+            turnProvider,
+            turnModelName,
             inputTokens,
             outputTokens,
           );
@@ -1431,7 +1460,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // Track tok/s for this model — use active refs, not startup options
           const agentElapsed = (Date.now() - agentStreamStartMs) / 1000;
           if (outputTokens > 0 && agentElapsed > 0) {
-            const providerModel = `${aiProviderRef.current}/${activeModelNameRef.current}`;
+            const providerModel = `${turnProvider}/${turnModelName}`;
             const tps = Math.round(outputTokens / agentElapsed);
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
@@ -1450,8 +1479,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setTokens(estimatedContextTokens);
           const compactionResult = shouldCompact(
             estimatedContextTokens,
-            options.model,
-            options.contextLength,
+            turnModelName,
+            turnContextLength,
           );
           if (compactionResult.level === "micro") {
             // Free pre-pass: trim verbose tool output, no LLM call
@@ -1481,7 +1510,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               addMemory("learning", mem);
             }
             const compacted = await compactMessages(
-              model,
+              turnModel,
               plainMessages,
               compactionResult.level,
             );
@@ -1524,8 +1553,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               partialInputTokens,
               partialOutputTokens,
               "agent",
-              aiProviderRef.current,
-              activeModelNameRef.current,
+              turnProvider,
+              turnModelName,
               costTrackerRef.current,
               setCost,
             );
@@ -1569,7 +1598,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         } // end while
       })();
     },
-    [getActiveTools, options.provider, options.model, options.contextLength],
+    [getActiveTools],
   );
 
   // ------- cancel() -------- //
@@ -1732,35 +1761,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     const contextLength = providerConfig?.contextLength;
 
     // Ensure API key is in process.env for cloud providers
-    const apiKey = providerConfig?.apiKey;
-    if (apiKey) {
-      const envMap: Record<string, string> = {
-        anthropic: "ANTHROPIC_API_KEY",
-        openai: "OPENAI_API_KEY",
-        google: "GOOGLE_GENERATIVE_AI_API_KEY",
-        xai: "XAI_API_KEY",
-        groq: "GROQ_API_KEY",
-        deepseek: "DEEPSEEK_API_KEY",
-        mistral: "MISTRAL_API_KEY",
-      };
-      // OpenAI-compatible providers use OPENAI_API_KEY as fallback
-      const envVar = envMap[newProvider] || "OPENAI_API_KEY";
-      if (envVar) {
-        const resolvedKey = apiKey.startsWith("{env:")
-          ? process.env[apiKey.slice(5, -1)] || ""
-          : apiKey;
-        if (resolvedKey) {
-          process.env[envVar] = resolvedKey;
-        }
-      }
-    }
+    const resolvedApiKey = setProviderApiKeyEnv(newProvider, providerConfig?.apiKey);
 
     aiProviderRef.current = newProvider as AIProvider;
     activeModelNameRef.current = newModel;
     activeContextLengthRef.current = contextLength;
-    const resolvedApiKey = apiKey?.startsWith("{env:")
-      ? process.env[apiKey.slice(5, -1)] || undefined
-      : apiKey;
     modelRef.current = createModel(newProvider as AIProvider, newModel, host, contextLength, resolvedApiKey);
 
     // Local providers need context length ensured before first use

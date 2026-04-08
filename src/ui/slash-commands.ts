@@ -272,7 +272,13 @@ See \`docs/quality-gates.md\` for full documentation and examples.`;
 export interface SlashCommandContext {
   addSystemMessage: (content: string) => void;
   addUserMessage: (content: string) => void;
-  submit: (input: string, displayText?: string) => void;
+  submit: (
+    input: string,
+    displayText?: string,
+    options?: {
+      modelOverride?: { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number };
+    },
+  ) => void;
   provider: string;
   model: string;
   workingDir: string;
@@ -2510,29 +2516,30 @@ Write the file with write_file to AGENT.md in the project root.`,
         if (!p) {
           ctx.addSystemMessage(`Persona \`${personaSlug}\` not found. Use \`/personas\` to list all.`);
         } else {
-          if (ctx.switchModel) {
-            try {
-              const config = resolveConfig();
-              const routed = getProviderForPersona(config, p.provider || personaSlug);
-              ctx.switchModel(routed.provider, routed.model, {
-                apiKey: routed.apiKey,
-                host: routed.host,
-                contextLength: routed.contextLength,
-              });
-            } catch (error) {
-              logger.warn("Failed to resolve routed model for /as persona; continuing with current session model", {
-                persona: personaSlug,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
-
           // Prepend persona context to the task so the agent adopts the role
           const personaPrefix =
             `[Acting as **${p.name}** — ${p.description}]\n\n` +
             `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
             `## Task\n\n`;
-          ctx.submit(personaPrefix + task, `/as ${personaSlug} ${task}`);
+          try {
+            const config = resolveConfig();
+            const routed = getProviderForPersona(config, p.provider || personaSlug);
+            ctx.submit(personaPrefix + task, `/as ${personaSlug} ${task}`, {
+              modelOverride: {
+                provider: routed.provider,
+                model: routed.model,
+                apiKey: routed.apiKey,
+                host: routed.host,
+                contextLength: routed.contextLength,
+              },
+            });
+          } catch (error) {
+            logger.warn("Failed to resolve routed model for /as persona; continuing with current session model", {
+              persona: personaSlug,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            ctx.submit(personaPrefix + task, `/as ${personaSlug} ${task}`);
+          }
         }
       }
       break;

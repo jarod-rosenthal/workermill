@@ -1372,10 +1372,19 @@ describe("handleSlashCommand", () => {
       expect(ctx.submit).toHaveBeenCalledWith(
         expect.stringContaining("review the auth middleware"),
         expect.any(String),
+        {
+          modelOverride: {
+            provider: "ollama",
+            model: "qwen3-coder:30b",
+            apiKey: undefined,
+            host: undefined,
+            contextLength: undefined,
+          },
+        },
       );
     });
 
-    it("switches to the routed persona model before submit", () => {
+    it("uses the routed persona model only for that submit", () => {
       vi.mocked(resolveConfig).mockReturnValueOnce({
         providers: {
           ollama: { model: "qwen3-coder:30b" },
@@ -1400,18 +1409,19 @@ describe("handleSlashCommand", () => {
       const switchModel = vi.fn();
       const ctx = createContext({ switchModel } as any);
       handleSlashCommand("/as qa_engineer verify the dashboard flow", ctx);
-      expect(switchModel).toHaveBeenCalledWith(
-        "xai",
-        "grok-code-fast-1",
-        {
-          apiKey: "xai-test-key",
-          host: "https://api.x.ai/v1",
-          contextLength: 262144,
-        },
-      );
+      expect(switchModel).not.toHaveBeenCalled();
       expect(ctx.submit).toHaveBeenCalledWith(
         expect.stringContaining("verify the dashboard flow"),
         expect.any(String),
+        {
+          modelOverride: {
+            provider: "xai",
+            model: "grok-code-fast-1",
+            apiKey: "xai-test-key",
+            host: "https://api.x.ai/v1",
+            contextLength: 262144,
+          },
+        },
       );
     });
 
@@ -1980,6 +1990,15 @@ describe("handleSlashCommand", () => {
       expect(ctx.submit).toHaveBeenCalledWith(
         expect.stringContaining("fix auth"),
         expect.any(String),
+        {
+          modelOverride: {
+            provider: "ollama",
+            model: "qwen3-coder:30b",
+            apiKey: undefined,
+            host: undefined,
+            contextLength: undefined,
+          },
+        },
       );
       delete process.env.OPENAI_API_KEY;
     });

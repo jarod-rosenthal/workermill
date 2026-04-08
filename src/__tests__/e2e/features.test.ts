@@ -46,21 +46,41 @@ function buildMockContext(
 ): SlashCommandContext & {
   systemMessages: string[];
   userMessages: string[];
-  submittedInputs: Array<{ input: string; displayText?: string }>;
+  submittedInputs: Array<{
+    input: string;
+    displayText?: string;
+    options?: {
+      modelOverride?: { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number };
+    };
+  }>;
 } {
   const systemMessages: string[] = [];
   const userMessages: string[] = [];
-  const submittedInputs: Array<{ input: string; displayText?: string }> = [];
+  const submittedInputs: Array<{
+    input: string;
+    displayText?: string;
+    options?: {
+      modelOverride?: { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number };
+    };
+  }> = [];
 
   const ctx: SlashCommandContext & {
     systemMessages: string[];
     userMessages: string[];
-    submittedInputs: Array<{ input: string; displayText?: string }>;
+    submittedInputs: Array<{
+      input: string;
+      displayText?: string;
+      options?: {
+        modelOverride?: { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number };
+      };
+    }>;
   } = {
     addSystemMessage: (content: string) => systemMessages.push(content),
     addUserMessage: (content: string) => userMessages.push(content),
-    submit: (input: string, displayText?: string) =>
-      submittedInputs.push({ input, displayText }),
+    submit: (input: string, displayText?: string, options?: {
+      modelOverride?: { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number };
+    }) =>
+      submittedInputs.push({ input, displayText, options }),
     provider: "ollama",
     model: MODEL,
     workingDir: overrides.workingDir,

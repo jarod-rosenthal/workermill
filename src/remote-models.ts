@@ -8,7 +8,7 @@ export interface RemoteModelInfo extends ModelInfo {
   provider: string;
 }
 
-const DEFAULT_MODELS_URL =
+const getModelsUrl = () =>
   process.env.WM_MODELS_URL ||
   "https://raw.githubusercontent.com/jarod-rosenthal/workermill/main/frontend/public/api/models.json";
 
@@ -139,8 +139,6 @@ export interface ModelUpdateResult {
 interface CacheData {
   models: RemoteModelInfo[];
   etag?: string;
-  source?: string;
-  updatedAt?: string;
 }
 
 function getConfigDir(): string {
@@ -191,7 +189,7 @@ export async function fetchRemoteModels(config: CliConfig, forceRefresh = false)
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-    const res = await globalThis.fetch(DEFAULT_MODELS_URL, {
+    const res = await globalThis.fetch(getModelsUrl(), {
       signal: controller.signal,
       headers
     });
@@ -205,7 +203,7 @@ export async function fetchRemoteModels(config: CliConfig, forceRefresh = false)
       const data = await res.json() as RemoteModelInfo[];
       const etag = res.headers.get("etag") || undefined;
       try {
-        saveCache({ models: data, etag, source: DEFAULT_MODELS_URL, updatedAt: new Date().toISOString() });
+        saveCache({ models: data, etag });
       } catch {
         // Ignore cache write errors
       }
@@ -253,12 +251,15 @@ export async function loadModelsFromUrl(url: string, forceRefresh = false): Prom
   const cachedModels = cache?.models || [];
   const cachedEtag = cache?.etag;
 
-  // Check if URL matches cached source and we have a valid etag
-  const isSameSource = cache?.source === url;
-  
+  // For custom URLs, don't rely on cached etag since it's only valid for the default URL
   const headers: Record<string, string> = {};
-  if (!forceRefresh && isSameSource && cachedEtag) {
-    headers["If-None-Match"] = cachedEtag;
+  if (!forceRefresh && cachedEtag) {
+    // Only use cached etag if we're fetching from the same default URL
+    // Custom URLs bypass etag caching
+    const defaultUrl = getModelsUrl();
+    if (url === defaultUrl) {
+      headers["If-None-Match"] = cachedEtag;
+    }
   }
 
   try {
@@ -326,7 +327,7 @@ export async function updateModelCatalog(source: string | undefined, force: bool
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await globalThis.fetch(DEFAULT_MODELS_URL, {
+      const res = await globalThis.fetch(getModelsUrl(), {
         signal: controller.signal,
         headers
       });
@@ -337,40 +338,39 @@ export async function updateModelCatalog(source: string | undefined, force: bool
         status = "unchanged";
         models = cache.models;
         etag = cache.etag;
-        sourceDisplay = cache.source || DEFAULT_MODELS_URL;
+        sourceDisplay = "remote (cached)";
       } else if (res.ok) {
         const data = await res.json() as RemoteModelInfo[];
         etag = res.headers.get("etag") || undefined;
         const previousCache = loadCache();
         const previousCount = previousCache?.models?.length || 0;
         
-        // Save to cache
-        saveCache({ models: data, etag, source: DEFAULT_MODELS_URL, updatedAt: now });
+        // Save to cache (only models and etag, per original interface)
+        saveCache({ models: data, etag });
         
         // Determine if truly updated (different model count or content)
         status = data.length !== previousCount ? "updated" : "unchanged";
         models = data;
-        sourceDisplay = DEFAULT_MODELS_URL;
+        sourceDisplay = "remote";
       } else {
         throw new Error(`HTTP ${res.status}`);
       }
     } else if (source === "embedded") {
       // Load embedded catalog
       models = loadEmbeddedModels();
-      saveCache({ models, source: "embedded", updatedAt: now });
+      saveCache({ models }); // No etag for embedded
       status = "updated";
       sourceDisplay = "embedded";
     } else if (source.startsWith("http://") || source.startsWith("https://")) {
       // Load from URL
       models = await loadModelsFromUrl(source, force);
-      etag = undefined; // URLs other than default don't support etag caching in this impl
-      saveCache({ models, etag, source, updatedAt: now });
+      saveCache({ models }); // No etag for custom URLs
       status = "updated";
       sourceDisplay = source;
     } else {
       // Treat as file path
       models = await loadModelsFromFile(source);
-      saveCache({ models, etag: undefined, source, updatedAt: now });
+      saveCache({ models }); // No etag for file paths
       status = "updated";
       sourceDisplay = source;
     }

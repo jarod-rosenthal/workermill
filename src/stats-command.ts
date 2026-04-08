@@ -2,8 +2,9 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import chalk from "chalk";
-import { Session, SessionCostModel, SessionCostByRole } from "./session.js";
-import { getProjectSessionsDir } from "./project-data.js";
+import type { SessionCostByRole } from "./session.js";
+import { Session } from "./session.js";
+
 
 /**
  * Stats aggregation types for cross-session analytics.

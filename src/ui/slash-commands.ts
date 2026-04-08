@@ -249,7 +249,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Option | What it does |
 |---|---|
 | \`review.specCheck: true\` | Before planning: prompts you to answer up to 3 ambiguities in your task description |
-| \`review.verifyEnabled: true\` | After workers finish: runs planner-generated output assertions before the reviewer sees the diff |
+| \`review.verifyEnabled: false\` | Disable planner-generated verification commands (enabled by default) |
 | \`qualityGates: [{name, commands}]\` | Static project-wide assertions that run on every \`/build\` — use for invariants like "app starts" |
 
 Gate failures are passed to the tech lead reviewer as context. No retry loop — failures are flagged as must-fix during review.

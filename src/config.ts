@@ -36,7 +36,7 @@ export interface ReviewConfig {
   autoRevise?: boolean;
   /** Score threshold for auto-approval, 1-10 scale (default: 9) */
   approvalThreshold?: number;
-  /** Have the planner generate verification commands per story, run them before review (default: false) */
+  /** Have the planner generate verification commands per story, run them before review (default: true) */
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
   specCheck?: boolean;

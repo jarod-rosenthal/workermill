@@ -111,6 +111,10 @@ interface ServerState {
   openFiles: Map<string, number>; // uri -> version
   publishedDiagnostics: Map<string, DiagnosticItem[]>; // uri -> diagnostics from push notifications
   ready: boolean;
+  capabilities: {
+    pullDiagnostics: boolean;       // textDocument/diagnostic
+    workspaceDiagnostics: boolean;  // workspace/diagnostic
+  };
 }
 
 let server: ServerState | null = null;
@@ -365,6 +369,7 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
       openFiles: new Map(),
       publishedDiagnostics: new Map(),
       ready: false,
+      capabilities: { pullDiagnostics: false, workspaceDiagnostics: false },
     };
 
     s.process.stdout!.on("data", (data: Buffer) => handleData(s, data));
@@ -393,12 +398,13 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
     });
 
     // LSP initialize handshake
-    await sendRequest(s, "initialize", {
+    const initResult = await sendRequest(s, "initialize", {
       processId: process.pid,
       rootUri: `file://${workingDir}`,
       capabilities: {
         textDocument: {
           publishDiagnostics: { relatedInformation: true },
+          diagnostic: { dynamicRegistration: false },  // pull diagnostics (3.17+)
           definition: { dynamicRegistration: false },
           references: { dynamicRegistration: false },
           hover: { contentFormat: ["plaintext", "markdown"] },
@@ -409,7 +415,24 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
             willSaveWaitUntil: false,
           },
         },
+        workspace: {
+          diagnostics: { refreshSupport: true },  // workspace/diagnostic (3.17+)
+        },
       },
+    }) as { capabilities?: {
+      diagnosticProvider?: { workspaceDiagnostics?: boolean } | boolean;
+    } } | null;
+
+    // Detect server diagnostic capabilities from the initialize response
+    const diagProvider = initResult?.capabilities?.diagnosticProvider;
+    if (typeof diagProvider === "object" && diagProvider !== null) {
+      s.capabilities.pullDiagnostics = true;
+      s.capabilities.workspaceDiagnostics = diagProvider.workspaceDiagnostics === true;
+    }
+    logger.debug("LSP server capabilities", {
+      language: s.language,
+      pullDiagnostics: s.capabilities.pullDiagnostics,
+      workspaceDiagnostics: s.capabilities.workspaceDiagnostics,
     });
 
     sendNotification(s, "initialized", {});
@@ -486,7 +509,39 @@ function syncFile(s: ServerState, filePath: string): void {
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage", "__pycache__", ".venv", "venv", "target"]);
 
-function collectFiles(dirPath: string): string[] {
+/**
+ * Parse the project's tsconfig.json to get exclude patterns.
+ * Files matching these patterns should not be opened in the LSP — they're
+ * outside the project program and will produce false-positive diagnostics
+ * (e.g., test files missing vitest types when only @types/node is in tsconfig).
+ */
+function loadTsconfigExcludes(workingDir: string): RegExp[] {
+  const tsconfigPath = path.join(workingDir, "tsconfig.json");
+  if (!fs.existsSync(tsconfigPath)) return [];
+  try {
+    // Strip comments for JSON.parse — tsconfig allows // and /* */ comments
+    const raw = fs.readFileSync(tsconfigPath, "utf-8")
+      .replace(/\/\/.*$/gm, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const config = JSON.parse(raw) as { exclude?: string[] };
+    if (!Array.isArray(config.exclude)) return [];
+    return config.exclude
+      .map((pattern) => {
+        // Convert glob patterns to regex: ** = any path, * = any segment
+        const escaped = pattern
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replace(/\*\*/g, "⬡⬡")
+          .replace(/\*/g, "[^/]*")
+          .replace(/⬡⬡/g, ".*");
+        return new RegExp(`(^|/)${escaped}(/|$)`);
+      });
+  } catch {
+    return [];
+  }
+}
+
+function collectFiles(dirPath: string, workingDir?: string): string[] {
+  const excludes = workingDir ? loadTsconfigExcludes(workingDir) : [];
   const files: string[] = [];
   const walk = (currentDir: string) => {
     const entries = fs.readdirSync(currentDir, { withFileTypes: true });
@@ -496,7 +551,13 @@ function collectFiles(dirPath: string): string[] {
           walk(path.join(currentDir, entry.name));
         }
       } else if (entry.isFile() && languageId(entry.name) !== "plaintext") {
-        files.push(path.join(currentDir, entry.name));
+        const fullPath = path.join(currentDir, entry.name);
+        // Check against tsconfig exclude patterns using the relative path
+        if (excludes.length > 0 && workingDir) {
+          const relPath = path.relative(workingDir, fullPath);
+          if (excludes.some((re) => re.test(relPath))) continue;
+        }
+        files.push(fullPath);
       }
     }
   };
@@ -513,106 +574,174 @@ async function getDirectoryDiagnostics(dirPath: string, workingDir: string, seve
   }
 }
 
+interface DiagnosticEntry {
+  file: string;
+  line: number;
+  col: number;
+  severity: "error" | "warning" | "info" | "hint";
+  message: string;
+  source?: string;
+  code?: string | number;
+}
+
+function collectDiagnosticEntries(
+  items: DiagnosticItem[],
+  resolvedPath: string,
+  workingDir: string,
+  severity: "error" | "warning" | "hint" | "all",
+): { entries: DiagnosticEntry[]; errors: number; warnings: number; hints: number } {
+  const filtered = filterDiagnosticsBySeverity(items, severity);
+  let errors = 0, warnings = 0, hints = 0;
+  const entries: DiagnosticEntry[] = [];
+  for (const d of filtered) {
+    entries.push({
+      file: path.relative(workingDir, resolvedPath),
+      line: d.range.start.line + 1,
+      col: d.range.start.character + 1,
+      severity: getSeverityString(d.severity),
+      message: d.message,
+      source: d.source,
+      code: d.code,
+    });
+    if (d.severity === 1) errors++;
+    else if (d.severity === 2) warnings++;
+    else hints++;
+  }
+  return { entries, errors, warnings, hints };
+}
+
+/**
+ * Try workspace/diagnostic (LSP 3.17+) — single request for all workspace diagnostics.
+ * Returns null if the server doesn't support it.
+ */
+async function tryWorkspaceDiagnostics(
+  s: ServerState,
+  workingDir: string,
+  severity: "error" | "warning" | "hint" | "all",
+): Promise<{ diagnostics: DiagnosticEntry[]; summary: { errors: number; warnings: number; hints: number } } | null> {
+  if (!s.capabilities.workspaceDiagnostics) return null;
+  try {
+    const result = await sendRequest(s, "workspace/diagnostic", {
+      previousResultIds: [],
+    }) as { items?: Array<{
+      uri: string;
+      kind: "full" | "unchanged";
+      items?: DiagnosticItem[];
+    }> } | null;
+
+    const items = result?.items;
+    if (!items) return null;
+
+    const diagnostics: DiagnosticEntry[] = [];
+    const summary = { errors: 0, warnings: 0, hints: 0 };
+    for (const doc of items) {
+      if (doc.kind !== "full" || !doc.items?.length) continue;
+      const filePath = doc.uri.startsWith("file://") ? doc.uri.slice(7) : doc.uri;
+      const collected = collectDiagnosticEntries(doc.items, filePath, workingDir, severity);
+      diagnostics.push(...collected.entries);
+      summary.errors += collected.errors;
+      summary.warnings += collected.warnings;
+      summary.hints += collected.hints;
+    }
+    return { diagnostics, summary };
+  } catch {
+    // Server advertised capability but failed — fall through to file-by-file
+    logger.debug("workspace/diagnostic failed, falling back to file-by-file");
+    return null;
+  }
+}
+
+/**
+ * Process files in parallel batches using pull diagnostics.
+ * Sends didOpen for a batch, fires all diagnostic requests concurrently,
+ * then collects results — much faster than sequential processing.
+ */
+async function batchPullDiagnostics(
+  s: ServerState,
+  files: string[],
+  workingDir: string,
+  severity: "error" | "warning" | "hint" | "all",
+): Promise<{ diagnostics: DiagnosticEntry[]; summary: { errors: number; warnings: number; hints: number } }> {
+  const diagnostics: DiagnosticEntry[] = [];
+  const summary = { errors: 0, warnings: 0, hints: 0 };
+  const BATCH_SIZE = 20;
+
+  for (let i = 0; i < files.length; i += BATCH_SIZE) {
+    const batch = files.slice(i, i + BATCH_SIZE);
+
+    // Sync all files in this batch (didOpen/didChange notifications — no response to wait for)
+    for (const filePath of batch) {
+      syncFile(s, filePath);
+    }
+
+    // Fire all diagnostic requests concurrently
+    const results = await Promise.allSettled(
+      batch.map(async (filePath) => {
+        const resolvedPath = path.resolve(filePath);
+        const uri = fileUri(resolvedPath);
+        s.publishedDiagnostics.delete(uri);
+
+        if (s.capabilities.pullDiagnostics) {
+          const result = await sendRequest(s, "textDocument/diagnostic", {
+            textDocument: { uri },
+          }) as { items?: DiagnosticItem[] } | null;
+          return { resolvedPath, items: result?.items || [] };
+        }
+        // Push diagnostics — wait briefly for the server to process
+        await new Promise((r) => setTimeout(r, 2000));
+        return { resolvedPath, items: s.publishedDiagnostics.get(uri) || [] };
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      const { resolvedPath, items } = r.value;
+      const collected = collectDiagnosticEntries(items, resolvedPath, workingDir, severity);
+      diagnostics.push(...collected.entries);
+      summary.errors += collected.errors;
+      summary.warnings += collected.warnings;
+      summary.hints += collected.hints;
+    }
+  }
+  return { diagnostics, summary };
+}
+
 async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
   try {
     const s = await ensureServer(workingDir);
-    const files = collectFiles(dirPath);
-    
-    // Collect diagnostics for all files
-    const diagnostics: {
-      file: string;
-      line: number;
-      col: number;
-      severity: "error" | "warning" | "info" | "hint";
-      message: string;
-      source?: string;
-      code?: string | number;
-    }[] = [];
-    
-    const summary = {
-      errors: 0,
-      warnings: 0,
-      hints: 0
-    };
-    
-    // Process each file
-    for (const filePath of files) {
-      const resolvedPath = path.resolve(filePath);
-      
-      // Clear any stale push diagnostics for this file
-      s.publishedDiagnostics.delete(fileUri(resolvedPath));
-      
-      // Sync file content to server
-      syncFile(s, filePath);
-      
-      // Try pull diagnostics first (LSP 3.17+)
-      try {
-        const result = await sendRequest(s, "textDocument/diagnostic", {
-          textDocument: { uri: fileUri(resolvedPath) },
-        }) as { items?: DiagnosticItem[] } | null;
-        
-        const items = result?.items || [];
-        const filteredItems = filterDiagnosticsBySeverity(items, severity);
-        
-        for (const d of filteredItems) {
-          const loc = d.range.start;
-          diagnostics.push({
-            file: path.relative(workingDir, resolvedPath),
-            line: loc.line + 1,
-            col: loc.character + 1,
-            severity: getSeverityString(d.severity),
-            message: d.message,
-            source: d.source,
-            code: d.code
-          });
-          
-          // Update summary
-          if (d.severity === 1) summary.errors++;
-          else if (d.severity === 2) summary.warnings++;
-          else summary.hints++;
-        }
-      } catch {
-        // Server doesn't support pull diagnostics — wait for push diagnostics
-        // Give the server a moment to publish diagnostics after our didOpen/didChange
-        await new Promise((r) => setTimeout(r, 1500));
-        
-        const pushed = s.publishedDiagnostics.get(fileUri(resolvedPath));
-        if (pushed && pushed.length > 0) {
-          const filteredItems = filterDiagnosticsBySeverity(pushed, severity);
-          for (const d of filteredItems) {
-            const loc = d.range.start;
-            diagnostics.push({
-              file: path.relative(workingDir, resolvedPath),
-              line: loc.line + 1,
-              col: loc.character + 1,
-              severity: getSeverityString(d.severity),
-              message: d.message,
-              source: d.source,
-              code: d.code
-            });
-            
-            // Update summary
-            if (d.severity === 1) summary.errors++;
-            else if (d.severity === 2) summary.warnings++;
-            else summary.hints++;
-          }
-        }
-      }
+
+    // 1. Try workspace/diagnostic — single request, no file walking needed
+    const wsResult = await tryWorkspaceDiagnostics(s, workingDir, severity);
+    if (wsResult) {
+      return { success: true, content: JSON.stringify({ lsp_available: true, ...wsResult }) };
     }
-    
-    const response = {
-      lsp_available: true,
-      summary,
-      diagnostics
+
+    // 2. Fall back to file-by-file with parallel batching
+    const files = collectFiles(dirPath, workingDir);
+    logger.debug("LSP directory diagnostics", { fileCount: files.length, dirPath });
+    const result = await batchPullDiagnostics(s, files, workingDir, severity);
+
+    // Deduplicate — the same diagnostic can appear via both pull and push
+    const seen = new Set<string>();
+    const deduped = result.diagnostics.filter((d) => {
+      const key = `${d.file}:${d.line}:${d.col}:${d.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return {
+      success: true,
+      content: JSON.stringify({
+        lsp_available: true,
+        summary: result.summary,
+        diagnostics: deduped,
+      }),
     };
-    
-    return { success: true, content: JSON.stringify(response) };
   } catch (err) {
-    // If no LSP is available, return false for lsp_available
     if (err instanceof Error && err.message.includes("No language server found")) {
       return { success: true, content: JSON.stringify({ lsp_available: false, summary: { errors: 0, warnings: 0, hints: 0 }, diagnostics: [] }) };
     }
-    // Handle other errors gracefully - return empty diagnostics instead of failing
     const message = err instanceof Error ? err.message : String(err);
     logger.debug("Directory diagnostics fallback", { error: message });
     return { success: true, content: JSON.stringify({ lsp_available: false, error: message, summary: { errors: 0, warnings: 0, hints: 0 }, diagnostics: [] }) };
@@ -620,73 +749,35 @@ async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, 
 }
 
 async function getDirectoryDiagnosticsText(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
+  // Use the JSON path and convert to text — same parallel batching, one code path
+  const jsonResult = await getDirectoryDiagnosticsJson(dirPath, workingDir, severity);
+  if (!jsonResult.success || !jsonResult.content) return jsonResult;
+
   try {
-    const s = await ensureServer(workingDir);
-    const files = collectFiles(dirPath);
-    
-    // Collect diagnostics for all files
-    const results: string[] = [];
-    let totalErrors = 0;
-    let totalWarnings = 0;
-    
-    // Process each file
-    for (const filePath of files) {
-      const resolvedPath = path.resolve(filePath);
-      
-      // Clear any stale push diagnostics for this file
-      s.publishedDiagnostics.delete(fileUri(resolvedPath));
-      
-      // Sync file content to server
-      syncFile(s, filePath);
-      
-      // Try pull diagnostics first (LSP 3.17+)
-      try {
-        const result = await sendRequest(s, "textDocument/diagnostic", {
-          textDocument: { uri: fileUri(resolvedPath) },
-        }) as { items?: DiagnosticItem[] } | null;
-        
-        const items = result?.items || [];
-        const filteredItems = filterDiagnosticsBySeverity(items, severity);
-        
-        if (filteredItems.length > 0) {
-          const fileDiagnostics = formatDiagnostics(filteredItems, resolvedPath);
-          results.push(fileDiagnostics);
-          
-          // Count errors and warnings
-          for (const d of filteredItems) {
-            if (d.severity === 1) totalErrors++;
-            else if (d.severity === 2) totalWarnings++;
-          }
-        }
-      } catch {
-        // Server doesn't support pull diagnostics — wait for push diagnostics
-        // Give the server a moment to publish diagnostics after our didOpen/didChange
-        await new Promise((r) => setTimeout(r, 1500));
-        
-        const pushed = s.publishedDiagnostics.get(fileUri(resolvedPath));
-        if (pushed && pushed.length > 0) {
-          const filteredItems = filterDiagnosticsBySeverity(pushed, severity);
-          if (filteredItems.length > 0) {
-            const fileDiagnostics = formatDiagnostics(filteredItems, resolvedPath);
-            results.push(fileDiagnostics);
-            
-            // Count errors and warnings
-            for (const d of filteredItems) {
-              if (d.severity === 1) totalErrors++;
-              else if (d.severity === 2) totalWarnings++;
-            }
-          }
-        }
+    const parsed = JSON.parse(jsonResult.content) as {
+      lsp_available: boolean;
+      summary: { errors: number; warnings: number; hints: number };
+      diagnostics: DiagnosticEntry[];
+    };
+    if (!parsed.lsp_available) {
+      return { success: true, content: "No language server available." };
+    }
+    const lines = [`Directory diagnostics for: ${dirPath}`, `Total errors: ${parsed.summary.errors}, warnings: ${parsed.summary.warnings}`];
+    // Group by file
+    const byFile = new Map<string, DiagnosticEntry[]>();
+    for (const d of parsed.diagnostics) {
+      if (!byFile.has(d.file)) byFile.set(d.file, []);
+      byFile.get(d.file)!.push(d);
+    }
+    for (const [file, entries] of byFile) {
+      lines.push(`\n${file}:`);
+      for (const d of entries) {
+        lines.push(`  ${d.line}:${d.col} ${d.severity}: ${d.message}`);
       }
     }
-    
-    const header = `Directory diagnostics for: ${dirPath}\nTotal errors: ${totalErrors}, warnings: ${totalWarnings}\n`;
-    const content = header + results.join("\n");
-    
-    return { success: true, content };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Directory diagnostics failed: ${message}` };
+    return { success: true, content: lines.join("\n") };
+  } catch {
+    return jsonResult; // fallback to raw JSON
   }
 }
 

@@ -17,11 +17,15 @@ import { formatProjectInstructions } from "../instructions.js";
 import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
-import { getProviderForPersona } from "../config.js";
-import { getDiffForReview } from "../git-ops.js";
+import { getProviderForPersona, loadConfig, saveConfig } from "../config.js";
+import { getDiffForReview, getDiffSinceCommit, getHeadHash, captureStoryPriorWork, commitRevisionChanges } from "../git-ops.js";
+import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
+import { withConcurrencyControl } from "../tool-concurrency.js";
 
 import type {
   OrchestrationOutput,
+  Story,
+  SharedContext,
   StandaloneReviewResult,
   ReviewMustFixItem,
 } from "./types.js";
@@ -35,8 +39,16 @@ import {
   normalizeErrorSignature,
   parseMarkerValue,
   isTransientError,
+  isBalanceOrQuotaError,
+  isRateLimitError,
+  rateLimitSleep,
+  truncateForPrompt,
+  extractToolFilePath,
   buildReasoningOptions,
+  emitReasoningDelta,
 } from "./utils.js";
+
+import { checkToolPermission, emitFailureCode, formatToolCallDisplay } from "./execution.js";
 
 
 // ---------------------------------------------------------------------------
@@ -560,4 +572,796 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
 
   return { score, decision, feedback, reviewText };
+}
+
+
+// ---------------------------------------------------------------------------
+// Review loop result — returned by runReviewLoop
+// ---------------------------------------------------------------------------
+
+export interface ReviewLoopResult {
+  /** The review text from the approved review (empty if not approved). */
+  finalReviewText: string;
+  /** True when the loop was interrupted by pause/cancel and the caller should return early. */
+  aborted: boolean;
+}
+
+
+// ---------------------------------------------------------------------------
+// Review loop parameters
+// ---------------------------------------------------------------------------
+
+export interface ReviewLoopParams {
+  config: CliConfig;
+  output: OrchestrationOutput;
+  sorted: Story[];
+  context: SharedContext;
+  userTask: string;
+  featureBranch: string | null;
+  mainBranch: string;
+  workingDir: string;
+  costTracker: CostTracker;
+  abortSignal: AbortSignal | undefined;
+  trustAll: boolean | (() => boolean);
+  sandboxed: boolean | "os";
+  sessionAllow: Set<string>;
+  liveViewServer?: import("../live-view-server.js").LiveViewServer;
+  ticketOps: { postComment(body: string): Promise<void> } | null;
+  gateResultsSection: string;
+  waitWhilePaused: () => Promise<boolean>;
+  pauseForBalanceIssue: (scope: string) => Promise<boolean>;
+  logRetryHint: () => void;
+}
+
+
+// ---------------------------------------------------------------------------
+// runReviewLoop — extracted inline review + revision loop from orchestrator
+// ---------------------------------------------------------------------------
+
+export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoopResult> {
+  const {
+    config, output, sorted, context, userTask,
+    featureBranch, mainBranch, workingDir,
+    costTracker, abortSignal, trustAll, sandboxed, sessionAllow,
+    liveViewServer, ticketOps, gateResultsSection,
+    waitWhilePaused, pauseForBalanceIssue, logRetryHint,
+  } = params;
+
+  // Review config
+  const reviewEnabled = config.review?.enabled !== false; // default: true
+  const maxRevisions = config.review?.maxRevisions ?? 3;
+  let autoRevise = config.review?.autoRevise ?? false;
+
+  // Run inline review with revision loop
+  let finalReviewText = ""; // Captures the approved review for use in PR body
+  const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
+  if (reviewer) {
+    const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(
+      config,
+      "tech_lead"
+    );
+
+    if (revApiKey) {
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+      const envVar = envMap[revProvider];
+      const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
+      if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
+    }
+
+    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
+    const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
+
+    // Read-only tools for reviewer — emit structured tool calls so UI status
+    // counters and activity indicators stay accurate during tech_lead review.
+    const reviewerTools: Record<string, AnyToolDef> = {};
+    for (const toolName of reviewer.tools) {
+      const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
+      if (toolDef) {
+        reviewerTools[toolName] = {
+          ...toolDef,
+          execute: async (input: Record<string, unknown>) => {
+            output.toolCall("tech_lead", toolName, input);
+            const result = await toolDef.execute(input);
+            return result;
+          },
+        };
+      }
+    }
+
+    let previousReviewFeedback = "";
+    let openMustFixItems: ReviewMustFixItem[] = [];
+    let lastBlockerSignature = "";
+    let repeatedBlockerCount = 0;
+    // Check if user cancelled before starting review
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled.");
+      logRetryHint();
+      return { finalReviewText: "", aborted: true };
+    }
+    logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
+    let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
+    for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
+      if (await waitWhilePaused()) {
+        return { finalReviewText: "", aborted: true };
+      }
+      const isRevision = reviewRound > 1;
+      logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
+      output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
+
+      output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
+
+      try {
+        // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
+        const mustFixSection = isRevision && openMustFixItems.length > 0
+          ? `## Open Must-Fix Items
+These blockers are still active until the next review clears them:
+
+${formatMustFixItems(openMustFixItems)}
+
+---
+
+`
+          : "";
+        const previousFeedbackSection = isRevision && previousReviewFeedback
+          ? `${mustFixSection}## Previous Review Feedback (Round ${reviewRound})
+This is a revision attempt. The previous code was reviewed and these issues were identified:
+
+${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
+
+**Evaluate whether the revision addressed the issues you raised.**
+- If your major issues were fixed, approve — even if minor items remain
+- If a cosmetic or minor issue persists after being flagged, note it in feedback but don't block on it again
+- If a functional bug, security issue, or missing requirement persists, you MUST block on it again — these are real problems regardless of how many times they've been flagged
+- If the revision introduced NEW bugs, request another revision for those specific issues
+- Score honestly based on current code quality, not relative to last round
+
+---
+
+`
+          : "";
+
+        const storyPlanDetails = sorted.map((s, idx) => {
+          const parts = [`### Story ${idx + 1}: ${s.title} (${s.persona})`];
+          parts.push(s.description);
+          if (s.targetFiles?.length) parts.push(`**Target files:** ${s.targetFiles.join(", ")}`);
+          if (s.referenceFiles?.length) parts.push(`**Reference patterns:** ${s.referenceFiles.join(", ")}`);
+          if (s.implementationNotes) parts.push(`**Guidance:** ${s.implementationNotes}`);
+          return parts.join("\n");
+        }).join("\n\n");
+
+        // Get clean diff from feature branch vs main — matches worker's consolidated PR diff.
+        // On revision rounds, ALSO show what changed since the last review so the reviewer
+        // can see progress instead of re-evaluating everything from scratch.
+        let codeDiff = "";
+        if (featureBranch) {
+          if (isRevision && preRevisionHash) {
+            // Revision rounds: send ONLY what changed since last review.
+            // The reviewer already saw the full diff — sending it again wastes context
+            // and risks exceeding the model's context window on later rounds.
+            const revisionDelta = getDiffSinceCommit(workingDir, preRevisionHash);
+            if (revisionDelta) {
+              codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Use read_file to inspect any file in full.\n\n${revisionDelta}`;
+            } else {
+              codeDiff += "(no changes detected since last review)";
+            }
+          } else {
+            // First review: send the full branch diff
+            const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+            if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
+            if (diff) codeDiff += diff;
+          }
+        } else {
+          // Fallback: uncommitted changes diff
+          try {
+            const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
+              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+            }).trim();
+            const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
+              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+            }).trim();
+            if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
+            if (diff) codeDiff += diff;
+          } catch { /* not a git repo */ }
+        }
+
+        // Cap diff to fit within the reviewer model's context window.
+        // Rough estimate: 1 token ≈ 4 chars. Reserve 40% of context for system prompt,
+        // tools, instructions, and response. The diff gets the remaining 60%.
+        const revContextWindow = getModelContext(revModel, revCtx);
+        const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
+        if (codeDiff.length > maxDiffChars) {
+          // Write full diff to a temp file so the reviewer can read_file it
+          const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
+          try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+          const stat = codeDiff.match(/## Branch Diff.*?\n([\s\S]*?)\n\n/)?.[1] || "";
+          codeDiff = codeDiff.slice(0, maxDiffChars) +
+            `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
+            `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+            `${stat ? `File list:\n${stat}` : ""}`;
+        }
+
+        const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+        const loopGuardSection = isRevision && repeatedBlockerCount >= 2
+          ? `## Loop Guard
+
+Recent review rounds repeated similar blockers. Re-verify the current code directly before blocking again.
+
+- Do NOT insist on a specific file path change unless that path is truly required for behavior correctness
+- If behavior already works, approve and mention optional follow-ups as non-blocking
+- If you still require revision, provide concrete failure evidence and the exact minimal fix needed
+`
+          : "";
+        const reviewPrompt = `${previousFeedbackSection}${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Implementation Plan — THIS IS WHAT THE WORKERS WERE TOLD TO DO
+
+Review the code against this plan. The planner analyzed the codebase and gave each worker specific guidance.
+
+${storyPlanDetails}
+
+## Code Changes
+
+The diff below shows what was changed. For new files, use your read_file tool to inspect them.
+
+Files created: ${context.filesCreated.join(", ") || "none"}
+Files modified: ${context.filesModified.join(", ") || "none"}
+${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
+
+${codeDiff || "(no code changes detected)"}${gateResultsSection}
+
+## Original Spec (reference)
+
+The plan above was derived from this spec. Use it to check completeness, but the plan is the workers' source of truth.
+
+${userTask}
+
+## Review Instructions
+
+Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed.
+${loopGuardSection ? `\n${loopGuardSection}` : ""}
+
+## Feedback Guidelines
+
+- **Be specific**: Point to exact files and issues when providing feedback
+- **Be constructive**: Suggest alternatives, not just problems
+- **Be balanced**: Acknowledge what's done well alongside improvements
+- **Be pragmatic**: Distinguish must-fix from nice-to-have issues
+- **Be evidence-based**: For blocking issues, cite concrete evidence (failing behavior, broken path, missing code, or reproducible command)
+
+### APPROVE when:
+- Code correctly implements the requirements from the original spec
+- No obvious bugs or security issues
+- Code follows existing patterns in the codebase
+- Minor cosmetic issues are NOT grounds for revision — mention them in feedback but still approve
+
+### REVISION_NEEDED when:
+- Code has functional bugs that affect correctness
+- Security vulnerabilities that must be fixed
+- Missing required functionality from the task spec
+- Broken imports, missing dependencies, or code that won't run
+- You can provide concrete evidence of the failure from the current code state
+
+### REJECT when:
+- Fundamental approach is wrong and cannot be fixed with revisions
+
+**Quality gate stance**: Make decisions based on impact and evidence, not preference.
+- Block only for functional correctness, security, or missing-required-functionality issues backed by concrete evidence.
+- Do NOT block for style or cosmetic preferences.
+- If uncertain, inspect files or run lightweight verification before blocking.
+
+## Output Format
+
+You MUST write your detailed feedback FIRST, THEN add the decision markers at the end.
+
+**1. Write your full review** — analyze the code, list specific issues with file paths, explain what's good and what needs fixing. This is the most important part. Workers read this to know what to fix. Be thorough.
+
+**2. Then add these markers at the end:**
+
+REVIEW_DECISION: approved (or revision_needed or rejected)
+CODE_QUALITY_SCORE: ${config.review?.approvalThreshold ?? 9}
+FEEDBACK: One-line summary of your decision
+
+For REVISION_NEEDED decisions, also include:
+BLOCKING_EVIDENCE: concrete proof from this code state (repro step, failing command, or exact missing/wrong implementation)
+ACTIONABLE_FIX: minimal specific change required to get approval
+
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues, ${config.review?.approvalThreshold ?? 9}+ = quality-gate pass. Use the score with your evidence: below ${config.review?.approvalThreshold ?? 9} means you found real blocking issues; ${config.review?.approvalThreshold ?? 9}+ means no blocking issues remain.
+
+### For REVISION_NEEDED Decisions - Specify Affected Stories
+
+There are exactly ${sorted.length} stories (numbered 1 to ${sorted.length}):
+${sorted.map((s, i) => `  ${i + 1}. ${s.title} (${s.persona})`).join("\n")}
+
+AFFECTED_STORIES MUST only contain numbers from 1 to ${sorted.length}. Do NOT invent story numbers that don't exist.
+
+\`\`\`
+AFFECTED_STORIES: [2, 3]
+AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
+\`\`\`
+
+**Guidelines:**
+- Only reference story numbers 1-${sorted.length} — these are the ONLY stories that exist
+- Only include stories that have ACTUAL implementation issues in their code
+- If ALL stories need revision, you may omit AFFECTED_STORIES (all will re-run)
+- Be specific in AFFECTED_REASONS so developers know exactly what to fix
+- Do NOT list issues as separate "stories" — map issues back to the story that should have handled them`;
+
+        // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
+        // TODO: Rate limit retry for reviewer streamText — add isRateLimitError check in catch block
+        // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
+        let reviewerOutput = "";
+        let reviewerFinalText = "";
+        const reviewStartMs = Date.now();
+        const reviewTimeoutMs = getReviewWallTimeoutMs();
+        const maxReviewAttempts = 2;
+        let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+        let lastReviewError: unknown;
+        for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+          const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+          try {
+            const reviewStream = streamText({
+              model: reviewModel,
+              abortSignal: timedAbort.signal,
+              system: reviewer.systemPrompt,
+              prompt: reviewPrompt,
+              tools: reviewerTools,
+              stopWhen: stepCountIs(100),
+              timeout: { chunkMs: 120_000 },
+              ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+              ...buildReasoningOptions(revProvider, revModel),
+              onStepFinish({ text }) {
+                if (text) {
+                  reviewerOutput += text + "\n";
+                  const lines = text.split("\n").filter(l => l.trim());
+                  for (const line of lines) {
+                    if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                    output.log("tech_lead", line);
+                  }
+                }
+              },
+            });
+            const result = await collectReviewStreamResult(
+              reviewStream,
+              reviewTimeoutMs,
+              timedAbort,
+              "Tech Lead review",
+            );
+            reviewerFinalText = result.finalText;
+            reviewUsage = result.usage;
+            lastReviewError = undefined;
+            break;
+          } catch (err) {
+            lastReviewError = err;
+            const transient = isTransientError(err);
+            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient);
+            if (!canRetry) throw err;
+            const retryReason = timedAbort.didTimeout() ? "timed out" : "hit a transient provider error";
+            output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
+            logger.warn("Retrying tech lead review", {
+              attempt,
+              provider: revProvider,
+              model: revModel,
+              reason: err instanceof Error ? err.message : String(err),
+              stack: err instanceof Error ? err.stack : undefined,
+            });
+          } finally {
+            timedAbort.dispose();
+          }
+        }
+        if (lastReviewError) throw lastReviewError;
+
+        // Some providers/models put the decisive final answer in stream.text
+        // rather than step chunks; prefer that when it is richer.
+        const stepText = reviewerOutput.trim();
+        const reviewText = reviewerFinalText.length > stepText.length
+          ? reviewerFinalText
+          : (stepText || reviewerFinalText);
+        logger.debug("Reviewer output", { reviewRound, text: reviewText });
+
+        output.statusDone();
+
+        // Extract review decision — 3-tier system matching WorkerMill worker
+        const parsedReview = parseRequiredReviewOutcome(reviewText);
+        const decision = parsedReview.decision;
+        const score = parsedReview.score;
+
+        // Score must meet threshold — the model's decision marker alone is not enough.
+        const threshold = config.review?.approvalThreshold ?? 9;
+        const approved = score >= threshold;
+        const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
+        if (!approved) {
+          const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
+          if (blockerSignature && blockerSignature === lastBlockerSignature) {
+            repeatedBlockerCount += 1;
+          } else {
+            repeatedBlockerCount = 1;
+            lastBlockerSignature = blockerSignature;
+          }
+        } else {
+          repeatedBlockerCount = 0;
+          lastBlockerSignature = "";
+        }
+        const stuckOnSameBlocker = !approved && repeatedBlockerCount >= 2;
+        const revInputTokens = reviewUsage?.inputTokens || 0;
+        const revOutputTokens = reviewUsage?.outputTokens || 0;
+        // Track tok/s for reviewer model
+        const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
+        if (revOutputTokens > 0 && reviewElapsed > 0) {
+          const reviewTokPerSec = Math.round(revOutputTokens / reviewElapsed);
+          output.updateTokPerSec?.(`${revProvider}/${revModel}`, reviewTokPerSec);
+          logger.info("Model performance", { provider: revProvider, model: revModel, tokPerSec: reviewTokPerSec });
+        }
+        logger.info(`Review round ${reviewRound} result`, { decision, score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
+
+        const feedback = extractReviewFeedback(reviewText, decision);
+        if (approved) {
+          openMustFixItems = [];
+        } else {
+          const currentMustFixItems = extractStructuredMustFixItems(reviewText, parsedAffected);
+          openMustFixItems = mergeMustFixItems(openMustFixItems, currentMustFixItems);
+        }
+
+        // Display review result with horizontal rules
+        output.log("tech_lead", "\u2500".repeat(60));
+        output.log("tech_lead", `::code_quality_score::${score}/10`);
+        output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
+        output.log("tech_lead", "\u2500".repeat(60));
+        if (feedback) {
+          output.log("tech_lead", "Fix context:");
+          for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
+            output.log("tech_lead", line);
+          }
+        }
+        output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
+        if (stuckOnSameBlocker) {
+          output.coordinatorLog(`Loop guard: reviewer repeated the same blockers for ${repeatedBlockerCount} rounds.`);
+        }
+
+        // Post review result to ticket — matches worker/epic/coordinator-review.ts
+        if (ticketOps) {
+          if (approved) {
+            const roundLabel = reviewRound > 1 ? ` after ${reviewRound - 1} revision${reviewRound > 2 ? "s" : ""}` : "";
+            ticketOps.postComment(
+              `## ✅ Tech Lead Review — Approved${roundLabel} (${score}/10)\n\n${feedback}`
+            ).catch(() => {});
+          } else {
+            ticketOps.postComment(
+              `## 🔄 Tech Lead Review — Revision ${reviewRound}/${maxRevisions} (${score}/10)\n\n${feedback}`
+            ).catch(() => {});
+          }
+        }
+
+        // Save feedback for next review round — so tech_lead can check if issues were addressed
+        previousReviewFeedback = reviewText;
+
+        // Track reviewer cost
+        costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
+          revInputTokens, revOutputTokens);
+        output.updateCost?.(costTracker.getTotalCost());
+        output.updateUsageSummary?.(costTracker.getUsageSummary());
+
+        // If approved or out of revision attempts, done
+        if (approved) {
+          finalReviewText = reviewText;
+          runLifecycleHooks("review_complete", config.hooks, workingDir, {
+            WORKERMILL_REVIEW_SCORE: String(score),
+            WORKERMILL_REVIEW_DECISION: "approved",
+          });
+          break;
+        }
+        const revisionsLeft = maxRevisions - (reviewRound - 1);
+        if (revisionsLeft <= 0) {
+          emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions} revision attempt(s).`);
+          output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
+          break;
+        }
+
+        // Ask user or auto-revise
+        let shouldRevise = autoRevise;
+        if (autoRevise && stuckOnSameBlocker) {
+          output.coordinatorLog("Loop guard: pausing auto-revise because reviewer feedback repeated without new signal.");
+          shouldRevise = false;
+        }
+        if (!autoRevise) {
+          try {
+            const rv = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
+            if (typeof rv === "object") {
+              shouldRevise = rv.allowed;
+              if (rv.mode === "always") {
+                // Switch to auto-revise for remaining rounds
+                autoRevise = true;
+                output.coordinatorLog("Auto-revise enabled for remaining rounds.");
+                // Persist globally so future /build runs behave consistently.
+                // Users can revert with: /settings review.autoRevise false
+                try {
+                  const globalCfg = loadConfig();
+                  if (globalCfg) {
+                    globalCfg.review = { ...globalCfg.review, autoRevise: true };
+                    saveConfig(globalCfg);
+                    output.coordinatorLog("Saved globally: /settings review.autoRevise true");
+                  }
+                } catch (persistErr) {
+                  logger.warn("Failed to persist review.autoRevise", {
+                    error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+                  });
+                }
+              }
+            } else {
+              shouldRevise = rv;
+            }
+          } catch (err) {
+            logger.debug("Revision prompt cancelled", { error: err instanceof Error ? err.message : String(err) });
+            shouldRevise = false; // cancelled
+          }
+        } else {
+          output.coordinatorLog(`Auto-revising (${revisionsLeft} left)...`);
+        }
+
+        if (!shouldRevise) {
+          emitFailureCode(output, "review_blocker_unresolved", "Tech Lead review still has blocking issues and revision was declined.");
+          break;
+        }
+
+        // Parse which stories need revision — send feedback back to the original workers
+        // (selective revision from inline-reviewer.ts)
+        const affected = parsedAffected;
+        const affectedSet = affected && affected.stories.length > 0 ? new Set(affected.stories) : null;
+
+        if (affected && affected.stories.length > 0) {
+          const selectiveInfo = `stories ${affected.stories.join(", ")}`;
+          output.coordinatorLog(`Selective revision: ${selectiveInfo}`);
+          if (Object.keys(affected.reasons).length > 0) {
+            for (const [idx, reason] of Object.entries(affected.reasons)) {
+              output.coordinatorLog(`  Story ${idx}: ${reason}`);
+            }
+          }
+        } else {
+          output.coordinatorLog("Full revision (all stories)");
+        }
+
+        output.log("system", "--- Revision Pass ---");
+
+        // Capture HEAD before revision — so next review shows only what changed
+        if (featureBranch) {
+          preRevisionHash = getHeadHash(workingDir);
+        }
+
+        for (let i = 0; i < sorted.length; i++) {
+          if (await waitWhilePaused()) {
+            return { finalReviewText: "", aborted: true };
+          }
+          const story = sorted[i];
+
+          // Skip stories not affected by the review (selective revision)
+          if (affectedSet && !affectedSet.has(i + 1)) {
+            output.coordinatorLog(`Skipping story ${i + 1}/${sorted.length} — not affected`);
+            continue;
+          }
+
+          const storyPersona = loadPersona(story.persona);
+          if (!storyPersona) continue;
+
+          const { provider: sProvider, model: sModel, apiKey: sApiKey, host: sHost, contextLength: sCtx } = getProviderForPersona(
+            config, storyPersona.provider || story.persona
+          );
+          if (sProvider && sApiKey) {
+              const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+              const envVar = envMap[sProvider];
+              if (envVar && !process.env[envVar]) {
+                const key = sApiKey.startsWith("{env:") ? process.env[sApiKey.slice(5, -1)] : sApiKey;
+                if (key) process.env[envVar] = key;
+              }
+          }
+
+          // Build per-story feedback: use AFFECTED_REASONS if available, otherwise full review text
+          const storyReason = affected?.reasons?.[i + 1];
+          const storyMustFixItems = openMustFixItems.filter((item) => item.storyNumber === undefined || item.storyNumber === i + 1);
+          const fallbackReviewFeedback = truncateForPrompt(reviewText, 6_000, "review feedback");
+          const storyFeedback = storyReason
+            ? `Story ${i + 1} (${story.title}):\n${storyReason}`
+            : fallbackReviewFeedback;
+          const loopGuardReminder = stuckOnSameBlocker
+            ? `
+
+## Loop Guard
+The reviewer has repeated similar blockers across rounds. Before changing code, verify whether the claimed gap is truly still present.
+- If behavior already works, prefer minimal clarifying changes (focused tests or explicit handling) instead of broad rewrites
+- If behavior is broken, fix only the smallest change needed and keep scope tight
+`
+            : "";
+
+          output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
+          logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
+          output.log(story.persona, `Starting revision: ${story.title} (\x1b[38;5;208m${sProvider}/${sModel}\x1b[0m, ${formatContext(getModelContext(sModel, sCtx))} context)`);
+
+          output.status(`${story.persona}: revising...`);
+
+          const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx, sApiKey);
+          const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
+          const storyTools: Record<string, AnyToolDef> = {};
+          for (const toolName of storyPersona.tools) {
+            const toolDef = storyAllTools[toolName as keyof typeof storyAllTools] as AnyToolDef;
+            if (toolDef) {
+              storyTools[toolName] = {
+                ...toolDef,
+                execute: async (input: Record<string, unknown>) => {
+                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
+                  if (!allowed) return "Tool execution denied by user.";
+                  output.toolCall(story.persona, toolName, input);
+                  const revHookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
+                  if (revHookResult.blocked) {
+                    return `Tool blocked by pre-hook: ${revHookResult.reason}`;
+                  }
+                  output.status(`${story.persona}: working...`);
+                  const result = await toolDef.execute(input);
+                  runHooks("post", toolName, config.hooks, workingDir);
+                  output.status("");
+                  return result;
+                },
+              };
+            }
+          }
+
+          // Apply concurrency control to revision tools — same as story execution
+          for (const [name, td] of Object.entries(storyTools)) {
+            if (td && typeof td.execute === "function") {
+              const original = td.execute;
+              (storyTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
+            }
+          }
+
+          // Revision prompt follows WorkerMill platform pattern (prompt-builder.ts):
+          // Per-story feedback + what was tried before + efficiency tips + scope enforcement.
+          // The worker gets enough context to fix its own mistakes without re-implementing.
+
+          // Capture per-story prior work from git history — matches worker/epic/git-ops.ts:captureStoryBranchSummaries()
+          const whatYouDidLastTime = featureBranch
+            ? captureStoryPriorWork(workingDir, mainBranch, i + 1)
+            : "";
+
+          const revisionSystemPrompt = `${storyPersona.systemPrompt}
+
+Working directory: ${workingDir}`;
+
+          try {
+            // TODO: Rate limit retry for revision streamText — add isRateLimitError check in catch block
+            const revisionStartMs = Date.now();
+            const revisionReasoningLength = { value: 0 };
+            const revStream = streamText({
+              model: storyModel,
+              abortSignal,
+              system: revisionSystemPrompt,
+              prompt: `## ⚠️ REVISION REQUIRED — Tech Lead Feedback
+
+### Your Story's Required Fix
+${storyFeedback}
+${loopGuardReminder}
+${storyMustFixItems.length > 0 ? `## Structured Must-Fix Items\n${formatMustFixItems(storyMustFixItems)}\n\n` : ""}${whatYouDidLastTime}
+## Your Story Scope
+Story ${i + 1}: "${story.title}" — ${story.description}
+${story.targetFiles?.length ? `**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.primaryPattern ? `\n**Primary pattern file:** ${story.primaryPattern}` : ""}
+${story.integrationPoints?.length ? `\n**Integration points:** ${story.integrationPoints.join(", ")}` : ""}
+${story.nonGoals?.length ? `\n**Non-goals:** ${story.nonGoals.join(", ")}` : ""}
+${story.validationSignal ? `\n**Validation signal:** ${story.validationSignal}` : ""}
+${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementationNotes}` : ""}
+
+**IMPORTANT: Only fix issues that are YOUR story's responsibility.**
+- Fix the specific issues listed above
+- Do NOT fix issues in files that belong to other stories
+- Do NOT rewrite files from scratch — use edit_file for targeted changes
+- READ each file BEFORE editing it
+
+**EFFICIENCY TIP: Go straight to the files mentioned in the feedback.**
+- You already built this code in the previous attempt
+- Skip re-reading files unless they're directly relevant to the feedback
+- Focus on the specific issues, not re-implementation
+
+**Communication:** Think out loud with short progress updates. Before major tool calls, state intent; after tool calls, state what changed and next step.`,
+              tools: storyTools as ToolSet,
+              stopWhen: stepCountIs(100),
+              timeout: { chunkMs: 120_000 },
+              ...buildReasoningOptions(sProvider, sModel),
+              ...buildOllamaOptions(sProvider as AIProvider, sCtx),
+              onStepFinish({ text, toolCalls, reasoningText }) {
+                emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, revisionReasoningLength);
+                if (toolCalls && toolCalls.length > 0) {
+                  for (const tc of toolCalls) {
+                    const filePath = extractToolFilePath(tc.toolName, tc.input as Record<string, unknown>);
+                    if (!filePath) continue;
+                    if (tc.toolName === "write_file") {
+                      if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
+                    } else if (tc.toolName === "edit_file" || tc.toolName === "multi_edit_file" || tc.toolName === "patch") {
+                      if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
+                    }
+                  }
+                }
+                if ((!text || !text.trim()) && toolCalls && toolCalls.length > 0) {
+                  const first = toolCalls[0];
+                  const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
+                  output.log(story.persona, `${first.toolName}${detail ? ` ${detail}` : ""}`);
+                }
+                if (text) {
+                  const lines = text.split("\n").filter(l => l.trim());
+                  for (const line of lines) {
+                    if (line.includes("::")) continue;
+                    output.log(story.persona, line);
+                  }
+                }
+                output.status(`${story.persona}: working...`);
+              },
+            });
+
+            for await (const _chunk of revStream.textStream) { /* drive */ }
+            const revUsage = await revStream.totalUsage;
+
+            costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
+              revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
+            output.updateCost?.(costTracker.getTotalCost());
+            output.updateUsageSummary?.(costTracker.getUsageSummary());
+
+            // Track tok/s for revision worker model
+            const revisionElapsed = (Date.now() - revisionStartMs) / 1000;
+            const revisionOutTokens = revUsage?.outputTokens || 0;
+            if (revisionOutTokens > 0 && revisionElapsed > 0) {
+              const revisionTokPerSec = Math.round(revisionOutTokens / revisionElapsed);
+              output.updateTokPerSec?.(`${sProvider}/${sModel}`, revisionTokPerSec);
+              logger.info("Model performance", { provider: sProvider, model: sModel, tokPerSec: revisionTokPerSec });
+            }
+
+            logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
+            output.log(story.persona, `${story.title} — revision complete!`);
+          } catch (err) {
+            output.statusDone();
+            if (isBalanceOrQuotaError(err)) {
+              const shouldStop = await pauseForBalanceIssue(`Revision story ${i + 1}`);
+              if (shouldStop) {
+                return { finalReviewText: "", aborted: true };
+              }
+              continue;
+            }
+            const revRl = isRateLimitError(err);
+            if (revRl) {
+              const waitSec = Math.ceil(revRl.retryAfterMs / 1000);
+              output.log("system", `Revision rate limited — retrying in ${waitSec}s`);
+              logger.info("Revision rate limit retry", { story: i + 1, waitSec });
+              await rateLimitSleep(revRl.retryAfterMs);
+              // Fall through to next review loop iteration which will re-attempt
+            } else {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
+              output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
+            }
+          }
+
+          // Commit revision changes — checkpoint on the feature branch
+          if (featureBranch) {
+            const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
+            if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
+          }
+        }
+        // Loop back to review again
+      } catch (err) {
+        output.statusDone();
+        if (isBalanceOrQuotaError(err)) {
+          const shouldStop = await pauseForBalanceIssue("Tech Lead review");
+          if (shouldStop) {
+            return { finalReviewText: "", aborted: true };
+          }
+          continue;
+        }
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error("Review failed", {
+          error: errMsg,
+          stack: err instanceof Error ? err.stack : undefined,
+          provider: revProvider,
+          model: revModel,
+          reviewRound,
+        });
+        output.log("system", `Review skipped: ${errMsg}`);
+        break;
+      }
+    } // end review loop
+  }
+
+  return { finalReviewText, aborted: false };
 }

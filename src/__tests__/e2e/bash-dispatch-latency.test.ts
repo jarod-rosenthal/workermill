@@ -4,7 +4,6 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { execSync } from "child_process";
-import pty from "node-pty";
 import { detectOllamaHost } from "../helpers/ollama-host.js";
 
 const MODEL = "qwen3-coder:30b";
@@ -15,8 +14,30 @@ const EXECUTION_BUDGET_MS = 5000;
 
 let OLLAMA_HOST = "";
 let ollamaAvailable = false;
+let ptyAvailable = true;
+
+type PtyInstance = {
+  write(data: string): void;
+  onData(cb: (data: string) => void): void;
+  kill(): void;
+};
+
+type PtyModule = {
+  spawn(
+    file: string,
+    args?: string[],
+    options?: Record<string, unknown>,
+  ): PtyInstance;
+};
 
 beforeAll(async () => {
+  try {
+    await import("node-pty");
+  } catch {
+    ptyAvailable = false;
+    return;
+  }
+
   const host = await detectOllamaHost();
   if (!host) return;
   OLLAMA_HOST = host;
@@ -123,7 +144,7 @@ function parseNativeToolUseCounts(logText: string): number[] {
   return counts;
 }
 
-async function typeLine(proc: pty.IPty, text: string): Promise<void> {
+async function typeLine(proc: PtyInstance, text: string): Promise<void> {
   for (const ch of text) {
     proc.write(ch);
     await sleep(8);
@@ -133,6 +154,10 @@ async function typeLine(proc: pty.IPty, text: string): Promise<void> {
 
 describe("CLI bash dispatch latency", () => {
   it("uses native tool calling in PTY chat and keeps bash dispatch fast", async () => {
+    if (!ptyAvailable) {
+      console.log("Skipping: node-pty native module not available");
+      return;
+    }
     if (!ollamaAvailable) {
       console.log("Skipping: Ollama qwen3-coder:30b not available");
       return;
@@ -140,9 +165,10 @@ describe("CLI bash dispatch latency", () => {
 
     const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-cli-e2e-repo-"));
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-cli-e2e-home-"));
-    let proc: pty.IPty | null = null;
+    let proc: PtyInstance | null = null;
 
     try {
+      const pty = (await import("node-pty")) as PtyModule;
       initGitRepo(repoDir);
       writeCliConfig(homeDir);
 

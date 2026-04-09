@@ -2,11 +2,13 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 import { execSync } from "child_process";
 import { runOrchestration } from "../../orchestrator.js";
 import { shellArg } from "../../git-ops.js";
 import type { CliConfig } from "../../config.js";
 import { loadConfig, saveConfig } from "../../config.js";
+import type { Session } from "../../session.js";
 import type { OrchestrationOutput } from "../../orchestrator.js";
 import { handleSlashCommand } from "../../ui/slash-commands.js";
 import type { SlashCommandContext } from "../../ui/slash-commands.js";
@@ -71,6 +73,51 @@ function buildOllamaConfig(): CliConfig {
       },
     },
     default: "ollama",
+  };
+}
+
+async function writeSessionFixture(cwd: string, session: Session): Promise<void> {
+  fs.mkdirSync(cwd, { recursive: true });
+  const canonicalPath = fs.realpathSync(cwd);
+  const projectId = crypto.createHash("md5").update(canonicalPath).digest("hex").slice(0, 8);
+  const projectRoot = path.join(tempHome!.wmDir, "projects", projectId);
+  const sessionsDir = path.join(projectRoot, "sessions");
+  const logsDir = path.join(projectRoot, "logs");
+
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(logsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectRoot, "meta.json"),
+    JSON.stringify(
+      {
+        canonicalPath,
+        lastAccessed: new Date().toISOString(),
+        version: "1.0",
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf-8",
+  );
+  fs.writeFileSync(path.join(sessionsDir, `${session.id}.json`), JSON.stringify(session, null, 2), "utf-8");
+}
+
+function makeSession(overrides: Partial<Session> = {}): Session {
+  const startedAt = overrides.startedAt ?? new Date().toISOString();
+  return {
+    id: overrides.id ?? `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    messages: overrides.messages ?? [],
+    cwd: overrides.cwd,
+    provider: overrides.provider ?? "ollama",
+    model: overrides.model ?? MODEL,
+    startedAt,
+    updatedAt: overrides.updatedAt ?? startedAt,
+    totalTokens: overrides.totalTokens ?? 0,
+    totalCostUsd: overrides.totalCostUsd,
+    costByModel: overrides.costByModel,
+    costByRole: overrides.costByRole,
+    name: overrides.name,
+    finishedAt: overrides.finishedAt,
   };
 }
 
@@ -338,7 +385,7 @@ describe("CLI E2E — full lifecycle", () => {
       expect(ctx.systemMessages.some((m) => m.includes("Updated") && m.includes("key"))).toBe(true);
     });
 
-    it("/settings route backend_developer ollama — saves routing", () => {
+    it("/settings route backend_developer ollama/qwen3-coder:30b — saves routing", () => {
       if (!ollamaAvailable) {
         console.log("Skipping: Ollama not available");
         return;
@@ -350,12 +397,15 @@ describe("CLI E2E — full lifecycle", () => {
       const tempDir = cloneTestRepo();
       const ctx = buildMockContext({ workingDir: tempDir });
 
-      const handled = handleSlashCommand("/settings route backend_developer ollama", ctx);
+      const handled = handleSlashCommand(`/settings route backend_developer ollama/${MODEL}`, ctx);
       expect(handled).toBe(true);
 
       const updated = loadConfig();
       expect(updated).not.toBeNull();
-      expect(updated!.routing?.backend_developer).toBe("ollama");
+      expect(updated!.routing?.backend_developer).toBe("ollama_backend_developer");
+      expect(updated!.providers.ollama_backend_developer.model).toBe(MODEL);
+      expect(updated!.providers.ollama_backend_developer.host).toBe(OLLAMA_HOST);
+      expect(updated!.providers.ollama_backend_developer.contextLength).toBe(65536);
 
       expect(ctx.systemMessages.some((m) => m.includes("Updated") && m.includes("route"))).toBe(true);
     });
@@ -867,7 +917,7 @@ describe("CLI E2E — full lifecycle", () => {
       const tempDir = cloneTestRepo();
       const ctx = buildMockContext({ workingDir: tempDir });
 
-      handleSlashCommand("/settings route backend_developer nonexistent_provider", ctx);
+      handleSlashCommand("/settings route backend_developer nonexistent_provider/test-model", ctx);
 
       // Should show error about provider not found
       const allMessages = ctx.systemMessages.join("\n");
@@ -989,30 +1039,34 @@ describe("CLI E2E — full lifecycle", () => {
   // =========================================================================
   describe("stats command validation", () => {
     it("should aggregate cost data across sessions and report tokens correctly", async () => {
-      if (!ollamaAvailable) {
-        console.log("Skipping: Ollama not available");
-        return;
-      }
-
       const tempDir = cloneTestRepo();
       process.chdir(tempDir);
-
-      const config = buildOllamaConfig();
-      // Disable review to speed up
-      config.review = { enabled: false };
-
-      const { output, logs } = buildOrchestrationOutput();
-
-      // Run orchestration to create a session with cost data
-      const result = await runOrchestration(
-        config,
-        "Add a simple comment to the README.md file.",
-        true, // trustAll
-        true, // sandboxed
-        output,
+      await writeSessionFixture(
+        tempDir,
+        makeSession({
+          id: "stats-costed-session",
+          cwd: tempDir,
+          startedAt: new Date().toISOString(),
+          totalTokens: 100,
+          totalCostUsd: 0.25,
+          costByModel: [
+            {
+              key: `ollama/${MODEL}`,
+              provider: "ollama",
+              model: MODEL,
+              inputTokens: 30,
+              outputTokens: 70,
+              costUsd: 0.25,
+              roles: ["worker"],
+            },
+          ],
+          costByRole: {
+            worker: { inputTokens: 30, outputTokens: 70, costUsd: 0.25 },
+            planner: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+            reviewer: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+          },
+        }),
       );
-
-      expect(result.stories.length).toBeGreaterThan(0);
 
       // Now run the stats command
       const { runStatsCommand } = await import("../../stats-command.js");
@@ -1053,32 +1107,56 @@ describe("CLI E2E — full lifecycle", () => {
       expect(statsJson).toHaveProperty("cost_usd");
       expect(typeof statsJson.cost_usd).toBe("number");
 
-      // Verify sessions have cost data
-      expect(statsJson.sessions.total).toBeGreaterThan(0);
-      expect(statsJson.sessions.with_cost_data).toBeGreaterThan(0);
+      expect(statsJson.sessions.total).toBe(1);
+      expect(statsJson.sessions.with_cost_data).toBe(1);
+      expect(statsJson.cost_usd).toBe(0.25);
     });
 
     it("should filter stats by current working directory with --cwd flag", async () => {
-      if (!ollamaAvailable) {
-        console.log("Skipping: Ollama not available");
-        return;
-      }
-
       const tempDir = cloneTestRepo();
       process.chdir(tempDir);
+      await writeSessionFixture(
+        tempDir,
+        makeSession({
+          id: "cwd-session",
+          cwd: tempDir,
+          startedAt: new Date().toISOString(),
+          totalTokens: 100,
+          totalCostUsd: 0.15,
+          costByModel: [
+            {
+              key: `ollama/${MODEL}`,
+              provider: "ollama",
+              model: MODEL,
+              inputTokens: 40,
+              outputTokens: 60,
+              costUsd: 0.15,
+              roles: ["worker"],
+            },
+          ],
+        }),
+      );
 
-      const config = buildOllamaConfig();
-      config.review = { enabled: false };
-
-      const { output } = buildOrchestrationOutput();
-
-      // Run orchestration in the test directory
-      await runOrchestration(
-        config,
-        "Add a comment to package.json.",
-        true,
-        true,
-        output,
+      await writeSessionFixture(
+        path.join(os.tmpdir(), `wm-e2e-stats-other-${Date.now()}`),
+        makeSession({
+          id: "other-project-session",
+          cwd: path.join(os.tmpdir(), `wm-e2e-other-project-${Date.now()}`),
+          startedAt: new Date().toISOString(),
+          totalTokens: 200,
+          totalCostUsd: 0.35,
+          costByModel: [
+            {
+              key: `ollama/${MODEL}`,
+              provider: "ollama",
+              model: MODEL,
+              inputTokens: 90,
+              outputTokens: 110,
+              costUsd: 0.35,
+              roles: ["worker"],
+            },
+          ],
+        }),
       );
 
       // Change to a different directory
@@ -1093,29 +1171,28 @@ describe("CLI E2E — full lifecycle", () => {
       console.log = (msg: string) => { capturedOutput += msg + "\n"; };
 
       try {
-        // Test --cwd flag to scope to the original directory
-        runStatsCommand({ cwd: true, json: true });
-      } finally {
-        console.log = originalLog;
-      }
-
-      const statsJson = JSON.parse(capturedOutput.trim());
-      // Should still find sessions from the --cwd directory
-      expect(statsJson.sessions.total).toBeGreaterThan(0);
-
-      // Without --cwd, should not include sessions from other directories
-      capturedOutput = "";
-      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
-
-      try {
         runStatsCommand({ json: true });
       } finally {
         console.log = originalLog;
       }
 
-      const globalStatsJson = JSON.parse(capturedOutput.trim());
-      // In the other directory, should not find the sessions
-      expect(globalStatsJson.sessions.total).toBe(0);
+      const statsJson = JSON.parse(capturedOutput.trim());
+      expect(statsJson.sessions.total).toBeGreaterThan(0);
+
+      capturedOutput = "";
+      console.log = (msg: string) => { capturedOutput += msg + "\n"; };
+
+      try {
+        process.chdir(tempDir);
+        runStatsCommand({ cwd: true, json: true });
+      } finally {
+        console.log = originalLog;
+      }
+
+      const scopedStatsJson = JSON.parse(capturedOutput.trim());
+      expect(scopedStatsJson.sessions.total).toBe(1);
+      expect(scopedStatsJson.by_project).toHaveLength(1);
+      expect(scopedStatsJson.by_project[0].cwd).toBe(tempDir);
     });
   });
 });

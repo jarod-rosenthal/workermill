@@ -570,7 +570,8 @@ export function App(props: AppProps): React.ReactElement {
               <Box flexDirection="column" marginLeft={2}>
                 <Markdown content={normalizedContent} width={markdownWidth} />
                 {message.turnReceipt ? (
-                  <Box flexDirection="column" marginTop={0}>
+                  <Box flexDirection="column" marginTop={1}>
+                    <Text color={theme.subtleDark} dimColor>{turnDivider}</Text>
                     <Text color={theme.subtle} dimColor>{formatTurnReceipt(message.turnReceipt)}</Text>
                     <Text color={theme.subtleDark} dimColor>{"── end response ──"}</Text>
                   </Box>

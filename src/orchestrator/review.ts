@@ -911,7 +911,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 - Do NOT list issues as separate "stories" — map issues back to the story that should have handled them`;
 
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
-        // TODO: Rate limit retry for reviewer streamText — add isRateLimitError check in catch block
         // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
         let reviewerOutput = "";
         let reviewerFinalText = "";
@@ -957,10 +956,12 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           } catch (err) {
             lastReviewError = err;
             const transient = isTransientError(err);
-            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient);
+            const rl = isRateLimitError(err);
+            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
             if (!canRetry) throw err;
-            const retryReason = timedAbort.didTimeout() ? "timed out" : "hit a transient provider error";
+            const retryReason = timedAbort.didTimeout() ? "timed out" : rl ? `rate limited (waiting ${Math.ceil((rl.retryAfterMs) / 1000)}s)` : "hit a transient provider error";
             output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
+            if (rl) await rateLimitSleep(rl.retryAfterMs);
             logger.warn("Retrying tech lead review", {
               attempt,
               provider: revProvider,
@@ -1248,7 +1249,6 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 Working directory: ${workingDir}`;
 
           try {
-            // TODO: Rate limit retry for revision streamText — add isRateLimitError check in catch block
             const revisionStartMs = Date.now();
             const revisionReasoningLength = { value: 0 };
             const revStream = streamText({

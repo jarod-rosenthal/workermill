@@ -478,6 +478,12 @@ The CLI reads API keys from these environment variables if not set in config:
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Mistral | `MISTRAL_API_KEY` |
 
+### Other environment variables
+
+| Variable | Purpose |
+|---|---|
+| `WM_DISABLE_MODEL_AUTO_UPDATE` | Set to `1` to skip automatic model catalog fetching on startup |
+
 In config, use `{env:VAR_NAME}` syntax to reference them without embedding the actual key:
 
 ```json

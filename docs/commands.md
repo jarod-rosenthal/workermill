@@ -345,7 +345,7 @@ Headless (non-interactive) prompt execution. Runs a single prompt through the ag
 
 ```bash
 wm run "list all TODO comments in the codebase"
-wm run -p anthropic/claude-sonnet-4-6 "explain src/auth.ts"
+wm run --model anthropic/claude-sonnet-4-6 "explain src/auth.ts"
 wm run --json "what framework does this project use"
 ```
 
@@ -353,8 +353,12 @@ wm run --json "what framework does this project use"
 
 | Flag | Description |
 |---|---|
-| `-p, --provider <provider/model>` | Override provider and model |
+| `--model <provider/model>` | Override provider and model |
 | `--json` | Emit structured JSON output instead of plain text |
+| `--session <id>` | Continue a specific session |
+| `--continue` | Continue the most recent session |
+| `--max-steps <n>` | Cap tool/reasoning steps |
+| `--full-disk` | Allow tools to access files outside working directory |
 
 Useful for scripting, CI pipelines, and automation. The agent has full tool access (subject to permissions) but no interactive prompts.
 

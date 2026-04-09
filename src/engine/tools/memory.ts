@@ -67,21 +67,25 @@ export async function executeMemoryCommand(
 ): Promise<string> {
   ensureMemoriesDir(cwd);
 
-  switch (action.command) {
-    case "view":
-      return handleView(action.path || "/memories", action.view_range, cwd);
-    case "create":
-      return handleCreate(action.path!, action.file_text!, cwd);
-    case "str_replace":
-      return handleStrReplace(action.path!, action.old_str!, action.new_str!, cwd);
-    case "insert":
-      return handleInsert(action.path!, action.insert_line!, action.insert_text!, cwd);
-    case "delete":
-      return handleDelete(action.path!, cwd);
-    case "rename":
-      return handleRename(action.old_path!, action.new_path!, cwd);
-    default:
-      return `Error: Unknown memory command "${action.command}"`;
+  try {
+    switch (action.command) {
+      case "view":
+        return handleView(action.path || "/memories", action.view_range, cwd);
+      case "create":
+        return handleCreate(action.path!, action.file_text!, cwd);
+      case "str_replace":
+        return handleStrReplace(action.path!, action.old_str!, action.new_str!, cwd);
+      case "insert":
+        return handleInsert(action.path!, action.insert_line!, action.insert_text!, cwd);
+      case "delete":
+        return handleDelete(action.path!, cwd);
+      case "rename":
+        return handleRename(action.old_path!, action.new_path!, cwd);
+      default:
+        return `Error: Unknown memory command "${action.command}"`;
+    }
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 

@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`wm runs` commands** — inspect past `/build` runs: `wm runs list` (recent runs with outcome, cost, branch), `wm runs show <id>` (full details with stories, gates, reviews, tokens), `wm runs last` (most recent). All support `--json`.
+- **`wm model` command** — set or show the default model without entering a session. `wm model ollama/qwen3-coder:30b` persists to config. `wm model` shows current default and routing.
+- **`ticket` tool** — agents can fetch tickets, post comments, transition status, and list issues directly through GitHub Issues, Jira, or Linear. Uses configured `ticketSystem`. Added to all worker personas.
+- **Provider capability registry** — centralized provider/model feature differences in `src/provider-capabilities.ts`. Queries capabilities instead of scattering `if (provider === "ollama")` conditionals.
 - **Persistent `memory` tool** — agents now have a `memory` tool for file-based persistent memory across sessions. Works with every provider (Ollama, OpenAI, Google, xAI, etc.). Agents check memory at session start and save project patterns, corrections, and preferences as they work. Stored per-project under `~/.workermill/projects/<id>/memories/`.
 - **Definition-of-done contracts** — planner emits `requiredFiles`, `requiredTests`, and `requiredCommands` per story. The orchestrator validates these after execution and blocks completion if artifacts are missing or commands fail. Machine-readable failure codes (`missing_required_file`, `missing_required_test`, `required_command_failed`, etc.) replace vague error messages.
 - **QA participation control** — new `qa.participation` config setting (`"off"`, `"auto"`, `"always"`) controls whether a dedicated QA story is added to `/build` runs. Default: `"auto"`.

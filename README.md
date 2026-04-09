@@ -334,6 +334,9 @@ Run outside the interactive session from a normal terminal prompt.
 | `wm stats` | Cross-session usage analytics and cost summary |
 | `wm schema` | Generate JSON Schema for config validation |
 | `wm logs` | Stream or tail CLI log entries |
+| `wm model <provider/model>` | Set default model without entering a session |
+| `wm runs list` | List recent /build runs with outcomes |
+| `wm runs show <id>` | Full details of a past build run |
 | `wm doctor` | Health check: Node, git, config, providers |
 
 </details>
@@ -395,7 +398,7 @@ Create your own by dropping a `.md` file in `.workermill/personas/` (project) or
 
 ## Tools
 
-WorkerMill gives its agents 22 tools — file operations, shell, search, git, web, code intelligence, and memory:
+WorkerMill gives its agents 23 tools — file operations, shell, search, git, web, code intelligence, memory, and tickets:
 
 | Tool | What it does |
 |------|-------------|
@@ -417,6 +420,7 @@ WorkerMill gives its agents 22 tools — file operations, shell, search, git, we
 | `todo` | Track tasks within a session |
 | `verify` | Run quality gate commands |
 | `memory` | Persistent cross-session agent memory |
+| `ticket` | Fetch, comment, transition issues (GitHub/Jira/Linear) |
 
 Plus any tools connected via [MCP servers](#mcp-support).
 

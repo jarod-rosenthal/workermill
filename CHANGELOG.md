@@ -9,7 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Strict mode for `/build`** — `--strict` flag or `review.strict: true` config. All gate failures block (not just required ones), review approval required, out-of-scope file edits are blocking. For high-trust workflows.
 - **Recovery mode** — CLI detects interrupted builds on startup and shows guided recovery: branch status, story progress, remaining work, options to `/retry`, `/undo`, or continue.
-- **Memory provenance** — memory files created by the `memory` tool now include YAML frontmatter with `source` (agent/auto-extracted/manual), `confidence` (high/medium/low), and `created` timestamp. Auto-extracted learnings are timestamped per entry.
+- **Memory provenance and auditability** — saved project memories now carry structured provenance (`source`, `confidence`, `runId`, `storyId`, `persona`) and `/memories` surfaces manual vs agent vs auto-extracted entries. `/remember` no longer creates duplicate sidecar files, and `/forget` also cleans up matching additional memory files.
 - **Docs consistency tests** — 7 automated tests verify: persona count matches README, tool count matches README, documented CLI subcommands exist in code, config fields in docs match Zod schema, HELP_TEXT commands have case handlers.
 - **`wm runs` commands** — inspect past `/build` runs: `wm runs list` (recent runs with outcome, cost, branch), `wm runs show <id>` (full details with stories, gates, reviews, tokens), `wm runs last` (most recent). All support `--json`.
 - **`wm model` command** — set or show the default model without entering a session. `wm model ollama/qwen3-coder:30b` persists to config. `wm model` shows current default and routing.
@@ -17,7 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Provider capability registry** — centralized provider/model feature differences in `src/provider-capabilities.ts`. Queries capabilities instead of scattering `if (provider === "ollama")` conditionals.
 - **Persistent `memory` tool** — agents now have a `memory` tool for file-based persistent memory across sessions. Works with every provider (Ollama, OpenAI, Google, xAI, etc.). Agents check memory at session start and save project patterns, corrections, and preferences as they work. Stored per-project under `~/.workermill/projects/<id>/memories/`.
 - **Definition-of-done contracts** — planner emits `requiredFiles`, `requiredTests`, and `requiredCommands` per story. The orchestrator validates these after execution and blocks completion if artifacts are missing or commands fail. Machine-readable failure codes (`missing_required_file`, `missing_required_test`, `required_command_failed`, etc.) replace vague error messages.
-- **QA participation control** — new `qa.participation` config setting (`"off"`, `"auto"`, `"always"`) controls whether a dedicated QA story is added to `/build` runs. Default: `"auto"`.
+- **QA participation control** — `qa.participation` now supports `"default"` (planner decides when QA is needed) or `"always"` (always add a dedicated QA story).
 - **Per-story workspace rollback** — git snapshot taken before each story's revision loop. On retry, workspace is restored to pre-story state so each attempt starts clean instead of inheriting half-broken edits.
 - **Story file ownership enforcement** — after story execution, touched files are compared against the story's declared scope (`targetFiles`, `requiredFiles`). Warns when >50% of edits are outside scope.
 - **Run manifest** — every `/build` run persists a JSON manifest at `~/.workermill/projects/<id>/runs/<run-id>.json` with full run state: stories, outcomes, cost, tokens, branch. Foundation for `wm runs list` and `wm runs show`.
@@ -37,12 +37,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Dependencies updated** — all in-range deps bumped (AI SDK, MCP SDK 1.29, vitest, react). 0 vulnerabilities.
 - **Long-running E2E handling** — the aggregate E2E runner now gives each file a larger per-file timeout budget by default and kills timed-out child processes cleanly.
 - **Ship workflow E2E scope** — `ship-workflow` coverage focused on ship/orchestration behavior.
+- **Settings UX** — `/settings` output now has clearer spacing before the settings block and persona routing table, making the transcript easier to read.
+- **Assistant response footer spacing** — turn receipts now render below a divider with a small gap, so the summary does not sit directly against the last paragraph of model output.
 
 ### Fixed
 - **Rate limit retry in planner and reviewer** — planner retries up to 3 times on HTTP 429 with backoff. Reviewer retry loop now catches rate limits alongside timeouts and transient errors. Fixed `isRateLimitError` matching billing/quota errors (infinite retry bug).
 - **Memory tool path traversal** — `executeMemoryCommand` now catches path traversal errors and returns error strings instead of throwing unhandled exceptions.
 - **Standalone `/review` empty-output failures** — Tech Lead review now retries once when a provider returns empty or malformed review output.
 - **Tool execution E2E flakiness** — tool execution end-to-end tests now assert stable tool outcomes and filesystem effects.
+- **`wm runs show` prefix matching** — ambiguous run ID prefixes now fail explicitly instead of silently selecting the first match.
 
 ## [1.0.1] - 2026-04-08
 

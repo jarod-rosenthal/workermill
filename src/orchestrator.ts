@@ -542,6 +542,28 @@ export async function runOrchestration(
   }
   const finalReviewText = reviewLoopResult.finalReviewText;
 
+  // --- Build Summary ---
+  {
+    const completed = sorted.filter(s => completedStoryIds.includes(s.id));
+    const failed = sorted.filter(s => failedStories.has(s.id));
+    const skipped = sorted.filter(s => skippedStories.has(s.id));
+    const lines: string[] = ["", "── Build Summary ──"];
+    for (const s of sorted) {
+      const idx = sorted.indexOf(s) + 1;
+      if (completedStoryIds.includes(s.id)) {
+        lines.push(`  ✓ Story ${idx}: ${s.title} (${s.persona})`);
+      } else if (failedStories.has(s.id)) {
+        lines.push(`  ✗ Story ${idx}: ${s.title} (${s.persona}) — failed`);
+      } else if (skippedStories.has(s.id)) {
+        lines.push(`  ⊘ Story ${idx}: ${s.title} (${s.persona}) — skipped (dependency failed)`);
+      }
+    }
+    lines.push(`  ${completed.length} passed · ${failed.length} failed · ${skipped.length} skipped`);
+    lines.push(`  Cost: ~$${costTracker.getTotalCost().toFixed(2)}`);
+    lines.push("");
+    for (const line of lines) output.log("system", line);
+  }
+
   // --- Completion: push, PR, ticket updates, cleanup ---
   return runCompletion({
     config, output, sorted, completedStoryIds, featureBranch, mainBranch,

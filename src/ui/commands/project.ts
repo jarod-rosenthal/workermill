@@ -176,7 +176,8 @@ export function handleForgetCommand(arg: string, ctx: SlashCommandContext): void
   }
 }
 
-export function handleMemoriesCommand(_arg: string, ctx: SlashCommandContext): void {
+export function handleMemoriesCommand(arg: string, ctx: SlashCommandContext): void {
+  const showAll = arg.trim().toLowerCase() === "all";
   const savedMemories = loadMemories(ctx.workingDir);
   const fileMemories = listMemoriesWithProvenance(ctx.workingDir)
     .filter((memory) => !PRIMARY_MEMORY_FILES.includes(memory.file));
@@ -210,10 +211,14 @@ export function handleMemoriesCommand(_arg: string, ctx: SlashCommandContext): v
     for (const memory of savedMemories) {
       lines.push(`- **[${typeLabels[memory.type] || memory.type}]** ${memory.content} \`(${memory.id})\`${formatProvenance(memory)}`);
     }
+    if (fileMemories.length > 0 && !showAll) {
+      lines.push("");
+      lines.push(`Use \`/memories all\` to see ${fileMemories.length} additional memory file${fileMemories.length === 1 ? "" : "s"}.`);
+    }
     lines.push("");
   }
 
-  if (fileMemories.length > 0) {
+  if (showAll && fileMemories.length > 0) {
     lines.push("**Additional Memory Files** (`~/.workermill/projects/.../memories/`):\n");
     for (const memory of fileMemories) {
       lines.push(`- \`${memory.file}\`${formatProvenance(memory)}`);

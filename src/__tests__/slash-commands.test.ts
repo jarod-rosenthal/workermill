@@ -1220,6 +1220,47 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("[manual/high]")
       );
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("/memories all")
+      );
+      expect(ctx.addSystemMessage).not.toHaveBeenCalledWith(
+        expect.stringContaining("run run-abc123")
+      );
+      expect(ctx.addSystemMessage).not.toHaveBeenCalledWith(
+        expect.stringContaining("**Additional Memory Files**")
+      );
+    });
+
+    it("lists additional memory files with /memories all", () => {
+      vi.mocked(loadMemories).mockReturnValueOnce([
+        {
+          id: "mem-1",
+          type: "preference",
+          content: "Use Prisma",
+          createdAt: "2026-03-30",
+          source: "manual",
+          confidence: "high",
+        } as any,
+      ]);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([
+        {
+          file: "auto-learnings.md",
+          source: "auto-extracted",
+          confidence: "medium",
+          runId: "run-abc123",
+          storyId: "story-2",
+          persona: "qa_engineer",
+          preview: "Discovered the CI runner needs PNPM",
+        },
+      ]);
+      const ctx = createContext();
+      handleSlashCommand("/memories all", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("**Additional Memory Files**")
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("auto-learnings.md")
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("run run-abc123")
       );
     });

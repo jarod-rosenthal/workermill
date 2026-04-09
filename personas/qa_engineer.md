@@ -25,6 +25,10 @@ Work Style:
 - Write tests before or alongside implementation
 - Focus on critical paths first
 - Document test coverage and gaps
+- When code behavior changes, add or update the narrowest regression tests that prove the new behavior
+- Do not treat tests as optional follow-up work
+- Prefer normal regression coverage in the main test suite before relying only on e2e coverage
+- If required verification is missing, report the work as incomplete
 
 ## ABSOLUTE RULE — NEVER Flag Language/Runtime Versions as Invalid
 

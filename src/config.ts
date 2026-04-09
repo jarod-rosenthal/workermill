@@ -68,6 +68,11 @@ export interface ProgramConfig {
   epicPrompt?: "ask" | "always";
 }
 
+export interface QaConfig {
+  /** Whether QA gets a dedicated story in /build runs. Default: auto */
+  participation?: "off" | "auto" | "always";
+}
+
 export interface HookConfig {
   /** Shell command to run (for "command" type, default) */
   command?: string;
@@ -117,6 +122,7 @@ export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
   routing?: Record<string, string>;
+  qa?: QaConfig;
   mcp?: Record<string, MCPServerConfig>;
   review?: ReviewConfig;
   hooks?: HooksConfig;
@@ -259,6 +265,7 @@ export function resolveConfig(): CliConfig {
     providers: { ...global.providers, ...(project?.providers || {}) },
     default: project?.default || global.default,
     routing: { ...global.routing, ...(project?.routing || {}) },
+    qa: { ...global.qa, ...(project?.qa || {}) },
     mcp: { ...global.mcp, ...(project?.mcp || {}) },
     review: { ...global.review, ...(project?.review || {}) },
     hooks: {

@@ -1854,6 +1854,48 @@ function formatMustFixItems(items: ReviewMustFixItem[]): string {
   }).join("\n");
 }
 
+function normalizeStoryDependencies(stories: Story[]): Story[] {
+  const validIds = new Set(stories.map((story) => story.id));
+  return stories.map((story) => ({
+    ...story,
+    dependsOn: story.dependsOn?.filter((dep) => validIds.has(dep)),
+  }));
+}
+
+function buildAutoQaStory(stories: Story[]): Story {
+  const implementationStories = stories.filter((story) => story.persona !== "qa_engineer");
+  const dependsOn = implementationStories.map((story) => story.id);
+  const cliCommandTargets = implementationStories
+    .flatMap((story) => story.targetFiles ?? [])
+    .filter((file) => /(^|\/)[^/]+-command\.ts$/.test(file))
+    .map((file) => path.basename(file).replace(/\.ts$/, ".test.ts"))
+    .map((file) => `src/__tests__/${file}`);
+
+  return {
+    id: "qa-validation",
+    title: "Cross-story QA validation",
+    persona: "qa_engineer",
+    description: "Validate the completed implementation end-to-end, add or tighten missing regression coverage, and confirm the user-facing workflow still works.",
+    dependsOn,
+    targetFiles: cliCommandTargets,
+    requiredTests: cliCommandTargets,
+    implementationNotes: "Review the completed stories, verify the main user workflow, and add the narrowest missing regression coverage needed to prove the implementation is done.",
+    validationSignal: "The build has dedicated QA validation coverage and any missing regression gaps have been closed.",
+  };
+}
+
+export function applyQaParticipation(stories: Story[], participation: "off" | "auto" | "always"): Story[] {
+  if (participation === "off") {
+    return normalizeStoryDependencies(stories.filter((story) => story.persona !== "qa_engineer"));
+  }
+
+  if (participation === "always" && !stories.some((story) => story.persona === "qa_engineer")) {
+    return normalizeStoryDependencies([...stories, buildAutoQaStory(stories)]);
+  }
+
+  return normalizeStoryDependencies(stories);
+}
+
 function validatePlannerStories(stories: Story[]): string[] {
   const issues: string[] = [];
 
@@ -2343,7 +2385,13 @@ export async function runOrchestration(
       return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
 
-    const plannerStories = planResult.stories;
+    const qaParticipation = config.qa?.participation ?? "auto";
+    const plannerStories = applyQaParticipation(planResult.stories, qaParticipation);
+    if (qaParticipation === "off" && plannerStories.length !== planResult.stories.length) {
+      output.log("planner", "QA participation is off — removed dedicated qa_engineer stories from this run.");
+    } else if (qaParticipation === "always" && plannerStories.length > planResult.stories.length) {
+      output.log("planner", "QA participation is always — added a dedicated qa_engineer validation story.");
+    }
 
     // Show the plan — WorkerMill format
     output.log("planner", `Plan generated: ${plannerStories.length} stories`);

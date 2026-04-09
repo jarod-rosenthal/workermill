@@ -937,6 +937,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const reviewEnabled = config.review?.enabled !== false;
         const maxRevisions = config.review?.maxRevisions ?? 3;
         const approvalThreshold = config.review?.approvalThreshold ?? 9;
+        const qaParticipation = config.qa?.participation ?? "auto";
         const liveViewEnabled = config.liveView === true;
         const liveViewUrl = ctx.getLiveViewUrl?.() || null;
         const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
@@ -951,6 +952,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
           `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
           `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
+          `| QA participation | ${qaParticipation} | \`/settings qa.participation <off/auto/always>\` |\n` +
           `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
           `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
           `| Inline edit preview | ${inlineEditPreview} | \`/settings ui.inlineEditPreview <true/false>\` |\n` +
@@ -1043,6 +1045,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "review.threshold": "review.threshold",
           "review.autorevise": "review.autoRevise",
           "review.autobranch": "review.autoBranch",
+          "qa.participation": "qa.participation",
           "program.maxissues": "program.maxIssues",
           "program.maxautoretries": "program.maxAutoRetries",
           "program.gatemode": "program.gateMode",
@@ -1109,6 +1112,16 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           }
           case "review.autoBranch": {
             config.review = { ...config.review, autoBranch: boolVal(value) };
+            break;
+          }
+          case "qa.participation": {
+            const normalized = value.toLowerCase();
+            if (!["off", "auto", "always"].includes(normalized)) {
+              ctx.addSystemMessage("Invalid value for `qa.participation`. Use `off`, `auto`, or `always`.");
+              settingApplied = false;
+              break;
+            }
+            config.qa = { ...config.qa, participation: normalized as "off" | "auto" | "always" };
             break;
           }
           case "program.maxIssues": {
@@ -1305,7 +1318,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
+        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
           if (key === "route") {

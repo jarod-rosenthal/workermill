@@ -722,6 +722,7 @@ describe("handleSlashCommand", () => {
       const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       // Primary settings present
       expect(msg).toContain("Review enabled");
+      expect(msg).toContain("QA participation");
       expect(msg).toContain("Live code view");
       expect(msg).toContain("Issue tracker");
       // Advanced settings hidden
@@ -1580,6 +1581,25 @@ describe("handleSlashCommand", () => {
           review: expect.objectContaining({ autoRevise: true }),
         }),
       );
+    });
+
+    it("updates qa.participation", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings qa.participation always", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          qa: expect.objectContaining({ participation: "always" }),
+        }),
+      );
+    });
+
+    it("rejects invalid qa.participation values", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings qa.participation maybe", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid value for `qa.participation`"),
+      );
+      expect(saveConfig).not.toHaveBeenCalled();
     });
 
     it("updates program.maxIssues", () => {

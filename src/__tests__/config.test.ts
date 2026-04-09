@@ -389,6 +389,7 @@ describe("config", () => {
         providers: { ollama: { model: "global-model", host: "http://localhost:11434" } },
         default: "ollama",
         routing: { planner: "ollama" },
+        qa: { participation: "off" },
         review: { enabled: true, maxRevisions: 3 },
       };
       fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
@@ -399,6 +400,7 @@ describe("config", () => {
         default: "anthropic",
         providers: { anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
         routing: { reviewer: "anthropic" },
+        qa: { participation: "always" },
         review: { maxRevisions: 5 },
       };
       fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify(projectConfig), "utf-8");
@@ -415,6 +417,8 @@ describe("config", () => {
       // Routing is merged
       expect(resolved.routing?.planner).toBe("ollama");
       expect(resolved.routing?.reviewer).toBe("anthropic");
+      // QA config is merged
+      expect(resolved.qa?.participation).toBe("always");
       // Review is merged
       expect(resolved.review?.enabled).toBe(true);
       expect(resolved.review?.maxRevisions).toBe(5);

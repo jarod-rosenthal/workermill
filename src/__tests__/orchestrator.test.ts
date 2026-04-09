@@ -192,6 +192,7 @@ import {
   validateStoryContractArtifacts,
   extractStructuredMustFixItems,
   mergeMustFixItems,
+  applyQaParticipation,
   type OrchestrationOutput,
   type Story,
 } from "../orchestrator.ts";
@@ -389,6 +390,32 @@ AFFECTED_REASONS: {"1":"Add the missing normal regression test."}`;
     expect(merged).toHaveLength(1);
     expect(merged[0].id).toBe(initial[0].id);
     expect(merged[0].storyNumber).toBe(1);
+  });
+});
+
+describe("qa participation helpers", () => {
+  it("removes dedicated qa_engineer stories when participation is off", () => {
+    const stories: Story[] = [
+      { id: "impl", title: "Implement feature", persona: "backend_developer", description: "Build it." },
+      { id: "qa", title: "Validate feature", persona: "qa_engineer", description: "Test it.", dependsOn: ["impl"] },
+    ];
+
+    expect(applyQaParticipation(stories, "off").map((story) => story.id)).toEqual(["impl"]);
+  });
+
+  it("adds a qa validation story when participation is always and no qa story exists", () => {
+    const stories: Story[] = [
+      { id: "stats", title: "Add wm stats", persona: "backend_developer", description: "Build the command.", targetFiles: ["src/stats-command.ts"] },
+    ];
+
+    const result = applyQaParticipation(stories, "always");
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual(expect.objectContaining({
+      id: "qa-validation",
+      persona: "qa_engineer",
+      requiredTests: ["src/__tests__/stats-command.test.ts"],
+      dependsOn: ["stats"],
+    }));
   });
 });
 

@@ -1,93 +1,15 @@
-import path from "path";
-import fs from "fs";
 import type { CliConfig, QualityGateCommand } from "../config.js";
 import * as logger from "../logger.js";
 import { runGate, type GateResult } from "../gate-runner.js";
-import * as lspTool from "../engine/tools/lsp.js";
-import type { OrchestrationOutput, Story } from "./types.js";
+import { runDiagnosticsOnTouchedFiles, emitFailureCode } from "./execution.js";
+import { getStoryDefinitionOfDone as _getStoryDefinitionOfDone } from "./execution.js";
+import type { OrchestrationOutput, Story, SharedContext } from "./types.js";
+
+// ── Testable utility (used by orchestrator-gates.test.ts) ──
 
 export interface PostExecutionQualityGateResult {
   gateResultsSection: string;
   requiredFailures: GateResult[];
-}
-
-export interface DiagnosticsSectionResult {
-  errorCount: number;
-  section: string;
-}
-
-/** Run LSP diagnostics on touched files. Returns error count (0 = clean, -1 = no LSP). */
-export async function runDiagnosticsOnTouchedFiles(
-  touchedFiles: string[],
-  workingDir: string,
-  log: (msg: string) => void,
-): Promise<DiagnosticsSectionResult> {
-  if (touchedFiles.length === 0) return { errorCount: 0, section: "" };
-
-  const excludes = lspTool.loadTsconfigExcludes(workingDir);
-  const unique = [...new Set(touchedFiles)].filter((filePath) => {
-    const rel = path.isAbsolute(filePath) ? path.relative(workingDir, filePath) : filePath;
-    return !excludes.some((re) => re.test(rel));
-  });
-  if (unique.length === 0) return { errorCount: 0, section: "" };
-
-  log(`Running diagnostics on ${unique.length} touched file(s)...`);
-  let totalErrors = 0;
-  let lspAvailable = true;
-  const lines: string[] = [];
-
-  for (const filePath of unique) {
-    try {
-      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
-      if (!fs.existsSync(resolvedPath)) {
-        log(`⚠ File not found: ${filePath}`);
-        continue;
-      }
-
-      const result = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
-      if (result.success && result.content) {
-        try {
-          const parsed = JSON.parse(result.content);
-          if (parsed.lsp_available === false) {
-            lspAvailable = false;
-            continue;
-          }
-          const errors =
-            parsed.summary?.errors ??
-            parsed.diagnostics?.filter((d: { severity: string }) => d.severity === "error").length ??
-            0;
-          totalErrors += errors;
-          const status = errors > 0 ? `✗ ${filePath}: ${errors} error(s)` : `✓ ${filePath}: clean`;
-          log(status);
-          lines.push(status);
-          if (errors > 0 && parsed.diagnostics) {
-            for (const diagnostic of parsed.diagnostics.slice(0, 5)) {
-              lines.push(`    ${diagnostic.line}:${diagnostic.col} ${diagnostic.message}`);
-            }
-            if (parsed.diagnostics.length > 5) {
-              lines.push(`    ... and ${parsed.diagnostics.length - 5} more`);
-            }
-          }
-        } catch {
-          log(`✓ ${filePath}: ${result.content}`);
-        }
-      } else {
-        log(`✗ ${filePath}: ${result.error}`);
-      }
-    } catch (err) {
-      log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  if (!lspAvailable && totalErrors === 0) return { errorCount: -1, section: "" };
-
-  const section = totalErrors > 0
-    ? `\n\n## LSP Diagnostics — ${totalErrors} ERROR(S)\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n\nThese type errors were found in touched files. Factor them into your review — request revision if they indicate real bugs.`
-    : lines.length > 0
-      ? `\n\n## LSP Diagnostics — CLEAN\n\n${lines.map((line) => `- ${line}`).join("\n")}`
-      : "";
-
-  return { errorCount: totalErrors, section };
 }
 
 export async function runPostExecutionQualityGates(args: {
@@ -147,4 +69,100 @@ export async function runPostExecutionQualityGates(args: {
     gateResultsSection,
     requiredFailures: failed.filter((result) => requiredGateNames.has(result.name)),
   };
+}
+
+// ── Orchestrator-level wrapper (called by runOrchestration) ──
+
+export interface QualityGatesResult {
+  gateResultsSection: string;
+  earlyExit: boolean;
+}
+
+/**
+ * Runs post-execution quality gates: static gates, required command gates,
+ * and dynamic verification gates. Returns formatted results for the reviewer.
+ * Returns early if required gates fail.
+ * Also runs LSP diagnostics on touched files.
+ */
+export async function runQualityGates(args: {
+  config: CliConfig;
+  output: OrchestrationOutput;
+  sorted: Story[];
+  completedStoryIds: string[];
+  context: SharedContext;
+  workingDir: string;
+}): Promise<QualityGatesResult> {
+  const { config, output, sorted, completedStoryIds, context, workingDir } = args;
+
+  let gateResultsSection = "";
+  const verifyEnabled = config.review?.verifyEnabled !== false;
+
+  const staticGates = config.qualityGates ?? [];
+  const requiredCommandGates = sorted
+    .filter((s) => completedStoryIds.includes(s.id) && _getStoryDefinitionOfDone(s).requiredCommands.length > 0)
+    .map((s) => ({ name: `required: ${s.title}`, commands: _getStoryDefinitionOfDone(s).requiredCommands }));
+  const dynamicGates = verifyEnabled
+    ? sorted
+        .filter(s => completedStoryIds.includes(s.id) && s.verificationCommands?.length)
+        .map(s => ({ name: `verify: ${s.title}`, commands: s.verificationCommands! }))
+    : [];
+  const allGates = [...staticGates, ...requiredCommandGates, ...dynamicGates];
+  const requiredGateNames = new Set(requiredCommandGates.map((gate) => gate.name));
+
+  if (allGates.length > 0 && completedStoryIds.length > 0) {
+    output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
+    output.status(`Running quality gates (${allGates.length})...`);
+    const gateResults = await Promise.all(allGates.map(g => runGate(g, workingDir)));
+    output.statusDone();
+
+    const failed = gateResults.filter(r => !r.passed);
+    const passed = gateResults.filter(r => r.passed);
+
+    for (const r of passed) output.coordinatorLog(`  ✓ ${r.name}`);
+    for (const r of failed) output.coordinatorLog(`  ✗ ${r.name} — failed`);
+
+    logger.info("Quality gates complete", {
+      total: gateResults.length,
+      passed: passed.length,
+      failed: failed.length,
+    });
+
+    const requiredFailures = failed.filter((result) => requiredGateNames.has(result.name));
+
+    if (failed.length > 0) {
+      gateResultsSection =
+        `\n\n## Quality Gate Results — ${failed.length} FAILED\n\n` +
+        failed.map(r =>
+          `### ${r.name} — FAILED\n\`\`\`\n${r.output.slice(0, 2000)}\n\`\`\``
+        ).join("\n\n") +
+        "\n\nRequired command failures are blocking. Verification-gate failures remain reviewer context.";
+    } else {
+      gateResultsSection =
+        "\n\n## Quality Gate Results — ALL PASSED\n\n" +
+        passed.map(r => `- ✓ ${r.name}`).join("\n");
+    }
+
+    if (requiredFailures.length > 0) {
+      for (const failure of requiredFailures) {
+        emitFailureCode(output, "required_command_failed", `${failure.name} failed`);
+      }
+      output.coordinatorLog(`Definition-of-done check failed: ${requiredFailures.length} required command${requiredFailures.length !== 1 ? "s" : ""} failed.`);
+      logger.info("Blocking required command failures", { failures: requiredFailures.map((result) => result.name) });
+      return { gateResultsSection, earlyExit: true };
+    }
+  }
+
+  // Run LSP diagnostics on touched files BEFORE review — so the reviewer sees type errors
+  if (completedStoryIds.length > 0) {
+    const diagResult = await runDiagnosticsOnTouchedFiles(
+      [...context.filesCreated, ...context.filesModified],
+      workingDir,
+      (msg) => output.coordinatorLog(msg),
+    );
+    if (diagResult.section) {
+      gateResultsSection += diagResult.section;
+    }
+  }
+
+  return { gateResultsSection, earlyExit: false };
 }

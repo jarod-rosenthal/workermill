@@ -1,16 +1,44 @@
-import type { ToolSet } from "ai";
+import { streamText, stepCountIs, type ToolSet } from "ai";
+import { z } from "zod";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "../safety.js";
 import { checkpoint } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { estimateContextTokens } from "../compaction.js";
+import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
+import type { AIProvider } from "../engine/types.js";
+import { createToolDefinitions } from "../engine/tools/index.js";
+import { loadPersona } from "../personas.js";
+import { formatProjectInstructions } from "../instructions.js";
+import { getProviderForPersona } from "../config.js";
+import type { CliConfig } from "../config.js";
+import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
+import { isGitRepo, commitStoryChanges } from "../git-ops.js";
+import { withConcurrencyControl } from "../tool-concurrency.js";
+import { CostTracker } from "../cost-tracker.js";
+import { saveShipRun } from "../ship-state.js";
+import { getMCPToolDefinitions } from "../mcp-client.js";
+import * as lspTool from "../engine/tools/lsp.js";
 
 import type { Story, OrchestrationOutput, FailureCode, StoryContractIssue, SharedContext } from "./types.js";
 import {
   truncateForPrompt,
   estimateToolSchemaTokens,
   extractToolFilePath,
+  isRateLimitError,
+  isBalanceOrQuotaError,
+  MAX_RATE_LIMIT_RETRIES,
+  getModelContext,
+  formatContext,
+  normalizeErrorSignature,
+  rateLimitSleep,
+  parsePromptLengthError,
+  extractDeclaredFileMarkers,
+  classifyError,
+  buildReasoningOptions,
+  emitReasoningDelta,
 } from "./utils.js";
 import { isExcludedTestPath, deriveAutoRequiredTests } from "./planning.js";
 
@@ -560,4 +588,851 @@ export function formatContractIssuesForPrompt(issues: StoryContractIssue[]): str
 export function emitFailureCode(output: OrchestrationOutput, code: FailureCode, detail: string): void {
   output.log("system", `::failure_code::${code}`);
   output.error(`[${code}] ${detail}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  runDiagnosticsOnTouchedFiles                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Run LSP diagnostics on touched files. Returns error count (0 = clean, -1 = no LSP). */
+export async function runDiagnosticsOnTouchedFiles(
+  touchedFiles: string[],
+  workingDir: string,
+  log: (msg: string) => void,
+): Promise<{ errorCount: number; section: string }> {
+  if (touchedFiles.length === 0) return { errorCount: 0, section: "" };
+
+  // Filter out tsconfig-excluded files (test files produce false-positive diagnostics)
+  const excludes = lspTool.loadTsconfigExcludes(workingDir);
+  const unique = [...new Set(touchedFiles)].filter((f) => {
+    const rel = path.isAbsolute(f) ? path.relative(workingDir, f) : f;
+    return !excludes.some((re) => re.test(rel));
+  });
+  if (unique.length === 0) return { errorCount: 0, section: "" };
+
+  log(`Running diagnostics on ${unique.length} touched file(s)...`);
+  let totalErrors = 0;
+  let lspAvailable = true;
+  const lines: string[] = [];
+  for (const filePath of unique) {
+    try {
+      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
+      if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
+      const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
+      if (r.success && r.content) {
+        try {
+          const parsed = JSON.parse(r.content);
+          if (parsed.lsp_available === false) { lspAvailable = false; continue; }
+          const errors = parsed.summary?.errors ?? parsed.diagnostics?.filter((d: { severity: string }) => d.severity === "error").length ?? 0;
+          totalErrors += errors;
+          const status = errors > 0 ? `✗ ${filePath}: ${errors} error(s)` : `✓ ${filePath}: clean`;
+          log(status);
+          lines.push(status);
+          // Include first few error details for reviewer context
+          if (errors > 0 && parsed.diagnostics) {
+            for (const d of parsed.diagnostics.slice(0, 5)) {
+              lines.push(`    ${d.line}:${d.col} ${d.message}`);
+            }
+            if (parsed.diagnostics.length > 5) lines.push(`    ... and ${parsed.diagnostics.length - 5} more`);
+          }
+        } catch {
+          log(`✓ ${filePath}: ${r.content}`);
+        }
+      } else {
+        log(`✗ ${filePath}: ${r.error}`);
+      }
+    } catch (err) {
+      log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (!lspAvailable && totalErrors === 0) return { errorCount: -1, section: "" };
+
+  // Build a section for the reviewer
+  const section = totalErrors > 0
+    ? `\n\n## LSP Diagnostics — ${totalErrors} ERROR(S)\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n\nThese type errors were found in touched files. Factor them into your review — request revision if they indicate real bugs.`
+    : lines.length > 0
+      ? `\n\n## LSP Diagnostics — CLEAN\n\n${lines.map(l => `- ${l}`).join("\n")}`
+      : "";
+
+  return { errorCount: totalErrors, section };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  executeStories                                                            */
+/* -------------------------------------------------------------------------- */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyToolDef = any;
+
+export interface ExecuteStoriesParams {
+  sorted: Story[];
+  completedStoryIds: string[];
+  config: CliConfig;
+  output: OrchestrationOutput;
+  trustAll: boolean | (() => boolean);
+  sandboxed: boolean | "os";
+  userTask: string;
+  context: SharedContext;
+  sessionAllow: Set<string>;
+  workingDir: string;
+  costTracker: CostTracker;
+  featureBranch: string | null;
+  mainBranch: string;
+  abortSignal?: AbortSignal;
+  liveViewServer?: import("../live-view-server.js").LiveViewServer;
+  ticketOps: { postComment(comment: string): Promise<void> } | null;
+
+  // Callbacks from the orchestrator
+  waitWhilePaused: () => Promise<boolean>;
+  pauseForBalanceIssue: (scope: string) => Promise<boolean>;
+  logRetryHint: () => void;
+}
+
+export interface ExecuteStoriesResult {
+  completedStoryIds: string[];
+  failedStories: Set<string>;
+  skippedStories: Set<string>;
+  retryable: boolean;
+  context: SharedContext;
+  /** True if the loop exited early (user cancel, abort, or balance issue). */
+  earlyExit: boolean;
+}
+
+export async function executeStories(params: ExecuteStoriesParams): Promise<ExecuteStoriesResult> {
+  const {
+    sorted,
+    completedStoryIds,
+    config,
+    output,
+    trustAll,
+    sandboxed,
+    userTask,
+    context,
+    sessionAllow,
+    workingDir,
+    costTracker,
+    featureBranch,
+    mainBranch,
+    abortSignal,
+    liveViewServer,
+    ticketOps,
+    waitWhilePaused,
+    pauseForBalanceIssue,
+    logRetryHint,
+  } = params;
+
+  const failedStories = new Set<string>();
+  const skippedStories = new Set<string>();
+  let retryable = true;
+
+  for (let i = 0; i < sorted.length; i++) {
+    if (await waitWhilePaused()) {
+      return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+    }
+
+    // Check if user cancelled (ESC) before starting next story
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled.");
+      logger.info("Build cancelled by user before story start", { storyIndex: i });
+      logRetryHint();
+      return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+    }
+
+    const story = sorted[i];
+
+    // Skip already-completed stories (retry mode)
+    if (completedStoryIds.includes(story.id)) {
+      output.log("system", `Skipping story ${i + 1}/${sorted.length}: "${story.title}" — already completed`);
+      continue;
+    }
+
+    // Check if any dependency failed — block this story (cascade failure)
+    if (story.dependsOn?.some(dep => failedStories.has(dep) || skippedStories.has(dep))) {
+      const blockedBy = story.dependsOn.filter(dep => failedStories.has(dep) || skippedStories.has(dep));
+      skippedStories.add(story.id);
+      output.log("system", `Skipping story ${i + 1}/${sorted.length}: "${story.title}" — blocked by failed dependency: ${blockedBy.join(", ")}`);
+      logger.info(`Story ${i + 1} skipped (dependency failed)`, { story: story.id, blockedBy });
+      continue;
+    }
+
+    const persona = loadPersona(story.persona);
+    if (!persona) {
+      output.error(`Unknown persona: ${story.persona}`);
+      failedStories.add(story.id);
+      continue;
+    }
+
+    // Resolve provider for this persona
+    const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(
+      config,
+      persona.provider || story.persona
+    );
+
+    // Set API key
+    if (apiKey) {
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+      const envVar = envMap[provider];
+      if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
+    }
+
+    output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
+    output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m, ${formatContext(getModelContext(modelName, contextLength))} context)`);
+    logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
+
+    // Emit live view events
+    if (liveViewServer) {
+      liveViewServer.emitStoryStart(i + 1, story.title, story.persona, sorted.length);
+    }
+
+    output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
+
+    const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
+
+    // Build tools filtered by persona's allowed tools
+    const allTools = createToolDefinitions(workingDir, model, sandboxed);
+    const storyHealth: { testResults?: string; buildErrors?: string; servicesRunning?: string[] } = {};
+    const personaTools: Record<string, AnyToolDef> = {};
+    // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
+    // Reset per revision so a tool loop on revision 0 doesn't permanently abort retries
+    const LOOP_WINDOW = 6;
+    const LOOP_THRESHOLD = 4;
+    let recentToolSignatures: string[] = [];
+    let loopAbort = new AbortController();
+    const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
+    for (const toolName of persona.tools) {
+      const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
+      if (toolDef) {
+        personaTools[toolName] = {
+          ...toolDef,
+          execute: async (input: Record<string, unknown>) => {
+            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
+            if (!allowed) return "Tool execution denied by user.";
+
+            // Track for loop detection
+            const sig = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
+            recentToolSignatures.push(sig);
+            if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
+            if (recentToolSignatures.length >= LOOP_WINDOW) {
+              const counts: Record<string, number> = {};
+              for (const s of recentToolSignatures) counts[s] = (counts[s] || 0) + 1;
+              const maxCount = Math.max(...Object.values(counts));
+              if (maxCount >= LOOP_THRESHOLD) {
+                logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
+                output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
+                loopAbort.abort();
+                return "ABORTED: Tool call loop detected. Stop and report what you've accomplished so far.";
+              }
+            }
+
+            output.toolCall(story.persona, toolName, input);
+            for (const target of extractCheckpointTargets(toolName, input, workingDir)) {
+              checkpoint(target.path, target.tool);
+            }
+            const hookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
+            if (hookResult.blocked) {
+              return `Tool blocked by pre-hook: ${hookResult.reason}`;
+            }
+            const result = await toolDef.execute(input);
+            runHooks("post", toolName, config.hooks, workingDir);
+
+            // Log tool result to cli.log — full output, no truncation
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            const isError = typeof result === "string" && result.startsWith("Error:");
+            if (isError) {
+              logger.error("Tool error", { persona: story.persona, tool: toolName, result: resultStr });
+            } else {
+              logger.debug("Tool result", { tool: toolName, result: resultStr });
+            }
+
+            // Track docker compose services for auto-cleanup
+            if (toolName === "bash") {
+              const cmd = (input as { command?: string }).command || "";
+              if (/docker[\s-]compose\s+up/i.test(cmd)) {
+                const resolvedCwd = (input as { cwd?: string }).cwd || workingDir;
+                startedDockerCompose.add(resolvedCwd);
+              }
+            }
+
+            // Parse structured bash output for story health context
+            if (toolName === "bash" && typeof result === "string") {
+              // Test results: jest/vitest/pytest/go test/playwright
+              const testMatch = result.match(/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i);
+              if (testMatch) {
+                storyHealth.testResults = result.split("\n").filter(l =>
+                  /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(l)
+                ).slice(-5).join("\n");
+              }
+
+              // Build errors: tsc, eslint, go build
+              const errorLines = result.split("\n").filter(l =>
+                /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(l)
+              );
+              if (errorLines.length > 0) {
+                storyHealth.buildErrors = errorLines.join("\n");
+              }
+
+              // Docker services
+              const bashCmd = (input as { command?: string }).command || "";
+              if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(bashCmd)) {
+                const serviceLines = result.split("\n").filter(l => /Up|running|healthy/i.test(l));
+                if (serviceLines.length > 0) {
+                  storyHealth.servicesRunning = serviceLines.map(l => l.trim());
+                }
+              }
+            }
+
+            output.status("");
+            return result;
+          },
+        };
+      }
+    }
+
+    // Merge MCP tools into persona tools — same pattern as useAgent.ts
+    const mcpTools = getMCPToolDefinitions();
+    for (const [key, def] of Object.entries(mcpTools)) {
+      personaTools[key] = def;
+    }
+
+    // TODO: Deferred tool loading — skipped in orchestrator because persona-based filtering
+    // already limits tools per story. MCP tools are the only unbounded set. If MCP tool counts
+    // become large, add partitionTools() here (see useAgent.ts for the pattern).
+
+    // Add skill tool — lets story workers invoke custom skills mid-execution
+    personaTools["skill"] = {
+      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
+      inputSchema: z.object({
+        name: z.string().describe("The skill name to invoke"),
+        args: z.string().optional().describe("Optional arguments"),
+      }),
+      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
+        const { loadCustomCommands } = await import("../custom-commands.js");
+        const skills = loadCustomCommands();
+        const match = skills.find(
+          (s: { name: string }) => s.name.toLowerCase() === skillName.toLowerCase(),
+        );
+        if (!match) return `Skill "${skillName}" not found.`;
+        return args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt;
+      },
+    };
+
+    // Apply concurrency control — safe tools (read_file, list_dir, etc.) run in parallel
+    for (const [name, td] of Object.entries(personaTools)) {
+      if (td && typeof td.execute === "function") {
+        const original = td.execute;
+        (personaTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
+      }
+    }
+
+    let revisionFeedback = "";
+    let storyRateLimitRetries = 0;
+    let contextOverflowRetries = 0;
+    let contextOverflowSlackTokens = 0;
+    const retryErrorSignatureCounts = new Map<string, number>();
+    for (let revision = 0; revision <= 2; revision++) {
+
+    // Reset loop detection for each revision attempt
+    recentToolSignatures = [];
+    loopAbort = new AbortController();
+
+    // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts
+    const contextParts: string[] = [];
+
+    // Sibling files warning — DO NOT DELETE (from worker prompt-builder.ts)
+    if (context.filesCreated.length > 0) {
+      contextParts.push(`\n## Files Created by Prior Stories — DO NOT DELETE\n${context.filesCreated.map(f => `- ${f}`).join("\n")}\nThese files were created by other experts. You may import or reference them but NEVER delete or overwrite them.`);
+    }
+    if (context.filesModified.length > 0) {
+      contextParts.push(`\n## Files Modified by Prior Stories\n${context.filesModified.map(f => `- ${f}`).join("\n")}\nBe aware these files have been changed. Read them before making assumptions about their contents.`);
+    }
+
+    // Decisions as hard constraints (not informational — from worker coordinator pattern)
+    if (context.decisions.length > 0) {
+      contextParts.push(`\n## Architectural Decisions — FOLLOW THESE\n${context.decisions.map((d, idx) => `${idx + 1}. ${d}`).join("\n")}\nThese decisions were made by prior experts. Follow them — do not contradict or revisit unless the spec explicitly requires a different approach.`);
+    }
+
+    // Learnings as helpful context
+    if (context.learnings.length > 0) {
+      contextParts.push(`\n## Learnings from Prior Stories\n${context.learnings.map(l => `- ${l}`).join("\n")}`);
+    }
+
+    const contextBlock = contextParts.join("\n");
+
+    const projectInstructions = formatProjectInstructions(workingDir);
+    const contextWindow = getModelContext(modelName, contextLength);
+    const fittedPrompt = fitWorkerPromptToContext({
+      personaSystemPrompt: persona.systemPrompt,
+      projectInstructions,
+      userTask,
+      story,
+      contextBlock,
+      revisionFeedback,
+      workingDir,
+      personaTools: personaTools as ToolSet,
+      contextWindow,
+      aggressive: contextOverflowRetries > 0,
+      overflowTokens: contextOverflowSlackTokens,
+    });
+    const systemPrompt = fittedPrompt.systemPrompt;
+    if (fittedPrompt.trimmedSections.length > 0) {
+      output.log(
+        "system",
+        `Trimmed ${fittedPrompt.trimmedSections.join(", ")} to fit ${formatContext(contextWindow)} context (${Math.round(fittedPrompt.estimatedTokens / 1000)}K/${Math.round(fittedPrompt.budgetTokens / 1000)}K prompt budget)`,
+      );
+      logger.info("Worker prompt trimmed for context", {
+        story: story.id,
+        persona: story.persona,
+        provider,
+        model: modelName,
+        contextWindow,
+        estimatedTokens: fittedPrompt.estimatedTokens,
+        budgetTokens: fittedPrompt.budgetTokens,
+        trimmedSections: fittedPrompt.trimmedSections,
+        aggressive: contextOverflowRetries > 0,
+      });
+    }
+
+    try {
+      // Combine user abort with loop detection abort
+      const combinedAbort = new AbortController();
+      if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
+      loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
+
+      // Text repetition detection
+      const recentTexts: string[] = [];
+      const TEXT_LOOP_WINDOW = 8;
+      const TEXT_SUPPRESS_THRESHOLD = 5;
+      const TEXT_ABORT_THRESHOLD = 10;
+      let textRepeatCount = 0;
+      let textSuppressed = false;
+
+      // Captures representative expert text for ticket comments.
+      let expertSummary = "";
+      let lastSyntheticThinkingSig = "";
+      const reasoningLength = { value: 0 };
+
+      // Track tool calls for structured ticket update
+      const storyActions: Array<{ tool: string; detail: string }> = [];
+
+      const storyStartMs = Date.now();
+      const stream = streamText({
+        model,
+        abortSignal: combinedAbort.signal,
+        system: systemPrompt,
+        prompt: fittedPrompt.prompt,
+        tools: personaTools as ToolSet,
+        stopWhen: stepCountIs(100),
+        timeout: { chunkMs: 120_000 },
+        ...buildReasoningOptions(provider, modelName),
+        ...buildOllamaOptions(provider as AIProvider, contextLength),
+        onStepFinish({ text, toolCalls, reasoningText }) {
+          emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, reasoningLength);
+          if (toolCalls && toolCalls.length > 0) {
+            // Track actions for ticket update
+            for (const tc of toolCalls) {
+              const name = tc.toolName;
+              const input = tc.input as Record<string, unknown>;
+              const filePath = extractToolFilePath(name, input);
+              if (name === "write_file" && filePath) {
+                storyActions.push({ tool: "created", detail: filePath });
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "created");
+              } else if ((name === "edit_file" || name === "multi_edit_file" || name === "patch") && filePath) {
+                storyActions.push({ tool: "edited", detail: filePath });
+                if (liveViewServer) liveViewServer.emitFileChange(story.persona, i + 1, story.title, filePath, "edited");
+              } else if (name === "bash" && input.command) {
+                const cmd = String(input.command);
+                // Only track meaningful commands, not reads
+                if (/npm (test|run|install)|npx|yarn|pnpm|docker|go (build|test)|pytest|cargo|make|mvn|gradle/i.test(cmd)) {
+                  storyActions.push({ tool: "ran", detail: cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd });
+                }
+              } else if (name === "verify" && input.command) {
+                storyActions.push({ tool: "verified", detail: String(input.command).slice(0, 80) });
+              }
+            }
+            if ((!text || !text.trim()) && toolCalls.length > 0) {
+              const first = toolCalls[0];
+              const detail = formatToolCallDisplay(first.toolName, first.input as Record<string, unknown>);
+              const sig = `${first.toolName}:${detail}`;
+              if (sig !== lastSyntheticThinkingSig) {
+                output.log(story.persona, `${first.toolName}${detail ? ` ${detail}` : ""}`);
+                lastSyntheticThinkingSig = sig;
+              }
+            }
+          }
+
+          if (text) {
+            // Keep a representative sample for ticket comments.
+            if (!expertSummary) expertSummary = text.slice(0, 2000);
+            // Text loop detection
+            // Normalize signature: trim, collapse whitespace, lowercase first 200 chars
+            const textSig = text.trim().replace(/\s+/g, " ").substring(0, 200).toLowerCase();
+            recentTexts.push(textSig);
+            if (recentTexts.length > TEXT_LOOP_WINDOW) recentTexts.shift();
+            if (recentTexts.length >= TEXT_LOOP_WINDOW) {
+              const counts: Record<string, number> = {};
+              for (const t of recentTexts) counts[t] = (counts[t] || 0) + 1;
+              const maxCount = Math.max(...Object.values(counts));
+              if (maxCount >= TEXT_SUPPRESS_THRESHOLD) {
+                textRepeatCount++;
+                if (!textSuppressed) {
+                  textSuppressed = true;
+                  output.log(story.persona, "(repeating output suppressed)");
+                  logger.info("Text repetition suppressed", { persona: story.persona, count: textRepeatCount });
+                }
+                if (textRepeatCount >= TEXT_ABORT_THRESHOLD) {
+                  logger.error("Text output loop — aborting after repeated output", { persona: story.persona });
+                  output.error("Text output stuck in loop — aborting story");
+                  combinedAbort.abort();
+                }
+                return;
+              }
+              textSuppressed = false;
+            }
+
+            const lines = text.split("\n").filter(l => l.trim());
+            for (const line of lines) {
+              if (line.includes("::decision::") || line.includes("::learning::") || line.includes("::remember::") ||
+                  line.includes("::file_created::") || line.includes("::file_modified::")) continue;
+              output.log(story.persona, line);
+            }
+            // Always log full text to cli.log — terminal may suppress but logs show truth
+            logger.debug("Story output", { persona: story.persona, text });
+          }
+          output.status(`${story.persona}: working...`);
+        },
+      });
+
+      // Drive the stream (required for streamText) — onStepFinish handles display
+      try {
+        for await (const _chunk of stream.textStream) { /* consumed */ }
+      } catch {
+        // Stream may throw on abort (user ESC or rambling detector) — that's expected
+      }
+
+      // Check abort immediately after stream ends — user may have pressed ESC
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+      }
+
+      const text = await stream.text;
+      const usage = await stream.totalUsage;
+
+      output.statusDone();
+
+      // Extract markers and display as WorkerMill-style persona activity
+      const decisionMatches = text.match(/::decision::(.*?)(?=::\w+::|$)/gs);
+      if (decisionMatches) {
+        for (const m of decisionMatches) {
+          const decision = m.replace("::decision::", "").trim();
+          context.decisions.push(decision);
+          output.log(story.persona, decision);
+        }
+      }
+
+      // Learning extraction disabled — smaller models spam generic platitudes
+      // ("follows best practices", "implementation is production-ready") that
+      // pollute the memory system. Re-enable when we have quality filtering.
+
+      context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
+      context.filesModified.push(...extractDeclaredFileMarkers(text, "file_modified"));
+
+      // Track cost
+      const inTokens = usage?.inputTokens || 0;
+      const outTokens = usage?.outputTokens || 0;
+      costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
+      output.updateCost?.(costTracker.getTotalCost());
+      output.updateUsageSummary?.(costTracker.getUsageSummary());
+
+      // Track tok/s for worker model
+      const storyElapsed = (Date.now() - storyStartMs) / 1000;
+      if (outTokens > 0 && storyElapsed > 0) {
+        const workerTokPerSec = Math.round(outTokens / storyElapsed);
+        output.updateTokPerSec?.(`${provider}/${modelName}`, workerTokPerSec);
+        logger.info("Model performance", { provider, model: modelName, tokPerSec: workerTokPerSec });
+      }
+
+      // Detect empty story — model returned nothing
+      if (outTokens === 0 && !text.trim()) {
+        logger.error(`Story ${i + 1} produced no output`, { persona: story.persona });
+        if (revision < 2) {
+          output.log(story.persona, `Story produced no output — retrying (${revision + 1}/3)`);
+          continue; // retry this story
+        }
+        emitFailureCode(output, "worker_no_output", `Story ${i + 1} failed: model produced no output after 3 attempts`);
+        failedStories.add(story.id);
+        break;
+      }
+
+      // --- Post-execution validation ---
+      // File existence check only. Build/lint/test verification is the expert's
+      // responsibility — they have bash and verify tools. Auto-detecting and
+      // running quality gates caused cascading failures when earlier stories
+      // created broken configs that later stories couldn't fix.
+      {
+        const missingFiles = context.filesCreated.filter(f => {
+          const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
+          return !fs.existsSync(fullPath);
+        });
+        if (missingFiles.length > 0) {
+          logger.info("Missing declared files", { persona: story.persona, files: missingFiles });
+          if (revision < 2) {
+            output.log(story.persona, `${missingFiles.length} declared file(s) missing — retrying`);
+            revisionFeedback = `\n\n## Missing Files\nThese files were declared as created but don't exist on disk:\n${missingFiles.map(f => `- ${f}`).join("\n")}\n\nCreate them or remove the declarations.`;
+            continue;
+          }
+        }
+      }
+
+      {
+        const contractIssues = validateStoryContractArtifacts(story, workingDir);
+        if (contractIssues.length > 0) {
+          logger.info("Story contract validation failed", {
+            story: story.id,
+            persona: story.persona,
+            issues: contractIssues.map((issue) => ({ code: issue.code, path: issue.path, command: issue.command })),
+          });
+          if (revision < 2) {
+            output.log(story.persona, `${contractIssues.length} definition-of-done issue(s) detected — retrying`);
+            revisionFeedback = `\n\n## Definition Of Done Failures\n${formatContractIssuesForPrompt(contractIssues)}\n\nFix every blocking item above before finishing this story.`;
+            continue;
+          }
+
+          for (const issue of contractIssues) {
+            emitFailureCode(output, issue.code, `Story ${i + 1}: ${issue.message}`);
+          }
+          failedStories.add(story.id);
+          break;
+        }
+      }
+
+      // Detect stories that still produced no real file changes on disk.
+      // This catches both pure narration and failed/no-op write tool attempts.
+      {
+        const fileActions = storyActions.filter(a => a.tool === "created" || a.tool === "edited");
+        const canCheckGitChanges = isGitRepo(workingDir);
+        let hasDiskChanges = false;
+        if (canCheckGitChanges) {
+          try {
+            const diffOut = execSync("git diff HEAD --name-only", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+            const untrackedOut = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+            hasDiskChanges = diffOut.length > 0 || untrackedOut.length > 0;
+          } catch { /* best effort */ }
+        }
+
+        if (outTokens > 0 && canCheckGitChanges && !hasDiskChanges) {
+          logger.info("Story produced output but no file changes on disk", {
+            persona: story.persona,
+            outTokens,
+            fileActionCount: fileActions.length,
+          });
+
+          if (revision < 2) {
+            output.log(story.persona, "No file changes detected — retrying with stronger guidance");
+            const guidance = fileActions.length === 0
+              ? "You described what to do but did NOT actually use tools to write code."
+              : "You called file-edit tools, but they did not produce any persisted file changes.";
+            revisionFeedback = `\n\n## No Changes Written\n${guidance} Your previous response left zero tracked or untracked file changes on disk.\n\n**You MUST use the edit_file, write_file, or multi_edit_file tools to make real edits.** Describing changes with ::file_modified:: markers is NOT the same as making them. Actually write the code now and ensure files are changed on disk.`;
+            continue;
+          }
+
+          const reason = fileActions.length === 0
+            ? "model narrated changes but never wrote code"
+            : "model called write tools but produced no persisted file changes";
+          output.error(`Story ${i + 1} failed: ${reason} after 3 attempts`);
+          failedStories.add(story.id);
+          break;
+        }
+      }
+
+      // --- Diagnostics enforcement ---
+      const diagResult = await runDiagnosticsOnTouchedFiles(
+        [...context.filesCreated, ...context.filesModified],
+        workingDir,
+        (msg) => output.log(story.persona, msg),
+      );
+      const diagnosticErrors = diagResult.errorCount;
+
+      // Check abort before completing
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+      }
+
+      output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
+      logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
+      completedStoryIds.push(story.id);
+
+      // Post story completion to ticket — structured update like a real team member
+      if (ticketOps) {
+        // Build structured summary from actual tool calls
+        const created = [...new Set(storyActions.filter(a => a.tool === "created").map(a => a.detail))];
+        const edited = [...new Set(storyActions.filter(a => a.tool === "edited").map(a => a.detail))];
+        const commands = storyActions.filter(a => a.tool === "ran" || a.tool === "verified");
+
+        const updateParts: string[] = [];
+
+        // Lead with the expert's own summary if available
+        if (expertSummary) {
+          updateParts.push(expertSummary);
+          updateParts.push("");
+        }
+
+        // Concrete actions taken
+        const actionLines: string[] = [];
+        if (created.length > 0) actionLines.push(`**Created:** ${created.map(f => `\`${f}\``).join(", ")}`);
+        if (edited.length > 0) actionLines.push(`**Modified:** ${edited.map(f => `\`${f}\``).join(", ")}`);
+        if (commands.length > 0) {
+          const cmdList = commands.slice(0, 5).map(c => `\`${c.detail}\``).join(", ");
+          actionLines.push(`**Ran:** ${cmdList}${commands.length > 5 ? ` +${commands.length - 5} more` : ""}`);
+        }
+        if (actionLines.length > 0) {
+          updateParts.push("**Actions:**");
+          updateParts.push(...actionLines);
+        }
+
+        // Fallback if no actions tracked
+        if (updateParts.length === 0) {
+          const changedFiles = [...new Set([...context.filesCreated, ...context.filesModified])];
+          updateParts.push(`Implemented ${story.title}. ${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`);
+        }
+
+        ticketOps.postComment(
+          `### ${story.persona} (${provider}/${modelName}) — ${story.title} (${i + 1}/${sorted.length})\n\n${updateParts.join("\n")}`
+        ).catch(() => {});
+      }
+
+      // Persist progress so /retry works across terminal restarts
+      if (featureBranch) {
+        saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
+      }
+
+      // Commit story changes — creates a checkpoint on the feature branch
+      // Gate: don't commit if LSP found errors (diagnosticErrors === -1 means no LSP, allow commit)
+      if (featureBranch && diagnosticErrors <= 0) {
+        const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
+        if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
+      } else if (diagnosticErrors > 0) {
+        output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — commit skipped, will be caught in review`);
+      }
+
+      const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;
+      if (liveViewServer) liveViewServer.emitStoryComplete(i + 1, storyElapsedForLiveView);
+
+          break; // Story succeeded, exit revision loop
+    } catch (err) {
+      output.statusDone();
+
+      // If user cancelled (ESC), exit immediately — don't retry or classify
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled.");
+        logger.info("Build cancelled by user during story execution", { story: i + 1, persona: story.persona });
+        logRetryHint();
+        return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+      }
+
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
+
+      if (isBalanceOrQuotaError(errMsg)) {
+        const shouldStop = await pauseForBalanceIssue(`Story ${i + 1}`);
+        if (shouldStop) {
+          return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+        }
+        // Retry same revision after user tops up or switches provider.
+        continue;
+      }
+
+      const promptOverflow = parsePromptLengthError(err);
+      if (promptOverflow && contextOverflowRetries < 1) {
+        contextOverflowRetries++;
+        contextOverflowSlackTokens = Math.max(0, promptOverflow.actualTokens - promptOverflow.limitTokens);
+        output.log(
+          "system",
+          `Prompt exceeded model context (${formatContext(promptOverflow.actualTokens)} > ${formatContext(promptOverflow.limitTokens)}) — retrying with tighter prompt budget`,
+        );
+        logger.info("Retrying story after prompt-length overflow", {
+          story: i + 1,
+          persona: story.persona,
+          provider,
+          model: modelName,
+          actualTokens: promptOverflow.actualTokens,
+          limitTokens: promptOverflow.limitTokens,
+        });
+        continue;
+      }
+
+      // Rate limit retry with backoff — retry in-place before falling through to error classification
+      const rl = isRateLimitError(err);
+      if (rl && storyRateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+        storyRateLimitRetries++;
+        const waitSec = Math.ceil(rl.retryAfterMs / 1000);
+        output.log("system", `Rate limited — retrying in ${waitSec}s (${storyRateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
+        logger.info("Rate limit retry", { story: i + 1, attempt: storyRateLimitRetries, waitSec });
+        await rateLimitSleep(rl.retryAfterMs);
+        continue; // retry same revision
+      }
+
+      // Classify error — from worker/epic/types.ts + worker-decision-engine.ts
+      const errorClass = classifyError(errMsg);
+      logger.info(`Error classified`, { category: errorClass.category, fixable: errorClass.fixable, persona: story.persona });
+      const signature = `${errorClass.category}:${normalizeErrorSignature(errMsg)}`;
+      const seenCount = (retryErrorSignatureCounts.get(signature) || 0) + 1;
+      retryErrorSignatureCounts.set(signature, seenCount);
+
+      // Transient errors — retry as-is
+      if (errorClass.category === "transient" && revision < 2) {
+        if (seenCount >= 2) {
+          output.error(`Story ${i + 1} kept failing with the same transient error — stopping retries to avoid token waste.`);
+          logger.info("Retry stopped on repeated transient error", { story: i + 1, signature });
+          failedStories.add(story.id);
+          break;
+        }
+        output.log(story.persona, `Transient error: ${errMsg} — retrying...`);
+        logger.info(`Story ${i + 1} retrying (transient)`, { revision });
+        continue;
+      }
+
+      // Fixable errors (typescript, lint, test, build) — retry with fix context
+      if (errorClass.fixable && revision < 2) {
+        if (seenCount >= 2) {
+          output.error(`Story ${i + 1} repeated the same ${errorClass.category} error — stopping retries to avoid token waste.`);
+          logger.info("Retry stopped on repeated fixable error", { story: i + 1, signature, category: errorClass.category });
+          failedStories.add(story.id);
+          break;
+        }
+        output.log(story.persona, `${errorClass.category} error detected — retrying with fix context (${revision + 1}/3)`);
+        logger.info(`Story ${i + 1} retrying (fixable ${errorClass.category})`, { revision });
+        const errorForPrompt = truncateForPrompt(errMsg, 2_500, "error details");
+        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${errorForPrompt}\n\n**${errorClass.fixHint}**`;
+        continue;
+      }
+
+      // Non-fixable or retries exhausted
+      if (errorClass.category === "rate_limit") {
+        output.error(`Story ${i + 1} hit rate limit — stopping (wait and retry later)`);
+      } else if (errorClass.category === "auth") {
+        output.error(`Story ${i + 1} auth error — check your API key/credentials`);
+      } else {
+        output.error(`Story ${i + 1} failed: ${errMsg}`);
+      }
+      failedStories.add(story.id);
+      break;
+    }
+
+    } // end revision loop
+
+    // Auto-cleanup: stop any Docker Compose services started during this story
+    for (const composeDir of startedDockerCompose) {
+      try {
+        execSync("docker compose down --timeout 5 2>/dev/null", { cwd: composeDir, timeout: 15_000 });
+        output.log("system", "Auto-cleanup: stopped Docker services");
+        logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: false };
 }

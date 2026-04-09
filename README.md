@@ -194,7 +194,7 @@ Use expensive models for judgment. Free local models for volume.
 | **Hooks** | Pre/post tool hooks with blocking, lifecycle events, HTTP webhooks |
 | **Custom Personas** | Drop `.md` files in `.workermill/personas/` — project-level or global |
 | **Custom Commands** | `.workermill/skills/` for project-specific slash commands |
-| **Project Memory** | `/remember` saves context that persists across sessions — corrections, preferences, learnings |
+| **Project Memory** | `/remember` saves project-scoped context under `~/.workermill/projects/<id>/memories/` — corrections, preferences, learnings |
 | **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
 | **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |

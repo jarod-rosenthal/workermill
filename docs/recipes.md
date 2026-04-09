@@ -374,7 +374,7 @@ Update it when the project changes significantly (new stack, new conventions). O
 /remember CI runs on self-hosted runners, so `ubuntu-latest` won't work
 ```
 
-Memories persist per project in `~/.workermill/memories/<project-id>.json` and load automatically with every session.
+Memories persist per project in `~/.workermill/projects/<project-id>/memories/` and load automatically with every session.
 
 **The agent also reads** common standards (priority order): `AGENT.md`, `AGENTS.md`, `.workermill/instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.windsurfrules`, `.windsurf/rules/*`, `.clinerules`, and `.github/copilot-instructions.md`.
 

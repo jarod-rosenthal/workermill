@@ -10,6 +10,8 @@ import { isDangerous, isDangerousFile } from "../../safety.js";
 import { microCompact, shouldCompact } from "../../compaction.js";
 import { handleSlashCommand } from "../../ui/slash-commands.js";
 import type { SlashCommandContext } from "../../ui/slash-commands.js";
+import { createTempWorkerMillHome } from "../helpers/temp-workermill-home.js";
+import { getProjectRootDir } from "../../project-data.js";
 
 let OLLAMA_HOST = "";
 const MODEL = "qwen3-coder:30b";
@@ -344,6 +346,35 @@ describe("slash command /compact", () => {
       // System message about compacting
       expect(ctx.systemMessages.some((m) => m.includes("Compacting"))).toBe(true);
     } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 6: Project memory persistence
+// ---------------------------------------------------------------------------
+
+describe("project memory persistence", () => {
+  it("persists remembered facts across sessions in the same project", () => {
+    const tempHome = createTempWorkerMillHome();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-e2e-memory-"));
+
+    try {
+      const firstCtx = buildMockContext({ workingDir: tempDir });
+      expect(handleSlashCommand("/remember Use Prisma for all new database work", firstCtx)).toBe(true);
+      expect(firstCtx.systemMessages.some((m) => m.includes("Remembered"))).toBe(true);
+
+      const secondCtx = buildMockContext({ workingDir: tempDir });
+      expect(handleSlashCommand("/memories", secondCtx)).toBe(true);
+      expect(secondCtx.systemMessages.some((m) => m.includes("Use Prisma for all new database work"))).toBe(true);
+
+      const memoryFile = path.join(getProjectRootDir(tempDir), "memories", "preferences.md");
+      expect(fs.existsSync(memoryFile)).toBe(true);
+      expect(fs.readFileSync(memoryFile, "utf-8")).toContain("Use Prisma for all new database work");
+    } finally {
+      tempHome.restore();
+      tempHome.cleanup();
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

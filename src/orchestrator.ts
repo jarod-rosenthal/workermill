@@ -177,7 +177,8 @@ export async function runOrchestration(
   }
 
   const costTracker = new CostTracker();
-  const persistedMemories = loadMemories();
+  const workingDir = process.cwd();
+  const persistedMemories = loadMemories(workingDir);
   const context: SharedContext = {
     filesCreated: [],
     filesModified: [],
@@ -186,7 +187,6 @@ export async function runOrchestration(
   };
   context.learnings.push(...persistedMemories.filter(m => m.type === "learning").map(m => m.content));
   const sessionAllow = new Set<string>();
-  const workingDir = process.cwd();
 
   runLifecycleHooks("ship_start", config.hooks, workingDir, { WORKERMILL_TASK: userTask.slice(0, 200) });
 

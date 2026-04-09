@@ -50,7 +50,7 @@ workermill/
 │   ├── compaction.ts          # Context window management
 │   ├── hooks.ts               # Pre/post tool hook execution
 │   ├── mcp-client.ts          # MCP server discovery and tool registration
-│   ├── memory.ts              # ::learning:: / ::remember:: extraction
+│   ├── memory.ts              # Project-scoped memory storage and marker extraction
 │   ├── checkpoints.ts         # /undo file checkpoints
 │   ├── git-ops.ts             # Git operations (branch, commit, push)
 │   ├── ticket-ops.ts          # GitHub/Jira/Linear ticket fetching

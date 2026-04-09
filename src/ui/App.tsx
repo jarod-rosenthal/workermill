@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
+import { Box, Text, Static, useApp, useInput, useWindowSize } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
 import { EditedFilePreview } from "./EditedFilePreview.js";
@@ -302,7 +302,7 @@ function OrchestratorPrompt({ request }: {
  */
 export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const { columns: termColumns } = useWindowSize();
   const lastEscRef = useRef(0);
   const pendingRollbackAfterCancelRef = useRef(false);
   const rollbackPrefillSeqRef = useRef(0);
@@ -490,7 +490,7 @@ export function App(props: AppProps): React.ReactElement {
     : props.permissionMode;
 
   // marginLeft={2} on assistant boxes consumes 2 cols; cap at a sane max
-  const markdownWidth = Math.max(40, (stdout?.columns ?? 80) - 2);
+  const markdownWidth = Math.max(40, termColumns - 2);
   const turnDivider = "\u2500".repeat(Math.max(24, Math.min(markdownWidth - 2, 72)));
   const hasLiveToolActivity = (props.streamingToolCalls?.length ?? 0) > 0;
   const hasLiveStatusActivity =

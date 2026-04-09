@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
 import { listProviders, fetchLiveModels, fetchRemoteModels } from "../provider-registry.js";
@@ -111,7 +111,7 @@ export function Input({
   prefillSeq,
   onPrefillApplied,
 }: InputProps): React.ReactElement {
-  const { stdout } = useStdout();
+  const { columns: termColumns } = useWindowSize();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -545,6 +545,20 @@ export function Input({
     { isActive: captureInput },
   );
 
+  // Bracketed paste — receives pasted text as a single string instead of
+  // individual keypresses. Prevents the scrambling bug where rapid pasted
+  // characters were inserted at wrong positions due to stale cursor state.
+  usePaste((text) => {
+    const currentValue = valueRef.current;
+    const currentCursorPos = cursorPosRef.current;
+    const nextValue = currentValue.slice(0, currentCursorPos) + text + currentValue.slice(currentCursorPos);
+    const nextCursorPos = currentCursorPos + text.length;
+    valueRef.current = nextValue;
+    cursorPosRef.current = nextCursorPos;
+    setValue(nextValue);
+    setCursorPos(nextCursorPos);
+  }, { isActive: captureInput });
+
   // Inline hint: show the best match after the cursor, no height change
   const hint = showCompletions && completions.length > 0
     ? completions[completionIndex % completions.length]
@@ -553,7 +567,7 @@ export function Input({
   // Render width for the input content area (excluding 2-char prompt prefix).
   const renderedValue = hasQueuedValue ? (queuedValue ?? "") : value;
   const renderedCursorPos = hasQueuedValue ? renderedValue.length : cursorPos;
-  const contentWidth = Math.max(10, (stdout?.columns ?? 80) - 2);
+  const contentWidth = Math.max(10, termColumns - 2);
   const isMultiline = renderedValue.includes("\n");
   const isSoftWrappedSingleLine = !isMultiline && renderedValue.length > contentWidth;
 

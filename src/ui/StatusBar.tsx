@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { theme } from "./theme.js";
 import { findModelInfo } from "../provider-registry.js";
 import { normalizeToolName } from "./tool-status.js";
@@ -119,8 +119,7 @@ function modelLabel(providerModel: string): string {
  * Row 3: [permission mode] (shift+tab to cycle) + planner/reviewer model metadata
  */
 function StatusBarView(props: StatusBarProps): React.ReactElement {
-  const { stdout } = useStdout();
-  const width = stdout?.columns || 80;
+  const { columns: width } = useWindowSize();
 
   // Context usage bar
   const barLen = 10;

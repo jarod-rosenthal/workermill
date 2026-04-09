@@ -563,32 +563,56 @@ export async function runOrchestration(
     status: completedStoryIds.includes(s.id) ? "completed" as const
       : failedStories.has(s.id) ? "failed" as const
       : "skipped" as const,
-    retryCount: 0, // TODO: track per-story retry count in executeStories
+    retryCount: 0,
   }));
   const allCompleted = completedStoryIds.length === sorted.length;
   const anyCompleted = completedStoryIds.length > 0;
+  const reviewEnabled = config.review?.enabled !== false;
+  const reviewScore = reviewLoopResult.finalReviewText
+    ? (() => { const m = reviewLoopResult.finalReviewText.match(/CODE_QUALITY_SCORE:\s*(\d+)/); return m ? parseInt(m[1]) : null; })()
+    : null;
+  const reviewDecision = reviewLoopResult.finalReviewText
+    ? (reviewScore !== null && reviewScore >= (config.review?.approvalThreshold ?? 9) ? "approved" : "revision_needed")
+    : reviewEnabled ? "skipped" : "disabled";
   manifest.outcome = allCompleted ? "success" : anyCompleted ? "partial" : "failed";
   saveRunManifest(manifest);
 
-  // --- Build Summary ---
+  // --- Build Report ---
   {
     const completed = sorted.filter(s => completedStoryIds.includes(s.id));
     const failed = sorted.filter(s => failedStories.has(s.id));
     const skipped = sorted.filter(s => skippedStories.has(s.id));
-    const lines: string[] = ["", `── Build Summary (${manifest.id}) ──`];
+    const lines: string[] = ["", `── Build Report (${manifest.id}) ──`, ""];
+    lines.push("Stories:");
     for (const s of sorted) {
       const idx = sorted.indexOf(s) + 1;
       if (completedStoryIds.includes(s.id)) {
-        lines.push(`  ✓ Story ${idx}: ${s.title} (${s.persona})`);
+        lines.push(`  ✓ ${idx}. ${s.title} (${s.persona})`);
       } else if (failedStories.has(s.id)) {
-        lines.push(`  ✗ Story ${idx}: ${s.title} (${s.persona}) — failed`);
+        lines.push(`  ✗ ${idx}. ${s.title} (${s.persona}) — failed`);
       } else if (skippedStories.has(s.id)) {
-        lines.push(`  ⊘ Story ${idx}: ${s.title} (${s.persona}) — skipped (dependency failed)`);
+        lines.push(`  ⊘ ${idx}. ${s.title} (${s.persona}) — skipped`);
       }
     }
-    lines.push(`  ${completed.length} passed · ${failed.length} failed · ${skipped.length} skipped`);
-    lines.push(`  Cost: ~$${costTracker.getTotalCost().toFixed(2)}`);
-    lines.push(`  Run: ${manifest.id}`);
+    lines.push("");
+    // Gate results
+    if (gateResultsSection) {
+      const gatesPassed = gateResultsSection.includes("ALL PASSED");
+      lines.push(`Quality gates: ${gatesPassed ? "✓ all passed" : "✗ failures detected"}`);
+    }
+    // Review result
+    if (reviewEnabled) {
+      if (reviewScore !== null) {
+        lines.push(`Review: ${reviewDecision === "approved" ? "✓" : "✗"} ${reviewScore}/10 (${reviewDecision})`);
+      } else {
+        lines.push(`Review: skipped`);
+      }
+    }
+    lines.push("");
+    lines.push(`Result: ${completed.length} passed · ${failed.length} failed · ${skipped.length} skipped`);
+    if (featureBranch) lines.push(`Branch: ${featureBranch}`);
+    lines.push(`Cost: ~$${costTracker.getTotalCost().toFixed(2)}`);
+    lines.push(`Run: ${manifest.id}`);
     lines.push("");
     for (const line of lines) output.log("system", line);
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { shouldCaptureInput } from "../ui/Input.tsx";
+import { shouldCaptureInput, shouldInsertNewlineOnReturn } from "../ui/Input.tsx";
 
 // Replicate BUILTIN_COMMANDS from Input.tsx (full list)
 const BUILTIN_COMMANDS = [
@@ -244,6 +244,37 @@ describe("queued input capture", () => {
 
   it("does not capture when inactive and not queued", () => {
     expect(shouldCaptureInput(false, false)).toBe(false);
+  });
+});
+
+describe("modified Enter handling", () => {
+  it("uses Shift+Enter for multiline input everywhere", () => {
+    expect(shouldInsertNewlineOnReturn({ return: true, shift: true }, {} as NodeJS.ProcessEnv)).toBe(true);
+  });
+
+  it("uses Meta/Alt+Enter in terminals with enhanced keyboard reporting", () => {
+    expect(shouldInsertNewlineOnReturn(
+      { return: true, meta: true },
+      { TERM_PROGRAM: "WezTerm" } as NodeJS.ProcessEnv,
+    )).toBe(true);
+    expect(shouldInsertNewlineOnReturn(
+      { return: true, meta: true },
+      { KITTY_WINDOW_ID: "1" } as NodeJS.ProcessEnv,
+    )).toBe(true);
+  });
+
+  it("does not treat Meta+Enter as newline in terminals without known support", () => {
+    expect(shouldInsertNewlineOnReturn(
+      { return: true, meta: true },
+      {} as NodeJS.ProcessEnv,
+    )).toBe(false);
+  });
+
+  it("does not turn plain Enter into a newline", () => {
+    expect(shouldInsertNewlineOnReturn(
+      { return: true },
+      { TERM_PROGRAM: "WezTerm" } as NodeJS.ProcessEnv,
+    )).toBe(false);
   });
 });
 

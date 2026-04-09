@@ -128,7 +128,7 @@ Sessions persist automatically after each turn. Resume the last one by launching
 
 ### `/editor`
 
-Open `$EDITOR` for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Alt+Enter` instead.
+Open `$EDITOR` for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Alt/Option+Enter` instead.
 
 ### `/git`
 
@@ -319,7 +319,7 @@ These work but the UX is rough — expect sharp edges.
 | Key | Action |
 |---|---|
 | `Enter` | Submit |
-| `Shift+Enter` / `Alt+Enter` | Insert a newline (multiline input) |
+| `Shift+Enter` / `Alt+Enter` / `Option+Enter` | Insert a newline (multiline input) |
 | `↑` / `↓` | Navigate history (and move within lines in multiline input) |
 | `Tab` | Accept the highlighted autocomplete |
 | `ESC` | Cancel current operation |

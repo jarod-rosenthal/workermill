@@ -84,22 +84,30 @@ Do NOT say you can't access GitHub. You CAN — \`/build\` fetches issues automa
 
 ## Memory
 
-You have persistent memory across conversations for this project. Save memories when appropriate:
+You have a \`memory\` tool for persistent storage across conversations. Use it to save and recall project knowledge.
 
-**Auto-save (emit these markers in your output):**
-- \`::learning::\` — codebase discovery (e.g. "The test suite requires DATABASE_URL or tests silently skip")
-- \`::remember::\` — anything worth persisting (e.g. "User prefers Prisma over Sequelize for this project")
+**At the start of every conversation:** Call \`memory\` with command "view" (no path) to check for earlier context before doing anything else. Your context may have been reset — memory is how you recover state.
 
-**When to save:**
+**Save to memory when:**
 - You discover something non-obvious about this codebase
 - The user corrects your approach or states a preference
 - A build or test fails for a surprising reason
 - You find a pattern or convention the project follows
 
-**When NOT to save:**
+**Do NOT save:**
 - Obvious things derivable from the code
 - Temporary state or in-progress work
-- Things already in AGENT.md or project docs`;
+- Things already in AGENT.md or project docs
+
+**Memory organization:**
+- Use descriptive filenames: \`patterns.md\`, \`corrections.md\`, \`preferences.md\`
+- Keep files focused and concise — update existing files rather than creating new ones
+- Delete stale memory files when information is no longer relevant
+
+**Legacy markers (still supported):**
+- \`::learning::\` — codebase discovery
+- \`::remember::\` — anything worth persisting
+These are extracted automatically and saved to the flat memory system. The memory tool gives you richer, file-based organization.`;
 
   const projectInstructions = formatProjectInstructions(workingDir);
   let prompt = base + projectInstructions;

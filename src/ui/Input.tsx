@@ -70,6 +70,32 @@ export function shouldCaptureInput(isActive: boolean, isQueued?: boolean): boole
   return isActive || !!isQueued;
 }
 
+type ReturnKeyState = {
+  return?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+};
+
+function supportsModifiedEnter(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    env.TERM_PROGRAM === "WezTerm"
+      || env.TERM_PROGRAM === "vscode"
+      || env.KITTY_WINDOW_ID
+      || env.GHOSTTY_RESOURCES_DIR
+      || env.GHOSTTY_BIN_DIR,
+  );
+}
+
+export function shouldInsertNewlineOnReturn(
+  key: ReturnKeyState,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!key.return) return false;
+  if (key.shift) return true;
+  if (key.meta && supportsModifiedEnter(env)) return true;
+  return false;
+}
+
 /**
  * User text input component with history and slash command autocomplete.
  */
@@ -339,12 +365,11 @@ export function Input({
         return;
       }
 
-      // Submit (or insert newline with Shift+Enter / Alt+Enter / Meta+Enter)
+      // Submit (or insert newline with Shift+Enter / Alt+Enter / Option+Enter)
       if (key.return) {
-        // Only Shift+Enter inserts a newline. Treat Enter as submit otherwise.
-        // Some terminals can set key.meta on plain Enter, which caused accidental
-        // hidden newlines and chopped committed user messages.
-        if (key.shift) {
+        // Support the common multiline patterns on terminals that expose
+        // modified Enter reliably via enhanced keyboard reporting.
+        if (shouldInsertNewlineOnReturn(key)) {
           const currentValue = valueRef.current;
           const currentCursorPos = cursorPosRef.current;
           const nextValue = currentValue.slice(0, currentCursorPos) + "\n" + currentValue.slice(currentCursorPos);

@@ -71,6 +71,32 @@ describe("memory", () => {
       expect(loaded).toHaveLength(1);
       expect(dup.content).toBe("same content");
     });
+
+    it("persists provenance metadata with saved memories", async () => {
+      process.env.WM_RUN_ID = "run-test123";
+      process.env.WM_STORY_ID = "story-2";
+      process.env.WM_PERSONA = "backend_engineer";
+
+      try {
+        const { addMemory, loadMemories } = await importMemory();
+        addMemory("learning", "Use transactions for multi-step writes", undefined, undefined, undefined, {
+          source: "agent",
+          confidence: "high",
+        });
+
+        const loaded = loadMemories();
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0].source).toBe("agent");
+        expect(loaded[0].confidence).toBe("high");
+        expect(loaded[0].runId).toBe("run-test123");
+        expect(loaded[0].storyId).toBe("story-2");
+        expect(loaded[0].persona).toBe("backend_engineer");
+      } finally {
+        delete process.env.WM_RUN_ID;
+        delete process.env.WM_STORY_ID;
+        delete process.env.WM_PERSONA;
+      }
+    });
   });
 
   describe("removeMemory()", () => {

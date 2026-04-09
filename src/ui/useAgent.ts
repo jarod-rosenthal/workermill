@@ -1064,7 +1064,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // Extract and save memories from model output
           const newMemories = extractMemoryMarkers(finalText);
           for (const m of newMemories) {
-            addMemory(m.type, m.content, workingDirRef.current);
+            addMemory(m.type, m.content, workingDirRef.current, undefined, undefined, {
+              source: "agent",
+              confidence: "high",
+            });
           }
 
           // Cost tracking — use active refs, not startup options (user may have switched via /model).
@@ -1208,7 +1211,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             // Extract memories before they're compacted away
             const extractedMemories = extractMemoriesBeforeCompact(plainMessages);
             for (const mem of extractedMemories) {
-              addMemory("learning", mem, workingDirRef.current);
+              addMemory("learning", mem, workingDirRef.current, undefined, undefined, {
+                source: "auto-extracted",
+                confidence: "medium",
+              });
             }
             // Also persist to file-based memory so the memory tool can find them
             if (extractedMemories.length > 0) {

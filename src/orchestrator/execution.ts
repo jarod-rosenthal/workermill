@@ -1241,7 +1241,13 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       const extractedMemories = extractMemoryMarkers(text).filter((m) => isHighConfidenceMemory(m.content));
       for (const memory of extractedMemories) {
-        addMemory(memory.type, memory.content, workingDir);
+        addMemory(memory.type, memory.content, workingDir, undefined, undefined, {
+          source: "agent",
+          confidence: "high",
+          runId: params.runId,
+          storyId: story.id,
+          persona: story.persona,
+        });
       }
 
       context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));

@@ -492,6 +492,15 @@ describe("orchestrator", () => {
           "learning",
           "Use Drizzle migration files under db/migrations",
           cwd,
+          undefined,
+          undefined,
+          {
+            source: "agent",
+            confidence: "high",
+            runId: expect.stringMatching(/^run-/),
+            storyId: "setup-api",
+            persona: "backend_developer",
+          },
         );
       } finally {
         process.chdir(oldCwd);

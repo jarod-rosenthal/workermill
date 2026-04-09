@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { executeMemoryCommand, getMemoriesDir, ensureMemoriesDir } from "../engine/tools/memory.js";
+import {
+  executeMemoryCommand,
+  getMemoriesDir,
+  ensureMemoriesDir,
+  buildProvenanceHeader,
+  listMemoriesWithProvenance,
+} from "../engine/tools/memory.js";
 
 // Use a temp directory so tests don't touch real project data
 let tmpDir: string;
@@ -95,6 +101,43 @@ describe("memory tool", () => {
       await executeMemoryCommand({ command: "create", path: "/memories/dup.md", file_text: "first" });
       const result = await executeMemoryCommand({ command: "create", path: "/memories/dup.md", file_text: "second" });
       expect(result).toContain("already exists");
+    });
+
+    it("includes run and story provenance from environment", async () => {
+      process.env.WM_RUN_ID = "run-xyz";
+      process.env.WM_STORY_ID = "story-9";
+      process.env.WM_PERSONA = "qa_engineer";
+
+      try {
+        await executeMemoryCommand({ command: "create", path: "/memories/provenance.md", file_text: "captured fact" });
+        const dir = getMemoriesDir();
+        const content = fs.readFileSync(path.join(dir, "provenance.md"), "utf-8");
+        expect(content).toContain("run_id: run-xyz");
+        expect(content).toContain("story_id: story-9");
+        expect(content).toContain("persona: qa_engineer");
+      } finally {
+        delete process.env.WM_RUN_ID;
+        delete process.env.WM_STORY_ID;
+        delete process.env.WM_PERSONA;
+      }
+    });
+  });
+
+  describe("provenance helpers", () => {
+    it("lists memory files with story provenance", async () => {
+      const content = buildProvenanceHeader("manual", "high", {
+        runId: "run-123",
+        storyId: "story-4",
+        persona: "backend_engineer",
+      }) + "# Note\n\nUse Prisma.";
+      await executeMemoryCommand({ command: "create", path: "/memories/manual-note.md", file_text: content });
+
+      const listed = listMemoriesWithProvenance();
+      expect(listed).toHaveLength(1);
+      expect(listed[0].file).toBe("manual-note.md");
+      expect(listed[0].runId).toBe("run-123");
+      expect(listed[0].storyId).toBe("story-4");
+      expect(listed[0].persona).toBe("backend_engineer");
     });
   });
 

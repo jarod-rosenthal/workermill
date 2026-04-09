@@ -11,6 +11,7 @@ vi.mock("fs", () => ({
     existsSync: vi.fn(() => false),
     readFileSync: vi.fn(() => ""),
     writeFileSync: vi.fn(),
+    rmSync: vi.fn(),
     unlinkSync: vi.fn(),
     mkdirSync: vi.fn(),
     readdirSync: vi.fn(() => []),
@@ -19,6 +20,7 @@ vi.mock("fs", () => ({
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(() => ""),
   writeFileSync: vi.fn(),
+  rmSync: vi.fn(),
   unlinkSync: vi.fn(),
   mkdirSync: vi.fn(),
   readdirSync: vi.fn(() => []),
@@ -83,9 +85,14 @@ vi.mock("../mcp-client.js", () => ({
 }));
 
 vi.mock("../memory.js", () => ({
+  PRIMARY_MEMORY_FILES: ["patterns.md", "preferences.md", "project-context.md", "corrections.md"],
   loadMemories: vi.fn(() => []),
   addMemory: vi.fn((_type: string, content: string) => ({ id: "mem-1", type: "preference", content })),
   removeMemory: vi.fn(() => false),
+}));
+
+vi.mock("../engine/tools/memory.js", () => ({
+  listMemoriesWithProvenance: vi.fn(() => []),
 }));
 
 vi.mock("../logger.js", () => ({
@@ -137,6 +144,7 @@ import { loadCustomCommands } from "../custom-commands.js";
 import { listAvailablePersonas, loadPersona } from "../personas.js";
 import { stopAllMCPServers, hasMCPServers, hasMCPRegistered, getMCPTools } from "../mcp-client.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
+import { listMemoriesWithProvenance } from "../engine/tools/memory.js";
 
 // ---- Helper ----
 
@@ -1108,7 +1116,10 @@ describe("handleSlashCommand", () => {
     it("saves a memory", () => {
       const ctx = createContext();
       handleSlashCommand("/remember always use Prisma", ctx);
-      expect(addMemory).toHaveBeenCalledWith("preference", "always use Prisma", "/tmp/test-project");
+      expect(addMemory).toHaveBeenCalledWith("preference", "always use Prisma", "/tmp/test-project", undefined, undefined, {
+        source: "manual",
+        confidence: "high",
+      });
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Remembered")
       );
@@ -1136,10 +1147,32 @@ describe("handleSlashCommand", () => {
 
     it("reports when memory not found", () => {
       vi.mocked(removeMemory).mockReturnValueOnce(false);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([]);
       const ctx = createContext();
       handleSlashCommand("/forget nonexistent", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("No memory found")
+      );
+    });
+
+    it("also removes additional memory files that match", () => {
+      vi.mocked(removeMemory).mockReturnValueOnce(false);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([
+        {
+          file: "auto-learnings.md",
+          source: "auto-extracted",
+          confidence: "medium",
+          runId: "run-1",
+          storyId: "story-1",
+          persona: "qa_engineer",
+          preview: "Use Prisma for schema changes",
+        },
+      ]);
+      const ctx = createContext();
+      handleSlashCommand("/forget prisma", ctx);
+      expect(fs.rmSync).toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Forgot")
       );
     });
   });
@@ -1147,6 +1180,7 @@ describe("handleSlashCommand", () => {
   describe("/memories", () => {
     it("reports no memories", () => {
       vi.mocked(loadMemories).mockReturnValueOnce([]);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([]);
       const ctx = createContext();
       handleSlashCommand("/memories", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
@@ -1156,7 +1190,25 @@ describe("handleSlashCommand", () => {
 
     it("lists memories", () => {
       vi.mocked(loadMemories).mockReturnValueOnce([
-        { id: "mem-1", type: "preference", content: "Use Prisma", createdAt: "2026-03-30" } as any,
+        {
+          id: "mem-1",
+          type: "preference",
+          content: "Use Prisma",
+          createdAt: "2026-03-30",
+          source: "manual",
+          confidence: "high",
+        } as any,
+      ]);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([
+        {
+          file: "auto-learnings.md",
+          source: "auto-extracted",
+          confidence: "medium",
+          runId: "run-abc123",
+          storyId: "story-2",
+          persona: "qa_engineer",
+          preview: "Discovered the CI runner needs PNPM",
+        },
       ]);
       const ctx = createContext();
       handleSlashCommand("/memories", ctx);
@@ -1164,10 +1216,17 @@ describe("handleSlashCommand", () => {
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Use Prisma")
       );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("[manual/high]")
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("run run-abc123")
+      );
     });
 
     it("/memory is an alias", () => {
       vi.mocked(loadMemories).mockReturnValueOnce([]);
+      vi.mocked(listMemoriesWithProvenance).mockReturnValueOnce([]);
       const ctx = createContext();
       handleSlashCommand("/memory", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(

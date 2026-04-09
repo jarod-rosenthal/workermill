@@ -174,15 +174,20 @@ export function buildProvenanceHeader(
   confidence: "high" | "medium" | "low" = "medium",
   context?: { runId?: string; storyId?: string; persona?: string },
 ): string {
+  const resolvedContext = {
+    runId: context?.runId ?? process.env.WM_RUN_ID,
+    storyId: context?.storyId ?? process.env.WM_STORY_ID,
+    persona: context?.persona ?? process.env.WM_PERSONA,
+  };
   const lines = [
     "---",
     `source: ${source}`,
     `confidence: ${confidence}`,
     `created: ${new Date().toISOString()}`,
   ];
-  if (context?.runId) lines.push(`run_id: ${context.runId}`);
-  if (context?.storyId) lines.push(`story_id: ${context.storyId}`);
-  if (context?.persona) lines.push(`persona: ${context.persona}`);
+  if (resolvedContext.runId) lines.push(`run_id: ${resolvedContext.runId}`);
+  if (resolvedContext.storyId) lines.push(`story_id: ${resolvedContext.storyId}`);
+  if (resolvedContext.persona) lines.push(`persona: ${resolvedContext.persona}`);
   lines.push("---", "", "");
   return lines.join("\n");
 }
@@ -220,6 +225,7 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
   confidence?: string;
   created?: string;
   runId?: string;
+  storyId?: string;
   persona?: string;
   preview: string;
 }> {
@@ -227,12 +233,13 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
   if (!fs.existsSync(dir)) return [];
   const results: Array<{
     file: string;
-    source?: string;
-    confidence?: string;
-    created?: string;
-    runId?: string;
-    persona?: string;
-    preview: string;
+      source?: string;
+      confidence?: string;
+      created?: string;
+      runId?: string;
+      storyId?: string;
+      persona?: string;
+      preview: string;
   }> = [];
 
   function walk(d: string, prefix: string): void {
@@ -255,6 +262,7 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
           confidence: prov?.confidence,
           created: prov?.created,
           runId: prov?.runId,
+          storyId: prov?.storyId,
           persona: prov?.persona,
           preview,
         });

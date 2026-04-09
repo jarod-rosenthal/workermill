@@ -10,6 +10,19 @@ export interface Memory {
   type: "learning" | "preference" | "context" | "correction";
   content: string;
   createdAt: string;
+  source?: "agent" | "auto-extracted" | "manual";
+  confidence?: "high" | "medium" | "low";
+  runId?: string;
+  storyId?: string;
+  persona?: string;
+}
+
+export interface MemoryMetadata {
+  source?: Memory["source"];
+  confidence?: Memory["confidence"];
+  runId?: string;
+  storyId?: string;
+  persona?: string;
 }
 
 const MEMORY_FILES: Record<Memory["type"], { file: string; heading: string }> = {
@@ -18,6 +31,8 @@ const MEMORY_FILES: Record<Memory["type"], { file: string; heading: string }> = 
   context: { file: "project-context.md", heading: "Project Context" },
   correction: { file: "corrections.md", heading: "Corrections" },
 };
+
+export const PRIMARY_MEMORY_FILES = Object.values(MEMORY_FILES).map((entry) => entry.file);
 
 function legacyProjectHash(cwd?: string): string {
   return crypto.createHash("md5").update(cwd || process.cwd()).digest("hex").slice(0, 8);
@@ -44,27 +59,84 @@ function filePathForType(type: Memory["type"], cwd?: string): string {
   return path.join(getMemoriesDir(cwd), MEMORY_FILES[type].file);
 }
 
+function readInlineMetadata(line: string): { text: string; metadata?: MemoryMetadata } {
+  const metadataMatch = line.match(/\s+<!--\s*wm:(\{.*\})\s*-->$/);
+  if (!metadataMatch || metadataMatch.index === undefined) {
+    return { text: line };
+  }
+
+  try {
+    const metadata = JSON.parse(metadataMatch[1]) as MemoryMetadata;
+    return {
+      text: line.slice(0, metadataMatch.index).trimEnd(),
+      metadata,
+    };
+  } catch {
+    return { text: line };
+  }
+}
+
+function serializeInlineMetadata(memory: Memory): string {
+  const metadata: MemoryMetadata = {
+    source: memory.source,
+    confidence: memory.confidence,
+    runId: memory.runId,
+    storyId: memory.storyId,
+    persona: memory.persona,
+  };
+
+  const hasMetadata = Object.values(metadata).some((value) => typeof value === "string" && value.length > 0);
+  if (!hasMetadata) return "";
+  return ` <!-- wm:${JSON.stringify(metadata)} -->`;
+}
+
+function defaultMemoryMetadata(overrides?: MemoryMetadata): MemoryMetadata {
+  const metadata: MemoryMetadata = {
+    source: overrides?.source,
+    confidence: overrides?.confidence,
+    runId: overrides?.runId ?? process.env.WM_RUN_ID,
+    storyId: overrides?.storyId ?? process.env.WM_STORY_ID,
+    persona: overrides?.persona ?? process.env.WM_PERSONA,
+  };
+
+  if (!metadata.source) metadata.source = metadata.runId || metadata.storyId ? "agent" : undefined;
+  if (!metadata.confidence) metadata.confidence = metadata.source === "auto-extracted" ? "medium" : (metadata.source ? "high" : undefined);
+
+  return metadata;
+}
+
 function parseMemoryLine(line: string, type: Memory["type"]): Memory | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("- ")) return null;
+  const { text, metadata } = readInlineMetadata(trimmed);
 
-  const tagged = trimmed.match(/^- \[([^\]]+)\]\s+(.*?)(?:\s+\(([^)]+)\))?$/);
+  const tagged = text.match(/^- \[([^\]]+)\]\s+(.*?)(?:\s+\(([^)]+)\))?$/);
   if (tagged) {
     return {
       id: tagged[1],
       type,
       content: tagged[2].trim(),
       createdAt: tagged[3] || "",
+      source: metadata?.source,
+      confidence: metadata?.confidence,
+      runId: metadata?.runId,
+      storyId: metadata?.storyId,
+      persona: metadata?.persona,
     };
   }
 
-  const plain = trimmed.match(/^- (.+)$/);
+  const plain = text.match(/^- (.+)$/);
   if (!plain) return null;
   return {
     id: crypto.createHash("md5").update(`${type}:${plain[1]}`).digest("hex").slice(0, 8),
     type,
     content: plain[1].trim(),
     createdAt: "",
+    source: metadata?.source,
+    confidence: metadata?.confidence,
+    runId: metadata?.runId,
+    storyId: metadata?.storyId,
+    persona: metadata?.persona,
   };
 }
 
@@ -104,7 +176,7 @@ function writeTypeFile(type: Memory["type"], memories: Memory[], cwd?: string): 
   const lines = [
     `# ${MEMORY_FILES[type].heading}`,
     "",
-    ...memories.map((m) => `- [${m.id}] ${m.content}${m.createdAt ? ` (${m.createdAt})` : ""}`),
+    ...memories.map((m) => `- [${m.id}] ${m.content}${m.createdAt ? ` (${m.createdAt})` : ""}${serializeInlineMetadata(m)}`),
     "",
   ];
   fs.writeFileSync(fp, lines.join("\n"), "utf-8");
@@ -183,16 +255,23 @@ export function addMemory(
   cwd?: string,
   existingId?: string,
   existingCreatedAt?: string,
+  metadata?: MemoryMetadata,
 ): Memory {
   const trimmed = content.trim();
   const existing = loadMemories(cwd).find((m) => m.content === trimmed);
   if (existing) return existing;
+  const normalizedMetadata = defaultMemoryMetadata(metadata);
 
   const memory: Memory = {
     id: existingId || crypto.randomUUID().slice(0, 8),
     type,
     content: trimmed,
     createdAt: existingCreatedAt || new Date().toISOString(),
+    source: normalizedMetadata.source,
+    confidence: normalizedMetadata.confidence,
+    runId: normalizedMetadata.runId,
+    storyId: normalizedMetadata.storyId,
+    persona: normalizedMetadata.persona,
   };
 
   const items = readTypeFile(type, cwd);

@@ -40,6 +40,7 @@ import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPerm
 import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
 import { withConcurrencyControl } from "../tool-concurrency.js";
+import { isLocalProvider } from "../provider-capabilities.js";
 import { createLiveViewServer, type LiveViewServer } from "../live-view-server.js";
 import { formatLiveViewUrlMessage, getLiveViewUrls } from "../live-view-url.js";
 import type {
@@ -254,7 +255,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       // Skip Docker MCP auto-detection for local models (Ollama/LM Studio) —
       // 50+ MCP tools overwhelm small models, causing XML text fallback instead
       // of structured tool calls. Users can still configure MCP explicitly.
-      const skipAutoDetect = aiProviderRef.current === "ollama" || aiProviderRef.current === "lmstudio";
+      const skipAutoDetect = isLocalProvider(aiProviderRef.current);
       const mcpConfig = skipAutoDetect
         ? (cliConfig?.mcp || {})
         : autoDetectMCPServers(cliConfig?.mcp || {});

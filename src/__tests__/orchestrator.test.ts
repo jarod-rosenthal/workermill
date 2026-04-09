@@ -2140,6 +2140,57 @@ describe("classifyError categories (via story execution errors)", () => {
     expect(allLogs).toMatch(/rate.?limit|429/i);
   });
 
+  it("retries the planner when it is rate limited", async () => {
+    vi.useFakeTimers();
+
+    const planText = makePlanWithOneStory();
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+
+      if (callCount === 1) {
+        throw new Error("429 Too Many Requests: retry after 1");
+      }
+
+      const isStoryWorker = callCount === 3;
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+          text: "done",
+          toolCalls: isStoryWorker ? [FAKE_TOOL_CALL] : [],
+        });
+      }
+
+      if (callCount === 2) {
+        return {
+          textStream: (async function* () { yield planText; })(),
+          text: Promise.resolve(planText),
+          totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+        };
+      }
+
+      const cwd = process.cwd();
+      fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+      fs.writeFileSync(path.join(cwd, "src", "planner-retry.ts"), "// impl");
+      return {
+        textStream: (async function* () { yield "Work done."; })(),
+        text: Promise.resolve("Work done."),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = { ...createTestConfig(), review: { enabled: false } };
+    const output = createMockOutput();
+
+    const promise = runOrchestration(config as any, "Build feature", true, false, output);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await promise;
+    vi.useRealTimers();
+
+    expect(callCount).toBeGreaterThanOrEqual(3);
+    expect(output.logs.join(" ")).toMatch(/Planner rate limited/i);
+  });
+
   it("logs auth error message when story throws 401", async () => {
     const planText = makePlanWithOneStory();
     let callCount = 0;
@@ -2894,6 +2945,44 @@ FEEDBACK: Shippable.`;
     expect(output.errors).toHaveLength(0);
   });
 
+  it("retries a standalone review once when the reviewer is rate limited", async () => {
+    vi.useFakeTimers();
+    const reviewerApprovesText = `Looks good.
+REVIEW_DECISION: approved
+CODE_QUALITY_SCORE: 9
+FEEDBACK: Shippable.`;
+
+    fs.writeFileSync(path.join(repoDir, "README.md"), "# Updated\n");
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("429 Too Many Requests: retry after 1");
+      }
+      return {
+        textStream: (async function* () { yield reviewerApprovesText; })(),
+        text: Promise.resolve(reviewerApprovesText),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    const promise = runStandaloneReview(config as any, output, "diff");
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await promise;
+    vi.useRealTimers();
+
+    expect(result?.decision).toBe("approved");
+    expect(callCount).toBe(2);
+    expect(output.logs.join(" ")).toMatch(/rate limited/i);
+  });
+
   it("retries a standalone review once when the reviewer returns empty output", async () => {
     const reviewerApprovesText = `Looks good.
 REVIEW_DECISION: approved
@@ -2932,6 +3021,77 @@ FEEDBACK: Shippable.`;
     expect(callCount).toBe(2);
     expect(output.logs.join(" ")).toMatch(/retrying once/i);
     expect(output.errors).toHaveLength(0);
+  });
+
+  it("retries the revision worker when it is rate limited", async () => {
+    vi.useFakeTimers();
+
+    const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "s1", "title": "Build feature", "persona": "backend_developer", "description": "Implement it." }
+  ]
+}
+\`\`\``;
+
+    const reviewerRejectsText = `Issues found.
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 5
+FEEDBACK: Missing error handling.`;
+
+    const reviewerApprovesText = `Looks good now.
+REVIEW_DECISION: approved
+CODE_QUALITY_SCORE: 9
+FEEDBACK: Well done.`;
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+
+      if (callCount === 4) {
+        throw new Error("429 Too Many Requests: retry after 1");
+      }
+
+      const isWorker = callCount === 2;
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+          text: "done",
+          toolCalls: isWorker ? [FAKE_TOOL_CALL] : [],
+        });
+      }
+
+      if (callCount === 2) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", "impl-initial.ts"), "// impl");
+      }
+
+      let text: string;
+      if (callCount === 1) text = planText;
+      else if (callCount === 2) text = "Work done.";
+      else if (callCount === 3) text = reviewerRejectsText;
+      else text = reviewerApprovesText;
+
+      return {
+        textStream: (async function* () { yield text; })(),
+        text: Promise.resolve(text),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 2, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    const promise = runOrchestration(config, "Build feature", true, false, output);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await promise;
+    vi.useRealTimers();
+
+    expect(output.logs.join(" ")).toMatch(/Revision rate limited/i);
   });
 
   it("pauses auto-revise when reviewer repeats the same blocker", async () => {

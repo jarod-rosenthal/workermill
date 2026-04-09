@@ -12,6 +12,7 @@ import { listSessions, saveSession } from "../../session.js";
 import { loadConfig, saveConfig } from "../../config.js";
 import { getChangedFiles } from "../../checkpoints.js";
 import { findModelInfo } from "../../provider-registry.js";
+import { isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
 
@@ -138,25 +139,25 @@ export function handleModelCommand(arg: string, ctx: SlashCommandContext): void 
     } else if (ctx.switchModel) {
       ctx.switchModel(newProvider, newModel);
 
-      const isLocalProvider = newProvider === "ollama" || newProvider === "lmstudio";
+      const isLocal = _isLocalProvider(newProvider);
       const configCtx = modelConfig?.providers?.[newProvider]?.contextLength;
       const newCtxWindow = contextOverride
-        || (isLocalProvider ? configCtx : undefined)
+        || (isLocal ? configCtx : undefined)
         || findModelInfo(newModel)?.contextWindow
-        || (isLocalProvider ? 128_000 : 256_000);
-      const ctxHint = isLocalProvider && !contextOverride && !configCtx
+        || (isLocal ? 128_000 : 256_000);
+      const ctxHint = isLocal && !contextOverride && !configCtx
         ? `\n*Tip: Local models default to 128k context. Set explicitly: \`/model ${newProvider}/${newModel} 64k\`*`
         : "";
       if (ctx.tokens > 0 && ctx.tokens > newCtxWindow * 0.8 && ctx.forceCompact) {
         ctx.addSystemMessage(
-          `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} \u2014 compacting conversation to fit...${ctxHint}`
+          `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocal ? ` (${newCtxWindow / 1024}k context)` : "")} \u2014 compacting conversation to fit...${ctxHint}`
         );
         void ctx.forceCompact().then(({ before, after }) => {
           ctx.addSystemMessage(`Compacted ${before} \u2192 ${after} messages.`);
         });
       } else {
         ctx.addSystemMessage(
-          `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} \u2014 active now.${ctxHint}`
+          `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocal ? ` (${newCtxWindow / 1024}k context)` : "")} \u2014 active now.${ctxHint}`
         );
       }
     } else {

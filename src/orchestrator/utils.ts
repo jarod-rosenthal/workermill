@@ -2,6 +2,7 @@ import type { ToolSet } from "ai";
 import fs from "fs";
 import path from "path";
 import { findModelInfo } from "../provider-registry.js";
+import { getProviderCapabilities } from "../provider-capabilities.js";
 
 /** Check if an error indicates a rate limit (HTTP 429) and extract the wait duration. */
 export function isRateLimitError(err: unknown): { retryAfterMs: number } | null {
@@ -359,18 +360,8 @@ export function isAbortControllerLike(value: unknown): value is AbortController 
 
 /** Build provider-specific reasoning/thinking options for streamText. */
 export function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
-  switch (provider) {
-    case "openai":
-      return { providerOptions: { openai: { reasoningSummary: "detailed" } } };
-    case "google":
-    case "gemini":
-      if (modelName && modelName.includes("gemini-3")) {
-        return { providerOptions: { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } } };
-      }
-      return { providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192, includeThoughts: true } } } };
-    default:
-      return {};
-  }
+  const caps = getProviderCapabilities(provider);
+  return caps.reasoningOptions(modelName);
 }
 
 /** Emit incremental reasoning text deltas line-by-line. */

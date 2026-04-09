@@ -522,14 +522,20 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       } catch (err) {
         lastReviewError = err;
         const transient = isTransientError(err);
+        const rl = isRateLimitError(err);
         const canRetry = attempt < maxReviewAttempts && (
           timedAbort.didTimeout()
           || transient
+          || rl
           || isMissingRequiredReviewMarkerError(err)
           || isEmptyReviewOutputError(err)
         );
         if (!canRetry) throw err;
-        output.coordinatorLog("Tech Lead review stalled or returned incomplete output; retrying once...");
+        const retryMessage = rl
+          ? `Tech Lead review rate limited; retrying once in ${Math.ceil(rl.retryAfterMs / 1000)}s...`
+          : "Tech Lead review stalled or returned incomplete output; retrying once...";
+        output.coordinatorLog(retryMessage);
+        if (rl) await rateLimitSleep(rl.retryAfterMs);
         logger.warn("Retrying standalone tech lead review", {
           attempt,
           provider: revProvider,

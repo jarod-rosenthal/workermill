@@ -15,6 +15,7 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
 import { resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
+import { isLocalProvider } from "./provider-capabilities.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -185,7 +186,7 @@ export async function runOrchestration(
   }
 
   // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
-  const skipAutoDetect = defaultProvider.provider === "ollama" || defaultProvider.provider === "lmstudio";
+  const skipAutoDetect = isLocalProvider(defaultProvider.provider);
   const mcpConfig = skipAutoDetect
     ? (config.mcp || {})
     : autoDetectMCPServers(config.mcp || {});

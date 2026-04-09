@@ -419,25 +419,26 @@ Rules:
 
   const planStart = Date.now();
 
-  // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
-  const planStream = streamText({
-    model: plannerModel,
-    abortSignal,
-    system: planner?.systemPrompt || "You are an implementation planner.",
-    prompt: plannerPrompt,
-    tools: readOnlyTools as ToolSet,
-    stopWhen: stepCountIs(100),
-    timeout: { chunkMs: 120_000 },
-    ...buildOllamaOptions(pProvider as AIProvider, pCtx),
-    onStepFinish() {
-      // Text already streamed line-by-line below — just update status between steps
-      output.status(getPrdDecompositionPhaseLabel("streaming"));
-    },
-  });
   // Stream planner output line-by-line as it arrives
   let planText = "";
   let planUsage: { inputTokens?: number; outputTokens?: number } | undefined;
   try {
+    // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
+    const planStream = streamText({
+      model: plannerModel,
+      abortSignal,
+      system: planner?.systemPrompt || "You are an implementation planner.",
+      prompt: plannerPrompt,
+      tools: readOnlyTools as ToolSet,
+      stopWhen: stepCountIs(100),
+      timeout: { chunkMs: 120_000 },
+      ...buildOllamaOptions(pProvider as AIProvider, pCtx),
+      onStepFinish() {
+        // Text already streamed line-by-line below — just update status between steps
+        output.status(getPrdDecompositionPhaseLabel("streaming"));
+      },
+    });
+
     let lineBuffer = "";
     for await (const chunk of planStream.textStream) {
       if (abortSignal?.aborted) break;

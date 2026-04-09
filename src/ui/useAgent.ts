@@ -34,6 +34,7 @@ import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../c
 import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
 import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
+import fs from "fs";
 import path from "path";
 import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
 import { notifyIfEnabled } from "../notify.js";
@@ -1547,6 +1548,17 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             const extractedMemories = extractMemoriesBeforeCompact(plainMessages);
             for (const mem of extractedMemories) {
               addMemory("learning", mem, workingDirRef.current);
+            }
+            // Also persist to file-based memory so the memory tool can find them
+            if (extractedMemories.length > 0) {
+              try {
+                const { ensureMemoriesDir, getMemoriesDir } = await import("../engine/tools/memory.js");
+                ensureMemoriesDir(workingDirRef.current);
+                const autoFile = path.join(getMemoriesDir(workingDirRef.current), "auto-learnings.md");
+                const header = fs.existsSync(autoFile) ? "" : "# Auto-extracted Learnings\n\nDiscoveries extracted during conversation compaction.\n\n";
+                const entries = extractedMemories.map(m => `- ${m}`).join("\n") + "\n";
+                fs.appendFileSync(autoFile, header + entries, "utf-8");
+              } catch { /* non-fatal */ }
             }
             const compacted = await compactMessages(
               turnModel,

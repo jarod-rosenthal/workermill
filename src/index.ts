@@ -401,6 +401,48 @@ program
     console.log();
   });
 
+// ── Model command: set or show default model outside a session ──
+program
+  .command("model [provider/model]")
+  .description("Show or set the default model without entering a session")
+  .action(async (modelArg?: string) => {
+    const { loadConfig: loadCfg, saveConfig: saveCfg } = await import("./config.js");
+    const cfg = loadCfg();
+    if (!cfg) {
+      console.error("No configuration found. Run `wm` to set up.");
+      process.exit(1);
+    }
+    if (!modelArg) {
+      const provider = cfg.default || "unknown";
+      const model = cfg.providers[provider]?.model || "unknown";
+      console.log(`Default: ${provider}/${model}`);
+      if (cfg.routing && Object.keys(cfg.routing).length > 0) {
+        console.log("\nRouting:");
+        for (const [role, prov] of Object.entries(cfg.routing)) {
+          const m = cfg.providers[prov]?.model || "default";
+          console.log(`  ${role}: ${prov}/${m}`);
+        }
+      }
+      return;
+    }
+    const parts = modelArg.split("/");
+    if (parts.length < 2) {
+      console.error("Usage: wm model <provider>/<model>");
+      console.error("Example: wm model ollama/qwen3-coder:30b");
+      process.exit(1);
+    }
+    const newProvider = parts[0];
+    const newModel = parts.slice(1).join("/");
+    if (!cfg.providers[newProvider]) {
+      console.error(`Provider "${newProvider}" not configured. Add it with: wm (then /settings key ${newProvider} <key>)`);
+      process.exit(1);
+    }
+    cfg.providers[newProvider].model = newModel;
+    cfg.default = newProvider;
+    saveCfg(cfg);
+    console.log(`Default model set to ${newProvider}/${newModel}`);
+  });
+
 // ── Models command group ──
 const modelsCmd = program
   .command("models")

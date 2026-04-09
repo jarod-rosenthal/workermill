@@ -913,9 +913,17 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       personaTools[key] = def;
     }
 
-    // TODO: Deferred tool loading — skipped in orchestrator because persona-based filtering
-    // already limits tools per story. MCP tools are the only unbounded set. If MCP tool counts
-    // become large, add partitionTools() here (see useAgent.ts for the pattern).
+    // Deferred tool loading — cap MCP tools to prevent context overflow on local models.
+    // If MCP tools exceed 20, keep only the first 20 and log the rest as deferred.
+    const mcpNames = Object.keys(personaTools).filter(n => n.startsWith("mcp__"));
+    if (mcpNames.length > 20) {
+      const deferred = mcpNames.slice(20);
+      for (const name of deferred) {
+        delete personaTools[name];
+      }
+      logger.info("Deferred excess MCP tools in orchestrator", { total: mcpNames.length, deferred: deferred.length, kept: 20 });
+      output.log("system", `${deferred.length} MCP tools deferred to fit context (${mcpNames.length} total, 20 kept)`);
+    }
 
     // Add skill tool — lets story workers invoke custom skills mid-execution
     personaTools["skill"] = {

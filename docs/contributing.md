@@ -32,7 +32,15 @@ From `package.json`:
 workermill/
 ├── src/
 │   ├── index.ts               # Commander CLI entry + chat default command
-│   ├── orchestrator.ts        # /build pipeline: planner → workers → reviewer
+│   ├── orchestrator.ts        # /build coordinator — sequencing and public API
+│   ├── orchestrator/          # Orchestration sub-modules
+│   │   ├── types.ts           # Story, OrchestrationOutput, OrchestrationResult
+│   │   ├── utils.ts           # Error classification, rate limiting, prompt helpers
+│   │   ├── planning.ts        # Planner prompt, story parsing, QA participation
+│   │   ├── execution.ts       # Story execution loop, tool setup, validation
+│   │   ├── review.ts          # Tech lead review, revision passes, must-fix tracking
+│   │   ├── gates.ts           # Quality gates, LSP diagnostics
+│   │   └── completion.ts      # Push, PR creation, ticket transitions, cleanup
 │   ├── config.ts              # Load/save ~/.workermill/cli.json
 │   ├── setup.ts               # First-run provider wizard
 │   ├── personas.ts            # Load persona markdown files

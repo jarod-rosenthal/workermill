@@ -391,7 +391,7 @@ Create your own by dropping a `.md` file in `.workermill/personas/` (project) or
 
 ## Tools
 
-WorkerMill gives its agents 17 tools — file operations, shell, search, git, web, and code intelligence:
+WorkerMill gives its agents 22 tools — file operations, shell, search, git, web, code intelligence, and memory:
 
 | Tool | What it does |
 |------|-------------|
@@ -412,6 +412,7 @@ WorkerMill gives its agents 17 tools — file operations, shell, search, git, we
 | `view_image` | Send images to vision models |
 | `todo` | Track tasks within a session |
 | `verify` | Run quality gate commands |
+| `memory` | Persistent cross-session agent memory |
 
 Plus any tools connected via [MCP servers](#mcp-support).
 

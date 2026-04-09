@@ -77,6 +77,29 @@ The reviewer sees a pass/fail summary before reading a single line of diff. Fail
 
 ---
 
+## Definition-of-Done Contracts
+
+The planner emits structured completion requirements per story — not just prose:
+
+```json
+{
+  "id": "story-2",
+  "title": "Implement wm stats command",
+  "requiredFiles": ["src/stats-command.ts"],
+  "requiredTests": ["src/__tests__/stats-command.test.ts"],
+  "requiredCommands": ["npm run typecheck", "npx vitest run src/__tests__/stats-command.test.ts"]
+}
+```
+
+After each story executes, the orchestrator validates:
+- Every `requiredFile` exists on disk
+- Every `requiredTest` exists and is not only in excluded suites (e.g. e2e-only)
+- Every `requiredCommand` passes (exit code 0)
+
+Failures block story completion with machine-readable failure codes: `missing_required_file`, `missing_required_test`, `test_only_in_excluded_suite`, `required_command_failed`, `worker_no_output`.
+
+---
+
 ## Two Sources of Gates
 
 ### 1. Planner-generated (dynamic)

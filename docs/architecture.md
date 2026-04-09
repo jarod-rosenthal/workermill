@@ -29,13 +29,30 @@ Triggered by `/build`. A team of specialized models works together.
 
 Flow:
 ```
-ticket/spec → planner → (optional critic loop) → specialist workers → tech lead reviewer → commit
+ticket/spec → planner → specialist workers → definition-of-done check → quality gates → tech lead reviewer → commit
 ```
 
-- **Planner** reads the codebase and decomposes the task into scoped stories with specific files and acceptance criteria
-- **Critic** (optional, off by default) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk — refines up to 3 times
+- **Planner** reads the codebase and decomposes the task into scoped stories with specific files, acceptance criteria, and definition-of-done contracts (`requiredFiles`, `requiredTests`, `requiredCommands`)
 - **Workers** execute stories one at a time using their persona's system prompt
+- **Definition-of-done** — after each story, the orchestrator validates that required files and tests exist and required commands pass. Missing artifacts block completion with machine-readable failure codes
+- **Quality gates** — static gates from config plus planner-generated verification commands run before review
 - **Reviewer** reads the diffs against the original spec and scores the code; a failing score sends work back for revision
+
+#### Orchestrator module structure
+
+The orchestrator is decomposed into focused modules under `src/orchestrator/`:
+
+| Module | Responsibility |
+|--------|---------------|
+| `types.ts` | Interfaces: Story, OrchestrationOutput, OrchestrationResult, etc. |
+| `utils.ts` | Error classification, rate limiting, prompt helpers, abort signals |
+| `planning.ts` | Planner prompt, story parsing/normalization, QA participation, topological sort |
+| `execution.ts` | Story execution loop, tool setup, contract validation, retry/revision |
+| `review.ts` | Tech lead review, revision passes, must-fix tracking, standalone review |
+| `gates.ts` | Quality gates, LSP diagnostics |
+| `completion.ts` | Push, PR creation, ticket transitions, cleanup |
+
+`orchestrator.ts` is the coordinator — setup, sequencing, and public API re-exports.
 
 Each role can use a different model via `/settings route <persona> <provider>`.
 
@@ -79,8 +96,12 @@ Built-in tools:
 - **Git:** `git` (branch, commit, diff, log — blocks destructive ops)
 - **Code:** `lsp` (Language Server Protocol integration), `verify` (run build/test commands)
 - **Web:** `fetch` (HTTP), `web_search` (provider-specific)
-- **Agentic:** `sub_agent` (spawn a child agent with worktree isolation), `todo` (task tracking)
+- **Agentic:** `sub_agent` (spawn a child agent with worktree isolation), `todo` (task tracking), `memory` (persistent cross-session memory)
 - **Meta:** `tool_metadata` (query tool capabilities and permissions)
+
+### Memory tool
+
+The `memory` tool gives agents persistent, file-based memory across sessions. Agents check their memory directory at conversation start and save project patterns, corrections, and preferences as they work. Memory is stored per-project under `~/.workermill/projects/<id>/memories/` as plain markdown files. Works with every provider.
 
 Each tool has metadata (`isReadOnly`, `isDestructive`, `concurrencySafe`) used by the permission system and concurrency scheduler.
 

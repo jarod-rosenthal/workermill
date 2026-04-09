@@ -17,6 +17,7 @@ Both files are plain JSON. The CLI writes the global file when you run `/setting
   "default": "anthropic",
   "routing": { },
   "review": { },
+  "qa": { },
   "qualityGates": [ ],
   "permissions": { },
   "hooks": { },
@@ -163,6 +164,27 @@ Controls the `/build` review pipeline.
 ```
 
 See [Quality Gates & Spec Check](quality-gates.md) for full documentation, examples, and guidance on writing effective verification commands.
+
+## `qa`
+
+Controls QA engineer participation in `/build` runs.
+
+```json
+"qa": {
+  "participation": "auto"
+}
+```
+
+| Field | Default | Purpose |
+|---|---|---|
+| `participation` | `"auto"` | When to add a dedicated QA story: `"off"` (never), `"auto"` (planner decides), `"always"` (always append a QA validation story) |
+
+### Setting from the CLI
+
+```
+/settings qa.participation off
+/settings qa.participation always
+```
 
 ## `qualityGates`
 

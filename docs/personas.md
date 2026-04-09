@@ -86,9 +86,9 @@ Available tools for the `tools` frontmatter array:
 
 **Web:** `fetch`, `web_search`
 
-**Agentic:** `sub_agent`, `todo`
+**Agentic:** `sub_agent`, `todo`, `memory`
 
-Read-only personas (like `planner` and `tech_lead`) restrict their tool set to read operations. Worker personas typically get the full set.
+The `memory` tool is available to all personas — it provides persistent cross-session memory stored as markdown files. Read-only personas (like `planner` and `tech_lead`) restrict their other tools to read operations. Worker personas typically get the full set.
 
 ## Routing Personas to Providers
 

@@ -10,18 +10,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Persistent `memory` tool** — agents now have a `memory` tool for file-based persistent memory across sessions. Works with every provider (Ollama, OpenAI, Google, xAI, etc.). Agents check memory at session start and save project patterns, corrections, and preferences as they work. Stored per-project under `~/.workermill/projects/<id>/memories/`.
 - **Definition-of-done contracts** — planner emits `requiredFiles`, `requiredTests`, and `requiredCommands` per story. The orchestrator validates these after execution and blocks completion if artifacts are missing or commands fail. Machine-readable failure codes (`missing_required_file`, `missing_required_test`, `required_command_failed`, etc.) replace vague error messages.
 - **QA participation control** — new `qa.participation` config setting (`"off"`, `"auto"`, `"always"`) controls whether a dedicated QA story is added to `/build` runs. Default: `"auto"`.
+- **Structured build summary** — `/build` now prints a pass/fail/skipped summary per story with total counts and cost at the end of every run.
+- **Auto-persist learnings to memory tool** — extracted `::learning::` and `::remember::` markers during compaction are now also written to the file-based memory tool storage at `auto-learnings.md`.
 - **Deterministic aggregate E2E runner** — `npm run test:e2e` now runs each end-to-end test file sequentially through `scripts/run-e2e.mjs`, emits per-file progress and heartbeat logs, retries a failed file once, and always prints a final pass/fail summary.
 
 ### Changed
-- **Orchestrator decomposed into sub-modules** — `src/orchestrator.ts` reduced from 4,653 to 538 lines (88% reduction). Orchestration phases extracted into `src/orchestrator/` — planning, execution, review, gates, completion, types, and utils. No behavior changes; all existing exports preserved.
-
-### Changed
-- **Long-running E2E handling** — the aggregate E2E runner now gives each file a larger per-file timeout budget by default and kills timed-out child processes cleanly instead of leaving the parent run looking hung or silent.
-- **Ship workflow E2E scope** — `ship-workflow` coverage is now focused on ship/orchestration behavior and no longer duplicates separate review/gate validation already covered elsewhere.
+- **Orchestrator decomposed into sub-modules** — `src/orchestrator.ts` reduced from 4,653 to 538 lines (88% reduction). Orchestration phases extracted into `src/orchestrator/` — planning, execution, review, gates, completion, types, and utils.
+- **useAgent.ts decomposed** — utility functions and types extracted into `src/ui/agent/` (utils.ts, types.ts). Reduced from 1,900 to 1,560 lines.
+- **Slash commands decomposed** — `src/ui/slash-commands.ts` reduced from 2,148 to 1,063 lines (50% reduction). Command handlers extracted into `src/ui/commands/` — settings, permissions, session, project.
+- **OS sandbox auto-upgrade for /build** — `/build` automatically upgrades to OS-level sandbox (`@anthropic-ai/sandbox-runtime`) when the platform supports it. Falls back to path sandbox if dependencies are missing. Chat mode is unaffected.
+- **MCP tools capped in orchestrator** — when MCP tools exceed 20 in `/build` workers, only the first 20 are kept. Prevents local models from being overwhelmed by Docker Desktop MCP gateway's 50+ tools.
+- **Long-running E2E handling** — the aggregate E2E runner now gives each file a larger per-file timeout budget by default and kills timed-out child processes cleanly.
+- **Ship workflow E2E scope** — `ship-workflow` coverage focused on ship/orchestration behavior.
 
 ### Fixed
-- **Standalone `/review` empty-output failures** — Tech Lead review now retries once when a provider returns empty or malformed review output instead of failing immediately on missing `REVIEW_DECISION` / `CODE_QUALITY_SCORE` markers.
-- **Tool execution E2E flakiness** — tool execution end-to-end tests now assert stable tool outcomes and filesystem effects instead of depending on provider-specific streamed tool event hooks.
+- **Rate limit retry in planner and reviewer** — planner retries up to 3 times on HTTP 429 with backoff. Reviewer retry loop now catches rate limits alongside timeouts and transient errors. Fixed `isRateLimitError` matching billing/quota errors (infinite retry bug).
+- **Memory tool path traversal** — `executeMemoryCommand` now catches path traversal errors and returns error strings instead of throwing unhandled exceptions.
+- **Standalone `/review` empty-output failures** — Tech Lead review now retries once when a provider returns empty or malformed review output.
+- **Tool execution E2E flakiness** — tool execution end-to-end tests now assert stable tool outcomes and filesystem effects.
 
 ## [1.0.1] - 2026-04-08
 

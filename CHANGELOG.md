@@ -6,10 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-04-08
+
+### Added
+- **`wm stats` command** — cross-session usage analytics showing total tokens (input/output), estimated cost, message count, and session count. Supports `--json` for machine-readable output. Usage data is persisted in session files and aggregated on demand.
+- **`wm schema` command** — generates a JSON Schema for `~/.workermill/cli.json` from the runtime Zod definition. Supports `--out <file>` for writing to disk. Enables editor IntelliSense and CI config validation.
+- **`wm session` CLI family** — manage sessions from the command line: `wm session list`, `wm session show <id>`, `wm session last`, `wm session rename <id> <name>`, `wm session delete <id>`. Session IDs accept prefix matching.
+- **`wm run` headless execution** — run a single prompt non-interactively with full tool access and exit. Supports `--json` output and `--provider` override for scripting and CI.
+- **`wm models update [source]`** — update the model catalog from a remote source or local file. Source-aware: detects and applies updates only when the catalog has changed.
+- **Verification gates enabled by default** — `review.verifyEnabled` now defaults to `true`. The planner generates per-story verification commands that run before the tech lead review. Opt out with `review.verifyEnabled: false`.
+
+### Changed
+- **LSP diagnostics run before review, not after** — diagnostic results are now available to the reviewer as context, catching type errors and lint issues before the review score is assigned.
+- **Persona routing consistency** — persona routing overrides and worker ticket labels now resolve correctly when using role-suffixed provider aliases.
+- **Zod upgraded to v4** — schema generation uses Zod 4 API with compatibility shims. Added dependency downgrade protection to prevent accidental version regression.
+
 ### Fixed
 - **Ollama not discovered in WSL** — model listing and model factory now detect the WSL gateway IP automatically, so Ollama running on the Windows host is reachable without an explicit `host` in config.
 - **LSP directory diagnostics caused /review to hang** — directory scans processed files sequentially (5+ min) and returned 200KB of false-positive diagnostics from tsconfig-excluded test files. Now uses parallel batching (12s), respects tsconfig excludes, and tries workspace/diagnostic (LSP 3.17+) first.
 - **Review failures not logged** — standalone `/review` and `/build` review catch blocks now log the actual provider error with stack trace, instead of silently returning 0 tokens.
+- **CodeQL command injection alerts** — resolved security alerts flagged by GitHub CodeQL analysis.
+- **3 Vite CVEs** — patched via override to vite 8.0.7.
+- **GitHub CLI shell quoting** — avoided shell quoting issues in `gh` CLI calls.
+- **Session list cap** — restored default session list cap that was accidentally removed.
 
 ## [0.16.0] - 2026-04-07
 

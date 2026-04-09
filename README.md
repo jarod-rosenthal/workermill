@@ -317,19 +317,36 @@ Requires `"experimental": true` in your config.
 
 </details>
 
+<details>
+<summary><strong>CLI Subcommands</strong></summary>
+
+Run outside the interactive session from a normal terminal prompt.
+
+| Command | What it does |
+|---------|-------------|
+| `wm run <prompt>` | Headless prompt execution — runs a single prompt and exits |
+| `wm models [filter]` | List available AI models with live provider discovery |
+| `wm session list` | List saved sessions |
+| `wm session show <id>` | Show a specific session's details |
+| `wm stats` | Cross-session usage analytics and cost summary |
+| `wm schema` | Generate JSON Schema for config validation |
+| `wm logs` | Stream or tail CLI log entries |
+| `wm doctor` | Health check: Node, git, config, providers |
+
+</details>
+
 **Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
 
 ---
 
 ## Context Windows
 
-WorkerMill supports a shorthand context argument on `/model` commands. You do not pass a separate flag. Just append the context size after the model:
+WorkerMill supports a shorthand context argument on `/model` commands for local providers. You do not pass a separate flag. Just append the context size after the model:
 
 ```bash
 /model ollama/qwen3-coder:30b 32k
 /model ollama/qwen3-coder:30b 256k
 /model lmstudio/deepseek-coder-v2 64k
-/model planner anthropic/claude-sonnet-4-6 256k
 ```
 
 Accepted formats include values like `32k`, `128k`, `256k`, and `1m`.
@@ -347,7 +364,7 @@ For local providers like Ollama and LM Studio, this is the easiest way to raise 
 }
 ```
 
-The slash command shorthand and the config value represent the same setting; the command just lets you express it in a human-friendly form.
+The slash command shorthand and the config value represent the same setting for local providers; the command just lets you express it in a human-friendly form.
 
 ---
 
@@ -457,7 +474,7 @@ API keys support `{env:VAR_NAME}` syntax to read from environment variables. See
 
 - **[Commands](docs/commands.md)** — every slash command, subcommand, and flag
 - **[Configuration](docs/configuration.md)** — every field in `~/.workermill/cli.json` with examples
-- **[Personas](docs/personas.md)** — writing custom expert roles, tool restrictions, per-project overrides
+- **[Personas](docs/personas.md)** — writing custom expert roles, tool restrictions, per-project overrides, provider routing
 - **[Hooks & Custom Commands](docs/hooks-and-skills.md)** — shell hooks around tool calls, lifecycle events, custom slash commands
 - **[Quality Gates](docs/quality-gates.md)** — how verification commands, LSP diagnostics, and spec checks work
 - **[Recipes](docs/recipes.md)** — concrete workflows: mixed-provider teams, quality gates, local-only setups

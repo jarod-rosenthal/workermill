@@ -142,7 +142,7 @@ Controls the `/build` review pipeline.
 | `useCritic` | `false` | Run a planning critic before execution — scores the plan 1-10 and refines it before workers start |
 | `criticThreshold` | `8` | Plan score (1-10) at or above which the critic approves the plan |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
-| `verifyEnabled` | `false` | After workers finish: instructs the planner to generate `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. |
+| `verifyEnabled` | `true` | After workers finish: instructs the planner to generate `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. Set to `false` to disable. |
 
 ### Setting from the CLI
 
@@ -358,6 +358,47 @@ Tools from MCP servers appear as `mcp__<server>__<tool>`. Docker Desktop's MCP g
 
 ```
 /mcp
+```
+
+## `liveView`
+
+Browser-based diff preview during `/build` runs. When enabled, the CLI opens a local URL showing file changes as they happen.
+
+| Value | Effect |
+|---|---|
+| `"auto"` (default) | Open when a browser is available |
+| `true` | Always open |
+| `false` | Disabled |
+
+```
+/settings liveView true
+/settings liveView false
+```
+
+## `inlineEditPreview`
+
+Show inline edited-file previews in the chat output and during `/build`. Default `true`.
+
+```
+/settings inlineEditPreview false
+```
+
+## `experimental`
+
+Enable experimental commands: `/doctor`, `/orchestrate`, `/program`. Default `false`.
+
+```
+/settings experimental true
+```
+
+## `editor`
+
+Terminal editor preference for the `/editor` command. Default `"auto"` (uses `$EDITOR` or falls back to `nano`).
+
+Options: `"vim"`, `"nano"`, `"auto"`.
+
+```
+/settings editor vim
 ```
 
 ## `sandbox`

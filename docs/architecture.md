@@ -74,11 +74,13 @@ Tools live in `src/engine/tools/`.
 
 Built-in tools:
 
-- **File:** `read_file`, `write_file`, `edit_file`, `patch`, `glob`, `grep`, `ls`
-- **Shell:** `bash` (sandboxed via worker thread)
+- **File:** `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `patch`, `glob`, `grep`, `ls`, `view_image`, `download_file`
+- **Shell:** `bash` (sandboxed via worker thread), `bash_background`, `bash_output`, `bash_kill`
+- **Git:** `git` (branch, commit, diff, log — blocks destructive ops)
 - **Code:** `lsp` (Language Server Protocol integration), `verify` (run build/test commands)
 - **Web:** `fetch` (HTTP), `web_search` (provider-specific)
 - **Agentic:** `sub_agent` (spawn a child agent with worktree isolation), `todo` (task tracking)
+- **Meta:** `tool_metadata` (query tool capabilities and permissions)
 
 Each tool has metadata (`isReadOnly`, `isDestructive`, `concurrencySafe`) used by the permission system and concurrency scheduler.
 
@@ -129,7 +131,7 @@ Before any compaction, the CLI scans message history for `::learning::` and `::r
 
 ## Session Persistence
 
-Sessions save to `~/.workermill/sessions/<id>.json` after every turn. Resume with `wm --resume`. The CLI tracks the working directory, model state, and full message history.
+Sessions save to `~/.workermill/projects/<project-id>/sessions/<id>.json` after every turn. Resume with `wm --resume`. The CLI tracks the working directory, model state, and full message history. Manage sessions from the command line with `wm session list`, `wm session show <id>`, and `wm session delete <id>`.
 
 ## Hooks
 

@@ -180,7 +180,7 @@ Personas are loaded from (in precedence order):
 2. `~/.workermill/personas/*.md` — user-level overrides
 3. `cli/personas/*.md` — bundled with the CLI
 
-See the [Personas guide](personas.md) for the file format and how to write custom ones.
+See the [Personas guide](personas.md) for the file format, tool restrictions, and how to write custom ones.
 
 ### `/skills`
 
@@ -191,7 +191,7 @@ List custom commands and skills loaded from:
 3. `.workermill/skills/*.md` — project skills
 4. `~/.workermill/skills/*.md` — user skills
 
-Each file creates a new slash command. See the [Skills guide](skills-and-commands.md) for the format.
+Each file creates a new slash command. See the [Hooks & Custom Commands guide](hooks-and-skills.md) for the format.
 
 ---
 
@@ -286,8 +286,6 @@ Show MCP (Model Context Protocol) server status and the tools each server expose
 | `/help` | `/h`, `/?` | List all commands |
 | `/quit` | `/exit`, `/q` | Exit the CLI |
 | `/log` | | Show recent log entries from `~/.workermill/logs/` |
-| `wm logs` | | Stream or tail CLI log entries for the current project |
-| `wm models` | | List available AI models with live provider discovery |
 | `/update` | | Check for a newer CLI version on npm |
 | `/release-notes` | `/changelog` | Show the CHANGELOG for the current version |
 
@@ -341,6 +339,25 @@ These work but the UX is rough — expect sharp edges.
 
 These run outside the interactive session — from a normal terminal prompt.
 
+### `wm run [prompt...]`
+
+Headless (non-interactive) prompt execution. Runs a single prompt through the agent and exits.
+
+```bash
+wm run "list all TODO comments in the codebase"
+wm run -p anthropic/claude-sonnet-4-6 "explain src/auth.ts"
+wm run --json "what framework does this project use"
+```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `-p, --provider <provider/model>` | Override provider and model |
+| `--json` | Emit structured JSON output instead of plain text |
+
+Useful for scripting, CI pipelines, and automation. The agent has full tool access (subject to permissions) but no interactive prompts.
+
 ### `wm models [filter]`
 
 List all available AI models across every configured provider. Combines the static model registry with live discovery of local providers (Ollama, LM Studio).
@@ -382,6 +399,40 @@ wm logs --cwd /path/to/repo    # Read log for a specific project directory
 ```
 
 **Note:** `/log` inside a session shows a quick tail of recent entries. `wm logs --follow` from a separate terminal gives a live stream while a session is running.
+
+### `wm session <subcommand>`
+
+Manage saved sessions from the command line.
+
+```bash
+wm session list                    # List all saved sessions
+wm session show <id>               # Show a specific session's details
+wm session last                    # Show the most recent session
+wm session rename <id> <name>      # Rename a session
+wm session delete <id>             # Delete a session
+```
+
+Session IDs accept prefix matching — `wm session show abc` matches a session starting with `abc`.
+
+### `wm stats`
+
+Show cross-session usage analytics: total tokens, estimated cost, messages, and sessions — aggregated from all saved session data.
+
+```bash
+wm stats                           # Human-readable summary
+wm stats --json                    # Machine-readable JSON output
+```
+
+Token counts are broken down by input and output. Cost estimates use the pricing data from each session's provider.
+
+### `wm schema`
+
+Generate a JSON Schema for `~/.workermill/cli.json` based on the runtime Zod schema definition. See the [Configuration reference](configuration.md#generating-configuration-schema) for full usage and editor integration.
+
+```bash
+wm schema                          # Print schema to stdout
+wm schema --out .workermill.schema.json  # Write to file
+```
 
 ### `wm doctor`
 

@@ -11,7 +11,7 @@ If you're just getting started, read the [project README](../README.md) first �
 
 ## Extending the CLI
 
-- **[Personas](personas.md)** — writing custom expert roles, overriding built-ins per project, tool restrictions.
+- **[Personas](personas.md)** — writing custom expert roles, overriding built-ins per project, tool restrictions, provider routing.
 - **[Hooks & Custom Commands](hooks-and-skills.md)** — shell hooks around tool calls, lifecycle events, and custom slash commands (skills).
 
 ## Guides

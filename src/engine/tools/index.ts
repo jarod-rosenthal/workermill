@@ -26,9 +26,10 @@ import * as verifyTool from "./verify.js";
 import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
 import * as memoryTool from "./memory.js";
+import * as ticketTool from "./ticket.js";
 
 // Re-export all tool modules
-export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool, memoryTool };
+export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool, memoryTool, ticketTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -892,6 +893,27 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           default:
             return `Error: Unknown command "${command}"`;
         }
+      },
+    }),
+
+    // ── Ticket tool — structured access to issue trackers ──
+    ticket: tool({
+      description: ticketTool.description,
+      inputSchema: z.object({
+        action: z.enum(["fetch", "comment", "transition", "list"]).describe(
+          "The operation: fetch (read ticket), comment (post update), transition (change status), list (search issues)"
+        ),
+        ticketKey: z.string().optional().describe(
+          "Ticket reference (e.g. '#42', 'GH-42', 'PROJ-123', 'TEAM-42')"
+        ),
+        comment: z.string().optional().describe("Comment text for the comment action"),
+        status: z.string().optional().describe("Target status for transition (e.g. 'done', 'in_progress')"),
+        query: z.string().optional().describe("Search query for the list action"),
+      }),
+      execute: async (input) => {
+        const result = await ticketTool.execute(input);
+        if (result.success) return result.content || "Done";
+        return `Error: ${result.error}`;
       },
     }),
   };

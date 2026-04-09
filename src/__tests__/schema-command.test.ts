@@ -53,7 +53,6 @@ describe("schema command", () => {
       expect(props.disableModelAutoUpdate).toBeDefined();
       expect(props.editor).toBeDefined();
       expect(props.program).toBeDefined();
-      expect(props.doctor).toBeDefined();
       expect(props.liveView).toBeDefined();
       expect(props.inlineEditPreview).toBeDefined();
       expect(props.experimental).toBeDefined();

@@ -956,7 +956,36 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     let contextOverflowRetries = 0;
     let contextOverflowSlackTokens = 0;
     const retryErrorSignatureCounts = new Map<string, number>();
+
+    // Snapshot workspace before story execution — restore on retry so each
+    // attempt starts clean instead of inheriting half-broken state.
+    let preStoryHash = "";
+    let preStoryUntrackedFiles: string[] = [];
+    try {
+      preStoryHash = execSync("git rev-parse HEAD 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      preStoryUntrackedFiles = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
+    } catch { /* not a git repo or no commits yet */ }
+
     for (let revision = 0; revision <= 2; revision++) {
+
+    // On retry, restore workspace to pre-story state
+    if (revision > 0 && preStoryHash) {
+      try {
+        // Restore tracked files to pre-story state
+        execSync(`git checkout ${preStoryHash} -- . 2>/dev/null`, { cwd: workingDir, stdio: "pipe" });
+        // Remove files created by the failed attempt (not in pre-story untracked set)
+        const currentUntracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
+        const preSet = new Set(preStoryUntrackedFiles);
+        for (const file of currentUntracked) {
+          if (!preSet.has(file)) {
+            try { fs.unlinkSync(path.join(workingDir, file)); } catch { /* best effort */ }
+          }
+        }
+        logger.info("Workspace restored before retry", { story: story.id, revision, restoredTo: preStoryHash.slice(0, 8) });
+      } catch (restoreErr) {
+        logger.warn("Workspace restore failed — retrying on dirty state", { error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) });
+      }
+    }
 
     // Reset loop detection for each revision attempt
     recentToolSignatures = [];

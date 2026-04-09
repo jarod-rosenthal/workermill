@@ -199,6 +199,16 @@ const defaultCmd = program
     }
 
     await printWelcome(workingDir, isFirstRun);
+
+    // Check for interrupted builds and show recovery prompt
+    try {
+      const { detectInterruptedBuild, printRecoveryPrompt } = await import("./recovery.js");
+      const recovery = detectInterruptedBuild(workingDir);
+      if (recovery) {
+        printRecoveryPrompt(recovery);
+      }
+    } catch { /* non-fatal */ }
+
     if (sandboxResolution.warning) {
       console.log(chalk.yellow(`  ⚠ ${sandboxResolution.warning}`));
       console.log();

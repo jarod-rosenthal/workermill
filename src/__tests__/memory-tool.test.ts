@@ -78,14 +78,17 @@ describe("memory tool", () => {
       const result = await executeMemoryCommand({ command: "create", path: "/memories/new.md", file_text: "content here" });
       expect(result).toContain("File created successfully");
       const dir = getMemoriesDir();
-      expect(fs.readFileSync(path.join(dir, "new.md"), "utf-8")).toBe("content here");
+      const content = fs.readFileSync(path.join(dir, "new.md"), "utf-8");
+      expect(content).toContain("content here");
+      // Should have provenance header
+      expect(content).toContain("source: agent");
     });
 
     it("creates nested directories", async () => {
       const result = await executeMemoryCommand({ command: "create", path: "/memories/sub/deep/file.md", file_text: "nested" });
       expect(result).toContain("File created successfully");
       const dir = getMemoriesDir();
-      expect(fs.readFileSync(path.join(dir, "sub", "deep", "file.md"), "utf-8")).toBe("nested");
+      expect(fs.readFileSync(path.join(dir, "sub", "deep", "file.md"), "utf-8")).toContain("nested");
     });
 
     it("returns error if file already exists", async () => {
@@ -124,12 +127,17 @@ describe("memory tool", () => {
 
   describe("insert", () => {
     it("inserts text at a specific line", async () => {
-      await executeMemoryCommand({ command: "create", path: "/memories/ins.md", file_text: "line 1\nline 3" });
-      const result = await executeMemoryCommand({ command: "insert", path: "/memories/ins.md", insert_line: 1, insert_text: "line 2" });
-      expect(result).toContain("has been edited");
+      // Create with frontmatter already included to get predictable content
+      await executeMemoryCommand({ command: "create", path: "/memories/ins.md", file_text: "---\ntest: true\n---\n\nline 1\nline 3" });
+      // Insert after the frontmatter + content lines
       const dir = getMemoriesDir();
+      const before = fs.readFileSync(path.join(dir, "ins.md"), "utf-8");
+      const lineCount = before.split("\n").length;
+      // Insert "line 2" before "line 3" (second to last content line)
+      const result = await executeMemoryCommand({ command: "insert", path: "/memories/ins.md", insert_line: lineCount - 1, insert_text: "line 2" });
+      expect(result).toContain("has been edited");
       const content = fs.readFileSync(path.join(dir, "ins.md"), "utf-8");
-      expect(content).toBe("line 1\nline 2\nline 3");
+      expect(content).toContain("line 1\nline 2\nline 3");
     });
 
     it("returns error for invalid line number", async () => {
@@ -175,7 +183,7 @@ describe("memory tool", () => {
       expect(result).toContain("Successfully renamed");
       const dir = getMemoriesDir();
       expect(fs.existsSync(path.join(dir, "old.md"))).toBe(false);
-      expect(fs.readFileSync(path.join(dir, "new.md"), "utf-8")).toBe("content");
+      expect(fs.readFileSync(path.join(dir, "new.md"), "utf-8")).toContain("content");
     });
 
     it("returns error when source does not exist", async () => {

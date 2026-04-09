@@ -168,6 +168,11 @@ function getDirSize(dirPath: string): number {
   return total;
 }
 
+/** Build a YAML frontmatter block for memory provenance tracking. */
+export function buildProvenanceHeader(source: "agent" | "auto-extracted" | "manual", confidence: "high" | "medium" | "low" = "medium"): string {
+  return `---\nsource: ${source}\nconfidence: ${confidence}\ncreated: ${new Date().toISOString()}\n---\n\n`;
+}
+
 function handleCreate(
   virtualPath: string,
   fileText: string,
@@ -181,7 +186,9 @@ function handleCreate(
 
   const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(resolved, fileText, "utf-8");
+  // Add provenance header if the content doesn't already have frontmatter
+  const content = fileText.startsWith("---\n") ? fileText : buildProvenanceHeader("agent") + fileText;
+  fs.writeFileSync(resolved, content, "utf-8");
   return `File created successfully at: ${virtualPath}`;
 }
 

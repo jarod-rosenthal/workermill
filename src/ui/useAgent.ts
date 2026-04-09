@@ -1213,11 +1213,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             // Also persist to file-based memory so the memory tool can find them
             if (extractedMemories.length > 0) {
               try {
-                const { ensureMemoriesDir, getMemoriesDir } = await import("../engine/tools/memory.js");
+                const { ensureMemoriesDir, getMemoriesDir, buildProvenanceHeader } = await import("../engine/tools/memory.js");
                 ensureMemoriesDir(workingDirRef.current);
                 const autoFile = path.join(getMemoriesDir(workingDirRef.current), "auto-learnings.md");
-                const header = fs.existsSync(autoFile) ? "" : "# Auto-extracted Learnings\n\nDiscoveries extracted during conversation compaction.\n\n";
-                const entries = extractedMemories.map(m => `- ${m}`).join("\n") + "\n";
+                const header = fs.existsSync(autoFile) ? "" : buildProvenanceHeader("auto-extracted", "medium") + "# Auto-extracted Learnings\n\nDiscoveries extracted during conversation compaction.\n\n";
+                const timestamp = new Date().toISOString().slice(0, 16);
+                const entries = extractedMemories.map(m => `- [${timestamp}] ${m}`).join("\n") + "\n";
                 fs.appendFileSync(autoFile, header + entries, "utf-8");
               } catch { /* non-fatal */ }
             }

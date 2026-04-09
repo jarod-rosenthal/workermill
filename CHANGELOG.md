@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Deterministic aggregate E2E runner** — `npm run test:e2e` now runs each end-to-end test file sequentially through `scripts/run-e2e.mjs`, emits per-file progress and heartbeat logs, retries a failed file once, and always prints a final pass/fail summary.
+
+### Changed
+- **Long-running E2E handling** — the aggregate E2E runner now gives each file a larger per-file timeout budget by default and kills timed-out child processes cleanly instead of leaving the parent run looking hung or silent.
+- **Ship workflow E2E scope** — `ship-workflow` coverage is now focused on ship/orchestration behavior and no longer duplicates separate review/gate validation already covered elsewhere.
+
+### Fixed
+- **Standalone `/review` empty-output failures** — Tech Lead review now retries once when a provider returns empty or malformed review output instead of failing immediately on missing `REVIEW_DECISION` / `CODE_QUALITY_SCORE` markers.
+- **Tool execution E2E flakiness** — tool execution end-to-end tests now assert stable tool outcomes and filesystem effects instead of depending on provider-specific streamed tool event hooks.
+
 ## [1.0.1] - 2026-04-08
 
 ### Added

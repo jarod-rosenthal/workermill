@@ -17,9 +17,14 @@ export function createTempWorkerMillHome(): TempHome {
   fs.mkdirSync(path.join(wmDir, "sessions"), { recursive: true });
   fs.mkdirSync(path.join(wmDir, "memory"), { recursive: true });
   fs.mkdirSync(path.join(wmDir, "logs"), { recursive: true });
+  fs.mkdirSync(path.join(wmDir, "projects"), { recursive: true });
+  fs.mkdirSync(path.join(wmDir, "commands"), { recursive: true });
+  fs.mkdirSync(path.join(wmDir, "personas"), { recursive: true });
 
   const origHomedir = os.homedir;
+  const originalStateRoot = process.env.WM_STATE_ROOT;
   vi.spyOn(os, "homedir").mockReturnValue(homeDir);
+  process.env.WM_STATE_ROOT = wmDir;
 
   return {
     homeDir,
@@ -29,6 +34,11 @@ export function createTempWorkerMillHome(): TempHome {
     },
     restore: () => {
       vi.spyOn(os, "homedir").mockImplementation(origHomedir);
+      if (originalStateRoot === undefined) {
+        delete process.env.WM_STATE_ROOT;
+      } else {
+        process.env.WM_STATE_ROOT = originalStateRoot;
+      }
     },
   };
 }

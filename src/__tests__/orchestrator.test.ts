@@ -2868,6 +2868,46 @@ FEEDBACK: Shippable.`;
     expect(output.errors).toHaveLength(0);
   });
 
+  it("retries a standalone review once when the reviewer returns empty output", async () => {
+    const reviewerApprovesText = `Looks good.
+REVIEW_DECISION: approved
+CODE_QUALITY_SCORE: 9
+FEEDBACK: Shippable.`;
+
+    fs.writeFileSync(path.join(repoDir, "README.md"), "# Updated\n");
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+      if (callCount === 1) {
+        return {
+          textStream: (async function* () {})(),
+          text: Promise.resolve(""),
+          totalUsage: Promise.resolve({ inputTokens: 50, outputTokens: 0 }),
+        };
+      }
+      return {
+        textStream: (async function* () { yield reviewerApprovesText; })(),
+        text: Promise.resolve(reviewerApprovesText),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    const result = await runStandaloneReview(config as any, output, "diff");
+
+    expect(result?.decision).toBe("approved");
+    expect(callCount).toBe(2);
+    expect(output.logs.join(" ")).toMatch(/retrying once/i);
+    expect(output.errors).toHaveLength(0);
+  });
+
   it("pauses auto-revise when reviewer repeats the same blocker", async () => {
     const planText = `\`\`\`json
 {

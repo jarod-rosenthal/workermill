@@ -188,6 +188,17 @@ export function validateTechLeadReviewOutput(
   return { decision, score: parsed.score, approved, feedback };
 }
 
+function isMissingRequiredReviewMarkerError(err: unknown): boolean {
+  return err instanceof Error && (
+    err.message.includes("Tech Lead output missing required marker: REVIEW_DECISION")
+    || err.message.includes("Tech Lead output missing required marker: CODE_QUALITY_SCORE")
+  );
+}
+
+function isEmptyReviewOutputError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("Tech Lead review produced empty output");
+}
+
 
 // ---------------------------------------------------------------------------
 // Affected stories parsing
@@ -462,6 +473,8 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     let lastReviewError: unknown;
     for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
       const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+      let attemptReviewerOutput = "";
+      let attemptReviewerFinalText = "";
       try {
         const reviewStream = streamText({
           model: reviewModel,
@@ -475,7 +488,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           ...buildReasoningOptions(revProvider, revModel),
           onStepFinish({ text }) {
             if (text) {
-              reviewerOutput += text + "\n";
+              attemptReviewerOutput += text + "\n";
               const lines = text.split("\n").filter((l: string) => l.trim());
               for (const line of lines) {
                 if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
@@ -491,16 +504,32 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timedAbort,
           "Tech Lead review",
         );
-        reviewerFinalText = result.finalText;
+        attemptReviewerFinalText = result.finalText;
+        const stepText = attemptReviewerOutput.trim();
+        const candidateReviewText = attemptReviewerFinalText.length > stepText.length
+          ? attemptReviewerFinalText
+          : (stepText || attemptReviewerFinalText);
+        if (!candidateReviewText.trim()) {
+          throw new Error("Tech Lead review produced empty output.");
+        }
+        parseRequiredReviewOutcome(candidateReviewText);
+        reviewerOutput = attemptReviewerOutput;
+        reviewerFinalText = attemptReviewerFinalText;
+        reviewText = candidateReviewText;
         reviewUsage = result.usage;
         lastReviewError = undefined;
         break;
       } catch (err) {
         lastReviewError = err;
         const transient = isTransientError(err);
-        const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient);
+        const canRetry = attempt < maxReviewAttempts && (
+          timedAbort.didTimeout()
+          || transient
+          || isMissingRequiredReviewMarkerError(err)
+          || isEmptyReviewOutputError(err)
+        );
         if (!canRetry) throw err;
-        output.coordinatorLog("Tech Lead review stalled; retrying once...");
+        output.coordinatorLog("Tech Lead review stalled or returned incomplete output; retrying once...");
         logger.warn("Retrying standalone tech lead review", {
           attempt,
           provider: revProvider,
@@ -513,10 +542,6 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       }
     }
     if (lastReviewError) throw lastReviewError;
-    const stepText = reviewerOutput.trim();
-    reviewText = reviewerFinalText.length > stepText.length
-      ? reviewerFinalText
-      : (stepText || reviewerFinalText);
     // Track cost
     const revInputTokens = reviewUsage?.inputTokens || 0;
     const revOutputTokens = reviewUsage?.outputTokens || 0;

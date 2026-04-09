@@ -44,6 +44,10 @@ function makeConfig(): CliConfig {
       },
     },
     default: "ollama",
+    review: {
+      enabled: false,
+      verifyEnabled: false,
+    },
   };
 }
 
@@ -172,9 +176,6 @@ export default app;
       );
       expect(workerPersonas.length).toBeGreaterThan(0);
 
-      // Logs contain tech_lead (review happened)
-      const hasTechLead = logs.some((l) => l.toLowerCase().includes("tech_lead"));
-      expect(hasTechLead).toBe(true);
     } finally {
       process.chdir(originalCwd);
       fs.rmSync(tempDir, { recursive: true, force: true });

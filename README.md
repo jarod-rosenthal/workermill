@@ -184,6 +184,7 @@ Use expensive models for judgment. Free local models for volume.
 | **Multi-Expert Orchestration** | `/build` decomposes tasks into stories and assigns specialist personas — backend, frontend, devops, security, QA |
 | **Independent Code Review** | Reviewer runs on a separate model. Never approves its own code. Rejects with specific feedback and code examples |
 | **11 Built-in Personas** | architect, backend, frontend, mobile, devops, security, QA, data/ML, tech writer, planner, tech lead |
+| **Definition of Done** | Planner emits required files, tests, and commands per story — orchestrator enforces them before review |
 | **Quality Gates** | Tests, linter, and LSP diagnostics run after each story — failures block review |
 | **LSP Integration** | Language server diagnostics, go-to-definition, find-references, hover info, workspace symbols — semantic code intelligence |
 | **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
@@ -194,9 +195,12 @@ Use expensive models for judgment. Free local models for volume.
 | **Hooks** | Pre/post tool hooks with blocking, lifecycle events, HTTP webhooks |
 | **Custom Personas** | Drop `.md` files in `.workermill/personas/` — project-level or global |
 | **Custom Commands** | `.workermill/skills/` for project-specific slash commands |
-| **Project Memory** | `/remember` saves project-scoped context under `~/.workermill/projects/<id>/memories/` — corrections, preferences, learnings |
+| **Agent Memory** | Persistent `memory` tool — agents save and recall project patterns, corrections, preferences across sessions. Works with all providers |
+| **Project Memory** | `/remember` saves user-facing context — corrections, preferences, learnings |
 | **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
+| **Run Manifests** | Every `/build` saves a JSON manifest with full run state — stories, outcomes, cost, review. Inspectable after the fact |
+| **Retry Rollback** | Failed story retries start from a clean workspace snapshot, not half-broken state |
 | **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |
 | **Permission System** | Granular tool allow/deny rules, `/trust` for session-wide approval |
 

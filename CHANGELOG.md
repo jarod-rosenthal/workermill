@@ -10,16 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Persistent `memory` tool** — agents now have a `memory` tool for file-based persistent memory across sessions. Works with every provider (Ollama, OpenAI, Google, xAI, etc.). Agents check memory at session start and save project patterns, corrections, and preferences as they work. Stored per-project under `~/.workermill/projects/<id>/memories/`.
 - **Definition-of-done contracts** — planner emits `requiredFiles`, `requiredTests`, and `requiredCommands` per story. The orchestrator validates these after execution and blocks completion if artifacts are missing or commands fail. Machine-readable failure codes (`missing_required_file`, `missing_required_test`, `required_command_failed`, etc.) replace vague error messages.
 - **QA participation control** — new `qa.participation` config setting (`"off"`, `"auto"`, `"always"`) controls whether a dedicated QA story is added to `/build` runs. Default: `"auto"`.
-- **Structured build summary** — `/build` now prints a pass/fail/skipped summary per story with total counts and cost at the end of every run.
+- **Per-story workspace rollback** — git snapshot taken before each story's revision loop. On retry, workspace is restored to pre-story state so each attempt starts clean instead of inheriting half-broken edits.
+- **Story file ownership enforcement** — after story execution, touched files are compared against the story's declared scope (`targetFiles`, `requiredFiles`). Warns when >50% of edits are outside scope.
+- **Run manifest** — every `/build` run persists a JSON manifest at `~/.workermill/projects/<id>/runs/<run-id>.json` with full run state: stories, outcomes, cost, tokens, branch. Foundation for `wm runs list` and `wm runs show`.
+- **Post-build report** — `/build` now prints a structured report showing per-story status, quality gate results, review score and decision, branch, cost, and run ID.
 - **Auto-persist learnings to memory tool** — extracted `::learning::` and `::remember::` markers during compaction are now also written to the file-based memory tool storage at `auto-learnings.md`.
+- **Bracketed paste handling** — `usePaste()` from Ink 7 ensures pasted text arrives as a single string. Prevents the class of paste-scrambling bugs where individual characters were inserted at wrong cursor positions.
 - **Deterministic aggregate E2E runner** — `npm run test:e2e` now runs each end-to-end test file sequentially through `scripts/run-e2e.mjs`, emits per-file progress and heartbeat logs, retries a failed file once, and always prints a final pass/fail summary.
 
 ### Changed
+- **Ink upgraded to v7** — `useStdout()` replaced with `useWindowSize()` for reactive terminal dimensions across App, Input, and StatusBar. `usePaste()` added for bracketed paste. `key.delete` references removed (consolidated to `key.backspace`). Unused `ink-text-input` dependency removed.
+- **Centralized state root** — all WorkerMill state paths now derive from `getStateRoot()` (`src/state-root.ts`). Set `WM_STATE_ROOT` to redirect all state into a temp directory for test isolation. 18 files updated.
 - **Orchestrator decomposed into sub-modules** — `src/orchestrator.ts` reduced from 4,653 to 538 lines (88% reduction). Orchestration phases extracted into `src/orchestrator/` — planning, execution, review, gates, completion, types, and utils.
 - **useAgent.ts decomposed** — utility functions and types extracted into `src/ui/agent/` (utils.ts, types.ts). Reduced from 1,900 to 1,560 lines.
 - **Slash commands decomposed** — `src/ui/slash-commands.ts` reduced from 2,148 to 1,063 lines (50% reduction). Command handlers extracted into `src/ui/commands/` — settings, permissions, session, project.
 - **OS sandbox auto-upgrade for /build** — `/build` automatically upgrades to OS-level sandbox (`@anthropic-ai/sandbox-runtime`) when the platform supports it. Falls back to path sandbox if dependencies are missing. Chat mode is unaffected.
 - **MCP tools capped in orchestrator** — when MCP tools exceed 20 in `/build` workers, only the first 20 are kept. Prevents local models from being overwhelmed by Docker Desktop MCP gateway's 50+ tools.
+- **Dependencies updated** — all in-range deps bumped (AI SDK, MCP SDK 1.29, vitest, react). 0 vulnerabilities.
 - **Long-running E2E handling** — the aggregate E2E runner now gives each file a larger per-file timeout budget by default and kills timed-out child processes cleanly.
 - **Ship workflow E2E scope** — `ship-workflow` coverage focused on ship/orchestration behavior.
 

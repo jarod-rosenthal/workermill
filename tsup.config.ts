@@ -23,8 +23,6 @@ export default defineConfig({
     "react",
     "react/jsx-runtime",
     "ink-text-input",
-    "marked",
-    "marked-terminal",
     // Node.js builtins
     "readline",
     "fs",

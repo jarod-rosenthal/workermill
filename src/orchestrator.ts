@@ -809,8 +809,39 @@ export interface Story {
   nonGoals?: string[];         // Explicit scope boundaries
   implementationNotes?: string; // Planner's architectural guidance
   validationSignal?: string;   // Observable condition that proves this story is complete
+  requiredFiles?: string[];
+  requiredTests?: string[];
+  requiredCommands?: string[];
   // Shell commands to verify acceptance criteria post-execution (verifyEnabled only)
   verificationCommands?: string[];
+}
+
+type FailureCode =
+  | "missing_required_file"
+  | "missing_required_test"
+  | "missing_required_command"
+  | "test_only_in_excluded_suite"
+  | "required_command_failed"
+  | "worker_no_output"
+  | "review_blocker_unresolved"
+  | "review_stale_vs_head";
+
+interface StoryContractIssue {
+  code: FailureCode;
+  storyId: string;
+  title: string;
+  message: string;
+  path?: string;
+  command?: string;
+}
+
+interface ReviewMustFixItem {
+  id: string;
+  storyNumber?: number;
+  summary: string;
+  blockingEvidence?: string;
+  actionableFix?: string;
+  signature: string;
 }
 
 interface SharedContext {
@@ -1292,6 +1323,9 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
       "nonGoals": ["Do not redesign the existing audit logging model.", "Do not add new auth flows."],
       "implementationNotes": "Follow the pattern in product.py for the model — use SQLAlchemy declarative with UUID primary key, org_id foreign key, and created_at timestamp. The router should mirror products.py structure: admin-only endpoints using get_current_admin dependency. Use FastAPI BackgroundTasks for async webhook delivery — do NOT dispatch inside the database transaction. The existing audit logger in middleware.py can be extended for delivery tracking.",
       "validationSignal": "A webhook can be created through the existing admin route pattern and delivery is dispatched asynchronously without breaking the surrounding transaction flow.",
+      "requiredFiles": ["src/models/webhook.py", "src/routers/webhooks.py"],
+      "requiredTests": ["tests/test_webhooks.py"],
+      "requiredCommands": ["python3 -m pytest tests/test_webhooks.py::test_create_webhook -x -q"],
       "dependsOn": ["id-of-dependency"]
     }
   ]
@@ -1310,6 +1344,9 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 - \`integrationPoints\`: exact seams where the work attaches
 - \`nonGoals\`: explicit boundaries that must remain out of scope
 - \`validationSignal\`: the observable condition that proves the story is complete
+- \`requiredFiles\`: files that MUST exist by the end of the story
+- \`requiredTests\`: normal regression tests that MUST exist by the end of the story
+- \`requiredCommands\`: targeted commands that MUST pass before review
 - \`assumptions\`: only when needed, and only for things not confirmed from the repo
 
 **Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
@@ -1342,7 +1379,13 @@ Rules:
 - 1–3 commands per story maximum
 - Scoped to THIS story's deliverable only
 - Runnable from the project root with no setup
-- Omit \`verificationCommands\` entirely for infrastructure-only stories (migrations, config changes) with no observable output` : ""}`;
+- Omit \`verificationCommands\` entirely for infrastructure-only stories (migrations, config changes) with no observable output
+
+**Definition-of-done rules:**
+- Prefer 0-2 \`requiredFiles\` entries: only the artifacts that prove the story landed
+- Prefer 1 \`requiredTests\` entry for the narrowest normal regression test
+- For new CLI commands under \`src/*-command.ts\`, always include a normal regression test under \`src/__tests__/\`, not only e2e coverage
+- \`requiredCommands\` should be focused verification for THIS story only, not the whole project` : ""}`;
 
 
   logger.info("Planner started", { provider: pProvider, model: pModel });
@@ -1490,7 +1533,7 @@ Rules:
         prompt: `You previously analyzed a codebase and produced the following plan:\n\n${extractionInput}\n\n` +
           `Convert your analysis into the required JSON format. Output ONLY a \`\`\`json code block:\n\n` +
           "```json\n" +
-          `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "targetFiles": ["path/to/file"], "referenceFiles": ["path/to/pattern"], "primaryPattern": "path/to/pattern", "integrationPoints": ["exact seam"], "nonGoals": ["scope boundary"], "validationSignal": "observable proof of correctness", "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
+          `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "targetFiles": ["path/to/file"], "referenceFiles": ["path/to/pattern"], "primaryPattern": "path/to/pattern", "integrationPoints": ["exact seam"], "nonGoals": ["scope boundary"], "validationSignal": "observable proof of correctness", "requiredFiles": ["path/to/file"], "requiredTests": ["src/__tests__/feature.test.ts"], "requiredCommands": ["npm run typecheck"], "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
           "```\n\n" +
           "Valid personas: backend_developer, frontend_developer, fullstack_developer, qa_engineer, devops_engineer, tech_writer.\n" +
           "Output ONLY the JSON block, no other text.",
@@ -1634,8 +1677,181 @@ function normalizeStory(raw: Record<string, unknown>, index: number): Story {
       : raw.validation_signal
         ? String(raw.validation_signal)
         : (description ? `Complete the story scope described as: ${description}` : undefined),
+    requiredFiles: toStringArray(raw.requiredFiles) ?? toStringArray(raw.required_files),
+    requiredTests: toStringArray(raw.requiredTests) ?? toStringArray(raw.required_tests),
+    requiredCommands: toStringArray(raw.requiredCommands) ?? toStringArray(raw.required_commands),
     verificationCommands: toStringArray(raw.verificationCommands) ?? toStringArray(raw.verification_commands),
   };
+}
+
+function uniqueStrings(values: (string | undefined)[]): string[] {
+  return [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))];
+}
+
+function toPosixPath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
+function isExcludedTestPath(filePath: string): boolean {
+  const normalized = toPosixPath(filePath);
+  return normalized.includes("/e2e/") || normalized.endsWith(".e2e.test.ts");
+}
+
+function deriveAutoRequiredTests(story: Story): string[] {
+  const targetFiles = story.targetFiles ?? [];
+  const required: string[] = [];
+  for (const file of targetFiles) {
+    const normalized = toPosixPath(file);
+    const match = normalized.match(/(^|\/)([^/]+-command)\.ts$/);
+    if (!match) continue;
+    required.push(`src/__tests__/${match[2]}.test.ts`);
+  }
+  return uniqueStrings(required);
+}
+
+export function getStoryDefinitionOfDone(story: Story): {
+  requiredFiles: string[];
+  requiredTests: string[];
+  requiredCommands: string[];
+} {
+  return {
+    requiredFiles: uniqueStrings(story.requiredFiles ?? []),
+    requiredTests: uniqueStrings([...(story.requiredTests ?? []), ...deriveAutoRequiredTests(story)]),
+    requiredCommands: uniqueStrings(story.requiredCommands ?? []),
+  };
+}
+
+function findExcludedTestFallback(workingDir: string, requiredTest: string): string | null {
+  const basename = path.basename(requiredTest);
+  const direct = path.join(workingDir, "src/__tests__/e2e", basename);
+  if (fs.existsSync(direct)) return toPosixPath(path.relative(workingDir, direct));
+
+  const e2eAlt = basename.replace(/\.test(\.[^.]+)$/, ".e2e.test$1");
+  const alt = path.join(workingDir, "src/__tests__/e2e", e2eAlt);
+  if (fs.existsSync(alt)) return toPosixPath(path.relative(workingDir, alt));
+
+  return null;
+}
+
+export function validateStoryContractArtifacts(story: Story, workingDir: string): StoryContractIssue[] {
+  const contract = getStoryDefinitionOfDone(story);
+  const issues: StoryContractIssue[] = [];
+
+  for (const file of contract.requiredFiles) {
+    const fullPath = path.isAbsolute(file) ? file : path.join(workingDir, file);
+    if (!fs.existsSync(fullPath)) {
+      issues.push({
+        code: "missing_required_file",
+        storyId: story.id,
+        title: story.title,
+        path: file,
+        message: `Required file is missing: ${file}`,
+      });
+    }
+  }
+
+  for (const testFile of contract.requiredTests) {
+    if (isExcludedTestPath(testFile)) {
+      issues.push({
+        code: "test_only_in_excluded_suite",
+        storyId: story.id,
+        title: story.title,
+        path: testFile,
+        message: `Required test is under an excluded suite: ${testFile}`,
+      });
+      continue;
+    }
+
+    const fullPath = path.isAbsolute(testFile) ? testFile : path.join(workingDir, testFile);
+    if (!fs.existsSync(fullPath)) {
+      const excludedFallback = findExcludedTestFallback(workingDir, testFile);
+      issues.push({
+        code: excludedFallback ? "test_only_in_excluded_suite" : "missing_required_test",
+        storyId: story.id,
+        title: story.title,
+        path: excludedFallback || testFile,
+        message: excludedFallback
+          ? `Expected normal regression test ${testFile}, but only found excluded-suite coverage at ${excludedFallback}`
+          : `Required test is missing: ${testFile}`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function formatContractIssuesForPrompt(issues: StoryContractIssue[]): string {
+  return issues.map((issue) => `- [${issue.code}] ${issue.message}`).join("\n");
+}
+
+function emitFailureCode(output: OrchestrationOutput, code: FailureCode, detail: string): void {
+  output.log("system", `::failure_code::${code}`);
+  output.error(`[${code}] ${detail}`);
+}
+
+function parseMarkerValue(text: string, marker: string): string | undefined {
+  const match = text.match(new RegExp(`${marker}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`, "i"));
+  return match ? match[1].trim() : undefined;
+}
+
+function summarizeMustFixItem(text: string): string {
+  const feedback = extractDetailedReviewText(text) || parseMarkerValue(text, "FEEDBACK") || text;
+  const firstLine = feedback.split("\n").map((line) => line.trim()).find(Boolean);
+  return firstLine || "Reviewer requested additional changes.";
+}
+
+export function extractStructuredMustFixItems(
+  reviewText: string,
+  affected: { stories: number[]; reasons: Record<number, string> } | null,
+): ReviewMustFixItem[] {
+  const blockingEvidence = parseMarkerValue(reviewText, "BLOCKING_EVIDENCE");
+  const actionableFix = parseMarkerValue(reviewText, "ACTIONABLE_FIX");
+  const baseSummary = summarizeMustFixItem(reviewText);
+
+  if (affected && affected.stories.length > 0) {
+    return affected.stories.map((storyNumber) => {
+      const summary = affected.reasons[storyNumber] || baseSummary;
+      const signature = normalizeErrorSignature([summary, blockingEvidence || "", actionableFix || "", String(storyNumber)].join("|"));
+      return {
+        id: `story-${storyNumber}-${signature.slice(0, 12)}`,
+        storyNumber,
+        summary,
+        blockingEvidence,
+        actionableFix,
+        signature,
+      };
+    });
+  }
+
+  const signature = normalizeErrorSignature([baseSummary, blockingEvidence || "", actionableFix || ""].join("|"));
+  return [{
+    id: `review-${signature.slice(0, 12)}`,
+    summary: baseSummary,
+    blockingEvidence,
+    actionableFix,
+    signature,
+  }];
+}
+
+export function mergeMustFixItems(
+  previous: ReviewMustFixItem[],
+  current: ReviewMustFixItem[],
+): ReviewMustFixItem[] {
+  const previousBySignature = new Map(previous.map((item) => [item.signature, item]));
+  return current.map((item) => {
+    const existing = previousBySignature.get(item.signature);
+    return existing ? { ...existing, ...item } : item;
+  });
+}
+
+function formatMustFixItems(items: ReviewMustFixItem[]): string {
+  if (items.length === 0) return "";
+  return items.map((item) => {
+    const parts = [`- [${item.id}] ${item.summary}`];
+    if (item.blockingEvidence) parts.push(`  Evidence: ${item.blockingEvidence}`);
+    if (item.actionableFix) parts.push(`  Fix: ${item.actionableFix}`);
+    return parts.join("\n");
+  }).join("\n");
 }
 
 function validatePlannerStories(stories: Story[]): string[] {
@@ -2743,7 +2959,7 @@ export async function runOrchestration(
           output.log(story.persona, `Story produced no output — retrying (${revision + 1}/3)`);
           continue; // retry this story
         }
-        output.error(`Story ${i + 1} failed: model produced no output after 3 attempts`);
+        emitFailureCode(output, "worker_no_output", `Story ${i + 1} failed: model produced no output after 3 attempts`);
         failedStories.add(story.id);
         break;
       }
@@ -2765,6 +2981,28 @@ export async function runOrchestration(
             revisionFeedback = `\n\n## Missing Files\nThese files were declared as created but don't exist on disk:\n${missingFiles.map(f => `- ${f}`).join("\n")}\n\nCreate them or remove the declarations.`;
             continue;
           }
+        }
+      }
+
+      {
+        const contractIssues = validateStoryContractArtifacts(story, workingDir);
+        if (contractIssues.length > 0) {
+          logger.info("Story contract validation failed", {
+            story: story.id,
+            persona: story.persona,
+            issues: contractIssues.map((issue) => ({ code: issue.code, path: issue.path, command: issue.command })),
+          });
+          if (revision < 2) {
+            output.log(story.persona, `${contractIssues.length} definition-of-done issue(s) detected — retrying`);
+            revisionFeedback = `\n\n## Definition Of Done Failures\n${formatContractIssuesForPrompt(contractIssues)}\n\nFix every blocking item above before finishing this story.`;
+            continue;
+          }
+
+          for (const issue of contractIssues) {
+            emitFailureCode(output, issue.code, `Story ${i + 1}: ${issue.message}`);
+          }
+          failedStories.add(story.id);
+          break;
         }
       }
 
@@ -3025,12 +3263,16 @@ export async function runOrchestration(
   const verifyEnabled = config.review?.verifyEnabled !== false;
 
   const staticGates = config.qualityGates ?? [];
+  const requiredCommandGates = sorted
+    .filter((s) => completedStoryIds.includes(s.id) && getStoryDefinitionOfDone(s).requiredCommands.length > 0)
+    .map((s) => ({ name: `required: ${s.title}`, commands: getStoryDefinitionOfDone(s).requiredCommands }));
   const dynamicGates = verifyEnabled
     ? sorted
         .filter(s => completedStoryIds.includes(s.id) && s.verificationCommands?.length)
         .map(s => ({ name: `verify: ${s.title}`, commands: s.verificationCommands! }))
     : [];
-  const allGates = [...staticGates, ...dynamicGates];
+  const allGates = [...staticGates, ...requiredCommandGates, ...dynamicGates];
+  const requiredGateNames = new Set(requiredCommandGates.map((gate) => gate.name));
 
   if (allGates.length > 0 && completedStoryIds.length > 0) {
     output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
@@ -3050,17 +3292,28 @@ export async function runOrchestration(
       failed: failed.length,
     });
 
+    const requiredFailures = failed.filter((result) => requiredGateNames.has(result.name));
+
     if (failed.length > 0) {
       gateResultsSection =
         `\n\n## Quality Gate Results — ${failed.length} FAILED\n\n` +
         failed.map(r =>
           `### ${r.name} — FAILED\n\`\`\`\n${r.output.slice(0, 2000)}\n\`\`\``
         ).join("\n\n") +
-        "\n\nThese failures are informational — factor them into your review score and flag as must-fix if they represent acceptance criteria gaps.";
+        "\n\nRequired command failures are blocking. Verification-gate failures remain reviewer context.";
     } else {
       gateResultsSection =
         "\n\n## Quality Gate Results — ALL PASSED\n\n" +
         passed.map(r => `- ✓ ${r.name}`).join("\n");
+    }
+
+    if (requiredFailures.length > 0) {
+      for (const failure of requiredFailures) {
+        emitFailureCode(output, "required_command_failed", `${failure.name} failed`);
+      }
+      output.coordinatorLog(`Definition-of-done check failed: ${requiredFailures.length} required command${requiredFailures.length !== 1 ? "s" : ""} failed.`);
+      logger.info("Blocking required command failures", { failures: requiredFailures.map((result) => result.name) });
+      return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
     }
   }
 
@@ -3118,6 +3371,7 @@ export async function runOrchestration(
     }
 
     let previousReviewFeedback = "";
+    let openMustFixItems: ReviewMustFixItem[] = [];
     let lastBlockerSignature = "";
     let repeatedBlockerCount = 0;
     // Check if user cancelled before starting review
@@ -3141,8 +3395,18 @@ export async function runOrchestration(
 
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
+        const mustFixSection = isRevision && openMustFixItems.length > 0
+          ? `## Open Must-Fix Items
+These blockers are still active until the next review clears them:
+
+${formatMustFixItems(openMustFixItems)}
+
+---
+
+`
+          : "";
         const previousFeedbackSection = isRevision && previousReviewFeedback
-          ? `## Previous Review Feedback (Round ${reviewRound})
+          ? `${mustFixSection}## Previous Review Feedback (Round ${reviewRound})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
@@ -3431,6 +3695,12 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         logger.info(`Review round ${reviewRound} result`, { decision, score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
         const feedback = extractReviewFeedback(reviewText, decision);
+        if (approved) {
+          openMustFixItems = [];
+        } else {
+          const currentMustFixItems = extractStructuredMustFixItems(reviewText, parsedAffected);
+          openMustFixItems = mergeMustFixItems(openMustFixItems, currentMustFixItems);
+        }
 
         // Display review result with horizontal rules
         output.log("tech_lead", "\u2500".repeat(60));
@@ -3482,6 +3752,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         }
         const revisionsLeft = maxRevisions - (reviewRound - 1);
         if (revisionsLeft <= 0) {
+          emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions} revision attempt(s).`);
           output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
           break;
         }
@@ -3527,7 +3798,10 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           output.coordinatorLog(`Auto-revising (${revisionsLeft} left)...`);
         }
 
-        if (!shouldRevise) break;
+        if (!shouldRevise) {
+          emitFailureCode(output, "review_blocker_unresolved", "Tech Lead review still has blocking issues and revision was declined.");
+          break;
+        }
 
         // Parse which stories need revision — send feedback back to the original workers
         // (selective revision from inline-reviewer.ts)
@@ -3582,6 +3856,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
           // Build per-story feedback: use AFFECTED_REASONS if available, otherwise full review text
           const storyReason = affected?.reasons?.[i + 1];
+          const storyMustFixItems = openMustFixItems.filter((item) => item.storyNumber === undefined || item.storyNumber === i + 1);
           const fallbackReviewFeedback = truncateForPrompt(reviewText, 6_000, "review feedback");
           const storyFeedback = storyReason
             ? `Story ${i + 1} (${story.title}):\n${storyReason}`
@@ -3662,7 +3937,7 @@ Working directory: ${workingDir}`;
 ### Your Story's Required Fix
 ${storyFeedback}
 ${loopGuardReminder}
-${whatYouDidLastTime}
+${storyMustFixItems.length > 0 ? `## Structured Must-Fix Items\n${formatMustFixItems(storyMustFixItems)}\n\n` : ""}${whatYouDidLastTime}
 ## Your Story Scope
 Story ${i + 1}: "${story.title}" — ${story.description}
 ${story.targetFiles?.length ? `**Target files:** ${story.targetFiles.join(", ")}` : ""}

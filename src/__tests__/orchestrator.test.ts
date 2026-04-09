@@ -188,7 +188,12 @@ import {
   classifyComplexity,
   shouldTransitionTicketOnPrOpen,
   checkToolPermission,
+  getStoryDefinitionOfDone,
+  validateStoryContractArtifacts,
+  extractStructuredMustFixItems,
+  mergeMustFixItems,
   type OrchestrationOutput,
+  type Story,
 } from "../orchestrator.ts";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
@@ -312,6 +317,81 @@ describe("shouldTransitionTicketOnPrOpen", () => {
   });
 });
 
+describe("definition-of-done helpers", () => {
+  it("auto-requires a normal regression test for CLI command stories", () => {
+    const story: Story = {
+      id: "stats",
+      title: "Add wm stats",
+      persona: "backend_developer",
+      description: "Add the stats command.",
+      targetFiles: ["src/stats-command.ts"],
+    };
+
+    expect(getStoryDefinitionOfDone(story).requiredTests).toEqual([
+      "src/__tests__/stats-command.test.ts",
+    ]);
+  });
+
+  it("flags e2e-only coverage as excluded for required tests", () => {
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-dod-test-"));
+    try {
+      fs.mkdirSync(path.join(repoDir, "src/__tests__/e2e"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, "src/__tests__/e2e/stats-command.test.ts"), "test");
+
+      const story: Story = {
+        id: "stats",
+        title: "Add wm stats",
+        persona: "backend_developer",
+        description: "Add the stats command.",
+        requiredTests: ["src/__tests__/stats-command.test.ts"],
+      };
+
+      expect(validateStoryContractArtifacts(story, repoDir)).toEqual([
+        expect.objectContaining({
+          code: "test_only_in_excluded_suite",
+          path: "src/__tests__/e2e/stats-command.test.ts",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("extracts and carries structured must-fix items across revisions", () => {
+    const roundOne = `The stats command is missing a normal regression test.
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 7
+FEEDBACK: Missing normal regression coverage
+BLOCKING_EVIDENCE: src/__tests__/stats-command.test.ts does not exist.
+ACTIONABLE_FIX: Add src/__tests__/stats-command.test.ts and cover the legacy no-cost-session case.
+AFFECTED_STORIES: [1]
+AFFECTED_REASONS: {"1":"Add the missing normal regression test."}`;
+
+    const roundTwo = `The stats command is still missing the same regression test.
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 7
+FEEDBACK: Still missing coverage
+BLOCKING_EVIDENCE: src/__tests__/stats-command.test.ts still does not exist.
+ACTIONABLE_FIX: Add src/__tests__/stats-command.test.ts and cover the legacy no-cost-session case.
+AFFECTED_STORIES: [1]
+AFFECTED_REASONS: {"1":"Add the missing normal regression test."}`;
+
+    const initial = extractStructuredMustFixItems(roundOne, {
+      stories: [1],
+      reasons: { 1: "Add the missing normal regression test." },
+    });
+    const merged = mergeMustFixItems(initial, extractStructuredMustFixItems(roundTwo, {
+      stories: [1],
+      reasons: { 1: "Add the missing normal regression test." },
+    }));
+
+    expect(initial).toHaveLength(1);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe(initial[0].id);
+    expect(merged[0].storyNumber).toBe(1);
+  });
+});
+
 describe("orchestrator", () => {
   let repoDir: string;
   let originalCwd: string;
@@ -364,6 +444,58 @@ describe("orchestrator", () => {
       await expect(
         runOrchestration(config, "Add a health check endpoint", true, false, output)
       ).resolves.not.toThrow();
+    });
+
+    it("blocks before review when a required command fails", async () => {
+      const output = createMockOutput();
+      const config = {
+        ...createTestConfig(),
+        review: { enabled: true, verifyEnabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+      };
+
+      const planText = `\`\`\`json
+{
+  "stories": [
+    {
+      "id": "stats",
+      "title": "Add wm stats",
+      "persona": "backend_developer",
+      "description": "Implement the stats command.",
+      "requiredFiles": ["src/impl.ts"],
+      "requiredCommands": ["bash -lc 'exit 1'"]
+    }
+  ]
+}
+\`\`\``;
+
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? planText : "Implemented stats.\n::file_created::src/impl.ts";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text,
+            toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
+          });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "export const impl = true;");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      await runOrchestration(config as any, "Add wm stats", true, false, output);
+
+      expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
+      expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
+      expect(mockStreamTextCalls).toHaveLength(2);
     });
 
     it("passes API keys through for routed provider aliases", async () => {

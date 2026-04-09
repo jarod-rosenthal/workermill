@@ -81,15 +81,18 @@ export async function runGate(
   gate: { name: string; commands: string[] },
   cwd: string
 ): Promise<GateResult> {
+  const outputs: string[] = [];
   for (const cmd of gate.commands) {
     try {
       const { stdout, stderr } = await runGateCommand(cmd, cwd);
       const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-      return { name: gate.name, passed: true, output: combined };
+      if (combined) outputs.push(`$ ${cmd}\n${combined}`);
     } catch (err: any) {
       const combined = [err.stdout, err.stderr].filter(Boolean).join("\n").trim();
-      return { name: gate.name, passed: false, output: combined };
+      const failureOutput = combined ? `$ ${cmd}\n${combined}` : `$ ${cmd}`;
+      outputs.push(failureOutput);
+      return { name: gate.name, passed: false, output: outputs.join("\n\n").trim() };
     }
   }
-  return { name: gate.name, passed: true, output: "" };
+  return { name: gate.name, passed: true, output: outputs.join("\n\n").trim() };
 }

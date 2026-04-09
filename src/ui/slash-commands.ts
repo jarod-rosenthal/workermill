@@ -10,30 +10,33 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { listSessions, saveSession } from "../session.js";
 import {
   loadConfig,
-  saveConfig,
-  loadProjectSettings,
-  saveProjectSettings,
-  loadLocalSettings,
   resolveConfig,
   getProviderForPersona,
-  PermissionRuleConfig,
 } from "../config.js";
-import { listProjects } from "../project-data.js";
 import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
-import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered, getMCPServerInfo } from "../mcp-client.js";
+import { stopAllMCPServers } from "../mcp-client.js";
 import { getRetryableRun } from "../ship-state.js";
 import { shutdown as shutdownLSP } from "../engine/tools/lsp.js";
 import { cleanupStaleWorktrees } from "../engine/tools/sub-agent.js";
-import { undoLast, undoFile, listCheckpoints, clearCheckpoints, getChangedFiles } from "../checkpoints.js";
+import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
 import * as logger from "../logger.js";
-import { loadMemories, addMemory, removeMemory } from "../memory.js";
-import { findModelInfo } from "../provider-registry.js";
-import crypto from "crypto";
+import { handleSettingsCommand } from "./commands/settings.js";
+import { handlePermissionsCommand, handleTrustCommand } from "./commands/permissions.js";
+import {
+  handleModelCommand, handleCostCommand, handleStatusCommand,
+  handleCompactCommand, handleClearCommand, handleEditCommand,
+  handleGitCommand, handleDiffCommand, handleChangedCommand,
+  handleSessionsCommand,
+} from "./commands/session.js";
+import {
+  handleInitCommand, handleRememberCommand, handleForgetCommand,
+  handleMemoriesCommand, handlePersonasCommand, handleSkillsCommand,
+  handleMcpCommand, handleProjectsCommand,
+} from "./commands/project.js";
 
 // ---------------------------------------------------------------------------
 // Ticket reference detection
@@ -365,210 +368,19 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /model ----
     case "model": {
-      if (!arg) {
-        ctx.addSystemMessage(
-          `**Current model:** ${ctx.provider}/${ctx.model}\n\n` +
-          "**Switch models:**\n" +
-          "| What | Command |\n" +
-          "|---|---|\n" +
-          "| Worker model | `/model <provider>/<model>` |\n" +
-          "| Planner model | `/model planner <provider>/<model>` |\n" +
-          "| Reviewer model | `/model reviewer <provider>/<model>` |\n\n" +
-          "Example: `/model reviewer openai/gpt-5.3-codex`\n\n" +
-          "**Context window:** Add size after model name for local models:\n" +
-          "`/model ollama/qwen3-coder:30b 64k` or `/model lmstudio/deepseek-r1 128k`\n" +
-          "Local models default to 128k if not specified.\n\n" +
-          "**Supported providers:** ollama, lmstudio, anthropic, openai, google\n\n" +
-          "**Tip:** For a full catalog of available models, run \`wm models\` outside a session."
-        );
-      } else {
-        // Detect role prefix: /model planner|reviewer <provider>/<model>
-        const roleAliases: Record<string, string> = { planner: "planner", reviewer: "tech_lead", "tech_lead": "tech_lead" };
-        const tokens = arg.split(/\s+/);
-        let targetRole: string | null = null;
-        let targetRoleDisplay: string | null = null;
-        if (tokens.length >= 2 && roleAliases[tokens[0].toLowerCase()]) {
-          targetRoleDisplay = tokens[0].toLowerCase();
-          targetRole = roleAliases[targetRoleDisplay];
-          tokens.shift(); // remove role prefix, rest is provider/model
-        }
-        const modelArg = tokens[0];
-        // Check for optional context size (e.g. "256k", "128k", "1m")
-        let contextOverride: number | undefined;
-        let remainderStart = 1;
-        if (tokens[1] && /^\d+[km]$/i.test(tokens[1])) {
-          const ctxStr = tokens[1].toLowerCase();
-          if (ctxStr.endsWith("m")) {
-            contextOverride = parseInt(ctxStr, 10) * 1_048_576;
-          } else {
-            contextOverride = parseInt(ctxStr, 10) * 1024;
-          }
-          remainderStart = 2;
-        }
-        const remainder = tokens.slice(remainderStart).join(" ").trim();
-        const modelParts = modelArg.split("/");
-        let newProvider: string;
-        let newModel: string;
-        if (modelParts.length >= 2) {
-          newProvider = modelParts[0];
-          newModel = modelParts.slice(1).join("/");
-        } else {
-          newProvider = ctx.provider;
-          newModel = modelArg;
-        }
-
-        // Check if the provider needs an API key and whether we have one
-        const envKeyMap: Record<string, string> = {
-          anthropic: "ANTHROPIC_API_KEY",
-          openai: "OPENAI_API_KEY",
-          google: "GOOGLE_GENERATIVE_AI_API_KEY",
-          xai: "XAI_API_KEY",
-          groq: "GROQ_API_KEY",
-          deepseek: "DEEPSEEK_API_KEY",
-          mistral: "MISTRAL_API_KEY",
-        };
-        const needsKey = !!envKeyMap[newProvider];
-        const modelConfig = loadConfig();
-        const existingProviderConfig = modelConfig?.providers?.[newProvider];
-        const hasConfigKey = !!existingProviderConfig?.apiKey;
-        const envVar = envKeyMap[newProvider];
-        const hasEnvKey = !!(envVar && process.env[envVar]);
-
-        if (needsKey && !hasConfigKey && !hasEnvKey) {
-          // No credentials — tell the user how to provide them
-          ctx.addSystemMessage(
-            `**Cannot switch to \`${newProvider}\`** — no API key found.\n\n` +
-            `Add your key: \`/settings key ${newProvider} <your-api-key>\`\n` +
-            `Then run \`/model ${modelArg}\` again.`
-          );
-          break;
-        }
-
-        // Update config
-        if (modelConfig) {
-          if (!targetRole) {
-            // Worker switch — ensure provider entry exists with correct model, always set as default
-            if (!modelConfig.providers[newProvider]) {
-              const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
-              modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
-            } else {
-              modelConfig.providers[newProvider].model = newModel;
-              if (contextOverride) modelConfig.providers[newProvider].contextLength = contextOverride;
-            }
-            modelConfig.default = newProvider;
-          } else {
-            // Role switch — create base provider entry for API key storage only (no model, to avoid
-            // polluting the worker config with the role's model). Create a dedicated role entry.
-            if (!modelConfig.providers[newProvider]) {
-              const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
-              modelConfig.providers[newProvider] = { model: "", ...(keyRef ? { apiKey: keyRef } : {}) };
-            }
-            const roleProviderKey = `${newProvider}_${targetRole}`;
-            const baseEntry = modelConfig.providers[newProvider];
-            const apiKey = baseEntry?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
-            modelConfig.providers[roleProviderKey] = {
-              model: newModel,
-              ...(apiKey ? { apiKey } : {}),
-              ...(baseEntry?.host ? { host: baseEntry.host } : {}),
-              ...(contextOverride ? { contextLength: contextOverride } : {}),
-            };
-            modelConfig.routing = { ...modelConfig.routing, [targetRole]: roleProviderKey };
-          }
-          saveConfig(modelConfig);
-        }
-
-        // Display
-        const ctxLabel = contextOverride
-          ? ` (${contextOverride >= 1_048_576 ? `${contextOverride / 1_048_576}M` : `${contextOverride / 1024}k`} context)`
-          : "";
-        const roleLabel = targetRoleDisplay ? `**${targetRoleDisplay}** ` : "";
-
-        if (targetRole) {
-          // Role switch — update status bar
-          ctx.addSystemMessage(
-            `\n${roleLabel}switched to \`${newProvider}/${newModel}\`${ctxLabel} — active now.`
-          );
-          ctx.updateRoleModels?.();
-        } else if (ctx.switchModel) {
-          // Worker switch — hot-swap
-          ctx.switchModel(newProvider, newModel);
-
-          const isLocalProvider = newProvider === "ollama" || newProvider === "lmstudio";
-          const configCtx = modelConfig?.providers?.[newProvider]?.contextLength;
-          const newCtxWindow = contextOverride
-            || (isLocalProvider ? configCtx : undefined)
-            || findModelInfo(newModel)?.contextWindow
-            || (isLocalProvider ? 128_000 : 256_000);
-          // Hint: local models default to 128k if no context specified
-          const ctxHint = isLocalProvider && !contextOverride && !configCtx
-            ? `\n*Tip: Local models default to 128k context. Set explicitly: \`/model ${newProvider}/${newModel} 64k\`*`
-            : "";
-          if (ctx.tokens > 0 && ctx.tokens > newCtxWindow * 0.8 && ctx.forceCompact) {
-            ctx.addSystemMessage(
-              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} — compacting conversation to fit...${ctxHint}`
-            );
-            void ctx.forceCompact().then(({ before, after }) => {
-              ctx.addSystemMessage(`Compacted ${before} → ${after} messages.`);
-            });
-          } else {
-            ctx.addSystemMessage(
-              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel || (isLocalProvider ? ` (${newCtxWindow / 1024}k context)` : "")} — active now.${ctxHint}`
-            );
-          }
-        } else {
-          ctx.addSystemMessage(
-            `**Model switched** to \`${newProvider}/${newModel}\` — config saved. Takes effect on next session.`
-          );
-        }
-
-        // If there's a trailing command (e.g. "/model openai/gpt-5.4 /as backend_developer do X"),
-        // dispatch it as a follow-up slash command.
-        if (remainder.startsWith("/")) {
-          handleSlashCommand(remainder, ctx);
-        } else if (remainder) {
-          // Trailing text that isn't a command — submit as a prompt
-          ctx.submit(remainder);
-        }
-      }
+      handleModelCommand(arg, ctx);
       break;
     }
 
     // ---- /cost ----
     case "cost": {
-      const costUsd = ctx.cost;
-      const totalTokens = ctx.tokens;
-      const sessionMessages = ctx.session.messages.length;
-      ctx.addSystemMessage(
-        `**Session Cost Estimate**\n\n` +
-        `| Metric | Value |\n` +
-        `|---|---|\n` +
-        `| Model | ${ctx.provider}/${ctx.model} |\n` +
-        `| Est. cost | ~$${costUsd.toFixed(2)} |\n` +
-        `| Last input tokens | ${totalTokens.toLocaleString()} |\n` +
-        `| Session tokens | ${ctx.session.totalTokens.toLocaleString()} |\n` +
-        `| Messages | ${sessionMessages} |`
-      );
+      handleCostCommand(arg, ctx);
       break;
     }
 
     // ---- /status ----
     case "status": {
-      const session = ctx.session;
-      const msgCount = session.messages.length;
-      const mode = ctx.permissionMode || "default";
-      ctx.addSystemMessage(
-        `**Session Status**\n\n` +
-        `| Field | Value |\n` +
-        `|---|---|\n` +
-        `| Session ID | \`${session.id.slice(0, 8)}...\` |\n` +
-        `| Provider / Model | ${ctx.provider}/${ctx.model} |\n` +
-        `| Messages | ${msgCount} |\n` +
-        `| Session tokens | ${session.totalTokens.toLocaleString()} |\n` +
-        `| Cost | $${ctx.cost.toFixed(4)} |\n` +
-        `| Mode | ${mode} |\n` +
-        `| Working dir | \`${ctx.workingDir}\` |\n` +
-        `| Started | ${session.startedAt} |`
-      );
+      handleStatusCommand(arg, ctx);
       break;
     }
 
@@ -597,11 +409,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /trust ----
     case "trust": {
-      ctx.setTrustAll(true);
-      ctx.addSystemMessage(
-        "**Trust mode ON.** All non-dangerous tool calls will be auto-approved for this session. " +
-        "Dangerous operations (force push, rm -rf, etc.) still require confirmation."
-      );
+      handleTrustCommand(arg, ctx);
       break;
     }
 
@@ -793,576 +601,50 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /changed ----
     case "changed": {
-      const changes = getChangedFiles();
-      if (changes.length === 0) {
-        ctx.addSystemMessage("No files changed in this session.");
-      } else {
-        const lines = changes.map(tc => `- \`${path.relative(ctx.workingDir, tc.path)}\` (${tc.tool}, ${new Date(tc.timestamp).toLocaleTimeString()})`);
-        ctx.addSystemMessage(`**Changed Files** (${changes.length}):\n${lines.join("\n")}`);
-      }
+      handleChangedCommand(arg, ctx);
       break;
     }
 
     // ---- /diff ----
     case "diff": {
-      try {
-        // If on a feature branch, show committed changes vs main/master
-        const currentBr = execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", {
-          cwd: ctx.workingDir, encoding: "utf-8", timeout: 2000,
-        }).trim();
-        const isFeatureBranch = currentBr && currentBr !== "main" && currentBr !== "master";
-
-        // Determine the base to diff against
-        let baseBranch = "";
-        if (isFeatureBranch) {
-          // Find which of main/master exists
-          try {
-            execSync("git rev-parse --verify main 2>/dev/null", { cwd: ctx.workingDir, stdio: "pipe" });
-            baseBranch = "main";
-          } catch {
-            try {
-              execSync("git rev-parse --verify master 2>/dev/null", { cwd: ctx.workingDir, stdio: "pipe" });
-              baseBranch = "master";
-            } catch { /* neither exists */ }
-          }
-        }
-
-        const diffRange = baseBranch ? `${baseBranch}..HEAD` : "";
-        const diffStat = execSync(`git diff --stat ${diffRange} 2>/dev/null`, {
-          cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
-        }).trim();
-        const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", {
-          cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
-        }).trim();
-        const diff = execSync(`git diff ${diffRange} 2>/dev/null`, {
-          cwd: ctx.workingDir, encoding: "utf-8", timeout: 10000,
-        }).trim();
-
-        const parts: string[] = [];
-        if (baseBranch) parts.push(`Comparing \`${currentBr}\` to \`${baseBranch}\``);
-        if (diffStat) parts.push(`**Changes:**\n\`\`\`\n${diffStat}\n\`\`\``);
-        if (untracked) parts.push(`**New files:**\n${untracked.split("\n").map(f => `- \`${f}\``).join("\n")}`);
-        if (diff) {
-          parts.push(`**Diff:**\n\`\`\`diff\n${diff}\n\`\`\``);
-        }
-
-        if (parts.length === 0) {
-          ctx.addSystemMessage("No changes. Working tree is clean.");
-        } else {
-          ctx.addSystemMessage(parts.join("\n\n"));
-        }
-      } catch (err) {
-        logger.debug("/diff command failed", { error: err instanceof Error ? err.message : String(err) });
-        ctx.addSystemMessage("Not a git repository, or git is not installed.");
-      }
+      handleDiffCommand(arg, ctx);
       break;
     }
 
     // ---- /clear ----
     case "clear": {
-      // Reset the session — start fresh while keeping the UI
-      const session = ctx.session;
-      session.messages = [];
-      session.totalTokens = 0;
-      saveSession(session);
-      ctx.addSystemMessage("Conversation cleared. Starting fresh.");
+      handleClearCommand(arg, ctx);
       break;
     }
 
     // ---- /compact ----
     case "compact": {
-      if (!ctx.forceCompact) {
-        ctx.addSystemMessage("Compaction not available.");
-        break;
-      }
-      const msgCount = ctx.session.messages.length;
-      if (msgCount <= 2 && ctx.tokens === 0) {
-        ctx.addSystemMessage("Nothing to compact — conversation is empty.");
-        break;
-      }
-      ctx.addSystemMessage(`**Compacting...** ~${ctx.tokens.toLocaleString()} tokens${arg ? ` (preserving: ${arg})` : ""}`);
-      void ctx.forceCompact(arg || undefined).then(({ before, after }) => {
-        ctx.addSystemMessage(`**Compacted.** ~${before.toLocaleString()} → ~${after.toLocaleString()} tokens.`);
-      });
+      handleCompactCommand(arg, ctx);
       break;
     }
 
     // ---- /git ----
     case "git": {
-      const gitInfo = getGitStatus(ctx.workingDir);
-      ctx.addSystemMessage(gitInfo);
+      handleGitCommand(arg, ctx);
       break;
     }
 
     // ---- /edit ----
     case "edit": {
-      const editor = process.env.EDITOR || process.env.VISUAL || "vi";
-      const tmpFile = path.join(os.tmpdir(), `workermill-${Date.now()}.md`);
-      try {
-        fs.writeFileSync(tmpFile, "", "utf-8");
-        execSync(`${editor} ${tmpFile}`, {
-          cwd: ctx.workingDir,
-          stdio: "inherit",
-          timeout: 5 * 60 * 1000,
-        });
-        const contents = fs.readFileSync(tmpFile, "utf-8").trim();
-        if (contents) {
-          ctx.addUserMessage(contents);
-          ctx.submit(contents);
-        } else {
-          ctx.addSystemMessage("Editor closed with no content. Nothing submitted.");
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        ctx.addSystemMessage(`Failed to open editor (\`${editor}\`): ${errMsg}`);
-      } finally {
-        try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-      }
+      handleEditCommand(arg, ctx);
       break;
     }
 
     // ---- /settings ----
     case "settings":
     case "config": {
-      const config = loadConfig();
-      if (!config) {
-        ctx.addSystemMessage("No config found. Run setup first.");
-        break;
-      }
-
-      if (!arg || arg === "all") {
-        const showAll = arg === "all";
-
-        // Gather primary values
-        const reviewEnabled = config.review?.enabled !== false;
-        const maxRevisions = config.review?.maxRevisions ?? 3;
-        const approvalThreshold = config.review?.approvalThreshold ?? 9;
-        const qaParticipation = config.qa?.participation ?? "auto";
-        const liveViewEnabled = config.liveView === true;
-        const liveViewUrl = ctx.getLiveViewUrl?.() || null;
-        const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
-        const inlineEditPreview = config.inlineEditPreview ?? true;
-        const bellEnabled = config.bell === true;
-
-        // Primary settings — always shown
-        let table =
-          `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
-          `| Setting | Value | Command |\n` +
-          `|---|---|---|\n` +
-          `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
-          `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
-          `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
-          `| QA participation | ${qaParticipation} | \`/settings qa.participation <off/auto/always>\` |\n` +
-          `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
-          `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
-          `| Inline edit preview | ${inlineEditPreview} | \`/settings ui.inlineEditPreview <true/false>\` |\n` +
-          `| Beep when done | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
-          `| Experimental (/orchestrate) | ${config.experimental ?? false} | \`/settings experimental <true/false>\` |\n` +
-          `| API keys | — | \`/settings key <provider> <api-key>\` |`;
-
-        if (showAll) {
-          // Advanced settings
-          const ollamaHost = config.providers?.ollama?.host || "http://localhost:11434";
-          const ollamaCtx = config.providers?.ollama?.contextLength || 65536;
-          const autoRevise = config.review?.autoRevise ?? false;
-          const autoBranch = config.review?.autoBranch ?? false;
-          const maxIssues = config.program?.maxIssues ?? config.program?.maxSubIssues ?? 25;
-          const maxAutoRetries = config.program?.maxAutoRetries ?? 1;
-          const gateMode = config.program?.gateMode ?? "advisory";
-          const gateCount = config.program?.gates?.length ?? 0;
-          const sandboxMode = config.sandbox === "os" ? "os" : (config.sandbox !== false ? "true" : "false");
-          const allowRules = config.permissions?.allow || [];
-          const denyRules = config.permissions?.deny || [];
-
-          table +=
-            `\n\n**Advanced**\n\n` +
-            `| Setting | Value | Command |\n` +
-            `|---|---|---|\n` +
-            `| Ollama host | \`${ollamaHost}\` | \`/settings ollama.host <url>\` |\n` +
-            `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
-            `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
-            `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
-            `| Program max issues | ${maxIssues} | \`/settings program.maxIssues <n>\` |\n` +
-            `| Program max auto-retries | ${maxAutoRetries} | \`/settings program.maxAutoRetries <n>\` |\n` +
-            `| Program gate mode | ${gateMode} | \`/settings program.gateMode <required/advisory>\` |\n` +
-            `| Program gates | ${gateCount} command(s) | Edit \`program.gates\` in \`cli.json\` |\n` +
-            `| Sandbox | ${sandboxMode} | \`/settings sandbox <true/false/os>\` |\n` +
-            `| Jira URL | ${config.jira?.baseUrl || "—"} | \`/settings jira.url <url>\` |\n` +
-            `| Jira email | ${config.jira?.email || "—"} | \`/settings jira.email <email>\` |\n` +
-            `| Jira token | ${config.jira?.apiToken ? "***" : "—"} | \`/settings jira.token <token>\` |\n` +
-            `| Linear key | ${config.linear?.apiKey ? "***" : "—"} | \`/settings linear.key <key>\` |\n` +
-            `| Permission allow rules | ${allowRules.length} rule(s) | Edit \`cli.json\` |\n` +
-            `| Permission deny rules | ${denyRules.length} rule(s) | Edit \`cli.json\` |`;
-        } else {
-          table += `\n\nType \`/settings all\` to see all settings.`;
-        }
-
-        ctx.addSystemMessage(table);
-
-        const displayRoutingProvider = (persona: string, provider: string): string => {
-          // Role-specific aliases like "openai_tech_lead" are useful in config,
-          // but noisy in the settings table. Show the base provider name.
-          const suffix = `_${persona}`;
-          if (provider.endsWith(suffix)) {
-            return provider.slice(0, -suffix.length);
-          }
-          return provider;
-        };
-        const displayRoutingModel = (provider: string): string => {
-          return config.providers?.[provider]?.model || "(unknown)";
-        };
-
-        // Show routing — filter out stale entries (e.g. "critic" after removal)
-        const routing = config.routing;
-        const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
-        const routingRows = [
-          ...(showAll
-            ? [`| default | ${displayRoutingProvider("default", config.default)} | ${displayRoutingModel(config.default)} | ${config.default} |`]
-            : [`| default | ${displayRoutingProvider("default", config.default)} | ${displayRoutingModel(config.default)} |`]),
-          ...validEntries.map(([persona, provider]) =>
-            showAll
-              ? `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${displayRoutingModel(provider)} | ${provider} |`
-              : `| ${persona} | ${displayRoutingProvider(persona, provider)} | ${displayRoutingModel(provider)} |`,
-          ),
-        ];
-        const routingHeader = showAll
-          ? `| Persona | Provider | Model | Config key |\n|---|---|---|---|\n`
-          : `| Persona | Provider | Model |\n|---|---|---|\n`;
-        ctx.addSystemMessage(
-          `\n**Persona Routing** (\`/settings route <persona> <provider>/<model>\`)\n\n` +
-          routingHeader +
-          routingRows.join("\n"),
-        );
-      } else {
-        // Parse key=value or key value
-        const parts = arg.split(/[\s=]+/);
-        const rawKey = parts[0];
-        const keyAliases: Record<string, string> = {
-          "ollama.host": "ollama.host",
-          "ollama.context": "ollama.context",
-          "review.enabled": "review.enabled",
-          "review.maxrevisions": "review.maxRevisions",
-          "review.threshold": "review.threshold",
-          "review.autorevise": "review.autoRevise",
-          "review.autobranch": "review.autoBranch",
-          "qa.participation": "qa.participation",
-          "program.maxissues": "program.maxIssues",
-          "program.maxautoretries": "program.maxAutoRetries",
-          "program.gatemode": "program.gateMode",
-          "sandbox": "sandbox",
-          "liveview": "liveView",
-          "ui.inlineeditpreview": "ui.inlineEditPreview",
-          "inlineeditpreview": "ui.inlineEditPreview",
-          "bell": "bell",
-          "experimental": "experimental",
-          "tickets": "tickets",
-          "jira.url": "jira.url",
-          "jira.email": "jira.email",
-          "jira.token": "jira.token",
-          "linear.key": "linear.key",
-          "route": "route",
-          "key": "key",
-        };
-        const key = keyAliases[rawKey.toLowerCase()] ?? rawKey;
-        const value = parts.slice(1).join(" ");
-
-        if (!value) {
-          ctx.addSystemMessage(`Usage: \`/settings ${key} <value>\``);
-          break;
-        }
-
-        const boolVal = (v: string) => v === "true" || v === "1" || v === "on" || v === "yes";
-        const numVal = (v: string) => parseInt(v, 10);
-        const parseIntSetting = (raw: string, keyName: string, min: number): number | null => {
-          const n = parseInt(raw, 10);
-          if (!Number.isFinite(n) || n < min) {
-            ctx.addSystemMessage(`Invalid value for \`${keyName}\`. Use an integer >= ${min}.`);
-            return null;
-          }
-          return n;
-        };
-        let settingApplied = true;
-
-        switch (key) {
-          case "ollama.host": {
-            if (!config.providers.ollama) config.providers.ollama = { model: "qwen3-coder:30b" };
-            config.providers.ollama.host = value;
-            break;
-          }
-          case "ollama.context": {
-            if (!config.providers.ollama) config.providers.ollama = { model: "qwen3-coder:30b" };
-            config.providers.ollama.contextLength = numVal(value);
-            break;
-          }
-          case "review.enabled": {
-            config.review = { ...config.review, enabled: boolVal(value) };
-            break;
-          }
-          case "review.maxRevisions": {
-            config.review = { ...config.review, maxRevisions: numVal(value) };
-            break;
-          }
-          case "review.threshold": {
-            config.review = { ...config.review, approvalThreshold: numVal(value) };
-            break;
-          }
-          case "review.autoRevise": {
-            config.review = { ...config.review, autoRevise: boolVal(value) };
-            break;
-          }
-          case "review.autoBranch": {
-            config.review = { ...config.review, autoBranch: boolVal(value) };
-            break;
-          }
-          case "qa.participation": {
-            const normalized = value.toLowerCase();
-            if (!["off", "auto", "always"].includes(normalized)) {
-              ctx.addSystemMessage("Invalid value for `qa.participation`. Use `off`, `auto`, or `always`.");
-              settingApplied = false;
-              break;
-            }
-            config.qa = { ...config.qa, participation: normalized as "off" | "auto" | "always" };
-            break;
-          }
-          case "program.maxIssues": {
-            const n = parseIntSetting(value, "program.maxIssues", 1);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.program = { ...(config.program || {}), maxIssues: n };
-            break;
-          }
-          case "program.maxAutoRetries": {
-            const n = parseIntSetting(value, "program.maxAutoRetries", 0);
-            if (n === null) {
-              settingApplied = false;
-              break;
-            }
-            config.program = { ...(config.program || {}), maxAutoRetries: n };
-            break;
-          }
-          case "program.gateMode": {
-            const normalized = value.toLowerCase();
-            if (normalized !== "required" && normalized !== "advisory") {
-              ctx.addSystemMessage("Invalid value for `program.gateMode`. Use `required` or `advisory`.");
-              settingApplied = false;
-              break;
-            }
-            config.program = { ...(config.program || {}), gateMode: normalized as "required" | "advisory" };
-            break;
-          }
-          case "sandbox": {
-            const normalized = value.toLowerCase();
-            if (normalized === "os") {
-              config.sandbox = "os";
-              break;
-            }
-            if (["true", "1", "on", "yes"].includes(normalized)) {
-              config.sandbox = true;
-              break;
-            }
-            if (["false", "0", "off", "no"].includes(normalized)) {
-              config.sandbox = false;
-              break;
-            }
-            ctx.addSystemMessage("Invalid value for `sandbox`. Use `true`, `false`, or `os`.");
-            settingApplied = false;
-            break;
-          }
-          case "liveView": {
-            const normalized = value.toLowerCase();
-            if (["true", "1", "on", "yes"].includes(normalized)) {
-              config.liveView = true;
-              break;
-            }
-            if (["false", "0", "off", "no"].includes(normalized)) {
-              config.liveView = false;
-              break;
-            }
-            ctx.addSystemMessage("Invalid value for `liveView`. Use `true` or `false`.");
-            settingApplied = false;
-            break;
-          }
-          case "bell": {
-            config.bell = boolVal(value);
-            break;
-          }
-          case "ui.inlineEditPreview": {
-            config.inlineEditPreview = boolVal(value);
-            break;
-          }
-          case "experimental": {
-            config.experimental = boolVal(value);
-            break;
-          }
-          case "tickets": {
-            const valid = ["github", "jira", "linear"];
-            if (!valid.includes(value)) {
-              ctx.addSystemMessage(`Invalid tracker: \`${value}\`. Use one of: ${valid.join(", ")}`);
-              settingApplied = false;
-              break;
-            }
-            config.ticketSystem = value as "github" | "jira" | "linear";
-            if (value === "jira" && !config.jira) {
-              ctx.addSystemMessage("**Switched to Jira.** Now set credentials:\n\n```\n/settings jira.url https://myteam.atlassian.net\n/settings jira.email you@company.com\n/settings jira.token <api-token>\n```");
-            } else if (value === "linear" && !config.linear) {
-              ctx.addSystemMessage("**Switched to Linear.** Now set your API key:\n\n```\n/settings linear.key <api-key>\n```");
-            }
-            break;
-          }
-          case "jira.url": {
-            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, baseUrl: value };
-            break;
-          }
-          case "jira.email": {
-            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, email: value };
-            break;
-          }
-          case "jira.token": {
-            config.jira = { ...config.jira || { baseUrl: "", email: "", apiToken: "" }, apiToken: value };
-            break;
-          }
-          case "linear.key": {
-            config.linear = { apiKey: value };
-            break;
-          }
-          case "route": {
-            // /settings route <persona> <provider>/<model>
-            const routeParts = value.split(/\s+/);
-            if (routeParts.length < 2) {
-              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>/<model>`\n\nExample: `/settings route backend_developer anthropic/claude-sonnet-4-6`");
-              break;
-            }
-            const [persona, routeTarget] = routeParts;
-            const targetParts = routeTarget.split("/");
-            if (targetParts.length < 2) {
-              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>/<model>`\n\nExample: `/settings route qa_engineer xai/grok-code-fast-1`");
-              settingApplied = false;
-              break;
-            }
-            const provider = targetParts[0];
-            const model = targetParts.slice(1).join("/");
-            if (!config.providers[provider]) {
-              ctx.addSystemMessage(`Provider \`${provider}\` not found in config. Available: ${Object.keys(config.providers).join(", ")}\n\nTo add a provider first: \`/settings key ${provider} <api-key>\``);
-              settingApplied = false;
-              break;
-            }
-            const envKeyMap: Record<string, string> = {
-              anthropic: "ANTHROPIC_API_KEY",
-              openai: "OPENAI_API_KEY",
-              google: "GOOGLE_GENERATIVE_AI_API_KEY",
-              xai: "XAI_API_KEY",
-              groq: "GROQ_API_KEY",
-              deepseek: "DEEPSEEK_API_KEY",
-              mistral: "MISTRAL_API_KEY",
-            };
-            const needsKey = !!envKeyMap[provider];
-            const envVar = envKeyMap[provider];
-            const hasConfigKey = !!config.providers[provider]?.apiKey;
-            const hasEnvKey = !!(envVar && process.env[envVar]);
-            if (needsKey && !hasConfigKey && !hasEnvKey) {
-              ctx.addSystemMessage(
-                `**Cannot route \`${persona}\` to \`${provider}/${model}\`** — no API key found.\n\n` +
-                `Add your key: \`/settings key ${provider} <your-api-key>\`\n` +
-                `Then run \`/settings route ${persona} ${provider}/${model}\` again.`
-              );
-              settingApplied = false;
-              break;
-            }
-            const roleProviderKey = `${provider}_${persona}`;
-            const baseEntry = config.providers[provider];
-            const apiKey = baseEntry?.apiKey || (hasEnvKey ? `{env:${envVar}}` : undefined);
-            config.providers[roleProviderKey] = {
-              model,
-              ...(apiKey ? { apiKey } : {}),
-              ...(baseEntry?.host ? { host: baseEntry.host } : {}),
-              ...(baseEntry?.contextLength ? { contextLength: baseEntry.contextLength } : {}),
-            };
-            config.routing = { ...config.routing, [persona]: roleProviderKey };
-            break;
-          }
-          case "key": {
-            // /settings key <provider> <api-key>
-            const keyParts = value.split(/\s+/);
-            if (keyParts.length < 2) {
-              ctx.addSystemMessage("**Usage:** `/settings key <provider> <api-key>`\n\nExample: `/settings key anthropic sk-ant-...`");
-              break;
-            }
-            const [keyProvider, ...keyRest] = keyParts;
-            const apiKeyValue = keyRest.join(" ").trim();
-            if (!config.providers[keyProvider]) {
-              config.providers[keyProvider] = { model: "", apiKey: apiKeyValue };
-            } else {
-              config.providers[keyProvider].apiKey = apiKeyValue;
-            }
-            // Also set in process.env so it's immediately usable
-            const envNames: Record<string, string> = {
-              anthropic: "ANTHROPIC_API_KEY",
-              openai: "OPENAI_API_KEY",
-              google: "GOOGLE_GENERATIVE_AI_API_KEY",
-              xai: "XAI_API_KEY",
-              groq: "GROQ_API_KEY",
-              deepseek: "DEEPSEEK_API_KEY",
-              mistral: "MISTRAL_API_KEY",
-            };
-            const envName = envNames[keyProvider];
-            if (envName) {
-              process.env[envName] = apiKeyValue;
-            }
-            break;
-          }
-          default:
-            ctx.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings all\` to see all options.`);
-            settingApplied = false;
-            break;
-        }
-
-        if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
-          saveConfig(config);
-          ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
-          if (key === "route") {
-            ctx.updateRoleModels?.();
-          }
-          if (key === "liveView" && ctx.setLiveViewEnabled) {
-            const enabled = boolVal(value);
-            const url = ctx.setLiveViewEnabled(enabled);
-            if (enabled && url) {
-              const isWsl = process.platform === "linux" && (Boolean(process.env.WSL_DISTRO_NAME) || Boolean(process.env.WSL_INTEROP));
-              const wslHint = isWsl ? " (WSL: open this URL in your Windows browser)" : "";
-              ctx.addSystemMessage(`Live code view listening: \`${url}\`${wslHint}`);
-            } else if (enabled) {
-              ctx.addSystemMessage("Live code view enabled.");
-            } else {
-              ctx.addSystemMessage("Live code view disabled.");
-            }
-          }
-          if (key === "ui.inlineEditPreview" && ctx.setInlineEditPreviewEnabled) {
-            ctx.setInlineEditPreviewEnabled(boolVal(value));
-          }
-        }
-      }
+      handleSettingsCommand(arg, ctx);
       break;
     }
 
     // ---- /sessions ----
     case "sessions": {
-      const sessions = listSessions(20);
-      if (sessions.length === 0) {
-        ctx.addSystemMessage("No saved sessions found.");
-      } else {
-        const rows = sessions.map((s) => {
-          const date = new Date(s.startedAt).toLocaleString();
-          const name = s.name || s.preview;
-          return `| \`${s.id.slice(0, 8)}\` | ${name} | ${s.messageCount} msgs | ${s.totalTokens.toLocaleString()} tokens | ${date} |`;
-        });
-        ctx.addSystemMessage(
-          `**Recent Sessions** (${sessions.length})\n\n` +
-          `| ID | Name | Messages | Tokens | Date |\n` +
-          `|---|---|---|---|---|\n` +
-          rows.join("\n")
-        );
-      }
+      handleSessionsCommand(arg, ctx);
       break;
     }
 
@@ -1389,98 +671,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /permissions ----
     case "permissions": {
-      if (!arg) {
-        const modeLabel = ctx.permissionMode || "default";
-        const global = loadConfig();
-        const pSettings = loadProjectSettings();
-        const lSettings = loadLocalSettings();
-
-        // Collect rules with sources
-        const rules: Array<{ rule: string; type: "allow" | "ask" | "deny"; source: "global" | "project" | "local" }> = [];
-
-        const addRules = (config: PermissionRuleConfig | null | undefined, source: "global" | "project" | "local") => {
-          if (!config) return;
-          config.allow?.forEach(rule => rules.push({ rule, type: "allow", source }));
-          config.ask?.forEach(rule => rules.push({ rule, type: "ask", source }));
-          config.deny?.forEach(rule => rules.push({ rule, type: "deny", source }));
-        };
-
-        addRules(global?.permissions, "global");
-        addRules(pSettings, "project");
-        addRules(lSettings, "local");
-
-        const rulesInfo = rules.length > 0
-          ? `\n\n**Rules (${rules.length}):**\n` +
-            rules.map(r => `[${r.source}] ${r.type === "allow" ? "Allow" : r.type === "deny" ? "Deny" : "Ask"}: \`${r.rule}\``).join("\n")
-          : "";
-
-        ctx.addSystemMessage(
-          `**Permission mode:** ${modeLabel} *(shift+tab to cycle)*\n\n` +
-          "**Modes:** default → acceptEdits → plan → bypassPermissions\n\n" +
-          "Commands:\n" +
-          "- `/permissions allow <tool>` — allow a tool permanently (saved to project settings)\n" +
-          "- `/permissions deny <tool>` — deny a tool permanently (saved to project settings)\n" +
-          "- `/permissions reset` — reset to default mode\n\n" +
-          "Approving a bash command with **Yes, don't ask again** saves a permanent rule (saved to local settings)." +
-          rulesInfo
-        );
-      } else {
-        const parts = arg.split(/\s+/);
-        const action = parts[0];
-        const toolName = parts[1];
-
-        switch (action) {
-          case "trust":
-          case "bypass":
-            ctx.setTrustAll(true);
-            ctx.addSystemMessage("**bypassPermissions mode ON.** All tools auto-approved.");
-            break;
-          case "ask":
-          case "default":
-            ctx.setTrustAll(false);
-            ctx.addSystemMessage("**default mode ON.** Tools require approval.");
-            break;
-          case "allow": {
-            if (!toolName) {
-              ctx.addSystemMessage("Usage: `/permissions allow <tool or pattern>`\n\nExamples:\n- `/permissions allow bash` — allow all bash\n- `/permissions allow bash(npm run *)` — allow npm run commands\n- `/permissions allow edit_file` — allow all file edits");
-            } else {
-              // Save to project settings
-              const pSettings = loadProjectSettings() || {};
-              pSettings.allow = pSettings.allow || [];
-              if (!pSettings.allow.includes(toolName)) {
-                pSettings.allow.push(toolName);
-                saveProjectSettings(pSettings);
-              }
-              // Also add to session for immediate effect
-              ctx.allowTool(toolName.split("(")[0]); // session set uses bare tool name
-              ctx.addSystemMessage(`**Allowed** \`${toolName}\` — saved to project settings.`);
-            }
-            break;
-          }
-          case "deny": {
-            if (!toolName) {
-              ctx.addSystemMessage("Usage: `/permissions deny <tool or pattern>`");
-            } else {
-              // Save to project settings
-              const pSettings = loadProjectSettings() || {};
-              pSettings.deny = pSettings.deny || [];
-              if (!pSettings.deny.includes(toolName)) {
-                pSettings.deny.push(toolName);
-                saveProjectSettings(pSettings);
-              }
-              ctx.denyTool(toolName.split("(")[0]);
-              ctx.addSystemMessage(`**Denied** \`${toolName}\` — saved to project settings.`);
-            }
-            break;
-          }
-          case "reset":
-            ctx.setTrustAll(false);
-            ctx.addSystemMessage("**Permissions reset** to ask mode.");
-            break;
-          default:
-            ctx.addSystemMessage("Unknown action. Use: trust, ask, allow, deny, reset");
-        }
-      }
+      handlePermissionsCommand(arg, ctx);
       break;
     }
 
@@ -1559,127 +750,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /init ----
     case "init": {
-      ctx.addSystemMessage("**Tip:** Add `.workermill/*.local.json` to your `.gitignore` to keep personal permission overrides out of version control.");
-
-      const agentPath = path.join(ctx.workingDir, "AGENT.md");
-      const exists = fs.existsSync(agentPath);
-      const isForce = arg?.includes("--force");
-
-      if (exists && !isForce) {
-        // Re-run: validate existing file, bias toward stability
-        ctx.addSystemMessage("**Validating AGENT.md...** Checking accuracy against current codebase.");
-        ctx.submit(
-          `Read the existing AGENT.md file and validate it against the current state of the codebase.
-
-IMPORTANT: Your default stance is that the file is correct. Do NOT make changes unless something is **concretely wrong or missing**. Rewording for style, reordering sections, or adding "nice to have" content are NOT valid reasons to edit. If the file is accurate and complete, say "AGENT.md is up to date — no changes needed." and stop.
-
-Use your tools to spot-check — read a few key files, verify commands still work, confirm directory structure matches. You do not need to exhaustively re-explore the entire codebase.
-
-Only flag issues that are **factually incorrect**:
-- A file path, command, or pattern that no longer exists
-- A new top-level module or major dependency that is completely absent
-- A command that would fail if an agent ran it
-
-Do NOT touch:
-- Wording, tone, or section ordering
-- Content that is accurate but could be "more detailed"
-- Sections the user wrote manually (custom notes, pitfalls, workflow preferences)
-
-If you find concrete issues, list them and ask the user whether to apply fixes — do NOT write changes automatically. Present a short summary like:
-
-**Found 2 issues:**
-1. \`npm run typecheck\` should be \`npx tsc -b\` (command changed)
-2. Missing \`api/src/middleware/\` section (new module added since last init)
-
-**Apply fixes?** (say yes or I'll leave it as-is)`,
-          "/init (validating AGENT.md)"
-        );
-      } else {
-        // First run: generate from scratch
-        ctx.addSystemMessage("**Analyzing codebase...** I'll explore your project and generate `AGENT.md`.");
-        ctx.submit(
-          `Explore this codebase thoroughly and create an AGENT.md file in the project root. This file will be read by ALL AI agents working on this project — it's the single source of truth for how to work in this codebase.
-
-Use your tools aggressively — list directories, read package.json/requirements.txt/Cargo.toml/go.mod/pyproject.toml, read key source files, check test structure, look at CI configs, read existing docs. Understand the project before writing.
-
-Write an AGENT.md with these sections:
-
-## 1. Project Overview
-- What this project does in 1-2 sentences
-- Who it's for and what problem it solves
-
-## 2. Tech Stack
-- Languages and versions (be specific: "TypeScript 5.x with strict mode", not just "TypeScript")
-- Frameworks (Express 4.x, React 19, Next.js 15, etc.)
-- Database, ORM, cache, message queue
-- Key libraries that shape how code is written
-
-## 3. Architecture
-- Directory structure with purpose of each top-level directory
-- Architectural pattern (monolith, microservices, monorepo, MVC, clean architecture)
-- Data flow — how a request moves through the system
-- Key abstractions and patterns used throughout
-
-## 4. Quick Reference
-Build a command table:
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Dev server | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-| Lint | \`npm run lint\` |
-| Type check | \`npx tsc --noEmit\` |
-
-Include ALL available scripts, not just the obvious ones.
-
-## 5. Coding Standards
-Observe the actual code and document what you see:
-- Naming conventions (camelCase, snake_case, file naming)
-- File structure patterns (one component per file, barrel exports, etc.)
-- Import ordering conventions
-- Error handling patterns
-- How state is managed
-- Comment style and when comments are used
-
-## 6. Key Files & Entry Points
-List the most important files an agent should know about:
-- Main entry point(s)
-- Route definitions
-- Database schema/models
-- Config files
-- Environment variables (.env structure)
-
-## 7. Testing
-- Test framework and runner
-- Where tests live (co-located, separate directory)
-- How to run a single test
-- Test patterns used (unit, integration, e2e)
-- Any test fixtures or helpers
-
-## 8. Common Pitfalls
-Things that would trip up an AI agent:
-- Gotchas specific to this codebase
-- Environment requirements (specific Node version, Docker needed, etc.)
-- Files that should NOT be modified
-- Patterns that look wrong but are intentional
-
-## 9. Git & Workflow
-- Branch naming conventions
-- Commit message format
-- PR process if any
-
-Rules for writing:
-- Be SPECIFIC — reference actual file paths, actual commands, actual patterns
-- Be CONCISE — target under 200 lines, no filler
-- Every line should help an AI agent work better in this codebase
-- If you can't determine something from the code, leave it out rather than guessing
-- Use code blocks for commands and file paths
-
-Write the file with write_file to AGENT.md in the project root.`,
-          "/init (generating AGENT.md)"
-        );
-      }
+      handleInitCommand(arg, ctx);
       break;
     }
 
@@ -1806,38 +877,7 @@ Write the file with write_file to AGENT.md in the project root.`,
 
     // ---- /skills ----
     case "skills": {
-      const customCmds = loadCustomCommands();
-      const lines: string[] = ["**Skills & Custom Commands**\n"];
-
-      if (customCmds.length > 0) {
-        lines.push("**Custom Commands** (`.workermill/commands/` or `~/.workermill/commands/`):\n");
-        lines.push("| Command | Description |");
-        lines.push("|---|---|");
-        const shadowed: string[] = [];
-        for (const c of customCmds) {
-          if (BUILTIN_COMMANDS.has(c.name)) {
-            lines.push(`| \`/${c.name}\` | ${c.description} ⚠️ **shadowed by built-in** |`);
-            shadowed.push(c.name);
-          } else {
-            lines.push(`| \`/${c.name}\` | ${c.description} |`);
-          }
-        }
-        if (shadowed.length > 0) {
-          lines.push(`\n⚠️ **${shadowed.length} command(s) shadowed:** \`${shadowed.join("`, `")}\` — these match built-in commands and will never run. Rename them to avoid the conflict.`);
-        }
-      } else {
-        lines.push("No custom commands found.\n");
-        lines.push("Create `.workermill/commands/deploy.md` to add `/deploy`:\n");
-        lines.push("```markdown");
-        lines.push("---");
-        lines.push("name: deploy");
-        lines.push("description: Deploy to production");
-        lines.push("---");
-        lines.push("Run the deploy script and report results.");
-        lines.push("```");
-      }
-
-      ctx.addSystemMessage(lines.join("\n"));
+      handleSkillsCommand(arg, ctx);
       break;
     }
 
@@ -1890,142 +930,32 @@ Write the file with write_file to AGENT.md in the project root.`,
 
     // ---- /remember ----
     case "remember": {
-      if (!arg) {
-        ctx.addSystemMessage("**Usage:** `/remember <text>` — save a memory for this project\n\nExamples:\n- `/remember This project uses Prisma, not Sequelize`\n- `/remember Always run migrations before tests`");
-      } else {
-        const mem = addMemory("preference", arg, ctx.workingDir);
-        ctx.addSystemMessage(`**Remembered:** ${mem.content}`);
-      }
+      handleRememberCommand(arg, ctx);
       break;
     }
 
     // ---- /forget ----
     case "forget": {
-      if (!arg) {
-        ctx.addSystemMessage("**Usage:** `/forget <text>` — remove a memory matching the text");
-      } else {
-        const removed = removeMemory(arg, ctx.workingDir);
-        ctx.addSystemMessage(removed ? `**Forgot:** memory matching "${arg}"` : `No memory found matching "${arg}". Use \`/memories\` to list all.`);
-      }
+      handleForgetCommand(arg, ctx);
       break;
     }
 
     // ---- /memories ----
     case "memories":
     case "memory": {
-      const memories = loadMemories(ctx.workingDir);
-      if (memories.length === 0) {
-        ctx.addSystemMessage("No memories saved for this project.\n\nMemories are saved automatically when the agent discovers something, or manually with `/remember <text>`.");
-      } else {
-        const lines = ["**Project Memories**\n"];
-        const typeLabels: Record<string, string> = { learning: "Learning", preference: "Preference", context: "Context", correction: "Correction" };
-        for (const m of memories) {
-          lines.push(`- **[${typeLabels[m.type] || m.type}]** ${m.content} \`(${m.id})\``);
-        }
-        lines.push(`\n${memories.length} memories. Use \`/forget <id or text>\` to remove.`);
-        ctx.addSystemMessage(lines.join("\n"));
-      }
+      handleMemoriesCommand(arg, ctx);
       break;
     }
 
     // ---- /personas ----
     case "personas": {
-      const allPersonas = listAvailablePersonas();
-
-      if (!arg) {
-        // List all personas with source
-        const lines: string[] = ["**Personas**\n"];
-        const projectDir = path.join(ctx.workingDir, ".workermill", "personas");
-        const userDir = path.join(os.homedir(), ".workermill", "personas");
-
-        for (const slug of allPersonas) {
-          const p = loadPersona(slug);
-          if (!p) continue;
-          let source = "built-in";
-          if (fs.existsSync(path.join(projectDir, `${slug.replace(/_/g, "-")}.md`)) ||
-              fs.existsSync(path.join(projectDir, `${slug}.md`))) {
-            source = "project";
-          } else if (fs.existsSync(path.join(userDir, `${slug.replace(/_/g, "-")}.md`)) ||
-                     fs.existsSync(path.join(userDir, `${slug}.md`))) {
-            source = "user";
-          }
-          lines.push(`- **${p.name}** (\`${slug}\`) — ${p.description} [${source}]`);
-        }
-
-        lines.push("\n**Customize:**");
-        lines.push("- `/personas show <name>` — view a persona's prompt");
-        lines.push("- `/personas create <name>` — scaffold a custom persona");
-        lines.push("- Override built-ins by placing a file in `.workermill/personas/` or `~/.workermill/personas/`");
-
-        ctx.addSystemMessage(lines.join("\n"));
-      } else if (arg.startsWith("show ")) {
-        const slug = arg.slice(5).trim().replace(/-/g, "_");
-        const p = loadPersona(slug);
-        if (!p) {
-          ctx.addSystemMessage(`Persona \`${slug}\` not found. Use \`/personas\` to list all.`);
-        } else {
-          ctx.addSystemMessage(
-            `**${p.name}** (\`${p.slug}\`)\n\n` +
-            `**Description:** ${p.description}\n` +
-            `**Tools:** ${p.tools.join(", ")}\n\n` +
-            `**System Prompt:**\n\`\`\`\n${p.systemPrompt}\n\`\`\``
-          );
-        }
-      } else if (arg.startsWith("create ")) {
-        const slug = arg.slice(7).trim().replace(/\s+/g, "_").toLowerCase();
-        const personaDir = path.join(ctx.workingDir, ".workermill", "personas");
-        const personaPath = path.join(personaDir, `${slug}.md`);
-
-        if (fs.existsSync(personaPath)) {
-          ctx.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
-        } else {
-          if (!fs.existsSync(personaDir)) fs.mkdirSync(personaDir, { recursive: true });
-          const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, multi_edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
-          fs.writeFileSync(personaPath, template, "utf-8");
-          ctx.addSystemMessage(
-            `**Created** \`.workermill/personas/${slug}.md\`\n\n` +
-            "Edit the file to customize the system prompt, tools, and description. " +
-            "This persona will override the built-in one with the same name, or be available as a new persona for the planner to assign."
-          );
-        }
-      } else {
-        ctx.addSystemMessage("Usage: `/personas`, `/personas show <name>`, `/personas create <name>`");
-      }
+      handlePersonasCommand(arg, ctx);
       break;
     }
 
     // ---- /mcp ----
     case "mcp": {
-      if (hasMCPServers()) {
-        const tools = getMCPTools();
-        const serverInfo = getMCPServerInfo();
-        const transportByName = new Map(serverInfo.map((s) => [s.name, s.transport]));
-        const byServer = new Map<string, string[]>();
-        for (const { serverName, tool } of tools) {
-          if (!byServer.has(serverName)) byServer.set(serverName, []);
-          byServer.get(serverName)!.push(tool.name);
-        }
-        const lines: string[] = ["**MCP Servers (active)**\n"];
-        for (const [name, toolNames] of byServer) {
-          const transport = transportByName.get(name) || "stdio";
-          lines.push(`- **${name}** (${transport}) — ${toolNames.length} tools: ${toolNames.join(", ")}`);
-        }
-        ctx.addSystemMessage(lines.join("\n"));
-      } else if (hasMCPRegistered()) {
-        ctx.addSystemMessage(
-          "**MCP servers detected.** Tools will be available on your first prompt."
-        );
-      } else {
-        ctx.addSystemMessage(
-          "**No MCP servers configured.**\n\n" +
-          "MCP servers are auto-detected from Docker Desktop, or add them to `~/.workermill/cli.json`:\n\n" +
-          "**stdio** (local process):\n" +
-          "```json\n\"mcp\": {\n  \"my-server\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"my-mcp-server\"]\n  }\n}\n```\n\n" +
-          "**http** or **sse** (remote server):\n" +
-          "```json\n\"mcp\": {\n  \"my-server\": {\n    \"transport\": \"http\",\n    \"url\": \"https://my-mcp-server.example.com/mcp\",\n    \"headers\": { \"Authorization\": \"Bearer <token>\" }\n  }\n}\n```\n\n" +
-          "Servers start on your first prompt."
-        );
-      }
+      handleMcpCommand(arg, ctx);
       break;
     }
 
@@ -2108,22 +1038,7 @@ Write the file with write_file to AGENT.md in the project root.`,
 
     // ---- /projects ----
     case "projects": {
-      const projects = listProjects();
-      if (projects.length === 0) {
-        ctx.addSystemMessage("No known projects found. Projects are tracked when you work in them.");
-      } else {
-        const rows = projects.map((p) => {
-          const date = new Date(p.lastAccessed).toLocaleString();
-          const pathShort = p.canonicalPath.length > 50 ? p.canonicalPath.slice(0, 47) + "..." : p.canonicalPath;
-          return `| \`${p.id}\` | \`${pathShort}\` | ${date} |`;
-        });
-        ctx.addSystemMessage(
-          `**Known Projects** (${projects.length})\n\n` +
-          `| ID | Path | Last Accessed |\n` +
-          `|---|---|---|\n` +
-          rows.join("\n")
-        );
-      }
+      handleProjectsCommand(arg, ctx);
       break;
     }
 

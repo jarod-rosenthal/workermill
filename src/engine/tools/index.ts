@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
+import fs from "fs";
 import path from "path";
 
 import * as bashTool from "./bash.js";
@@ -24,9 +25,10 @@ import * as todoTool from "./todo.js";
 import * as verifyTool from "./verify.js";
 import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
+import * as memoryTool from "./memory.js";
 
 // Re-export all tool modules
-export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool };
+export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool, memoryTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -40,6 +42,21 @@ function assertPathInBounds(resolvedPath: string, workingDir: string, sandboxed:
     throw new Error(`Path "${resolvedPath}" is outside the working directory. Use --full-disk to allow access outside ${workingDir}`);
   }
   return normalized;
+}
+
+/** Recursively list all files in a directory. */
+function listMemoryFiles(dir: string): string[] {
+  const results: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(dir)) {
+      if (entry.startsWith(".")) continue;
+      const full = path.join(dir, entry);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) results.push(...listMemoryFiles(full));
+      else results.push(full);
+    }
+  } catch { /* best effort */ }
+  return results;
 }
 
 /**
@@ -787,5 +804,95 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           }),
         }
       : {}),
+
+    // ── Memory tool — persistent cross-session agent memory ──
+    memory: tool({
+      description:
+        "Read, create, update, search, or delete persistent memory files. " +
+        "Use this to store project patterns, corrections, preferences, and learnings " +
+        "that should persist across sessions. Memory is stored per-project.",
+      inputSchema: z.object({
+        command: z.enum(["view", "create", "update", "search", "delete"]).describe(
+          "The memory operation: view (read file/directory), create (new file), " +
+          "update (edit existing file), search (find by keyword), delete (remove file)"
+        ),
+        path: z.string().optional().describe(
+          "Memory file path (e.g. 'patterns.md', 'corrections.md'). " +
+          "Omit for view to list all memory files."
+        ),
+        content: z.string().optional().describe(
+          "File content for create, or new content for update"
+        ),
+        query: z.string().optional().describe(
+          "Search query for the search command"
+        ),
+      }),
+      execute: async ({ command, path: filePath, content, query }) => {
+        memoryTool.ensureMemoriesDir();
+        switch (command) {
+          case "view":
+            return memoryTool.executeMemoryCommand({
+              command: "view",
+              path: filePath ? `/memories/${filePath}` : "/memories",
+            });
+          case "create":
+            if (!filePath || !content) return "Error: create requires path and content";
+            return memoryTool.executeMemoryCommand({
+              command: "create",
+              path: `/memories/${filePath}`,
+              file_text: content,
+            });
+          case "update":
+            if (!filePath || !content) return "Error: update requires path and content";
+            // Overwrite the file with new content
+            const viewPath = `/memories/${filePath}`;
+            return memoryTool.executeMemoryCommand({
+              command: "create",
+              path: viewPath,
+              file_text: content,
+            }).catch(() =>
+              // File exists — delete and recreate
+              memoryTool.executeMemoryCommand({ command: "delete", path: viewPath }).then(() =>
+                memoryTool.executeMemoryCommand({ command: "create", path: viewPath, file_text: content })
+              )
+            );
+          case "search": {
+            if (!query) return "Error: search requires a query";
+            const dir = memoryTool.getMemoriesDir();
+            const results: string[] = [];
+            try {
+              const files = listMemoryFiles(dir);
+              const q = query.toLowerCase();
+              for (const file of files) {
+                const fileContent = fs.readFileSync(file, "utf-8");
+                const lines = fileContent.split("\n");
+                const matches = lines
+                  .map((line, i) => ({ line, num: i + 1 }))
+                  .filter(({ line }) => line.toLowerCase().includes(q));
+                if (matches.length > 0) {
+                  const rel = path.relative(dir, file);
+                  results.push(`${rel}:`);
+                  for (const m of matches.slice(0, 5)) {
+                    results.push(`  ${m.num}: ${m.line}`);
+                  }
+                  if (matches.length > 5) results.push(`  ... and ${matches.length - 5} more matches`);
+                }
+              }
+            } catch { /* best effort */ }
+            return results.length > 0
+              ? `Found matches:\n${results.join("\n")}`
+              : `No matches found for "${query}"`;
+          }
+          case "delete":
+            if (!filePath) return "Error: delete requires a path";
+            return memoryTool.executeMemoryCommand({
+              command: "delete",
+              path: `/memories/${filePath}`,
+            });
+          default:
+            return `Error: Unknown command "${command}"`;
+        }
+      },
+    }),
   };
 }

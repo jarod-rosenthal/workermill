@@ -521,4 +521,36 @@ program
     runStatsCommand(options);
   });
 
+// ── Runs command: inspect past /build runs ──
+const runsCmd = program
+  .command("runs")
+  .description("Inspect past /build run manifests");
+
+runsCmd
+  .command("list", { isDefault: true })
+  .description("List recent /build runs")
+  .option("--json", "Emit JSON output")
+  .action(async (options) => {
+    const { runsList } = await import("./runs-command.js");
+    runsList(options);
+  });
+
+runsCmd
+  .command("show <idOrPrefix>")
+  .description("Show details of a specific run")
+  .option("--json", "Emit JSON output")
+  .action(async (idOrPrefix, options) => {
+    const { runsShow } = await import("./runs-command.js");
+    runsShow(idOrPrefix, options);
+  });
+
+runsCmd
+  .command("last")
+  .description("Show the most recent run")
+  .option("--json", "Emit JSON output")
+  .action(async (options) => {
+    const { runsLast } = await import("./runs-command.js");
+    runsLast(options);
+  });
+
 program.parse();

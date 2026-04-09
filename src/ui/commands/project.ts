@@ -12,6 +12,7 @@ import { loadPersona, listAvailablePersonas } from "../../personas.js";
 import { hasMCPServers, getMCPTools, hasMCPRegistered, getMCPServerInfo } from "../../mcp-client.js";
 import { loadMemories, addMemory, removeMemory } from "../../memory.js";
 import { listProjects } from "../../project-data.js";
+import { ensureMemoriesDir, getMemoriesDir, buildProvenanceHeader, listMemoriesWithProvenance } from "../../engine/tools/memory.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { BUILTIN_COMMANDS } from "../slash-commands.js";
 
@@ -142,6 +143,17 @@ export function handleRememberCommand(arg: string, ctx: SlashCommandContext): vo
     ctx.addSystemMessage("**Usage:** `/remember <text>` \u2014 save a memory for this project\n\nExamples:\n- `/remember This project uses Prisma, not Sequelize`\n- `/remember Always run migrations before tests`");
   } else {
     const mem = addMemory("preference", arg, ctx.workingDir);
+    // Also write to the file-based memory system so the memory tool can find it
+    try {
+      ensureMemoriesDir(ctx.workingDir);
+      const sanitized = arg.replace(/[^a-zA-Z0-9 ]/g, "").trim().slice(0, 40).replace(/\s+/g, "-").toLowerCase();
+      const filename = `manual-${sanitized || "note"}-${mem.id}.md`;
+      const filePath = path.join(getMemoriesDir(ctx.workingDir), filename);
+      if (!fs.existsSync(filePath)) {
+        const header = buildProvenanceHeader("manual", "high");
+        fs.writeFileSync(filePath, `${header}${arg}\n`, "utf-8");
+      }
+    } catch { /* non-fatal */ }
     ctx.addSystemMessage(`**Remembered:** ${mem.content}`);
   }
 }
@@ -156,18 +168,41 @@ export function handleForgetCommand(arg: string, ctx: SlashCommandContext): void
 }
 
 export function handleMemoriesCommand(_arg: string, ctx: SlashCommandContext): void {
-  const memories = loadMemories(ctx.workingDir);
-  if (memories.length === 0) {
+  const flatMemories = loadMemories(ctx.workingDir);
+  const fileMemories = listMemoriesWithProvenance(ctx.workingDir);
+
+  if (flatMemories.length === 0 && fileMemories.length === 0) {
     ctx.addSystemMessage("No memories saved for this project.\n\nMemories are saved automatically when the agent discovers something, or manually with `/remember <text>`.");
-  } else {
-    const lines = ["**Project Memories**\n"];
+    return;
+  }
+
+  const lines: string[] = ["**Project Memories**\n"];
+
+  // File-based memories (with provenance)
+  if (fileMemories.length > 0) {
+    lines.push("**Agent Memory Files** (`~/.workermill/projects/.../memories/`):\n");
+    for (const m of fileMemories) {
+      const sourceTag = m.source ? `[${m.source}]` : "[unknown]";
+      const confidenceTag = m.confidence ? ` (${m.confidence})` : "";
+      const personaTag = m.persona ? ` by ${m.persona}` : "";
+      lines.push(`- **${sourceTag}${confidenceTag}** \`${m.file}\`${personaTag}`);
+      if (m.preview) lines.push(`  ${m.preview}`);
+    }
+    lines.push("");
+  }
+
+  // Flat JSON memories (legacy)
+  if (flatMemories.length > 0) {
     const typeLabels: Record<string, string> = { learning: "Learning", preference: "Preference", context: "Context", correction: "Correction" };
-    for (const m of memories) {
+    lines.push("**Saved Memories** (via `/remember`):\n");
+    for (const m of flatMemories) {
       lines.push(`- **[${typeLabels[m.type] || m.type}]** ${m.content} \`(${m.id})\``);
     }
-    lines.push(`\n${memories.length} memories. Use \`/forget <id or text>\` to remove.`);
-    ctx.addSystemMessage(lines.join("\n"));
   }
+
+  const total = flatMemories.length + fileMemories.length;
+  lines.push(`\n${total} total. Use \`/forget <id or text>\` to remove saved memories.`);
+  ctx.addSystemMessage(lines.join("\n"));
 }
 
 export function handlePersonasCommand(arg: string, ctx: SlashCommandContext): void {

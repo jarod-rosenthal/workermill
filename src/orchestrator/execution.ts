@@ -746,6 +746,8 @@ export interface ExecuteStoriesParams {
   abortSignal?: AbortSignal;
   liveViewServer?: import("../live-view-server.js").LiveViewServer;
   ticketOps: { postComment(comment: string): Promise<void> } | null;
+  /** Run manifest ID — used for memory provenance tracking */
+  runId?: string;
 
   // Callbacks from the orchestrator
   waitWhilePaused: () => Promise<boolean>;
@@ -842,6 +844,11 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
     output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m, ${formatContext(getModelContext(modelName, contextLength))} context)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
+
+    // Set provenance context for memory tool — so agent-created memories track their origin
+    if (params.runId) process.env.WM_RUN_ID = params.runId;
+    process.env.WM_STORY_ID = story.id;
+    process.env.WM_PERSONA = story.persona;
 
     // Emit live view events
     if (liveViewServer) {

@@ -169,8 +169,101 @@ function getDirSize(dirPath: string): number {
 }
 
 /** Build a YAML frontmatter block for memory provenance tracking. */
-export function buildProvenanceHeader(source: "agent" | "auto-extracted" | "manual", confidence: "high" | "medium" | "low" = "medium"): string {
-  return `---\nsource: ${source}\nconfidence: ${confidence}\ncreated: ${new Date().toISOString()}\n---\n\n`;
+export function buildProvenanceHeader(
+  source: "agent" | "auto-extracted" | "manual",
+  confidence: "high" | "medium" | "low" = "medium",
+  context?: { runId?: string; storyId?: string; persona?: string },
+): string {
+  const lines = [
+    "---",
+    `source: ${source}`,
+    `confidence: ${confidence}`,
+    `created: ${new Date().toISOString()}`,
+  ];
+  if (context?.runId) lines.push(`run_id: ${context.runId}`);
+  if (context?.storyId) lines.push(`story_id: ${context.storyId}`);
+  if (context?.persona) lines.push(`persona: ${context.persona}`);
+  lines.push("---", "", "");
+  return lines.join("\n");
+}
+
+/** Parse provenance frontmatter from a memory file's content. */
+export function parseProvenance(content: string): {
+  source?: string;
+  confidence?: string;
+  created?: string;
+  runId?: string;
+  storyId?: string;
+  persona?: string;
+} | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return null;
+  const fields: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const [key, ...rest] = line.split(": ");
+    if (key && rest.length > 0) fields[key.trim()] = rest.join(": ").trim();
+  }
+  return {
+    source: fields.source,
+    confidence: fields.confidence,
+    created: fields.created,
+    runId: fields.run_id,
+    storyId: fields.story_id,
+    persona: fields.persona,
+  };
+}
+
+/** List all memory files with their provenance metadata. */
+export function listMemoriesWithProvenance(cwd?: string): Array<{
+  file: string;
+  source?: string;
+  confidence?: string;
+  created?: string;
+  runId?: string;
+  persona?: string;
+  preview: string;
+}> {
+  const dir = getMemoriesDir(cwd);
+  if (!fs.existsSync(dir)) return [];
+  const results: Array<{
+    file: string;
+    source?: string;
+    confidence?: string;
+    created?: string;
+    runId?: string;
+    persona?: string;
+    preview: string;
+  }> = [];
+
+  function walk(d: string, prefix: string): void {
+    for (const entry of fs.readdirSync(d)) {
+      if (entry.startsWith(".")) continue;
+      const full = path.join(d, entry);
+      const rel = prefix ? `${prefix}/${entry}` : entry;
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) {
+        walk(full, rel);
+      } else {
+        const content = fs.readFileSync(full, "utf-8");
+        const prov = parseProvenance(content);
+        // Preview: first non-frontmatter, non-empty line
+        const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
+        const preview = body.split("\n").find(l => l.trim() && !l.startsWith("#"))?.trim().slice(0, 80) || "";
+        results.push({
+          file: rel,
+          source: prov?.source,
+          confidence: prov?.confidence,
+          created: prov?.created,
+          runId: prov?.runId,
+          persona: prov?.persona,
+          preview,
+        });
+      }
+    }
+  }
+
+  walk(dir, "");
+  return results;
 }
 
 function handleCreate(
@@ -187,7 +280,12 @@ function handleCreate(
   const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   // Add provenance header if the content doesn't already have frontmatter
-  const content = fileText.startsWith("---\n") ? fileText : buildProvenanceHeader("agent") + fileText;
+  const provenanceContext = {
+    runId: process.env.WM_RUN_ID,
+    storyId: process.env.WM_STORY_ID,
+    persona: process.env.WM_PERSONA,
+  };
+  const content = fileText.startsWith("---\n") ? fileText : buildProvenanceHeader("agent", "medium", provenanceContext) + fileText;
   fs.writeFileSync(resolved, content, "utf-8");
   return `File created successfully at: ${virtualPath}`;
 }

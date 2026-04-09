@@ -289,11 +289,9 @@ export async function runOrchestration(
       return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
 
-    const qaParticipation = config.qa?.participation ?? "auto";
+    const qaParticipation = config.qa?.participation ?? "default";
     const plannerStories = _applyQaParticipation(planResult.stories, qaParticipation);
-    if (qaParticipation === "off" && plannerStories.length !== planResult.stories.length) {
-      output.log("planner", "QA participation is off — removed dedicated qa_engineer stories from this run.");
-    } else if (qaParticipation === "always" && plannerStories.length > planResult.stories.length) {
+    if (qaParticipation === "always" && plannerStories.length > planResult.stories.length) {
       output.log("planner", "QA participation is always — added a dedicated qa_engineer validation story.");
     }
 
@@ -489,6 +487,7 @@ export async function runOrchestration(
     abortSignal,
     liveViewServer,
     ticketOps,
+    runId: manifest.id,
     waitWhilePaused,
     pauseForBalanceIssue,
     logRetryHint,

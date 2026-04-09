@@ -1303,6 +1303,43 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         }
       }
 
+      // --- File ownership enforcement ---
+      // Compare files touched by this story against its declared scope.
+      // Warn on small adjacent edits, log on large drift.
+      {
+        const touchedFiles = storyActions
+          .filter(a => a.tool === "created" || a.tool === "edited")
+          .map(a => a.detail);
+        if (touchedFiles.length > 0 && (story.targetFiles?.length || story.requiredFiles?.length)) {
+          const allowedFiles = new Set([
+            ...(story.targetFiles || []),
+            ...(story.requiredFiles || []),
+            ...(story.requiredTests || []),
+          ]);
+          // Normalize to relative paths for comparison
+          const normalize = (f: string) => {
+            const rel = path.isAbsolute(f) ? path.relative(workingDir, f) : f;
+            return rel.replace(/\\/g, "/");
+          };
+          const allowedNormalized = new Set([...allowedFiles].map(normalize));
+          const outOfScope = touchedFiles
+            .map(normalize)
+            .filter(f => !allowedNormalized.has(f));
+
+          if (outOfScope.length > 0) {
+            const ratio = outOfScope.length / touchedFiles.length;
+            if (ratio > 0.5 && outOfScope.length > 3) {
+              // Large drift — log as warning
+              output.log("system", `⚠ Story ${i + 1} edited ${outOfScope.length} file(s) outside its declared scope: ${outOfScope.slice(0, 5).join(", ")}${outOfScope.length > 5 ? ` +${outOfScope.length - 5} more` : ""}`);
+              logger.warn("Story file ownership drift", { story: story.id, outOfScope, ratio: Math.round(ratio * 100) });
+            } else if (outOfScope.length > 0) {
+              // Small adjacent edits — info-level
+              logger.info("Story edited files outside declared scope", { story: story.id, outOfScope });
+            }
+          }
+        }
+      }
+
       // --- Diagnostics enforcement ---
       const diagResult = await runDiagnosticsOnTouchedFiles(
         [...context.filesCreated, ...context.filesModified],

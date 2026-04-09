@@ -10,6 +10,21 @@ export const description =
   "Interact with issue trackers (GitHub Issues, Jira, Linear). " +
   "Fetch ticket details, post comments, or transition ticket status.";
 
+function formatTicketList(
+  items: Array<{ key: string; title: string; status: string; labels?: string[] }>,
+  ticketSystem: string,
+): string {
+  if (items.length === 0) return `No ${ticketSystem} tickets found.`;
+  return items
+    .map((item) => {
+      const labels = item.labels && item.labels.length > 0
+        ? ` — labels: ${item.labels.join(", ")}`
+        : "";
+      return `- ${item.key} [${item.status}] ${item.title}${labels}`;
+    })
+    .join("\n");
+}
+
 export async function execute(input: {
   action: "fetch" | "comment" | "transition" | "list";
   ticketKey?: string;
@@ -22,7 +37,11 @@ export async function execute(input: {
     const { loadConfig } = await import("../../config.js");
 
     const config = loadConfig();
-    const ticketSystem = config?.ticketSystem || "github";
+    const rawTicketSystem = config?.ticketSystem || "github";
+    if (rawTicketSystem === "none") {
+      return { success: false, error: "Ticket integration is disabled. Configure GitHub, Jira, or Linear in /settings." };
+    }
+    const ticketSystem = rawTicketSystem as "github" | "jira" | "linear";
 
     // Ensure credentials are available
     if (ticketSystem === "jira" && config?.jira) {
@@ -87,20 +106,11 @@ export async function execute(input: {
       }
 
       case "list": {
-        if (ticketSystem !== "github") {
-          return { success: false, error: `list is only supported for GitHub Issues. Current system: ${ticketSystem}` };
+        if (!TicketOps.isSystemAvailable(ticketSystem)) {
+          return { success: false, error: `Cannot connect to ${ticketSystem} — credentials not found.` };
         }
-        try {
-          const { execSync } = await import("child_process");
-          const query = input.query || "";
-          const cmd = query
-            ? `gh issue list --search "${query.replace(/"/g, '\\"')}" --limit 10 --json number,title,state,labels`
-            : `gh issue list --limit 10 --json number,title,state,labels`;
-          const output = execSync(cmd, { encoding: "utf-8", stdio: "pipe", timeout: 15_000 }).trim();
-          return { success: true, content: output };
-        } catch (err) {
-          return { success: false, error: `Failed to list issues: ${err instanceof Error ? err.message : String(err)}` };
-        }
+        const tickets = await TicketOps.listTickets(ticketSystem, input.query, 10);
+        return { success: true, content: formatTicketList(tickets, ticketSystem) };
       }
 
       default:

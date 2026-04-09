@@ -142,12 +142,17 @@ export async function runQualityGates(args: {
         passed.map(r => `- ✓ ${r.name}`).join("\n");
     }
 
-    if (requiredFailures.length > 0) {
-      for (const failure of requiredFailures) {
+    // Strict mode: ALL gate failures are blocking, not just required ones
+    const strictMode = config.review?.strict === true;
+    const blockingFailures = strictMode ? failed : requiredFailures;
+
+    if (blockingFailures.length > 0) {
+      for (const failure of blockingFailures) {
         emitFailureCode(output, "required_command_failed", `${failure.name} failed`);
       }
-      output.coordinatorLog(`Definition-of-done check failed: ${requiredFailures.length} required command${requiredFailures.length !== 1 ? "s" : ""} failed.`);
-      logger.info("Blocking required command failures", { failures: requiredFailures.map((result) => result.name) });
+      const label = strictMode ? "Strict mode" : "Definition-of-done check";
+      output.coordinatorLog(`${label} failed: ${blockingFailures.length} gate${blockingFailures.length !== 1 ? "s" : ""} failed.`);
+      logger.info("Blocking gate failures", { strict: strictMode, failures: blockingFailures.map((result) => result.name) });
       return { gateResultsSection, earlyExit: true };
     }
   }

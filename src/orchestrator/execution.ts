@@ -13,6 +13,7 @@ import { createToolDefinitions } from "../engine/tools/index.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { getProviderForPersona } from "../config.js";
+import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
 import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { isGitRepo, commitStoryChanges } from "../git-ops.js";
@@ -834,8 +835,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
     // Set API key
     if (apiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-      const envVar = envMap[provider];
+      const envVar = getApiKeyEnvVar(provider);
       if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
     }
 
@@ -1379,6 +1379,18 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         }
 
         if (ownership.severity === "warn") {
+          if (config.review?.strict) {
+            // Strict mode: any out-of-scope edit is blocking
+            const detail = `[strict] Story ${i + 1} edited ${ownership.outOfScope.length} file(s) outside scope: ${ownership.outOfScope.join(", ")}`;
+            output.log("system", `⚠ ${detail}`);
+            if (revision < 2) {
+              revisionFeedback = `\n\n## Scope Violation (strict mode)\nOut-of-scope edits:\n${ownership.outOfScope.map((file) => `- ${file}`).join("\n")}\n\nStrict mode requires all edits to be within declared scope. Fix and retry.`;
+              continue;
+            }
+            emitFailureCode(output, "out_of_scope_edit", detail);
+            failedStories.add(story.id);
+            break;
+          }
           logger.info("Story edited files outside declared scope", { story: story.id, outOfScope: ownership.outOfScope });
         }
       }

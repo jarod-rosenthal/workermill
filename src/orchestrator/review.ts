@@ -18,6 +18,7 @@ import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
 import { getProviderForPersona, loadConfig, saveConfig } from "../config.js";
+import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import { getDiffForReview, getDiffSinceCommit, getHeadHash, captureStoryPriorWork, commitRevisionChanges } from "../git-ops.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { withConcurrencyControl } from "../tool-concurrency.js";
@@ -316,8 +317,7 @@ export async function runStandaloneReview(
 
   // Set API key
   if (revApiKey) {
-    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-    const envVar = envMap[revProvider];
+    const envVar = getApiKeyEnvVar(revProvider);
     const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
     if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
   }
@@ -673,8 +673,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     );
 
     if (revApiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-      const envVar = envMap[revProvider];
+      const envVar = getApiKeyEnvVar(revProvider);
       const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
@@ -1083,6 +1082,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const revisionsLeft = maxRevisions - (reviewRound - 1);
         if (revisionsLeft <= 0) {
           emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions} revision attempt(s).`);
+          if (config.review?.strict) {
+            output.coordinatorLog(`[strict] Max revisions reached without approval — build failed.`);
+            output.error("Strict mode requires review approval. The build cannot proceed without it.");
+            return { finalReviewText: reviewText, aborted: true };
+          }
           output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
           break;
         }
@@ -1176,8 +1180,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             config, storyPersona.provider || story.persona
           );
           if (sProvider && sApiKey) {
-              const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-              const envVar = envMap[sProvider];
+              const envVar = getApiKeyEnvVar(sProvider);
               if (envVar && !process.env[envVar]) {
                 const key = sApiKey.startsWith("{env:") ? process.env[sApiKey.slice(5, -1)] : sApiKey;
                 if (key) process.env[envVar] = key;

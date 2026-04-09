@@ -6,6 +6,7 @@ import {
   loadConfig,
   saveConfig,
 } from "../../config.js";
+import { getApiKeyEnvVar } from "../../provider-capabilities.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 
 export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): void {
@@ -67,6 +68,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
         `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
         `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
+        `| Strict mode | ${config.review?.strict ?? false} | \`/settings review.strict <true/false>\` |\n` +
         `| Program max issues | ${maxIssues} | \`/settings program.maxIssues <n>\` |\n` +
         `| Program max auto-retries | ${maxAutoRetries} | \`/settings program.maxAutoRetries <n>\` |\n` +
         `| Program gate mode | ${gateMode} | \`/settings program.gateMode <required/advisory>\` |\n` +
@@ -128,6 +130,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       "review.threshold": "review.threshold",
       "review.autorevise": "review.autoRevise",
       "review.autobranch": "review.autoBranch",
+      "review.strict": "review.strict",
       "qa.participation": "qa.participation",
       "program.maxissues": "program.maxIssues",
       "program.maxautoretries": "program.maxAutoRetries",
@@ -195,6 +198,10 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       }
       case "review.autoBranch": {
         config.review = { ...config.review, autoBranch: boolVal(value) };
+        break;
+      }
+      case "review.strict": {
+        config.review = { ...config.review, strict: boolVal(value) };
         break;
       }
       case "qa.participation": {
@@ -331,17 +338,8 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
           settingApplied = false;
           break;
         }
-        const envKeyMap: Record<string, string> = {
-          anthropic: "ANTHROPIC_API_KEY",
-          openai: "OPENAI_API_KEY",
-          google: "GOOGLE_GENERATIVE_AI_API_KEY",
-          xai: "XAI_API_KEY",
-          groq: "GROQ_API_KEY",
-          deepseek: "DEEPSEEK_API_KEY",
-          mistral: "MISTRAL_API_KEY",
-        };
-        const needsKey = !!envKeyMap[provider];
-        const envVar = envKeyMap[provider];
+        const envVar = getApiKeyEnvVar(provider);
+        const needsKey = !!envVar;
         const hasConfigKey = !!config.providers[provider]?.apiKey;
         const hasEnvKey = !!(envVar && process.env[envVar]);
         if (needsKey && !hasConfigKey && !hasEnvKey) {
@@ -380,16 +378,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
           config.providers[keyProvider].apiKey = apiKeyValue;
         }
         // Also set in process.env so it's immediately usable
-        const envNames: Record<string, string> = {
-          anthropic: "ANTHROPIC_API_KEY",
-          openai: "OPENAI_API_KEY",
-          google: "GOOGLE_GENERATIVE_AI_API_KEY",
-          xai: "XAI_API_KEY",
-          groq: "GROQ_API_KEY",
-          deepseek: "DEEPSEEK_API_KEY",
-          mistral: "MISTRAL_API_KEY",
-        };
-        const envName = envNames[keyProvider];
+        const envName = getApiKeyEnvVar(keyProvider);
         if (envName) {
           process.env[envName] = apiKeyValue;
         }
@@ -401,7 +390,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         break;
     }
 
-    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
+    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "review.strict", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
       saveConfig(config);
       ctx.addSystemMessage(`**Updated** \`${key}\` \u2192 \`${value}\` (saved to ~/.workermill/cli.json)`);
       if (key === "route") {

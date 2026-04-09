@@ -81,6 +81,7 @@ function addSharedOptions(cmd: Command): Command {
     .option("--model <model>", "Override model")
     .option("--trust", "Skip all tool permission prompts")
     .option("--auto-revise", "Auto-approve revisions during /build reviews")
+    .option("--strict", "Strict mode — zero gate failures, require review approval, block scope drift")
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
@@ -120,6 +121,9 @@ async function loadCliConfig(options: Record<string, unknown>) {
   }
   if (options.autoRevise) {
     config.review = { ...config.review, autoRevise: true };
+  }
+  if (options.strict) {
+    config.review = { ...config.review, strict: true };
   }
   if (options.liveView) {
     config.liveView = true;

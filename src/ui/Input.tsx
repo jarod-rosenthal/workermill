@@ -487,7 +487,7 @@ export function Input({
       }
 
       // Backspace: delete character before cursor
-      if (key.backspace || key.delete) {
+      if (key.backspace) {
         const currentValue = valueRef.current;
         const currentCursorPos = cursorPosRef.current;
         if (currentCursorPos > 0) {

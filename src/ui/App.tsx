@@ -261,7 +261,7 @@ function OrchestratorPrompt({ request }: {
       setTimeout(() => request.resolve(request.suggestion), 100);
       return;
     }
-    if (key.backspace || key.delete) {
+    if (key.backspace) {
       setValue(v => v.slice(0, -1));
       return;
     }

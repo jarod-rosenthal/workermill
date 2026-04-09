@@ -22,7 +22,6 @@ export default defineConfig({
     "ink",
     "react",
     "react/jsx-runtime",
-    "ink-text-input",
     // Node.js builtins
     "readline",
     "fs",

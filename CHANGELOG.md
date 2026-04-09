@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Strict mode for `/build`** — `--strict` flag or `review.strict: true` config. All gate failures block (not just required ones), review approval required, out-of-scope file edits are blocking. For high-trust workflows.
+- **Recovery mode** — CLI detects interrupted builds on startup and shows guided recovery: branch status, story progress, remaining work, options to `/retry`, `/undo`, or continue.
+- **Memory provenance** — memory files created by the `memory` tool now include YAML frontmatter with `source` (agent/auto-extracted/manual), `confidence` (high/medium/low), and `created` timestamp. Auto-extracted learnings are timestamped per entry.
+- **Docs consistency tests** — 7 automated tests verify: persona count matches README, tool count matches README, documented CLI subcommands exist in code, config fields in docs match Zod schema, HELP_TEXT commands have case handlers.
 - **`wm runs` commands** — inspect past `/build` runs: `wm runs list` (recent runs with outcome, cost, branch), `wm runs show <id>` (full details with stories, gates, reviews, tokens), `wm runs last` (most recent). All support `--json`.
 - **`wm model` command** — set or show the default model without entering a session. `wm model ollama/qwen3-coder:30b` persists to config. `wm model` shows current default and routing.
 - **`ticket` tool** — agents can fetch tickets, post comments, transition status, and list issues directly through GitHub Issues, Jira, or Linear. Uses configured `ticketSystem`. Added to all worker personas.

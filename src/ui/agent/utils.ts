@@ -128,6 +128,8 @@ export type PermissionMode = typeof PERMISSION_MODES[number] | "dontAsk";
 // API key helpers
 // ---------------------------------------------------------------------------
 
+import { getApiKeyEnvVar } from "../../provider-capabilities.js";
+
 export function resolveApiKey(apiKey?: string): string | undefined {
   if (!apiKey) return undefined;
   return apiKey.startsWith("{env:")
@@ -139,16 +141,7 @@ export function setProviderApiKeyEnv(provider: string, apiKey?: string): string 
   const resolvedKey = resolveApiKey(apiKey);
   if (!resolvedKey) return undefined;
 
-  const envMap: Record<string, string> = {
-    anthropic: "ANTHROPIC_API_KEY",
-    openai: "OPENAI_API_KEY",
-    google: "GOOGLE_GENERATIVE_AI_API_KEY",
-    xai: "XAI_API_KEY",
-    groq: "GROQ_API_KEY",
-    deepseek: "DEEPSEEK_API_KEY",
-    mistral: "MISTRAL_API_KEY",
-  };
-  const envVar = envMap[provider] || "OPENAI_API_KEY";
+  const envVar = getApiKeyEnvVar(provider) || "OPENAI_API_KEY";
   if (envVar) {
     process.env[envVar] = resolvedKey;
   }

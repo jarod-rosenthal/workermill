@@ -13,6 +13,7 @@ import type { ToolCallInfo } from "./types.js";
 import { findModelInfo } from "../provider-registry.js";
 import { resolveConfig, getProviderForPersona } from "../config.js";
 import { getProjectHistoryPath } from "../project-data.js";
+import { providerNeedsContextOverride } from "../provider-capabilities.js";
 
 /**
  * Resolve context window for a model.
@@ -21,7 +22,7 @@ import { getProjectHistoryPath } from "../project-data.js";
  * Fallback: 128k.
  */
 function resolveContextWindow(provider: string, model: string, configContextLength?: number): number {
-  if (provider === "ollama" || provider === "lmstudio") {
+  if (providerNeedsContextOverride(provider)) {
     return configContextLength || 128_000;
   }
   const info = findModelInfo(model);

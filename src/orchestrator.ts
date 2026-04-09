@@ -15,7 +15,7 @@ import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
 import { resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
-import { isLocalProvider } from "./provider-capabilities.js";
+import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -166,16 +166,13 @@ export async function runOrchestration(
 
   // Ensure local models are loaded with the correct context length
   const defaultProvider = getProviderForPersona(config);
-  if (defaultProvider.provider === "ollama") {
-    const host = defaultProvider.host || config.providers[defaultProvider.provider]?.host || "http://localhost:11434";
+  if (providerNeedsContextOverride(defaultProvider.provider)) {
     const ctx = config.providers[defaultProvider.provider]?.contextLength;
-    if (ctx) {
+    if (ctx && defaultProvider.provider === "ollama") {
+      const host = defaultProvider.host || config.providers[defaultProvider.provider]?.host || "http://localhost:11434";
       await ensureOllamaContext(host, defaultProvider.model, ctx);
-    }
-  } else if (defaultProvider.provider === "lmstudio") {
-    const host = defaultProvider.host || config.providers[defaultProvider.provider]?.host || "http://localhost:1234/v1";
-    const ctx = config.providers[defaultProvider.provider]?.contextLength;
-    if (ctx) {
+    } else if (ctx && defaultProvider.provider === "lmstudio") {
+      const host = defaultProvider.host || config.providers[defaultProvider.provider]?.host || "http://localhost:1234/v1";
       await ensureLmStudioContext(host, defaultProvider.model, ctx);
     }
   }

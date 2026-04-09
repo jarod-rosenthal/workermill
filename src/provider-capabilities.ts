@@ -153,12 +153,19 @@ const DEFAULT_CAPS: ProviderCapabilities = {
 };
 
 /**
+ * Normalize aliased providers to their base provider name
+ * (e.g. "openai_tech_lead" → "openai").
+ */
+export function getBaseProviderName(provider: string): string {
+  return provider.replace(/_(?:planner|tech_lead|reviewer|worker)$/, "");
+}
+
+/**
  * Get capabilities for a provider. Returns defaults for unknown providers.
  * Strip role suffixes (e.g. "anthropic_planner" → "anthropic").
  */
 export function getProviderCapabilities(provider: string): ProviderCapabilities {
-  // Strip role suffix for aliased providers (e.g. "openai_tech_lead" → "openai")
-  const baseProvider = provider.replace(/_(?:planner|tech_lead|reviewer|worker)$/, "");
+  const baseProvider = getBaseProviderName(provider);
   return PROVIDER_CAPS[baseProvider] || DEFAULT_CAPS;
 }
 
@@ -167,7 +174,27 @@ export function isLocalProvider(provider: string): boolean {
   return getProviderCapabilities(provider).isLocal;
 }
 
+/** Check if a provider needs an explicit context window override. */
+export function providerNeedsContextOverride(provider: string): boolean {
+  return getProviderCapabilities(provider).needsContextOverride;
+}
+
 /** Get the API key env var for a provider, or null if not applicable. */
 export function getApiKeyEnvVar(provider: string): string | null {
   return getProviderCapabilities(provider).apiKeyEnvVar;
+}
+
+/** Check if a provider supports vision input. */
+export function providerSupportsVision(provider: string): boolean {
+  return getProviderCapabilities(provider).supportsVision;
+}
+
+/** Check if a provider supports streaming responses. */
+export function providerSupportsStreaming(provider: string): boolean {
+  return getProviderCapabilities(provider).supportsStreaming;
+}
+
+/** Check if a provider supports reliable tool calling. */
+export function providerHasReliableToolCalling(provider: string): boolean {
+  return getProviderCapabilities(provider).reliableToolCalling;
 }

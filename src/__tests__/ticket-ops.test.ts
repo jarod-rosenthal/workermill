@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TicketOps, extractGithubIssueNumber } from "../ticket-ops.js";
 
 // --- detectTicketRef (inline helper, test the pattern matching) ---
@@ -75,6 +75,16 @@ describe("extractGithubIssueNumber", () => {
 });
 
 describe("TicketOps", () => {
+  beforeEach(() => {
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_REPO;
+    delete process.env.JIRA_BASE_URL;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+    delete process.env.LINEAR_API_KEY;
+    vi.unstubAllGlobals();
+  });
+
   it("is not available without credentials", () => {
     const ops = new TicketOps("#42", "github");
     expect(ops.isAvailable()).toBe(false);
@@ -117,5 +127,69 @@ describe("TicketOps", () => {
     const ops = new TicketOps("PROJ-123");
     // Can't directly check ticketSystem, but we can verify it doesn't crash
     expect(ops.isAvailable()).toBe(false);
+  });
+
+  it("lists github issues through the API", async () => {
+    process.env.GITHUB_TOKEN = "gh-token";
+    process.env.GITHUB_REPO = "jarod-rosenthal/workermill";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      items: [
+        { number: 42, title: "Fix provider routing", state: "open", labels: [{ name: "bug" }] },
+      ],
+    }), { status: 200 })));
+
+    const items = await TicketOps.listTickets("github", "routing", 10);
+
+    expect(items).toEqual([
+      { key: "#42", title: "Fix provider routing", status: "open", labels: ["bug"] },
+    ]);
+  });
+
+  it("lists jira issues through the REST API", async () => {
+    process.env.JIRA_BASE_URL = "https://example.atlassian.net";
+    process.env.JIRA_EMAIL = "test@example.com";
+    process.env.JIRA_API_TOKEN = "jira-token";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      issues: [
+        {
+          key: "PROJ-123",
+          fields: {
+            summary: "Add runs subcommand",
+            status: { name: "In Progress" },
+            labels: ["enhancement"],
+          },
+        },
+      ],
+    }), { status: 200 })));
+
+    const items = await TicketOps.listTickets("jira", "runs", 10);
+
+    expect(items).toEqual([
+      { key: "PROJ-123", title: "Add runs subcommand", status: "In Progress", labels: ["enhancement"] },
+    ]);
+  });
+
+  it("lists linear issues through GraphQL", async () => {
+    process.env.LINEAR_API_KEY = "linear-token";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        issues: {
+          nodes: [
+            {
+              identifier: "TEAM-42",
+              title: "Unify memory backend",
+              state: { name: "Backlog" },
+              labels: { nodes: [{ name: "memory" }] },
+            },
+          ],
+        },
+      },
+    }), { status: 200 })));
+
+    const items = await TicketOps.listTickets("linear", "memory", 10);
+
+    expect(items).toEqual([
+      { key: "TEAM-42", title: "Unify memory backend", status: "Backlog", labels: ["memory"] },
+    ]);
   });
 });

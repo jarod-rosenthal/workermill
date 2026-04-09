@@ -12,6 +12,13 @@ import * as logger from "./logger.js";
 
 type TicketSystem = "jira" | "linear" | "github" | "internal";
 
+export interface TicketSummary {
+  key: string;
+  title: string;
+  status: string;
+  labels?: string[];
+}
+
 /** Parse a Linear GraphQL response, throwing on GraphQL-level errors (which arrive with HTTP 200). */
 function parseLinearResponse<T>(json: unknown): T {
   const res = json as { data?: T; errors?: Array<{ message: string; type?: string }> };
@@ -152,6 +159,51 @@ export class TicketOps {
   }
 
   /**
+   * Check if credentials exist for a ticket system without requiring a specific ticket key.
+   */
+  static isSystemAvailable(ticketSystem: TicketSystem): boolean {
+    switch (ticketSystem) {
+      case "internal":
+        return !!(
+          process.env.API_BASE_URL &&
+          process.env.TASK_ID &&
+          process.env.ORG_API_KEY
+        );
+      case "linear":
+        return !!process.env.LINEAR_API_KEY;
+      case "github":
+        return !!(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO);
+      case "jira":
+      default:
+        return !!(
+          process.env.JIRA_BASE_URL &&
+          process.env.JIRA_EMAIL &&
+          process.env.JIRA_API_TOKEN
+        );
+    }
+  }
+
+  /**
+   * List/search tickets for the configured tracker.
+   */
+  static async listTickets(
+    ticketSystem: TicketSystem,
+    query?: string,
+    limit = 10,
+  ): Promise<TicketSummary[]> {
+    switch (ticketSystem) {
+      case "github":
+        return await this.listGithubIssues(query, limit);
+      case "jira":
+        return await this.listJiraIssues(query, limit);
+      case "linear":
+        return await this.listLinearIssues(query, limit);
+      default:
+        throw new Error(`list is not supported for ticket system: ${ticketSystem}`);
+    }
+  }
+
+  /**
    * Fetch the ticket's title, body, and labels from the configured ticket system.
    * Returns null if credentials are missing or the fetch fails.
    */
@@ -230,6 +282,171 @@ export class TicketOps {
     return { title: issue.title, body: issue.description || "", labels: issue.labels?.nodes?.map((l) => l.name) };
   }
 
+  private static githubHeaders() {
+    return {
+      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
+      "User-Agent": "WorkerMill-AI-Worker",
+    };
+  }
+
+  private static jiraAuth(): { Authorization: string } {
+    const email = process.env.JIRA_EMAIL!;
+    const token = process.env.JIRA_API_TOKEN!;
+    return {
+      Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`,
+    };
+  }
+
+  private static async listGithubIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
+    const repo = process.env.GITHUB_REPO!;
+    const trimmed = query?.trim();
+    let res: Response;
+    if (trimmed) {
+      const q = encodeURIComponent(`repo:${repo} is:issue ${trimmed}`);
+      res = await fetch(`https://api.github.com/search/issues?q=${q}&per_page=${limit}`, {
+        headers: this.githubHeaders(),
+      });
+      if (res.status === 401) throw new Error("GitHub authentication failed while listing issues");
+      if (!res.ok) throw new Error(`GitHub issue search failed — ${res.status} ${res.statusText}`);
+      const data = await res.json() as {
+        items?: Array<{ number: number; title: string; state: string; labels?: Array<{ name: string }> }>;
+      };
+      return (data.items || []).map((issue) => ({
+        key: `#${issue.number}`,
+        title: issue.title,
+        status: issue.state,
+        labels: issue.labels?.map((label) => label.name),
+      }));
+    }
+
+    res = await fetch(
+      `https://api.github.com/repos/${repo}/issues?state=all&sort=updated&direction=desc&per_page=${limit}`,
+      { headers: this.githubHeaders() },
+    );
+    if (res.status === 401) throw new Error("GitHub authentication failed while listing issues");
+    if (!res.ok) throw new Error(`GitHub issue list failed — ${res.status} ${res.statusText}`);
+    const data = await res.json() as Array<{
+      number: number;
+      title: string;
+      state: string;
+      pull_request?: unknown;
+      labels?: Array<{ name: string }>;
+    }>;
+    return data
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        key: `#${issue.number}`,
+        title: issue.title,
+        status: issue.state,
+        labels: issue.labels?.map((label) => label.name),
+      }));
+  }
+
+  private static async listJiraIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
+    const base = process.env.JIRA_BASE_URL!;
+    const headers = {
+      ...this.jiraAuth(),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
+    const trimmed = query?.trim();
+    const escaped = trimmed?.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const jql = escaped ? `text ~ "${escaped}" ORDER BY updated DESC` : "ORDER BY updated DESC";
+    const res = await fetch(`${base}/rest/api/3/search`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jql,
+        maxResults: limit,
+        fields: ["summary", "status", "labels"],
+      }),
+    });
+    if (res.status === 401) throw new Error("Jira authentication failed while listing issues");
+    if (!res.ok) throw new Error(`Jira issue search failed — ${res.status} ${res.statusText}`);
+    const data = await res.json() as {
+      issues?: Array<{
+        key: string;
+        fields: {
+          summary: string;
+          status?: { name: string };
+          labels?: string[];
+        };
+      }>;
+    };
+    return (data.issues || []).map((issue) => ({
+      key: issue.key,
+      title: issue.fields.summary,
+      status: issue.fields.status?.name || "unknown",
+      labels: issue.fields.labels || [],
+    }));
+  }
+
+  private static async listLinearIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
+    const headers = {
+      Authorization: process.env.LINEAR_API_KEY!,
+      "Content-Type": "application/json",
+    };
+    const trimmed = query?.trim();
+    const graphqlQuery = trimmed
+      ? `query SearchIssues($query: String!, $limit: Int!) {
+          issues(
+            first: $limit
+            filter: {
+              or: [
+                { identifier: { containsIgnoreCase: $query } }
+                { title: { containsIgnoreCase: $query } }
+                { description: { containsIgnoreCase: $query } }
+              ]
+            }
+          ) {
+            nodes {
+              identifier
+              title
+              state { name }
+              labels { nodes { name } }
+            }
+          }
+        }`
+      : `query RecentIssues($limit: Int!) {
+          issues(first: $limit) {
+            nodes {
+              identifier
+              title
+              state { name }
+              labels { nodes { name } }
+            }
+          }
+        }`;
+    const res = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: graphqlQuery,
+        variables: trimmed ? { query: trimmed, limit } : { limit },
+      }),
+    });
+    if (res.status === 401) throw new Error("Linear authentication failed while listing issues");
+    if (!res.ok) throw new Error(`Linear issue search failed — ${res.status} ${res.statusText}`);
+    const data = parseLinearResponse<{
+      issues?: {
+        nodes?: Array<{
+          identifier: string;
+          title: string;
+          state?: { name: string };
+          labels?: { nodes?: Array<{ name: string }> };
+        }>;
+      };
+    }>(await res.json());
+    return (data.issues?.nodes || []).map((issue) => ({
+      key: issue.identifier,
+      title: issue.title,
+      status: issue.state?.name || "unknown",
+      labels: issue.labels?.nodes?.map((label) => label.name) || [],
+    }));
+  }
+
   /**
    * Validate credentials for a ticket system without creating a TicketOps instance.
    * Returns null on success, or an error message string on failure.
@@ -280,11 +497,7 @@ export class TicketOps {
   // --- Jira ---
 
   private jiraAuth(): { Authorization: string } {
-    const email = process.env.JIRA_EMAIL!;
-    const token = process.env.JIRA_API_TOKEN!;
-    return {
-      Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`,
-    };
+    return TicketOps.jiraAuth();
   }
 
   private async transitionJira(statusName: string): Promise<void> {
@@ -371,12 +584,7 @@ export class TicketOps {
   // --- GitHub ---
 
   private githubHeaders() {
-    return {
-      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-      "Content-Type": "application/json",
-      Accept: "application/vnd.github+json",
-      "User-Agent": "WorkerMill-AI-Worker",
-    };
+    return TicketOps.githubHeaders();
   }
 
   private async transitionGithub(statusName: string): Promise<void> {

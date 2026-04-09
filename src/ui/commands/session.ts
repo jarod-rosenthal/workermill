@@ -12,7 +12,7 @@ import { listSessions, saveSession } from "../../session.js";
 import { loadConfig, saveConfig } from "../../config.js";
 import { getChangedFiles } from "../../checkpoints.js";
 import { findModelInfo } from "../../provider-registry.js";
-import { isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
+import { getApiKeyEnvVar, isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
 
@@ -70,20 +70,11 @@ export function handleModelCommand(arg: string, ctx: SlashCommandContext): void 
     }
 
     // Check if the provider needs an API key and whether we have one
-    const envKeyMap: Record<string, string> = {
-      anthropic: "ANTHROPIC_API_KEY",
-      openai: "OPENAI_API_KEY",
-      google: "GOOGLE_GENERATIVE_AI_API_KEY",
-      xai: "XAI_API_KEY",
-      groq: "GROQ_API_KEY",
-      deepseek: "DEEPSEEK_API_KEY",
-      mistral: "MISTRAL_API_KEY",
-    };
-    const needsKey = !!envKeyMap[newProvider];
+    const envVar = getApiKeyEnvVar(newProvider);
+    const needsKey = !!envVar;
     const modelConfig = loadConfig();
     const existingProviderConfig = modelConfig?.providers?.[newProvider];
     const hasConfigKey = !!existingProviderConfig?.apiKey;
-    const envVar = envKeyMap[newProvider];
     const hasEnvKey = !!(envVar && process.env[envVar]);
 
     if (needsKey && !hasConfigKey && !hasEnvKey) {

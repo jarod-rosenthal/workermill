@@ -2,13 +2,13 @@
  * Ticket tool — gives agents structured access to issue trackers.
  *
  * Supports GitHub Issues, Jira, and Linear through the existing TicketOps class.
- * Agents can fetch tickets, post comments, and transition status without
- * shelling out to gh/curl.
+ * Agents can fetch tickets, list/search issues, post comments, and transition
+ * status without shelling out to tracker-specific CLIs.
  */
 
 export const description =
   "Interact with issue trackers (GitHub Issues, Jira, Linear). " +
-  "Fetch ticket details, post comments, or transition ticket status.";
+  "Fetch ticket details, list/search tickets, post comments, or transition ticket status.";
 
 function formatTicketList(
   items: Array<{ key: string; title: string; status: string; labels?: string[] }>,

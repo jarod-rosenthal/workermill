@@ -9,6 +9,7 @@ import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { getProviderForPersona } from "../config.js";
 import type { CliConfig } from "../config.js";
+import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import * as logger from "../logger.js";
 import { getPrdDecompositionPhaseLabel } from "../prd-decomposition-phases.js";
 
@@ -39,8 +40,7 @@ export async function runSpecCheck(
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
-    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-    const envVar = envMap[provider];
+    const envVar = getApiKeyEnvVar(provider);
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
 
@@ -119,8 +119,7 @@ export async function classifyComplexity(
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
-    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-    const envVar = envMap[provider];
+    const envVar = getApiKeyEnvVar(provider);
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
 
@@ -217,8 +216,7 @@ export async function planStories(
 
   const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
   if (pProvider && pApiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-      const envVar = envMap[pProvider];
+      const envVar = getApiKeyEnvVar(pProvider);
       if (envVar && !process.env[envVar]) {
         const key = pApiKey.startsWith("{env:") ? process.env[pApiKey.slice(5, -1)] : pApiKey;
         if (key) process.env[envVar] = key;

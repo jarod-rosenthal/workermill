@@ -4,6 +4,7 @@ import fs from "fs";
 import { theme } from "./theme.js";
 import { listProviders, fetchLiveModels, fetchRemoteModels } from "../provider-registry.js";
 import { resolveConfig } from "../config.js";
+import { isLocalProvider } from "../provider-capabilities.js";
 
 const BUILTIN_COMMANDS = [
   { name: "/as", desc: "Run task as persona" },
@@ -206,7 +207,7 @@ export function Input({
 
     // Cloud models from merged registry
     for (const model of mergedStaticModels) {
-      if (model.provider === "ollama" || model.provider === "lmstudio") continue;
+      if (isLocalProvider(model.provider)) continue;
       choices.push({
         name: `/model ${model.provider}/${model.id}`,
         desc: model.displayName,

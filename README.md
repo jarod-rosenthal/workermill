@@ -420,7 +420,7 @@ WorkerMill gives its agents 23 tools — file operations, shell, search, git, we
 | `todo` | Track tasks within a session |
 | `verify` | Run quality gate commands |
 | `memory` | Persistent cross-session agent memory |
-| `ticket` | Fetch, comment, transition issues (GitHub/Jira/Linear) |
+| `ticket` | Fetch, list/search, comment, and transition issues (GitHub/Jira/Linear) |
 
 Plus any tools connected via [MCP servers](#mcp-support).
 

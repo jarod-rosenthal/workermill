@@ -7,6 +7,7 @@ import { xai, createXai } from "@ai-sdk/xai";
 import { openrouter, createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import type { AIProvider } from "./types.js";
+import { getApiKeyEnvVar } from "../provider-capabilities.js";
 
 /** Resolve localhost host for a local provider, using WSL gateway if in WSL. */
 function resolveLocalProviderHost(port: number): string {
@@ -204,13 +205,8 @@ export function createModel(
       };
       const compatHost = host || compatibleHosts[provider];
       if (compatHost) {
-        // Map provider to its env var for API key lookup
-        const envKeys: Record<string, string> = {
-          groq: "GROQ_API_KEY",
-          deepseek: "DEEPSEEK_API_KEY",
-          mistral: "MISTRAL_API_KEY",
-        };
-        const resolvedKey = apiKey || (envKeys[provider] ? process.env[envKeys[provider]] : undefined);
+        const envKey = getApiKeyEnvVar(provider);
+        const resolvedKey = apiKey || (envKey ? process.env[envKey] : undefined);
         const compat = createOpenAI({ baseURL: compatHost, ...(resolvedKey ? { apiKey: resolvedKey } : {}) });
         return compat.chat(modelName);
       }

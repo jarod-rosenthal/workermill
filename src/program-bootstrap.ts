@@ -6,6 +6,7 @@ import type { AIProvider } from "./engine/types.js";
 import { SYSTEM_PROMPT_WITH_STORIES } from "./prompts/prd-prompts.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+import { getApiKeyEnvVar } from "./provider-capabilities.js";
 import { extractGithubIssueNumber } from "./ticket-ops.js";
 
 export interface ProgramEpic {
@@ -381,8 +382,7 @@ export async function decomposeParentIssue(
   // Set API key in env — the AI SDK reads it from the environment variable,
   // not from the model constructor.
   if (apiKey) {
-    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
-    const envVar = envMap[provider] || "OPENAI_API_KEY";
+    const envVar = getApiKeyEnvVar(provider) || "OPENAI_API_KEY";
     if (envVar) process.env[envVar] = apiKey;
   }
 

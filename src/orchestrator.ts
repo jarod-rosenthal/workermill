@@ -13,6 +13,7 @@ import {
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
+import { resolveSandboxMode } from "./sandbox-mode.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -67,6 +68,19 @@ export async function runOrchestration(
     logger.warn("Ignoring invalid abort argument passed to runOrchestration", {
       type: typeof abortControllerOrSignal,
     });
+  }
+
+  // Upgrade path sandbox to OS sandbox for /build — workers run autonomous code
+  // from AI models, so process-level isolation is the right default. Falls back
+  // silently to path sandbox if the platform doesn't support it.
+  if (sandboxed === true) {
+    const resolution = resolveSandboxMode("os");
+    sandboxed = resolution.effective;
+    if (resolution.warning) {
+      logger.info("OS sandbox fallback in /build", { warning: resolution.warning });
+    } else if (sandboxed === "os") {
+      logger.info("OS sandbox enabled for /build");
+    }
   }
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set

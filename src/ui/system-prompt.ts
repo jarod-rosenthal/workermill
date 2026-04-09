@@ -107,15 +107,15 @@ You have a \`memory\` tool for persistent storage across conversations. Use it t
 **Legacy markers (still supported):**
 - \`::learning::\` — codebase discovery
 - \`::remember::\` — anything worth persisting
-These are extracted automatically and saved to the flat memory system. The memory tool gives you richer, file-based organization.`;
+These are extracted automatically and saved into the structured project memory files.`;
 
   const projectInstructions = formatProjectInstructions(workingDir);
   let prompt = base + projectInstructions;
 
-  // Migrate old learnings on first load
-  migrateOldLearnings();
+  // Migrate old learnings on first load for this project only.
+  migrateOldLearnings(workingDir);
 
-  const memories = loadMemories();
+  const memories = loadMemories(workingDir);
   prompt += formatMemoriesForPrompt(memories);
 
   // Add MCP tool awareness if any MCP servers are active

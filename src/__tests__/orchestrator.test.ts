@@ -198,6 +198,7 @@ import {
 } from "../orchestrator.ts";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
+import { addMemory, extractMemoryMarkers } from "../memory.js";
 
 // ---- Helpers ----
 
@@ -471,6 +472,31 @@ describe("orchestrator", () => {
       await expect(
         runOrchestration(config, "Add a health check endpoint", true, false, output)
       ).resolves.not.toThrow();
+    });
+
+    it("saves high-confidence explicit memory markers for the current project", async () => {
+      const cwd = createTempGitRepo();
+      const oldCwd = process.cwd();
+      process.chdir(cwd);
+      vi.mocked(extractMemoryMarkers).mockReturnValueOnce([
+        { type: "learning", content: "Use Drizzle migration files under db/migrations" },
+      ]);
+
+      try {
+        const config = { ...createTestConfig(), review: { enabled: false } };
+        const output = createMockOutput();
+
+        await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+        expect(addMemory).toHaveBeenCalledWith(
+          "learning",
+          "Use Drizzle migration files under db/migrations",
+          cwd,
+        );
+      } finally {
+        process.chdir(oldCwd);
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
     });
 
     it("blocks before review when a required command fails", async () => {

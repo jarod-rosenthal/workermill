@@ -9,8 +9,13 @@ export function isRateLimitError(err: unknown): { retryAfterMs: number } | null 
   const message = err instanceof Error ? err.message : String(err);
   const lower = message.toLowerCase();
 
+  // Exclude billing/quota errors — those are handled by isBalanceOrQuotaError, not retryable
+  if (/insufficient[_\s-]?quota|insufficient[_\s-]?credit|credit balance|billing|payment required|402|exceeded your current quota|quota.*exhausted|balance.*low|usage limit reached/i.test(lower)) {
+    return null;
+  }
+
   // Quick exit — not a rate limit
-  const RATE_LIMIT_SIGNALS = ["429", "rate limit", "too many requests", "quota exceeded"];
+  const RATE_LIMIT_SIGNALS = ["429", "rate limit", "too many requests"];
   if (!RATE_LIMIT_SIGNALS.some(signal => lower.includes(signal))) return null;
 
   // 1. Parse "retry after N" from the error message body

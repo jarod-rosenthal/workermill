@@ -18,6 +18,8 @@ import {
   formatContext,
   getModelContext,
   isBalanceOrQuotaError,
+  isRateLimitError,
+  rateLimitSleep,
   resolveTaskInput,
 } from "./utils.js";
 
@@ -209,6 +211,7 @@ export async function planStories(
   sandboxed: boolean | "os",
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
+  _rateLimitRetries = 0,
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
   const planner = loadPersona("planner");
 
@@ -481,8 +484,15 @@ Rules:
       output.coordinatorLog("Resuming planner after provider/account update...");
       return planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
     }
-    // TODO: Rate limit retry for planner — requires extracting planner into a separate function
-    // to enable clean retry. For now, the error message surfaces the rate limit to the user.
+    // Rate limit retry — back off and retry the entire planner call (max 3 retries)
+    const rl = isRateLimitError(planErr);
+    if (rl && _rateLimitRetries < 3) {
+      const waitSec = Math.ceil(rl.retryAfterMs / 1000);
+      output.coordinatorLog(`Planner rate limited — retrying in ${waitSec}s (${_rateLimitRetries + 1}/3)`);
+      logger.info("Planner rate limit retry", { attempt: _rateLimitRetries + 1, waitSec });
+      await rateLimitSleep(rl.retryAfterMs);
+      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal, _rateLimitRetries + 1);
+    }
     const msg = planErr instanceof Error ? planErr.message : String(planErr);
     logger.error("Planner failed", { error: msg });
     output.error(`Planner failed: ${msg}`);

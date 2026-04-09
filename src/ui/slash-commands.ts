@@ -1893,7 +1893,7 @@ Write the file with write_file to AGENT.md in the project root.`,
       if (!arg) {
         ctx.addSystemMessage("**Usage:** `/remember <text>` — save a memory for this project\n\nExamples:\n- `/remember This project uses Prisma, not Sequelize`\n- `/remember Always run migrations before tests`");
       } else {
-        const mem = addMemory("preference", arg);
+        const mem = addMemory("preference", arg, ctx.workingDir);
         ctx.addSystemMessage(`**Remembered:** ${mem.content}`);
       }
       break;
@@ -1904,7 +1904,7 @@ Write the file with write_file to AGENT.md in the project root.`,
       if (!arg) {
         ctx.addSystemMessage("**Usage:** `/forget <text>` — remove a memory matching the text");
       } else {
-        const removed = removeMemory(arg);
+        const removed = removeMemory(arg, ctx.workingDir);
         ctx.addSystemMessage(removed ? `**Forgot:** memory matching "${arg}"` : `No memory found matching "${arg}". Use \`/memories\` to list all.`);
       }
       break;
@@ -1913,7 +1913,7 @@ Write the file with write_file to AGENT.md in the project root.`,
     // ---- /memories ----
     case "memories":
     case "memory": {
-      const memories = loadMemories();
+      const memories = loadMemories(ctx.workingDir);
       if (memories.length === 0) {
         ctx.addSystemMessage("No memories saved for this project.\n\nMemories are saved automatically when the agent discovers something, or manually with `/remember <text>`.");
       } else {

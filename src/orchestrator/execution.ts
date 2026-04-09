@@ -21,6 +21,7 @@ import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
 import { getMCPToolDefinitions } from "../mcp-client.js";
 import * as lspTool from "../engine/tools/lsp.js";
+import { addMemory, extractMemoryMarkers } from "../memory.js";
 
 import type { Story, OrchestrationOutput, FailureCode, StoryContractIssue, SharedContext } from "./types.js";
 import {
@@ -103,6 +104,16 @@ When creating GitHub Actions CI workflows that run tests requiring databases, ad
 /** Check if a story likely involves databases/services that need Docker. */
 export const SERVICE_KEYWORDS = /\b(postgres|mysql|mongo|redis|database|db|docker|compose|migration|schema|seed|service.?container)\b/i;
 
+const LOW_SIGNAL_MEMORY_PATTERNS = [
+  /\bbest practices?\b/i,
+  /\bproduction-?ready\b/i,
+  /\bimplementation is complete\b/i,
+  /\btests? pass(?:ed)?\b/i,
+  /\bworks correctly\b/i,
+  /\bfollows? project patterns?\b/i,
+  /\blooks good\b/i,
+];
+
 /* -------------------------------------------------------------------------- */
 /*  needsDockerInstructions                                                   */
 /* -------------------------------------------------------------------------- */
@@ -110,6 +121,14 @@ export const SERVICE_KEYWORDS = /\b(postgres|mysql|mongo|redis|database|db|docke
 export function needsDockerInstructions(story: Story, userTask: string): boolean {
   const text = `${story.description} ${story.implementationNotes ?? ""} ${userTask} ${(story.targetFiles ?? []).join(" ")}`;
   return SERVICE_KEYWORDS.test(text);
+}
+
+function isHighConfidenceMemory(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  if (trimmed.length < 12) return false;
+  if (LOW_SIGNAL_MEMORY_PATTERNS.some((pattern) => pattern.test(trimmed))) return false;
+  return true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1131,9 +1150,10 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         }
       }
 
-      // Learning extraction disabled — smaller models spam generic platitudes
-      // ("follows best practices", "implementation is production-ready") that
-      // pollute the memory system. Re-enable when we have quality filtering.
+      const extractedMemories = extractMemoryMarkers(text).filter((m) => isHighConfidenceMemory(m.content));
+      for (const memory of extractedMemories) {
+        addMemory(memory.type, memory.content, workingDir);
+      }
 
       context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
       context.filesModified.push(...extractDeclaredFileMarkers(text, "file_modified"));

@@ -1107,7 +1107,7 @@ describe("handleSlashCommand", () => {
     it("saves a memory", () => {
       const ctx = createContext();
       handleSlashCommand("/remember always use Prisma", ctx);
-      expect(addMemory).toHaveBeenCalledWith("preference", "always use Prisma");
+      expect(addMemory).toHaveBeenCalledWith("preference", "always use Prisma", "/tmp/test-project");
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Remembered")
       );
@@ -1127,7 +1127,7 @@ describe("handleSlashCommand", () => {
       vi.mocked(removeMemory).mockReturnValueOnce(true);
       const ctx = createContext();
       handleSlashCommand("/forget prisma", ctx);
-      expect(removeMemory).toHaveBeenCalledWith("prisma");
+      expect(removeMemory).toHaveBeenCalledWith("prisma", "/tmp/test-project");
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Forgot")
       );
@@ -1159,6 +1159,7 @@ describe("handleSlashCommand", () => {
       ]);
       const ctx = createContext();
       handleSlashCommand("/memories", ctx);
+      expect(loadMemories).toHaveBeenCalledWith("/tmp/test-project");
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Use Prisma")
       );

@@ -141,7 +141,7 @@ Long conversations hit context window limits. Three layers of compaction run aut
 2. **LLM summarization** — summarizes older messages when micro-compaction isn't enough
 3. **Hard truncation** — drops oldest messages if summarization fails
 
-Before any compaction, the CLI scans message history for `::learning::` and `::remember::` markers and persists them to `~/.workermill/memories/<project>.json` so the agent's discoveries aren't lost.
+Before any compaction, the CLI scans message history for `::learning::` and `::remember::` markers and persists them to the current project's memory directory under `~/.workermill/projects/<project-id>/memories/` so the agent's discoveries aren't lost.
 
 ## Safety
 

@@ -69,6 +69,7 @@ describe("buildSystemPrompt", () => {
   it("calls migrateOldLearnings on every invocation", () => {
     buildSystemPrompt("/some/dir");
     expect(mockMigrateOldLearnings).toHaveBeenCalledOnce();
+    expect(mockMigrateOldLearnings).toHaveBeenCalledWith("/some/dir");
   });
 
   it("includes project instructions when formatProjectInstructions returns content", () => {
@@ -101,6 +102,7 @@ describe("buildSystemPrompt", () => {
     mockLoadMemories.mockReturnValue(fakeMemories);
     buildSystemPrompt("/project");
     expect(mockLoadMemories).toHaveBeenCalledOnce();
+    expect(mockLoadMemories).toHaveBeenCalledWith("/project");
     expect(mockFormatMemoriesForPrompt).toHaveBeenCalledWith(fakeMemories);
   });
 

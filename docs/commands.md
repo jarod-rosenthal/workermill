@@ -158,7 +158,7 @@ Save a persistent memory for the current project.
 /remember The staging API is at https://staging.example.com
 ```
 
-Memories are stored in `~/.workermill/memories/<project-id>.json` and loaded into every session for that repo.
+Memories are stored per project under `~/.workermill/projects/<project-id>/memories/` as markdown files (`patterns.md`, `preferences.md`, `project-context.md`, `corrections.md`) and loaded into every session for that repo.
 
 ### `/forget <id or text>`
 

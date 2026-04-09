@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
+import { getStateRoot } from "./state-root.js";
 import { getProjectLogPath, ensureProjectDirs } from "./project-data.js";
 
 // Logs stored in project-specific logs/cli.log
@@ -13,7 +13,7 @@ let logStream: fs.WriteStream | null = null;
 function migrateLegacyLogs(): void {
   // Old path using raw cwd hash
   const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
-  const oldLogDir = path.join(os.homedir(), ".workermill", "logs", oldHash);
+  const oldLogDir = path.join(getStateRoot(), "logs", oldHash);
   const oldLogFile = path.join(oldLogDir, "cli.log");
   const newLogFile = LOG_FILE;
 

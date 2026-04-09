@@ -2,7 +2,7 @@ import type { CliConfig } from "./config.js";
 import type { ModelInfo } from "./providers/types.js";
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "./state-root.js";
 
 export interface RemoteModelInfo extends ModelInfo {
   provider: string;
@@ -147,7 +147,7 @@ interface CacheData {
 }
 
 function getConfigDir(): string {
-  return path.join(os.homedir(), ".workermill");
+  return getStateRoot();
 }
 
 function getCacheFile(): string {

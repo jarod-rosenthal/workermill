@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
+import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 import { getProjectSessionsDir, ensureProjectDirs } from "./project-data.js";
 
@@ -57,7 +57,7 @@ export interface SessionSummary {
 }
 
 function migrateGlobalSessions(): void {
-  const oldSessionsDir = path.join(os.homedir(), ".workermill", "sessions");
+  const oldSessionsDir = path.join(getStateRoot(), "sessions");
   if (!fs.existsSync(oldSessionsDir)) return;
 
   ensureProjectDirs();

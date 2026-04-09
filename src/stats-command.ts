@@ -1,6 +1,7 @@
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { getStateRoot } from "./state-root.js";
 import chalk from "chalk";
 import type { SessionCostByRole } from "./session.js";
 import { Session } from "./session.js";
@@ -297,7 +298,7 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
  * Collect sessions from all project directories.
  */
 function collectAllSessions(threshold: Date | null, cwdFilter?: string): Session[] {
-  const projectsDir = path.join(os.homedir(), ".workermill", "projects");
+  const projectsDir = path.join(getStateRoot(), "projects");
   const allSessions: Session[] = [];
 
   if (!fs.existsSync(projectsDir)) {

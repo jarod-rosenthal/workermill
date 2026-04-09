@@ -9,7 +9,7 @@
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "../state-root.js";
 import {
   loadConfig,
   resolveConfig,
@@ -680,7 +680,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       // /setup reset — wipe config and restart
       if (arg === "reset") {
         try {
-          const configPath = path.join(os.homedir(), ".workermill", "cli.json");
+          const configPath = path.join(getStateRoot(), "cli.json");
           if (fs.existsSync(configPath)) {
             fs.unlinkSync(configPath);
             ctx.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` to re-run setup.");

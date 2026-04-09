@@ -6,7 +6,7 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "../../state-root.js";
 import { loadCustomCommands } from "../../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../../personas.js";
 import { hasMCPServers, getMCPTools, hasMCPRegistered, getMCPServerInfo } from "../../mcp-client.js";
@@ -176,7 +176,7 @@ export function handlePersonasCommand(arg: string, ctx: SlashCommandContext): vo
   if (!arg) {
     const lines: string[] = ["**Personas**\n"];
     const projectDir = path.join(ctx.workingDir, ".workermill", "personas");
-    const userDir = path.join(os.homedir(), ".workermill", "personas");
+    const userDir = path.join(getStateRoot(), "personas");
 
     for (const slug of allPersonas) {
       const p = loadPersona(slug);

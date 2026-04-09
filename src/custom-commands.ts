@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 
 export interface CustomCommand {
@@ -23,9 +23,9 @@ export function loadCustomCommands(): CustomCommand[] {
   const commands: CustomCommand[] = [];
   const dirs: { path: string; source: CustomCommand["source"] }[] = [
     { path: path.join(process.cwd(), ".workermill", "skills"), source: "project-skills" },
-    { path: path.join(os.homedir(), ".workermill", "skills"), source: "user-skills" },
+    { path: path.join(getStateRoot(), "skills"), source: "user-skills" },
     { path: path.join(process.cwd(), ".workermill", "commands"), source: "project-commands" },
-    { path: path.join(os.homedir(), ".workermill", "commands"), source: "user-commands" },
+    { path: path.join(getStateRoot(), "commands"), source: "user-commands" },
   ];
 
   for (const dir of dirs) {

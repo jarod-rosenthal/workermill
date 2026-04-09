@@ -8,10 +8,10 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "./state-root.js";
 import type { ProgramEpic } from "./program-queue.js";
 
-const STATE_FILE = path.join(os.homedir(), ".workermill", "program-runs.json");
+const STATE_FILE = path.join(getStateRoot(), "program-runs.json");
 
 export interface ProgramRunState {
   workingDir: string;

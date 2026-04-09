@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 
-const CHECK_FILE = path.join(os.homedir(), ".workermill", "last-update-check.json");
+const CHECK_FILE = path.join(getStateRoot(), "last-update-check.json");
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
 interface CheckData {

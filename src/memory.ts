@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
 import * as logger from "./logger.js";
 import { getProjectRootDir } from "./project-data.js";
+import { getStateRoot } from "./state-root.js";
 
 export interface Memory {
   id: string;
@@ -24,7 +24,7 @@ function legacyProjectHash(cwd?: string): string {
 }
 
 function legacyMemoryDir(cwd?: string): string {
-  return path.join(os.homedir(), ".workermill", "memory", legacyProjectHash(cwd));
+  return path.join(getStateRoot(), "memory", legacyProjectHash(cwd));
 }
 
 function legacyMemoryFile(cwd?: string): string {
@@ -134,7 +134,7 @@ function migrateLegacyMemoryJson(cwd?: string): void {
 
 function migrateLegacyLearnings(cwd?: string): void {
   try {
-    const oldPath = path.join(os.homedir(), ".workermill", "learnings", `${legacyProjectHash(cwd)}.json`);
+    const oldPath = path.join(getStateRoot(), "learnings", `${legacyProjectHash(cwd)}.json`);
     if (!fs.existsSync(oldPath)) return;
 
     const oldLearnings = JSON.parse(fs.readFileSync(oldPath, "utf-8")) as string[];

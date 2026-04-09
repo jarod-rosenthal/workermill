@@ -1,10 +1,10 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { execSync } from "child_process";
+import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 
-const SCHEDULE_FILE = path.join(os.homedir(), ".workermill", "schedules.json");
+const SCHEDULE_FILE = path.join(getStateRoot(), "schedules.json");
 
 export interface ScheduledTask {
   id: string;
@@ -86,7 +86,7 @@ function parseCron(input: string): string | null {
 function installCron(task: ScheduledTask): boolean {
   const platform = process.platform;
   const workermill = "npx workermill";
-  const cmd = `cd "${task.workingDir}" && ${workermill} --trust -p "${task.prompt.replace(/"/g, '\\"')}" >> ~/.workermill/schedule-${task.id}.log 2>&1`;
+  const cmd = `cd "${task.workingDir}" && ${workermill} --trust -p "${task.prompt.replace(/"/g, '\\"')}" >> ${getStateRoot()}/schedule-${task.id}.log 2>&1`;
 
   if (platform === "win32") {
     // Windows: use schtasks

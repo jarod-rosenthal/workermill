@@ -13,6 +13,7 @@ import { findProjectInstructionSource } from "./instructions.js";
 import { runSetup } from "./setup.js";
 import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
 import { Root } from "./ui/Root.js";
+import { getStateRoot } from "./state-root.js";
 import { checkForUpdate } from "./update-check.js";
 
 /** Resolve display strings for all 3 roles from the full config. */
@@ -250,7 +251,6 @@ program
     const { execSync } = await import("child_process");
     const fs = (await import("fs")).default;
     const path = (await import("path")).default;
-    const os = (await import("os")).default;
 
     console.log();
     console.log(chalk.bold("  WorkerMill Doctor"));
@@ -278,7 +278,7 @@ program
     }
 
     // Check config
-    const configPath = path.join(os.homedir(), ".workermill", "cli.json");
+    const configPath = path.join(getStateRoot(), "cli.json");
     if (fs.existsSync(configPath)) {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -377,7 +377,7 @@ program
     }
 
     // Check custom commands
-    const cmdDirs = [path.join(cwd, ".workermill", "commands"), path.join(os.homedir(), ".workermill", "commands")];
+    const cmdDirs = [path.join(cwd, ".workermill", "commands"), path.join(getStateRoot(), "commands")];
     let cmdCount = 0;
     for (const dir of cmdDirs) {
       try {

@@ -8,11 +8,11 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { execSync } from "child_process";
+import { getStateRoot } from "./state-root.js";
 import type { Story } from "./orchestrator.js";
 
-const STATE_FILE = path.join(os.homedir(), ".workermill", "ship-runs.json");
+const STATE_FILE = path.join(getStateRoot(), "ship-runs.json");
 
 export interface ShipRun {
   workingDir: string;

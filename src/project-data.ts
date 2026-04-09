@@ -1,10 +1,10 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
+import { getStateRoot } from "./state-root.js";
 
-// Project-scoped data stored in ~/.workermill/projects/<project-hash>/
-const PROJECTS_DIR = path.join(os.homedir(), ".workermill", "projects");
+// Project-scoped data stored in <state-root>/projects/<project-hash>/
+const PROJECTS_DIR = path.join(getStateRoot(), "projects");
 
 /**
  * Get the canonical project ID by resolving the realpath of the current working directory.
@@ -159,7 +159,7 @@ export function listProjects(): Array<ProjectMeta & { id: string }> {
 }
 
 function migrateGlobalHistory(cwd?: string): void {
-  const oldPath = path.join(os.homedir(), ".workermill", "history");
+  const oldPath = path.join(getStateRoot(), "history");
   const newPath = getProjectHistoryPath(cwd);
 
   if (!fs.existsSync(oldPath) || fs.existsSync(newPath)) return;

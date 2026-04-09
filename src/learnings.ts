@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
+import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 import { getProjectLearningsPath, ensureProjectDirs } from "./project-data.js";
 
@@ -12,7 +12,7 @@ function learningsPath(): string {
 function migrateLegacyLearnings(): void {
   // Old path using raw cwd hash
   const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
-  const oldPath = path.join(os.homedir(), ".workermill", "learnings", `${oldHash}.json`);
+  const oldPath = path.join(getStateRoot(), "learnings", `${oldHash}.json`);
   const newPath = learningsPath();
 
   if (!fs.existsSync(oldPath) || fs.existsSync(newPath)) return;

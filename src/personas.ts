@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { getStateRoot } from "./state-root.js";
 
 export interface Persona {
   name: string;
@@ -53,7 +53,7 @@ export function loadPersona(slug: string): Persona | null {
     // Project-level persona overrides
     path.join(process.cwd(), ".workermill", "personas", `${slug}.md`),
     // User-level persona overrides
-    path.join(os.homedir(), ".workermill", "personas", `${slug}.md`),
+    path.join(getStateRoot(), "personas", `${slug}.md`),
     // Bundled with the npm package (personas/)
     path.join(import.meta.dirname || __dirname, "../personas", `${slug}.md`),
   ];
@@ -117,7 +117,7 @@ export function listAvailablePersonas(): string[] {
   }
 
   // Check user personas
-  const userDir = path.join(os.homedir(), ".workermill", "personas");
+  const userDir = path.join(getStateRoot(), "personas");
   try {
     if (fs.existsSync(userDir)) {
       for (const file of fs.readdirSync(userDir)) {

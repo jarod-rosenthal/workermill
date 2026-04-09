@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { z } from "zod";
 import * as logger from "./logger.js";
 
@@ -155,7 +154,8 @@ export interface CliConfig {
   experimental?: boolean;
 }
 
-const CONFIG_DIR = path.join(os.homedir(), ".workermill");
+import { getStateRoot } from "./state-root.js";
+const CONFIG_DIR = getStateRoot();
 const CONFIG_FILE = path.join(CONFIG_DIR, "cli.json");
 
 export function loadConfig(): CliConfig | null {

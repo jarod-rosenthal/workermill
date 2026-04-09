@@ -14,6 +14,7 @@ import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
 import { resolveSandboxMode } from "./sandbox-mode.js";
+import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -54,6 +55,9 @@ export async function runOrchestration(
 ): Promise<OrchestrationResult> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
+
+  // Create run manifest — persisted throughout for debugging and analytics
+  const manifest = createRunManifest(userTask, ticketKey);
 
   const abortController = isAbortControllerLike(abortControllerOrSignal)
     ? abortControllerOrSignal
@@ -542,12 +546,36 @@ export async function runOrchestration(
   }
   const finalReviewText = reviewLoopResult.finalReviewText;
 
+  // --- Populate and save run manifest ---
+  manifest.featureBranch = featureBranch;
+  manifest.mainBranch = mainBranch;
+  manifest.completedAt = new Date().toISOString();
+  manifest.totalCost = costTracker.getTotalCost();
+  if (typeof costTracker.getUsageSummary === "function") {
+    const usageSummary = costTracker.getUsageSummary();
+    manifest.totalInputTokens = usageSummary.total.inputTokens;
+    manifest.totalOutputTokens = usageSummary.total.outputTokens;
+  }
+  manifest.stories = sorted.map(s => ({
+    id: s.id,
+    title: s.title,
+    persona: s.persona,
+    status: completedStoryIds.includes(s.id) ? "completed" as const
+      : failedStories.has(s.id) ? "failed" as const
+      : "skipped" as const,
+    retryCount: 0, // TODO: track per-story retry count in executeStories
+  }));
+  const allCompleted = completedStoryIds.length === sorted.length;
+  const anyCompleted = completedStoryIds.length > 0;
+  manifest.outcome = allCompleted ? "success" : anyCompleted ? "partial" : "failed";
+  saveRunManifest(manifest);
+
   // --- Build Summary ---
   {
     const completed = sorted.filter(s => completedStoryIds.includes(s.id));
     const failed = sorted.filter(s => failedStories.has(s.id));
     const skipped = sorted.filter(s => skippedStories.has(s.id));
-    const lines: string[] = ["", "── Build Summary ──"];
+    const lines: string[] = ["", `── Build Summary (${manifest.id}) ──`];
     for (const s of sorted) {
       const idx = sorted.indexOf(s) + 1;
       if (completedStoryIds.includes(s.id)) {
@@ -560,6 +588,7 @@ export async function runOrchestration(
     }
     lines.push(`  ${completed.length} passed · ${failed.length} failed · ${skipped.length} skipped`);
     lines.push(`  Cost: ~$${costTracker.getTotalCost().toFixed(2)}`);
+    lines.push(`  Run: ${manifest.id}`);
     lines.push("");
     for (const line of lines) output.log("system", line);
   }

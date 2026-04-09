@@ -32,8 +32,7 @@ From `package.json`:
 workermill/
 ├── src/
 │   ├── index.ts               # Commander CLI entry + chat default command
-│   ├── orchestrator.ts        # /build pipeline: planner → critic → workers → reviewer
-│   ├── agent.ts               # Single-agent mode logic
+│   ├── orchestrator.ts        # /build pipeline: planner → workers → reviewer
 │   ├── config.ts              # Load/save ~/.workermill/cli.json
 │   ├── setup.ts               # First-run provider wizard
 │   ├── personas.ts            # Load persona markdown files
@@ -47,6 +46,16 @@ workermill/
 │   ├── checkpoints.ts         # /undo file checkpoints
 │   ├── git-ops.ts             # Git operations (branch, commit, push)
 │   ├── ticket-ops.ts          # GitHub/Jira/Linear ticket fetching
+│   ├── run-command.ts         # Headless wm run execution
+│   ├── session.ts             # Session persistence and management
+│   ├── session-command.ts     # wm session CLI subcommands
+│   ├── models-command.ts      # wm models CLI subcommands
+│   ├── stats-command.ts       # wm stats CLI subcommand
+│   ├── schema-command.ts      # wm schema CLI subcommand
+│   ├── project-data.ts        # Project registry and scoped data paths
+│   ├── provider-registry.ts   # Model discovery and provider info
+│   ├── live-view-server.ts    # Browser diff preview SSE server
+│   ├── gate-runner.ts         # Quality gate execution
 │   ├── engine/                # AI model factory, tools, types
 │   ├── providers/             # Provider registry and pricing engines
 │   ├── ui/                    # React + Ink UI components

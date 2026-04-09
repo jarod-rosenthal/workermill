@@ -447,12 +447,19 @@ Flags passed when starting the CLI from the shell.
 ```bash
 wm                          # Interactive chat (default)
 wm --resume                 # Resume the most recent session
+wm --fork                   # Fork the resumed session (use with --resume)
 wm --plan                   # Start in plan mode (read-only tools)
 wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
+wm --trust                  # Skip all tool permission prompts
 wm --auto-revise            # Auto-revise after a failed review without prompting
+wm --full-disk              # Allow tools to access files outside working directory
+wm --max-tokens <n>         # Maximum output tokens per response
+wm --live-view              # Enable live browser diff view
+wm --no-live-view           # Disable live browser diff view
+wm -p <prompt>              # Run a single prompt headlessly and exit
 wm --version                # Print CLI version
 wm --help                   # Show launch flags
 ```
 
-`--provider`, `--model`, and `--auto-revise` apply only for the current launch and are not written to config.
+`--provider`, `--model`, `--trust`, `--auto-revise`, `--full-disk`, `--max-tokens`, and `--live-view` apply only for the current launch and are not written to config.

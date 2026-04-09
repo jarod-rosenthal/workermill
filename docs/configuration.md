@@ -126,10 +126,9 @@ Controls the `/build` review pipeline.
   "maxRevisions": 3,
   "approvalThreshold": 9,
   "autoRevise": false,
-  "useCritic": false,
-  "criticThreshold": 8,
   "specCheck": false,
-  "verifyEnabled": false
+  "verifyEnabled": true,
+  "autoBranch": false
 }
 ```
 
@@ -139,10 +138,9 @@ Controls the `/build` review pipeline.
 | `maxRevisions` | `3` | Max review → revise cycles before giving up |
 | `approvalThreshold` | `9` | Review score (1-10) at or above which the code is approved |
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
-| `useCritic` | `false` | Run a planning critic before execution — scores the plan 1-10 and refines it before workers start |
-| `criticThreshold` | `8` | Plan score (1-10) at or above which the critic approves the plan |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
-| `verifyEnabled` | `true` | After workers finish: instructs the planner to generate `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. Set to `false` to disable. |
+| `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
+| `autoBranch` | `false` | Automatically create the feature branch when `/build` starts without prompting for confirmation. |
 
 ### Setting from the CLI
 
@@ -151,8 +149,6 @@ Controls the `/build` review pipeline.
 /settings review.maxRevisions 5
 /settings review.threshold 8
 /settings review.autoRevise true
-/settings review.critic true
-/settings review.criticThreshold 8
 ```
 
 `specCheck` and `verifyEnabled` are not yet exposed via `/settings` — set them directly in `.workermill/config.json`:
@@ -385,7 +381,7 @@ Show inline edited-file previews in the chat output and during `/build`. Default
 
 ## `experimental`
 
-Enable experimental commands: `/doctor`, `/orchestrate`, `/program`. Default `false`.
+Enable experimental commands: `/orchestrate`, `/program`. Default `false`.
 
 ```
 /settings experimental true

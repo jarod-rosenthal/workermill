@@ -38,24 +38,28 @@ If you run `/build` unattended (e.g. via a script), suggestions are applied sile
 
 ## Quality Gates
 
-Quality gates are **off by default**. Enable them in your project config:
+There are two sources of quality gates:
+
+1. **Planner-generated (dynamic)** — the planner generates verification commands per story based on what it reads in your codebase. **On by default** (`verifyEnabled: true`). If the planner can't generate meaningful commands for a story, nothing runs — there's no cost.
+
+2. **Static gates** — shell commands you define in `qualityGates` that run on every `/build`. **Off by default** (empty array). You must add these yourself.
+
+No configuration is required for dynamic gates — the planner handles it. To disable them:
 
 ```json
 // .workermill/config.json
 {
   "review": {
-    "verifyEnabled": true
+    "verifyEnabled": false
   }
 }
 ```
-
-With `verifyEnabled: true`, the planner automatically generates verification commands scoped to each story. No other configuration is needed.
 
 ---
 
 ## How It Works
 
-### Without quality gates (default)
+### Without quality gates
 
 ```
 Stories execute → Tech lead reviews → Revision if needed → PR created

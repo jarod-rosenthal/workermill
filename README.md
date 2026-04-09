@@ -313,7 +313,6 @@ Requires `"experimental": true` in your config.
 | `/voice` | Voice input — speak your task |
 | `/schedule` | Scheduled recurring tasks |
 | `/orchestrate` | Epic decomposition — break parent issues into child issues and execute |
-| `/doctor` | Code health diagnosis with prescriptions |
 
 </details>
 

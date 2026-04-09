@@ -652,14 +652,23 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         (sessionRef as { current: Session & { _restored?: Message[] } }).current._restored =
           restored as never;
       } else {
-        sessionRef.current = createSession(options.provider, options.model);
+        sessionRef.current = createSession(options.provider, options.model, workingDirRef.current);
       }
     } else {
-      sessionRef.current = createSession(options.provider, options.model);
+      sessionRef.current = createSession(options.provider, options.model, workingDirRef.current);
     }
 
     // Ensure project metadata is loaded/created for tracking
     loadProjectMeta(workingDirRef.current);
+
+    // Set finishedAt on clean exit
+    process.on('exit', () => {
+      const session = sessionRef.current;
+      if (session && !session.finishedAt) {
+        session.finishedAt = new Date().toISOString();
+        saveSession(session);
+      }
+    });
   }
 
   // Push restored messages into React state after first render.
@@ -1464,6 +1473,36 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             const tps = Math.round(outputTokens / agentElapsed);
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
+
+          // Enrich session with cost data before saving
+          const usageSummary = costTrackerRef.current.getUsageSummary();
+          session.totalCostUsd = Math.round(usageSummary.total.cost * 10000) / 10000;
+          session.costByModel = usageSummary.byModel.map(m => ({
+            key: m.key,
+            provider: m.provider,
+            model: m.model,
+            inputTokens: m.inputTokens,
+            outputTokens: m.outputTokens,
+            costUsd: Math.round(m.cost * 10000) / 10000,
+            roles: m.roles,
+          }));
+          session.costByRole = {
+            worker: {
+              inputTokens: usageSummary.byRole.worker.inputTokens,
+              outputTokens: usageSummary.byRole.worker.outputTokens,
+              costUsd: Math.round(usageSummary.byRole.worker.cost * 10000) / 10000,
+            },
+            planner: {
+              inputTokens: usageSummary.byRole.planner.inputTokens,
+              outputTokens: usageSummary.byRole.planner.outputTokens,
+              costUsd: Math.round(usageSummary.byRole.planner.cost * 10000) / 10000,
+            },
+            reviewer: {
+              inputTokens: usageSummary.byRole.reviewer.inputTokens,
+              outputTokens: usageSummary.byRole.reviewer.outputTokens,
+              costUsd: Math.round(usageSummary.byRole.reviewer.cost * 10000) / 10000,
+            },
+          };
 
           // Save session to disk.
           saveSession(session);

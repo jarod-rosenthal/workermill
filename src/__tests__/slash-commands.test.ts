@@ -720,6 +720,7 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/settings", ctx);
       const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(msg.startsWith("\n**Settings**")).toBe(true);
       // Primary settings present
       expect(msg).toContain("Review enabled");
       expect(msg).toContain("QA participation");
@@ -1601,6 +1602,16 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("Invalid value for `qa.participation`"),
       );
       expect(saveConfig).not.toHaveBeenCalled();
+    });
+
+    it("accepts qa.participation default", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings qa.participation default", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          qa: expect.objectContaining({ participation: "default" }),
+        }),
+      );
     });
 
     it("updates program.maxIssues", () => {

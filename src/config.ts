@@ -70,8 +70,8 @@ export interface ProgramConfig {
 }
 
 export interface QaConfig {
-  /** Whether QA gets a dedicated story in /build runs. Default: auto */
-  participation?: "off" | "auto" | "always";
+  /** Whether QA follows default planner behavior or is always forced in. Default: default */
+  participation?: "default" | "always";
 }
 
 export interface HookConfig {
@@ -394,6 +394,10 @@ export const ProgramConfigSchema = z.object({
   epicPrompt: z.enum(["ask", "always"]).optional(),
 });
 
+export const QaConfigSchema = z.object({
+  participation: z.enum(["default", "always"]).optional(),
+});
+
 export const HookConfigSchema = z.object({
   command: z.string().optional(),
   url: z.string().optional(),
@@ -429,6 +433,7 @@ export const CliConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema),
   default: z.string(),
   routing: z.record(z.string(), z.string()).optional(),
+  qa: QaConfigSchema.optional(),
   mcp: z.record(z.string(), MCPServerConfigSchema).optional(),
   review: ReviewConfigSchema.optional(),
   hooks: HooksConfigSchema.optional(),

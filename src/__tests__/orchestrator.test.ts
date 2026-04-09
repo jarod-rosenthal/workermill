@@ -395,13 +395,13 @@ AFFECTED_REASONS: {"1":"Add the missing normal regression test."}`;
 });
 
 describe("qa participation helpers", () => {
-  it("removes dedicated qa_engineer stories when participation is off", () => {
+  it("preserves planner-selected qa_engineer stories in default mode", () => {
     const stories: Story[] = [
       { id: "impl", title: "Implement feature", persona: "backend_developer", description: "Build it." },
       { id: "qa", title: "Validate feature", persona: "qa_engineer", description: "Test it.", dependsOn: ["impl"] },
     ];
 
-    expect(applyQaParticipation(stories, "off").map((story) => story.id)).toEqual(["impl"]);
+    expect(applyQaParticipation(stories, "default").map((story) => story.id)).toEqual(["impl", "qa"]);
   });
 
   it("adds a qa validation story when participation is always and no qa story exists", () => {

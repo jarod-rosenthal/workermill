@@ -792,11 +792,7 @@ export function buildAutoQaStory(stories: Story[]): Story {
 /*  applyQaParticipation                                                      */
 /* -------------------------------------------------------------------------- */
 
-export function applyQaParticipation(stories: Story[], participation: "off" | "auto" | "always"): Story[] {
-  if (participation === "off") {
-    return normalizeStoryDependencies(stories.filter((story) => story.persona !== "qa_engineer"));
-  }
-
+export function applyQaParticipation(stories: Story[], participation: "default" | "always"): Story[] {
   if (participation === "always" && !stories.some((story) => story.persona === "qa_engineer")) {
     return normalizeStoryDependencies([...stories, buildAutoQaStory(stories)]);
   }

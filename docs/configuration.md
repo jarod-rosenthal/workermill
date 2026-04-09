@@ -171,18 +171,18 @@ Controls QA engineer participation in `/build` runs.
 
 ```json
 "qa": {
-  "participation": "auto"
+  "participation": "default"
 }
 ```
 
 | Field | Default | Purpose |
 |---|---|---|
-| `participation` | `"auto"` | When to add a dedicated QA story: `"off"` (never), `"auto"` (planner decides), `"always"` (always append a QA validation story) |
+| `participation` | `"default"` | QA behavior for `/build`: `"default"` keeps planner-selected QA behavior, `"always"` always appends a dedicated QA validation story if one is missing |
 
 ### Setting from the CLI
 
 ```
-/settings qa.participation off
+/settings qa.participation default
 /settings qa.participation always
 ```
 

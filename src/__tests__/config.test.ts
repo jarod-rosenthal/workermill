@@ -389,7 +389,7 @@ describe("config", () => {
         providers: { ollama: { model: "global-model", host: "http://localhost:11434" } },
         default: "ollama",
         routing: { planner: "ollama" },
-        qa: { participation: "off" },
+        qa: { participation: "default" },
         review: { enabled: true, maxRevisions: 3 },
       };
       fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");

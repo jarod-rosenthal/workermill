@@ -9,7 +9,7 @@
  */
 
 import chalk from "chalk";
-import { listRunManifests, loadRunManifest, type RunManifest } from "./run-manifest.js";
+import { listRunManifests, type RunManifest } from "./run-manifest.js";
 
 function formatDate(iso: string): string {
   try {
@@ -70,9 +70,17 @@ export function runsList(options: { json?: boolean }): void {
 }
 
 export function runsShow(idOrPrefix: string, options: { json?: boolean }): void {
-  // Support prefix matching
   const runs = listRunManifests(undefined, 100);
-  const match = runs.find(r => r.id === idOrPrefix || r.id.startsWith(idOrPrefix));
+  const exactMatch = runs.find((r) => r.id === idOrPrefix);
+  const prefixMatches = exactMatch ? [] : runs.filter((r) => r.id.startsWith(idOrPrefix));
+  const match = exactMatch || prefixMatches[0];
+
+  if (!exactMatch && prefixMatches.length > 1) {
+    console.error(
+      `Run prefix "${idOrPrefix}" is ambiguous. Matches: ${prefixMatches.slice(0, 5).map((r) => r.id).join(", ")}`
+    );
+    process.exit(1);
+  }
 
   if (!match) {
     console.error(`Run "${idOrPrefix}" not found. Use \`wm runs list\` to see available runs.`);

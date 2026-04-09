@@ -23,7 +23,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
     const reviewEnabled = config.review?.enabled !== false;
     const maxRevisions = config.review?.maxRevisions ?? 3;
     const approvalThreshold = config.review?.approvalThreshold ?? 9;
-    const qaParticipation = config.qa?.participation ?? "auto";
+    const qaParticipation = config.qa?.participation ?? "default";
     const liveViewEnabled = config.liveView === true;
     const liveViewUrl = ctx.getLiveViewUrl?.() || null;
     const liveViewValue = liveViewEnabled && liveViewUrl ? `${liveViewEnabled} (\`${liveViewUrl}\`)` : String(liveViewEnabled);
@@ -32,13 +32,13 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
 
     // Primary settings — always shown
     let table =
-      `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
+      `\n**Settings** (\`~/.workermill/cli.json\`)\n\n` +
       `| Setting | Value | Command |\n` +
       `|---|---|---|\n` +
       `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
       `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
       `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
-      `| QA participation | ${qaParticipation} | \`/settings qa.participation <off/auto/always>\` |\n` +
+      `| QA participation | ${qaParticipation} | \`/settings qa.participation <default/always>\` |\n` +
       `| Issue tracker | ${config.ticketSystem || "github"} | \`/settings tickets <github\\|jira\\|linear>\` |\n` +
       `| Live code view | ${liveViewValue} | \`/settings liveView <true/false>\` |\n` +
       `| Inline edit preview | ${inlineEditPreview} | \`/settings ui.inlineEditPreview <true/false>\` |\n` +
@@ -114,7 +114,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       ? `| Persona | Provider | Model | Config key |\n|---|---|---|---|\n`
       : `| Persona | Provider | Model |\n|---|---|---|\n`;
     ctx.addSystemMessage(
-      `\n**Persona Routing** (\`/settings route <persona> <provider>/<model>\`)\n\n` +
+      `\n\n**Persona Routing** (\`/settings route <persona> <provider>/<model>\`)\n\n` +
       routingHeader +
       routingRows.join("\n"),
     );
@@ -206,12 +206,12 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       }
       case "qa.participation": {
         const normalized = value.toLowerCase();
-        if (!["off", "auto", "always"].includes(normalized)) {
-          ctx.addSystemMessage("Invalid value for `qa.participation`. Use `off`, `auto`, or `always`.");
+        if (!["default", "always"].includes(normalized)) {
+          ctx.addSystemMessage("Invalid value for `qa.participation`. Use `default` or `always`.");
           settingApplied = false;
           break;
         }
-        config.qa = { ...config.qa, participation: normalized as "off" | "auto" | "always" };
+        config.qa = { ...config.qa, participation: normalized as "default" | "always" };
         break;
       }
       case "program.maxIssues": {

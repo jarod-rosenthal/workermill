@@ -93,11 +93,14 @@ export const DOCKER_INSTRUCTIONS = `
 If this task requires databases, caches, or other services, use Docker to run real instances instead of mocking them. Do NOT mock or stub external services.
 
 ### Common Services
+- If the project has a \`docker-compose.yml\`, use \`docker compose up -d\` — it handles ports, networks, and health checks.
 - PostgreSQL: \`docker run -d --rm -p 5432:5432 -e POSTGRES_PASSWORD=test --name postgres-test postgres:16-alpine\`
 - Redis: \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
-- MongoDB: \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
-- MySQL: \`docker run -d --rm -p 3306:3306 -e MYSQL_ROOT_PASSWORD=test --name mysql-test mysql:8\`
-- If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
+
+**Port conflicts:** Before starting a service, check if the port is already in use. If it is, USE the existing service — do not try to start a second one on the same port. Check with:
+- \`docker ps\` — see if the container is already running
+- \`nc -zw1 localhost 5432 && echo "in use"\` — check if the port is bound
+- If a compose service fails with "port already allocated", run \`docker compose down\` first or connect to the existing service.
 
 Tests that pass against mocks but fail against real services are worthless.
 

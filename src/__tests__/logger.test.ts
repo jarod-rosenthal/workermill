@@ -200,7 +200,7 @@ describe("logger", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // Verify the log lives under the slug-hash directory we computed from fakeProjectDir
+    // Verify the log lives under ~/.workermill/projects/<slug-hash>/logs/
     const logsBase = path.join(tmp.homeDir, ".workermill", "projects");
     const entries = fs.readdirSync(logsBase);
     expect(entries).toContain(expectedProjectDir);

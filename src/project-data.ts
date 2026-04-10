@@ -62,11 +62,11 @@ export function getProjectLearningsPath(cwd?: string): string {
 }
 
 /**
- * Get the path to the project's log file for today (daily rotation).
- * Format: logs/YYYY-MM-DD.log
+ * Get the path to today's log file.
+ * Logs live alongside other project data: ~/.workermill/projects/<slug-hash>/logs/YYYY-MM-DD.log
  */
 export function getProjectLogPath(cwd?: string): string {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = new Date().toISOString().slice(0, 10);
   return path.join(getProjectRootDir(cwd), "logs", `${today}.log`);
 }
 

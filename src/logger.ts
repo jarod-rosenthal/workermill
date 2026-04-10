@@ -1,7 +1,4 @@
 import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import { getStateRoot } from "./state-root.js";
 import { getProjectLogPath, getProjectLogsDir, ensureProjectDirs } from "./project-data.js";
 
 // Daily log rotation: logs/YYYY-MM-DD.log
@@ -12,38 +9,11 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function migrateLegacyLogs(): void {
-  // Rename old cli.log to today's dated file. Done lazily on first log write.
-  const logsDir = getProjectLogsDir();
-  const oldProjectLog = path.join(logsDir, "cli.log");
-  if (!fs.existsSync(oldProjectLog)) return;
-
-  const dest = getProjectLogPath();
-  if (oldProjectLog === dest) return;
-  try {
-    // Rename is atomic and fast — no reading/writing large files
-    fs.renameSync(oldProjectLog, dest);
-  } catch {
-    // Ignore — old file may be locked or dest may already exist
-  }
-
-  // Also clean up legacy hash-based log dir if it exists
-  const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
-  const oldLogDir = path.join(getStateRoot(), "logs", oldHash);
-  const oldLogFile = path.join(oldLogDir, "cli.log");
-  if (fs.existsSync(oldLogFile)) {
-    try {
-      fs.renameSync(oldLogFile, dest);
-      try { fs.rmdirSync(oldLogDir); } catch {}
-      try { fs.rmdirSync(path.join(getStateRoot(), "logs")); } catch {}
-    } catch {
-      // Ignore migration errors
-    }
-  }
-}
-
 function ensureLogDir(): void {
-  migrateLegacyLogs();
+  const logsDir = getProjectLogsDir();
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
   ensureProjectDirs();
 }
 

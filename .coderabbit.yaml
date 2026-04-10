@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+early_access: false
+
+reviews:
+  # "chill" keeps feedback focused and avoids nitpicks;
+  # switch to "assertive" if you want more thorough reviews.
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: |
+        TypeScript CLI code. Prefer strict typing, no `any`. Flag missing
+        error handling only at system boundaries (user input, external APIs).
+        Do NOT suggest adding comments, docstrings, or type annotations to
+        unchanged code. Do NOT propose speculative abstractions or
+        backwards-compatibility shims.
+    - path: "src/__tests__/**/*.ts"
+      instructions: |
+        Vitest tests. Verify mocks match real module shapes, and that
+        temp directories use the `createTempWorkerMillHome` helper rather
+        than hardcoded paths. Flag tests that assert on implementation
+        details instead of observable behavior.
+    - path: "src/ui/commands/**/*.ts"
+      instructions: |
+        Slash-command handlers. Any new setting must also update the
+        settings display table and validation allowlist in
+        `src/ui/commands/settings.ts`. Flag handlers that validate values
+        without adding the key to the allowlist.
+
+  tools:
+    # Avoid double-running tools that already have dedicated workflows.
+    gitleaks:
+      enabled: false  # covered by .github/workflows/gitleaks.yml
+    semgrep:
+      enabled: false  # covered by .github/workflows/semgrep.yml
+    # No ESLint config in this repo — typecheck serves as lint.
+    eslint:
+      enabled: false
+    biome:
+      enabled: false
+    # Keep these on — they add coverage we don't already have.
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+
+chat:
+  auto_reply: true

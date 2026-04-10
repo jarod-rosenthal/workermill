@@ -128,8 +128,7 @@ Controls the `/build` review pipeline.
   "approvalThreshold": 9,
   "autoRevise": false,
   "specCheck": false,
-  "verifyEnabled": true,
-  "autoBranch": false
+  "verifyEnabled": true
 }
 ```
 
@@ -141,7 +140,6 @@ Controls the `/build` review pipeline.
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
 | `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
-| `autoBranch` | `false` | Automatically create the feature branch when `/build` starts without prompting for confirmation. |
 
 ### Setting from the CLI
 

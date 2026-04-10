@@ -51,7 +51,6 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       const ollamaHost = config.providers?.ollama?.host || "http://localhost:11434";
       const ollamaCtx = config.providers?.ollama?.contextLength || 65536;
       const autoRevise = config.review?.autoRevise ?? false;
-      const autoBranch = config.review?.autoBranch ?? false;
       const maxIssues = config.program?.maxIssues ?? config.program?.maxSubIssues ?? 25;
       const maxAutoRetries = config.program?.maxAutoRetries ?? 1;
       const gateMode = config.program?.gateMode ?? "advisory";
@@ -67,7 +66,6 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         `| Ollama host | \`${ollamaHost}\` | \`/settings ollama.host <url>\` |\n` +
         `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
         `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
-        `| Auto checkout branch | ${autoBranch} | \`/settings review.autoBranch <true/false>\` |\n` +
         `| Strict mode | ${config.review?.strict ?? false} | \`/settings review.strict <true/false>\` |\n` +
         `| Program max issues | ${maxIssues} | \`/settings program.maxIssues <n>\` |\n` +
         `| Program max auto-retries | ${maxAutoRetries} | \`/settings program.maxAutoRetries <n>\` |\n` +
@@ -129,7 +127,6 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       "review.maxrevisions": "review.maxRevisions",
       "review.threshold": "review.threshold",
       "review.autorevise": "review.autoRevise",
-      "review.autobranch": "review.autoBranch",
       "review.strict": "review.strict",
       "qa.participation": "qa.participation",
       "program.maxissues": "program.maxIssues",
@@ -194,10 +191,6 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       }
       case "review.autoRevise": {
         config.review = { ...config.review, autoRevise: boolVal(value) };
-        break;
-      }
-      case "review.autoBranch": {
-        config.review = { ...config.review, autoBranch: boolVal(value) };
         break;
       }
       case "review.strict": {
@@ -386,7 +379,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         break;
     }
 
-    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.autoBranch", "review.strict", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
+    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.strict", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
       saveConfig(config);
       ctx.addSystemMessage(`**Updated** \`${key}\` \u2192 \`${value}\` (saved to ~/.workermill/cli.json)`);
       if (key === "route") {

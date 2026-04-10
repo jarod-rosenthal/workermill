@@ -58,7 +58,6 @@ const SETTING_OPTIONS: SettingOption[] = [
   { key: "review.maxRevisions", desc: "Set review max revisions" },
   { key: "review.threshold", desc: "Set approval threshold" },
   { key: "review.autoRevise", desc: "Auto-revise after review", values: ["true", "false"] },
-  { key: "review.autoBranch", desc: "Auto-checkout review branch", values: ["true", "false"] },
   { key: "review.strict", desc: "Enable strict review mode", values: ["true", "false"] },
   { key: "qa.participation", desc: "Configure QA participation", values: ["default", "always"] },
   { key: "program.maxIssues", desc: "Set max issues per program" },

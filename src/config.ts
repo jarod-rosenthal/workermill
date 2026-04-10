@@ -40,8 +40,6 @@ export interface ReviewConfig {
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
   specCheck?: boolean;
-  /** Automatically proceed when /build creates a feature branch without prompting (default: false) */
-  autoBranch?: boolean;
   /** Strict mode — zero tolerance for gate failures, require review approval, block out-of-scope edits (default: false) */
   strict?: boolean;
 }
@@ -378,7 +376,6 @@ export const ReviewConfigSchema = z.object({
   approvalThreshold: z.number().optional(),
   verifyEnabled: z.boolean().optional(),
   specCheck: z.boolean().optional(),
-  autoBranch: z.boolean().optional(),
   strict: z.boolean().optional(),
 });
 

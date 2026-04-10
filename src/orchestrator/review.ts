@@ -711,13 +711,13 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
-    for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
+    for (let reviewRound = 1; reviewRound <= maxRevisions; reviewRound++) {
       if (await waitWhilePaused()) {
         return { finalReviewText: "", aborted: true };
       }
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
-      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions - 1}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
@@ -1058,7 +1058,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             ).catch(() => {});
           } else {
             ticketOps.postComment(
-              `## 🔄 Tech Lead Review — Revision ${reviewRound}/${maxRevisions} (${score}/10)\n\n${feedback}`
+              `## 🔄 Tech Lead Review — Revision ${reviewRound - 1}/${maxRevisions - 1} (${score}/10)\n\n${feedback}`
             ).catch(() => {});
           }
         }
@@ -1081,15 +1081,15 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           });
           break;
         }
-        const revisionsLeft = maxRevisions - (reviewRound - 1);
+        const revisionsLeft = maxRevisions - reviewRound;
         if (revisionsLeft <= 0) {
-          emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions} revision attempt(s).`);
+          emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions - 1} revision attempt(s).`);
           if (config.review?.strict) {
             output.coordinatorLog(`[strict] Max revisions reached without approval — build failed.`);
             output.error("Strict mode requires review approval. The build cannot proceed without it.");
             return { finalReviewText: reviewText, aborted: true };
           }
-          output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
+          output.coordinatorLog(`Max revisions (${maxRevisions - 1}) reached, proceeding to commit.`);
           break;
         }
 

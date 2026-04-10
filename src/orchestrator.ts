@@ -384,24 +384,16 @@ export async function runOrchestration(
       }
     }
 
-    // Branch creation prompt — makes the branch name visible before workers start.
-    // Skipped if the user already acknowledged the branch (via the existing-branch dialog above)
-    // or if they have previously selected "always" (autoBranch: true in config).
-    if (!branchAlreadyAcknowledged && config.review?.autoBranch !== true && !(typeof trustAll === "function" ? trustAll() : trustAll)) {
+    // Branch creation prompt — ALWAYS ask. Branch creation is never silent.
+    // Skipped only if the user already acknowledged the branch (via the existing-branch dialog above)
+    // or if --trust mode was explicitly enabled at launch.
+    if (!branchAlreadyAcknowledged && !(typeof trustAll === "function" ? trustAll() : trustAll)) {
       const branchName = derivedBranch ?? "a feature branch";
       const r = await output.confirm(`About to create and check out \`${branchName}\`. Continue?`);
-      const result = typeof r === "object" ? r : { allowed: r, mode: undefined };
-      if (!result.allowed) {
+      const allowed = typeof r === "object" ? r.allowed : r;
+      if (!allowed) {
         output.coordinatorLog("Cancelled.");
         return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
-      }
-      if (result.mode === "always") {
-        // Persist to global config so this survives across sessions
-        const globalCfg = loadConfig() ?? { providers: {}, default: "anthropic" };
-        globalCfg.review = { ...globalCfg.review, autoBranch: true };
-        saveConfig(globalCfg);
-        config.review = { ...config.review, autoBranch: true };
-        output.coordinatorLog("Got it — branch prompt disabled. Use `/settings review.autoBranch false` to re-enable.");
       }
     }
 

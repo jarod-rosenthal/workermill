@@ -269,6 +269,16 @@ export function extractDetailedReviewText(reviewText: string): string {
   return markerIdx > 0 ? reviewText.slice(0, markerIdx).trim() : "";
 }
 
+function normalizeVisibleReviewText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function shouldPrintFeedbackFallback(feedback: string, visibleStreamedText: string): boolean {
+  const normalizedFeedback = normalizeVisibleReviewText(feedback);
+  if (!normalizedFeedback) return false;
+  return !normalizeVisibleReviewText(visibleStreamedText).includes(normalizedFeedback);
+}
+
 export function buildReviewBlockerSignature(
   reviewText: string,
   affected: { stories: number[]; reasons: Record<number, string> } | null,
@@ -465,6 +475,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   // This matches the orchestrator's review pattern exactly.
   let reviewerOutput = "";
   let reviewerFinalText = "";
+  let reviewerVisibleText = "";
   let reviewText = "";
   const reviewStartMs = Date.now();
   try {
@@ -476,6 +487,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
       let attemptReviewerOutput = "";
       let attemptReviewerFinalText = "";
+      let attemptReviewerVisibleText = "";
       try {
         const reviewStream = streamText({
           model: reviewModel,
@@ -493,6 +505,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
               const lines = text.split("\n").filter((l: string) => l.trim());
               for (const line of lines) {
                 if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                attemptReviewerVisibleText += line + "\n";
                 output.log("tech_lead", line);
               }
             }
@@ -516,6 +529,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         parseRequiredReviewOutcome(candidateReviewText);
         reviewerOutput = attemptReviewerOutput;
         reviewerFinalText = attemptReviewerFinalText;
+        reviewerVisibleText = attemptReviewerVisibleText;
         reviewText = candidateReviewText;
         reviewUsage = result.usage;
         lastReviewError = undefined;
@@ -592,7 +606,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   output.log("tech_lead", `::review_decision::${decision}`);
   output.log("tech_lead", "\u2500".repeat(60));
   const feedback = extractReviewFeedback(reviewText, parsedReview.decision);
-  if (feedback) {
+  if (shouldPrintFeedbackFallback(feedback, reviewerVisibleText)) {
     output.log("tech_lead", "Fix context:");
     for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
       output.log("tech_lead", line);
@@ -921,6 +935,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
         let reviewerOutput = "";
         let reviewerFinalText = "";
+        let reviewerVisibleText = "";
         const reviewStartMs = Date.now();
         const reviewTimeoutMs = getReviewWallTimeoutMs();
         const maxReviewAttempts = 2;
@@ -945,6 +960,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
                   const lines = text.split("\n").filter(l => l.trim());
                   for (const line of lines) {
                     if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                    reviewerVisibleText += line + "\n";
                     output.log("tech_lead", line);
                   }
                 }
@@ -1038,7 +1054,8 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         output.log("tech_lead", `::code_quality_score::${score}/10`);
         output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
         output.log("tech_lead", "\u2500".repeat(60));
-        if (feedback) {
+        // Only print feedback if the user did not already see the review streamed to the terminal.
+        if (shouldPrintFeedbackFallback(feedback, reviewerVisibleText)) {
           output.log("tech_lead", "Fix context:");
           for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
             output.log("tech_lead", line);

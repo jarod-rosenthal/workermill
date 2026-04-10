@@ -2956,6 +2956,69 @@ FEEDBACK: Shippable.`;
     expect(output.errors).toHaveLength(0);
   });
 
+  it("does not reprint fix context when the orchestrator already streamed the review", async () => {
+    const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "s1", "title": "Build feature", "persona": "backend_developer", "description": "Implement it." }
+  ]
+}
+\`\`\``;
+
+    const streamedReviewText = "Missing tests.\nAdd regression coverage for edge cases.";
+    const reviewerRejectsText = `${streamedReviewText}
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 7
+FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
+
+    let callCount = 0;
+    vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+      mockStreamTextCalls.push(opts);
+      callCount++;
+      const isWorker = callCount === 2;
+      const isReviewer = callCount === 3;
+
+      if (typeof opts.onStepFinish === "function") {
+        (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+          text: isReviewer
+            ? "Missing tests.\n\nAdd regression coverage for  edge cases."
+            : "done",
+          toolCalls: isWorker ? [FAKE_TOOL_CALL] : [],
+        });
+      }
+
+      if (isWorker) {
+        const cwd = process.cwd();
+        fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+        fs.writeFileSync(path.join(cwd, "src", "impl.ts"), "// impl");
+      }
+
+      let text: string;
+      if (callCount === 1) text = planText;
+      else if (callCount === 2) text = "Work done.";
+      else text = reviewerRejectsText;
+
+      return {
+        textStream: (async function* () { yield text; })(),
+        text: Promise.resolve(text),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
+    });
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 1, autoRevise: false, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+    (output.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+    await runOrchestration(config, "Build feature", true, false, output);
+
+    expect(output.logs.filter((line) => line.includes("Fix context:"))).toHaveLength(0);
+    expect(output.logs.filter((line) => line.includes("[tech_lead] Missing tests."))).toHaveLength(1);
+    expect(output.logs.filter((line) => line.includes("Add regression coverage for  edge cases."))).toHaveLength(1);
+  });
+
   it("retries a standalone review once when the reviewer is rate limited", async () => {
     vi.useFakeTimers();
     const reviewerApprovesText = `Looks good.
@@ -3032,6 +3095,35 @@ FEEDBACK: Shippable.`;
     expect(callCount).toBe(2);
     expect(output.logs.join(" ")).toMatch(/retrying once/i);
     expect(output.errors).toHaveLength(0);
+  });
+
+  it("prints fix context in standalone review when the provider buffers the full response", async () => {
+    const reviewerRejectsText = `Missing tests.
+Add regression coverage for edge cases.
+REVIEW_DECISION: revision_needed
+CODE_QUALITY_SCORE: 7
+FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
+
+    fs.writeFileSync(path.join(repoDir, "README.md"), "# Updated\n");
+
+    vi.mocked(streamText).mockImplementation(() => ({
+      textStream: (async function* () { yield reviewerRejectsText; })(),
+      text: Promise.resolve(reviewerRejectsText),
+      totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+    }));
+
+    const config = {
+      ...createTestConfig(),
+      review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+    };
+    const output = createMockOutput();
+
+    const result = await runStandaloneReview(config as any, output, "diff");
+
+    expect(result?.decision).toBe("revision_needed");
+    expect(output.logs.filter((line) => line.includes("Fix context:"))).toHaveLength(1);
+    expect(output.logs.filter((line) => line.includes("[tech_lead] Missing tests."))).toHaveLength(1);
+    expect(output.logs.filter((line) => line.includes("[tech_lead] Add regression coverage for edge cases."))).toHaveLength(1);
   });
 
   it("retries the revision worker when it is rate limited", async () => {

@@ -20,7 +20,7 @@ describe("logger", () => {
     const slug = "dir"; // basename of /fake/project/dir
     expectedProjectDir = `${slug}-${expectedHash}`;
     const today = new Date().toISOString().slice(0, 10);
-    logFile = path.join(tmp.homeDir, ".workermill", "projects", expectedProjectDir, "logs", `${today}.log`);
+    logFile = path.join(tmp.homeDir, ".workermill", "logs", "dir", `${today}.log`);
 
     vi.spyOn(process, "cwd").mockReturnValue(fakeProjectDir);
     vi.resetModules();
@@ -200,9 +200,9 @@ describe("logger", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // Verify the log lives under ~/.workermill/projects/<slug-hash>/logs/
-    const logsBase = path.join(tmp.homeDir, ".workermill", "projects");
+    // Verify the log lives under ~/.workermill/logs/<slug>/
+    const logsBase = path.join(tmp.homeDir, ".workermill", "logs");
     const entries = fs.readdirSync(logsBase);
-    expect(entries).toContain(expectedProjectDir);
+    expect(entries).toContain("dir");
   });
 });

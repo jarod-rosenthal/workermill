@@ -62,19 +62,34 @@ export function getProjectLearningsPath(cwd?: string): string {
 }
 
 /**
+ * Get the project slug for log directory naming.
+ * e.g., /home/user/github/shipapi-demo → "shipapi-demo"
+ */
+function getProjectSlug(cwd?: string): string {
+  const dir = cwd || process.cwd();
+  let canonicalPath: string;
+  try { canonicalPath = fs.realpathSync(dir); } catch { canonicalPath = dir; }
+  return path.basename(canonicalPath)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "default";
+}
+
+/**
  * Get the path to today's log file.
- * Logs live alongside other project data: ~/.workermill/projects/<slug-hash>/logs/YYYY-MM-DD.log
+ * ~/.workermill/logs/<project-slug>/YYYY-MM-DD.log
  */
 export function getProjectLogPath(cwd?: string): string {
   const today = new Date().toISOString().slice(0, 10);
-  return path.join(getProjectRootDir(cwd), "logs", `${today}.log`);
+  return path.join(getStateRoot(), "logs", getProjectSlug(cwd), `${today}.log`);
 }
 
 /**
  * Get the path to the project's logs directory.
  */
 export function getProjectLogsDir(cwd?: string): string {
-  return path.join(getProjectRootDir(cwd), "logs");
+  return path.join(getStateRoot(), "logs", getProjectSlug(cwd));
 }
 
 /**

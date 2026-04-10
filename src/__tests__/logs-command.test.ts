@@ -62,20 +62,15 @@ describe("logs-command", () => {
 
   describe("getLogPath", () => {
     it("returns log path for cwd", () => {
-      const cwd = "/test/dir";
-      const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
       const today = new Date().toISOString().slice(0, 10);
-      const expected = path.join(os.homedir(), ".workermill", "projects", `dir-${hash}`, "logs", `${today}.log`);
-      expect(getLogPath(cwd)).toBe(expected);
+      const expected = path.join(os.homedir(), ".workermill", "logs", "dir", `${today}.log`);
+      expect(getLogPath("/test/dir")).toBe(expected);
     });
 
     it("returns log path for undefined cwd", () => {
-      const cwd = process.cwd();
-      const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
-      const slug = path.basename(cwd).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      const slug = path.basename(process.cwd()).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "default";
       const today = new Date().toISOString().slice(0, 10);
-      const projectDir = slug ? `${slug}-${hash}` : hash;
-      const expected = path.join(os.homedir(), ".workermill", "projects", projectDir, "logs", `${today}.log`);
+      const expected = path.join(os.homedir(), ".workermill", "logs", slug, `${today}.log`);
       expect(getLogPath()).toBe(expected);
     });
   });

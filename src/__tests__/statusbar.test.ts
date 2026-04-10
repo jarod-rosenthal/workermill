@@ -79,6 +79,25 @@ function getToolEntries(counts: Record<string, number>): [string, number][] {
     .sort((a, b) => b[1] - a[1]);
 }
 
+function modelLabel(providerModel: string): string {
+  const slash = providerModel.indexOf("/");
+  return slash >= 0 ? providerModel.slice(slash + 1) : providerModel;
+}
+
+function resolveWorkerTokPerSec(
+  tokPerSec: Record<string, number>,
+  workerKey: string,
+  roleWorkerKey?: string,
+): number | undefined {
+  if (tokPerSec[workerKey] != null) return tokPerSec[workerKey];
+  if (roleWorkerKey && tokPerSec[roleWorkerKey] != null) return tokPerSec[roleWorkerKey];
+
+  const workerModel = modelLabel(workerKey);
+  const modelMatches = Object.entries(tokPerSec).filter(([key]) => modelLabel(key) === workerModel);
+  if (modelMatches.length === 1) return modelMatches[0][1];
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -146,7 +165,7 @@ describe("StatusBar: tok/s display", () => {
   it("workerTps is shown when available", () => {
     const tps: Record<string, number> = { "ollama/qwen3-coder": 42 };
     const workerStr = "ollama/qwen3-coder";
-    const workerTps = tps[workerStr];
+    const workerTps = resolveWorkerTokPerSec(tps, workerStr);
     expect(workerTps).toBe(42);
     // In the component this renders as ` 42t/s`
     expect(`${workerTps}t/s`).toBe("42t/s");
@@ -155,7 +174,17 @@ describe("StatusBar: tok/s display", () => {
   it("workerTps is undefined when not in map", () => {
     const tps: Record<string, number> = {};
     const workerStr = "anthropic/claude-sonnet-4-6";
-    expect(tps[workerStr]).toBeUndefined();
+    expect(resolveWorkerTokPerSec(tps, workerStr)).toBeUndefined();
+  });
+
+  it("falls back to the routed worker key when available", () => {
+    const tps: Record<string, number> = { "openai_default/gpt-5.4": 77 };
+    expect(resolveWorkerTokPerSec(tps, "openai/gpt-5.4", "openai_default/gpt-5.4")).toBe(77);
+  });
+
+  it("falls back to a unique model-name match when keys differ", () => {
+    const tps: Record<string, number> = { "openai_default/gpt-5.4": 91 };
+    expect(resolveWorkerTokPerSec(tps, "openai/gpt-5.4")).toBe(91);
   });
 });
 

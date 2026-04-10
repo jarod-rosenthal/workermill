@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { shouldCaptureInput, shouldInsertNewlineOnReturn } from "../ui/Input.tsx";
+import { getSettingsCompletions, shouldCaptureInput, shouldInsertNewlineOnReturn } from "../ui/Input.tsx";
 
 // Replicate BUILTIN_COMMANDS from Input.tsx (full list)
 const BUILTIN_COMMANDS = [
@@ -39,6 +39,34 @@ const BUILTIN_COMMANDS = [
   { name: "/quit", desc: "Exit" },
 ];
 
+const SETTING_OPTIONS = [
+  { key: "all", desc: "Show all settings" },
+  { key: "ollama.host", desc: "Set Ollama host" },
+  { key: "ollama.context", desc: "Set Ollama context length" },
+  { key: "review.enabled", desc: "Enable or disable review", values: ["true", "false"] },
+  { key: "review.maxRevisions", desc: "Set review max revisions" },
+  { key: "review.threshold", desc: "Set approval threshold" },
+  { key: "review.autoRevise", desc: "Auto-revise after review", values: ["true", "false"] },
+  { key: "review.autoBranch", desc: "Auto-checkout review branch", values: ["true", "false"] },
+  { key: "review.strict", desc: "Enable strict review mode", values: ["true", "false"] },
+  { key: "qa.participation", desc: "Configure QA participation", values: ["default", "always"] },
+  { key: "program.maxIssues", desc: "Set max issues per program" },
+  { key: "program.maxAutoRetries", desc: "Set max auto-retries" },
+  { key: "program.gateMode", desc: "Set program gate mode", values: ["required", "advisory"] },
+  { key: "sandbox", desc: "Set sandbox mode", values: ["true", "false", "os"] },
+  { key: "liveView", desc: "Enable or disable live code view", values: ["true", "false"] },
+  { key: "ui.inlineEditPreview", desc: "Toggle inline edit preview", values: ["true", "false"] },
+  { key: "bell", desc: "Toggle completion bell", values: ["true", "false"] },
+  { key: "experimental", desc: "Toggle experimental features", values: ["true", "false"] },
+  { key: "tickets", desc: "Choose issue tracker", values: ["github", "jira", "linear"] },
+  { key: "jira.url", desc: "Set Jira base URL" },
+  { key: "jira.email", desc: "Set Jira email" },
+  { key: "jira.token", desc: "Set Jira API token" },
+  { key: "linear.key", desc: "Set Linear API key" },
+  { key: "route", desc: "Route a persona to a provider/model" },
+  { key: "key", desc: "Save an API key for a provider" },
+];
+
 // Replicate the completion filter function from Input.tsx (the useMemo body)
 function getCompletions(
   value: string,
@@ -61,6 +89,43 @@ function getCompletions(
     } catch {
       return [];
     }
+  }
+  const settingsMatch = value.match(/^\/(settings|config)(?:\s+(.*))?$/);
+  if (settingsMatch) {
+    const command = settingsMatch[1];
+    const rest = settingsMatch[2] ?? "";
+    const hasTrailingSpace = /\s$/.test(value);
+    const trimmedRest = rest.trim();
+
+    if (!trimmedRest) {
+      return SETTING_OPTIONS.map((option) => ({
+        name: `/${command} ${option.key}`,
+        desc: option.desc,
+      }));
+    }
+
+    const parts = trimmedRest.split(/\s+/);
+    const key = parts[0].toLowerCase();
+    const exactOption = SETTING_OPTIONS.find((option) => option.key.toLowerCase() === key);
+
+    if (parts.length === 1 && !hasTrailingSpace && !exactOption) {
+      return SETTING_OPTIONS
+        .filter((option) => option.key.toLowerCase().startsWith(key) && option.key.toLowerCase() !== key)
+        .map((option) => ({
+          name: `/${command} ${option.key}`,
+          desc: option.desc,
+        }));
+    }
+
+    if (!exactOption?.values) return [];
+
+    const valuePartial = parts.length === 1 ? "" : parts.slice(1).join(" ").toLowerCase();
+    return exactOption.values
+      .filter((optionValue) => optionValue.startsWith(valuePartial) && optionValue !== valuePartial)
+      .map((optionValue) => ({
+        name: `/${command} ${exactOption.key} ${optionValue}`,
+        desc: `Set ${exactOption.key}`,
+      }));
   }
   if (!value.startsWith("/") || value.includes(" ")) return [];
   const query = value.toLowerCase();
@@ -93,9 +158,48 @@ describe("Input completion logic", () => {
   });
 
   it("returns no completions for slash command that has a space but is not /ship or /build", () => {
-    expect(getCompletions("/settings foo", mockReaddirSync)).toEqual([]);
     expect(getCompletions("/model gpt-5", mockReaddirSync)).toEqual([]);
     expect(getCompletions("/as backend", mockReaddirSync)).toEqual([]);
+  });
+
+  it("offers settings keys after /settings", () => {
+    const names = getCompletions("/settings ", mockReaddirSync).map((r) => r.name);
+    expect(names).toContain("/settings review.enabled");
+    expect(names).toContain("/settings qa.participation");
+    expect(names).toContain("/settings experimental");
+  });
+
+  it("filters settings keys by partial prefix", () => {
+    const names = getCompletions("/settings rev", mockReaddirSync).map((r) => r.name);
+    expect(names).toContain("/settings review.enabled");
+    expect(names).toContain("/settings review.maxRevisions");
+    expect(names).not.toContain("/settings experimental");
+  });
+
+  it("offers value completions for boolean settings", () => {
+    const names = getCompletions("/settings experimental ", mockReaddirSync).map((r) => r.name);
+    expect(names).toEqual([
+      "/settings experimental true",
+      "/settings experimental false",
+    ]);
+  });
+
+  it("offers value completions when an exact settings key is typed", () => {
+    const names = getCompletions("/settings qa.participation", mockReaddirSync).map((r) => r.name);
+    expect(names).toEqual([
+      "/settings qa.participation default",
+      "/settings qa.participation always",
+    ]);
+  });
+
+  it("filters enumerated settings values by partial input", () => {
+    const names = getCompletions("/settings tickets gi", mockReaddirSync).map((r) => r.name);
+    expect(names).toEqual(["/settings tickets github"]);
+  });
+
+  it("supports /config as an alias for settings completions", () => {
+    const names = getCompletions("/config sandbox o", mockReaddirSync).map((r) => r.name);
+    expect(names).toEqual(["/config sandbox os"]);
   });
 
   it("filters BUILTIN_COMMANDS by prefix for partial /s input", () => {
@@ -244,6 +348,12 @@ describe("queued input capture", () => {
 
   it("does not capture when inactive and not queued", () => {
     expect(shouldCaptureInput(false, false)).toBe(false);
+  });
+});
+
+describe("settings completion helper", () => {
+  it("returns empty for non-settings input", () => {
+    expect(getSettingsCompletions("/model anthropic/claude-sonnet-4-6")).toEqual([]);
   });
 });
 

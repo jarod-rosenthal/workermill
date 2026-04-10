@@ -300,6 +300,19 @@ function referencesOutsidePath(command: string, cwd?: string): string | null {
   return null;
 }
 
+export function commandUsesDocker(command: string): boolean {
+  const segments = command.split(/&&|\|\||;|\n/);
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const stripped = trimmed.replace(/^(?:[A-Z_][A-Z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+)*/g, "");
+    if (/^(?:docker|docker-compose)\b/i.test(stripped)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function execute({
   command,
   cwd,
@@ -337,7 +350,8 @@ export async function execute({
   const effectiveCwd = cwd || process.cwd();
   const effectiveSandboxRoot = sandboxRoot || effectiveCwd;
   const sandboxRequested = osSandbox && SandboxManager.isSupportedPlatform();
-  let useSandbox = sandboxRequested && !sandboxUnavailableReason;
+  const dockerCommand = commandUsesDocker(command);
+  let useSandbox = sandboxRequested && !sandboxUnavailableReason && !dockerCommand;
 
   let shellCommand = command;
   if (useSandbox) {

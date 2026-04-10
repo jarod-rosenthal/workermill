@@ -44,6 +44,40 @@ const BUILTIN_COMMANDS = [
   { name: "/quit", desc: "Exit" },
 ];
 
+type SettingOption = {
+  key: string;
+  desc: string;
+  values?: string[];
+};
+
+const SETTING_OPTIONS: SettingOption[] = [
+  { key: "all", desc: "Show all settings" },
+  { key: "ollama.host", desc: "Set Ollama host" },
+  { key: "ollama.context", desc: "Set Ollama context length" },
+  { key: "review.enabled", desc: "Enable or disable review", values: ["true", "false"] },
+  { key: "review.maxRevisions", desc: "Set review max revisions" },
+  { key: "review.threshold", desc: "Set approval threshold" },
+  { key: "review.autoRevise", desc: "Auto-revise after review", values: ["true", "false"] },
+  { key: "review.autoBranch", desc: "Auto-checkout review branch", values: ["true", "false"] },
+  { key: "review.strict", desc: "Enable strict review mode", values: ["true", "false"] },
+  { key: "qa.participation", desc: "Configure QA participation", values: ["default", "always"] },
+  { key: "program.maxIssues", desc: "Set max issues per program" },
+  { key: "program.maxAutoRetries", desc: "Set max auto-retries" },
+  { key: "program.gateMode", desc: "Set program gate mode", values: ["required", "advisory"] },
+  { key: "sandbox", desc: "Set sandbox mode", values: ["true", "false", "os"] },
+  { key: "liveView", desc: "Enable or disable live code view", values: ["true", "false"] },
+  { key: "ui.inlineEditPreview", desc: "Toggle inline edit preview", values: ["true", "false"] },
+  { key: "bell", desc: "Toggle completion bell", values: ["true", "false"] },
+  { key: "experimental", desc: "Toggle experimental features", values: ["true", "false"] },
+  { key: "tickets", desc: "Choose issue tracker", values: ["github", "jira", "linear"] },
+  { key: "jira.url", desc: "Set Jira base URL" },
+  { key: "jira.email", desc: "Set Jira email" },
+  { key: "jira.token", desc: "Set Jira API token" },
+  { key: "linear.key", desc: "Set Linear API key" },
+  { key: "route", desc: "Route a persona to a provider/model" },
+  { key: "key", desc: "Save an API key for a provider" },
+];
+
 interface InputProps {
   /** Called when the user presses Enter with a non-empty value. */
   onSubmit: (value: string) => void;
@@ -95,6 +129,46 @@ export function shouldInsertNewlineOnReturn(
   if (key.shift) return true;
   if (key.meta && supportsModifiedEnter(env)) return true;
   return false;
+}
+
+export function getSettingsCompletions(value: string): Array<{ name: string; desc: string }> {
+  const settingsMatch = value.match(/^\/(settings|config)(?:\s+(.*))?$/);
+  if (!settingsMatch) return [];
+
+  const command = settingsMatch[1];
+  const rest = settingsMatch[2] ?? "";
+  const hasTrailingSpace = /\s$/.test(value);
+  const trimmedRest = rest.trim();
+
+  if (!trimmedRest) {
+    return SETTING_OPTIONS.map((option) => ({
+      name: `/${command} ${option.key}`,
+      desc: option.desc,
+    }));
+  }
+
+  const parts = trimmedRest.split(/\s+/);
+  const key = parts[0].toLowerCase();
+  const exactOption = SETTING_OPTIONS.find((option) => option.key.toLowerCase() === key);
+
+  if (parts.length === 1 && !hasTrailingSpace && !exactOption) {
+    return SETTING_OPTIONS
+      .filter((option) => option.key.toLowerCase().startsWith(key) && option.key.toLowerCase() !== key)
+      .map((option) => ({
+        name: `/${command} ${option.key}`,
+        desc: option.desc,
+      }));
+  }
+
+  if (!exactOption?.values) return [];
+
+  const valuePartial = parts.length === 1 ? "" : parts.slice(1).join(" ").toLowerCase();
+  return exactOption.values
+    .filter((optionValue) => optionValue.startsWith(valuePartial) && optionValue !== valuePartial)
+    .map((optionValue) => ({
+      name: `/${command} ${exactOption.key} ${optionValue}`,
+      desc: `Set ${exactOption.key}`,
+    }));
 }
 
 /**
@@ -274,6 +348,10 @@ export function Input({
       return modelChoices
         .filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(partial))
         .slice(0, 10);
+    }
+    const settingsCompletions = getSettingsCompletions(value);
+    if (settingsCompletions.length > 0) {
+      return settingsCompletions;
     }
     if (!value.startsWith("/") || value.includes(" ")) return [];
     const query = value.toLowerCase();

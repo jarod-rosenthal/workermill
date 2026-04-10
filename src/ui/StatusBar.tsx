@@ -112,6 +112,20 @@ function modelLabel(providerModel: string): string {
   return slash >= 0 ? providerModel.slice(slash + 1) : providerModel;
 }
 
+function resolveWorkerTokPerSec(
+  tokPerSec: Record<string, number>,
+  workerKey: string,
+  roleWorkerKey?: string,
+): number | undefined {
+  if (tokPerSec[workerKey] != null) return tokPerSec[workerKey];
+  if (roleWorkerKey && tokPerSec[roleWorkerKey] != null) return tokPerSec[roleWorkerKey];
+
+  const workerModel = modelLabel(workerKey);
+  const modelMatches = Object.entries(tokPerSec).filter(([key]) => modelLabel(key) === workerModel);
+  if (modelMatches.length === 1) return modelMatches[0][1];
+  return undefined;
+}
+
 /**
  * Three-row status bar:
  * Row 1: [model] [tok/s] [context bar] [pct] | [cwd] git:(branch) | [instructions] | [cost] [time]
@@ -171,7 +185,8 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
     : `${Math.round(props.maxContext / divisor)}k`;
   const modelDisplay = `${workerStr} (${ctxK})`;
   const tps = props.tokPerSec || {};
-  const workerTps = tps[workerKey];
+  const workerRoleKey = rm?.worker;
+  const workerTps = resolveWorkerTokPerSec(tps, workerKey, workerRoleKey);
 
   // Tool counts for row 2
   const counts = props.toolCounts || {};
@@ -248,10 +263,20 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
         )}
       </Box>
 
-      {/* Row 3: Permission mode + planner/reviewer */}
+      {/* Row 3: Permission mode + default/planner/reviewer */}
       <Box flexWrap="wrap">
         <Text color={modeColor} bold>{`${modeIcon} ${props.mode}`}</Text>
         <Text color={theme.subtle} dimColor>{" (shift+tab)"}</Text>
+        <Text color={theme.subtle}>{" │ "}</Text>
+        <Text>
+          <Text color={theme.success} bold>{"default"}</Text>
+          <Text color={theme.subtle}>:</Text>
+          <Text color={theme.success}>{workerStr}</Text>
+          <Text color={theme.subtle} dimColor>{` (${ctxK})`}</Text>
+          {workerTps != null ? (
+            <Text color={theme.subtle} dimColor>{` ${workerTps}t/s`}</Text>
+          ) : null}
+        </Text>
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <>
             <Text color={theme.subtle}>{" │ "}</Text>

@@ -616,45 +616,6 @@ export interface StoryOwnershipAssessment {
   severity: "none" | "warn" | "block";
 }
 
-export function assessStoryFileOwnership(
-  touchedFiles: string[],
-  story: Story,
-  workingDir: string,
-): StoryOwnershipAssessment {
-  if (
-    touchedFiles.length === 0 ||
-    !(story.targetFiles?.length || story.requiredFiles?.length || story.requiredTests?.length)
-  ) {
-    return { outOfScope: [], ratio: 0, severity: "none" };
-  }
-
-  const allowedFiles = new Set([
-    ...(story.targetFiles || []),
-    ...(story.requiredFiles || []),
-    ...(story.requiredTests || []),
-  ]);
-
-  const normalize = (filePath: string) => {
-    const rel = path.isAbsolute(filePath) ? path.relative(workingDir, filePath) : filePath;
-    return rel.replace(/\\/g, "/");
-  };
-
-  const allowedNormalized = new Set([...allowedFiles].map(normalize));
-  const outOfScope = touchedFiles
-    .map(normalize)
-    .filter((filePath) => !allowedNormalized.has(filePath));
-
-  if (outOfScope.length === 0) {
-    return { outOfScope: [], ratio: 0, severity: "none" };
-  }
-
-  const ratio = outOfScope.length / touchedFiles.length;
-  if (ratio > 0.5 && outOfScope.length > 3) {
-    return { outOfScope, ratio, severity: "block" };
-  }
-  return { outOfScope, ratio, severity: "warn" };
-}
-
 /* -------------------------------------------------------------------------- */
 /*  runDiagnosticsOnTouchedFiles                                              */
 /* -------------------------------------------------------------------------- */
@@ -1358,53 +1319,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           output.error(`Story ${i + 1} failed: ${reason} after 3 attempts`);
           failedStories.add(story.id);
           break;
-        }
-      }
-
-      // --- File ownership enforcement ---
-      // Compare files touched by this story against its declared scope.
-      // Small adjacent edits are tolerated with a warning; major drift blocks
-      // the attempt and retries on a clean restored workspace.
-      {
-        const touchedFiles = storyActions
-          .filter(a => a.tool === "created" || a.tool === "edited")
-          .map(a => a.detail);
-        const ownership = assessStoryFileOwnership(touchedFiles, story, workingDir);
-
-        if (ownership.severity === "block") {
-          const detail = `Story ${i + 1} edited ${ownership.outOfScope.length} file(s) outside its declared scope: ${ownership.outOfScope.slice(0, 5).join(", ")}${ownership.outOfScope.length > 5 ? ` +${ownership.outOfScope.length - 5} more` : ""}`;
-          logger.warn("Story file ownership drift", {
-            story: story.id,
-            outOfScope: ownership.outOfScope,
-            ratio: Math.round(ownership.ratio * 100),
-          });
-
-          if (revision < 2) {
-            output.log("system", `⚠ ${detail} — retrying with stronger scope guidance`);
-            revisionFeedback = `\n\n## Scope Violation\nYour previous attempt edited files outside this story's declared scope.\n\nOut-of-scope edits:\n${ownership.outOfScope.map((file) => `- ${file}`).join("\n")}\n\nYou MUST constrain this story to its declared files unless a change is explicitly required to wire into an existing integration point. Retry with a narrower edit set.`;
-            continue;
-          }
-
-          emitFailureCode(output, "out_of_scope_edit", detail);
-          output.error(`Story ${i + 1} failed: edited too many files outside its declared scope after 3 attempts`);
-          failedStories.add(story.id);
-          break;
-        }
-
-        if (ownership.severity === "warn") {
-          if (config.review?.strict) {
-            // Strict mode: any out-of-scope edit is blocking
-            const detail = `[strict] Story ${i + 1} edited ${ownership.outOfScope.length} file(s) outside scope: ${ownership.outOfScope.join(", ")}`;
-            output.log("system", `⚠ ${detail}`);
-            if (revision < 2) {
-              revisionFeedback = `\n\n## Scope Violation (strict mode)\nOut-of-scope edits:\n${ownership.outOfScope.map((file) => `- ${file}`).join("\n")}\n\nStrict mode requires all edits to be within declared scope. Fix and retry.`;
-              continue;
-            }
-            emitFailureCode(output, "out_of_scope_edit", detail);
-            failedStories.add(story.id);
-            break;
-          }
-          logger.info("Story edited files outside declared scope", { story: story.id, outOfScope: ownership.outOfScope });
         }
       }
 

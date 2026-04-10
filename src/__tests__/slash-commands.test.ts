@@ -1714,6 +1714,16 @@ describe("handleSlashCommand", () => {
       );
     });
 
+    it("updates experimental", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings experimental true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          experimental: true,
+        }),
+      );
+    });
+
     it("updates program.maxIssues", () => {
       const ctx = createContext();
       handleSlashCommand("/settings program.maxIssues 15", ctx);

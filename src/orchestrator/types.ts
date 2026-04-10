@@ -61,7 +61,6 @@ export type FailureCode =
   | "missing_required_command"
   | "test_only_in_excluded_suite"
   | "required_command_failed"
-  | "out_of_scope_edit"
   | "worker_no_output"
   | "review_blocker_unresolved"
   | "review_stale_vs_head";

@@ -312,7 +312,6 @@ export function App(props: AppProps): React.ReactElement {
   const [rollbackPrefill, setRollbackPrefill] = useState<{ value: string; seq: number } | null>(null);
   const [rollbackOfferVisible, setRollbackOfferVisible] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
-  const activitySinceRef = useRef<number | null>(null);
 
   const handleQueue = useCallback((value: string) => {
     setQueuedInput((prev) => prev ?? value);
@@ -508,25 +507,12 @@ export function App(props: AppProps): React.ReactElement {
   const animateActivity = true;
 
   useEffect(() => {
-    if (!hasLiveActivity) {
-      activitySinceRef.current = null;
-      return;
-    }
-    if (activitySinceRef.current == null) {
-      activitySinceRef.current = Date.now();
-    }
-  }, [hasLiveActivity]);
-
-  useEffect(() => {
     if (!hasLiveActivity || !animateActivity) return;
     const timer = setInterval(() => {
       setActivityTick((t) => (t + 1) % 10_000);
     }, ACTIVITY_TICK_MS_FAST);
     return () => clearInterval(timer);
   }, [animateActivity, hasLiveActivity]);
-
-  const elapsedSec = activitySinceRef.current ? Math.max(0, Math.floor((Date.now() - activitySinceRef.current) / 1000)) : 0;
-  const elapsedLabel = elapsedSec > 0 ? ` ${elapsedSec}s` : "";
 
   return (
     <Box flexDirection="column" width="100%">
@@ -590,17 +576,17 @@ export function App(props: AppProps): React.ReactElement {
             {hasLiveToolActivity ? (
               <ToolCallDisplay tool={props.streamingToolCalls![props.streamingToolCalls!.length - 1]} tick={activityTick} animate={animateActivity} />
             ) : props.orchestratorStatus ? (
-              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.orchestratorStatus}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.orchestratorStatus}</Text>
             ) : props.status === "thinking" ? (
-              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} Thinking<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} Thinking</Text>
             ) : props.status === "streaming" ? (
-              <Text color={theme.brand}>{animateActivity ? <Spinner color={theme.brand} tick={activityTick} /> : "●"} Streaming response<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.brand}>{animateActivity ? <Spinner color={theme.brand} tick={activityTick} /> : "●"} Streaming response</Text>
             ) : props.status === "tool_running" ? (
-              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.statusDetail || "Running tool"}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.warning}>{animateActivity ? <Spinner color={theme.warning} tick={activityTick} /> : "●"} {props.statusDetail || "Running tool"}</Text>
             ) : props.status === "permission" ? (
-              <Text color={theme.permission}>{animateActivity ? <Spinner color={theme.permission} tick={activityTick} /> : "●"} Waiting for permission<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.permission}>{animateActivity ? <Spinner color={theme.permission} tick={activityTick} /> : "●"} Waiting for permission</Text>
             ) : props.buildPreviewLine ? (
-              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} {props.buildPreviewLine}<Text color={theme.subtleDark}>{elapsedLabel}</Text></Text>
+              <Text color={theme.subtle}>{animateActivity ? <Spinner color={theme.subtle} tick={activityTick} /> : "●"} {props.buildPreviewLine}</Text>
             ) : (
               <Text>{" "}</Text>
             )}

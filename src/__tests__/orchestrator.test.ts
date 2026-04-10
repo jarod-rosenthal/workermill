@@ -557,7 +557,9 @@ describe("orchestrator", () => {
 
       expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
       expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
-      expect(mockStreamTextCalls).toHaveLength(2);
+      // Gate failures now flow into the review loop instead of bailing out,
+      // so we get 3 calls: planner + executor + reviewer
+      expect(mockStreamTextCalls).toHaveLength(3);
     });
 
     it("passes API keys through for routed provider aliases", async () => {

@@ -30,6 +30,14 @@ const TOOL_USAGE_LABELS: Record<string, string> = {
   read_file: "read",
   write_file: "write",
   edit_file: "edit",
+  multi_edit_file: "multi-edit",
+  bash_background: "bash-bg",
+  bash_output: "bash-out",
+  bash_kill: "bash-kill",
+  sub_agent: "agent",
+  web_search: "search",
+  view_image: "image",
+  download_file: "download",
 };
 
 function toolUsageLabel(name: string): string {
@@ -267,16 +275,6 @@ function StatusBarView(props: StatusBarProps): React.ReactElement {
       <Box flexWrap="wrap">
         <Text color={modeColor} bold>{`${modeIcon} ${props.mode}`}</Text>
         <Text color={theme.subtle} dimColor>{" (shift+tab)"}</Text>
-        <Text color={theme.subtle}>{" │ "}</Text>
-        <Text>
-          <Text color={theme.success} bold>{"default"}</Text>
-          <Text color={theme.subtle}>:</Text>
-          <Text color={theme.success}>{workerStr}</Text>
-          <Text color={theme.subtle} dimColor>{` (${ctxK})`}</Text>
-          {workerTps != null ? (
-            <Text color={theme.subtle} dimColor>{` ${workerTps}t/s`}</Text>
-          ) : null}
-        </Text>
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <>
             <Text color={theme.subtle}>{" │ "}</Text>

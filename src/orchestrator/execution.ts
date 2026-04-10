@@ -56,17 +56,20 @@ import { toPosixPath, uniqueStrings } from "./planning.js";
  */
 export const EXTERNAL_TOOLS = `
 
-## External Tools Available via Bash
+## External Tools Available
 
 You have full access to CLI tools installed on this machine through the bash tool. Use them freely:
 
-### GitHub CLI (\`gh\`)
-- \`gh issue list\` — list open issues
-- \`gh issue view 123\` — read a specific issue
-- \`gh issue search "search query"\` — search issues
+### Issue Trackers (GitHub Issues, Jira, Linear)
+Use the \`ticket\` tool — NOT \`gh\` CLI or \`curl\` — for all issue tracker operations:
+- \`ticket({ action: "fetch", ticketKey: "#42" })\` — read a specific issue
+- \`ticket({ action: "list", query: "search terms" })\` — search/list issues
+- \`ticket({ action: "comment", ticketKey: "#42", comment: "text" })\` — post a comment
+- \`ticket({ action: "transition", ticketKey: "#42", status: "done" })\` — change status
+
+### GitHub PRs (via bash)
 - \`gh pr list\` — list pull requests
 - \`gh pr view 123\` — read a specific PR
-- \`gh api repos/OWNER/REPO/issues\` — raw GitHub API access
 
 ### Web & Research
 - Use the \`web_search\` tool to search the web for documentation, examples, or solutions

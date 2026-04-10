@@ -337,7 +337,7 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
       "id": "short-kebab-case-id",
       "title": "Brief title",
       "persona": "persona_name",
-      "description": "Scope: which files/directories this story owns and what area it covers.",
+      "description": "Create the webhook model and API endpoints. Add a Webhook SQLAlchemy model (UUID PK, org_id FK, url, secret, event_types JSONB, active boolean, created_at). Add CRUD endpoints in a new webhooks router: POST /webhooks (create), GET /webhooks (list by org), DELETE /webhooks/:id. Wire async delivery via FastAPI BackgroundTasks on relevant events. Include DB migration for the new table.",
       "targetFiles": ["src/models/webhook.py", "src/routers/webhooks.py"],
       "referenceFiles": ["src/models/product.py", "src/routers/products.py"],
       "primaryPattern": "src/models/product.py",
@@ -371,6 +371,8 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 - \`requiredTests\`: normal regression tests that MUST exist by the end of the story
 - \`requiredCommands\`: targeted commands that MUST pass before review
 - \`assumptions\`: only when needed, and only for things not confirmed from the repo
+
+**\`description\` must be a detailed, complete scope definition** — NOT a one-liner. Include what to create, what each component does, data models, endpoints, and key behaviors. The worker uses this as their primary task brief. Never trail off with "..." or leave details out.
 
 **Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
 

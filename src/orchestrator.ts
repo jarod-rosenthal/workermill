@@ -525,9 +525,6 @@ export async function runOrchestration(
   const gatesResult = await runQualityGates({
     config, output, sorted, completedStoryIds, context, workingDir,
   });
-  if (gatesResult.earlyExit) {
-    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
-  }
   const { gateResultsSection } = gatesResult;
 
   // Run inline review with revision loop

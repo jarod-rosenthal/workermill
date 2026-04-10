@@ -424,23 +424,24 @@ ${codeDiff || "(no code changes detected)"}
 Review the code changes above for quality, correctness, and security.
 
 ### APPROVE when:
-- Code correctly implements the requirements
-- No obvious bugs or security issues
-- Code follows existing patterns in the codebase
-- Appropriate error handling is in place
-- Minor cosmetic issues are NOT grounds for revision
+- Code correctly implements the requirements AND the reviewer has no substantive improvements to suggest
+- Pure cosmetic issues (trailing whitespace, blank lines, import ordering) are NOT grounds for revision — mention them in feedback but still approve
 
 ### REVISION_NEEDED when:
 - Code has functional bugs that affect correctness
 - Security vulnerabilities that must be fixed
 - Missing required functionality
 - Broken imports, missing dependencies, or code that won't run
+- Tests are weak or incomplete — e.g. a test that doesn't verify the behavior it claims to, or missing edge cases
+- You identified a substantive improvement that strengthens correctness or prevents regressions
+
+**IMPORTANT: If you mention an issue in your review, request the fix.** Do not label real issues as "non-blocking" and then approve. If it was worth writing about, it is worth fixing. The only exception is pure cosmetic preferences — those go in feedback as FYI only.
 
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
 - Security vulnerability that requires different architecture
 
-**Be fair**: Approve code that works and has no functional bugs or security issues. Request revision for real problems only.
+**Quality gate stance**: Block for correctness, security, missing functionality, weak tests, and substantive improvements. Do NOT block for style or cosmetic preferences.
 
 ## Output Format
 
@@ -858,24 +859,25 @@ ${loopGuardSection ? `\n${loopGuardSection}` : ""}
 - **Be evidence-based**: For blocking issues, cite concrete evidence (failing behavior, broken path, missing code, or reproducible command)
 
 ### APPROVE when:
-- Code correctly implements the requirements from the original spec
-- No obvious bugs or security issues
-- Code follows existing patterns in the codebase
-- Minor cosmetic issues are NOT grounds for revision — mention them in feedback but still approve
+- Code correctly implements the requirements AND the reviewer has no substantive improvements to suggest
+- Pure cosmetic issues (trailing whitespace, blank lines, import ordering) are NOT grounds for revision — mention them in feedback but still approve
 
 ### REVISION_NEEDED when:
 - Code has functional bugs that affect correctness
 - Security vulnerabilities that must be fixed
 - Missing required functionality from the task spec
 - Broken imports, missing dependencies, or code that won't run
-- You can provide concrete evidence of the failure from the current code state
+- Tests are weak or incomplete — e.g. a test that doesn't actually verify the behavior it claims to test, or missing edge case coverage for the feature being built
+- You identified a substantive improvement that strengthens correctness, reliability, or prevents regressions — and you can describe the specific change needed
+
+**IMPORTANT: If you mention an issue in your review, request the fix.** Do not label real issues as "non-blocking" and then approve. If it was worth analyzing and writing about, it is worth fixing while we are here. The only exception is pure cosmetic preferences (style, formatting, naming conventions) — those go in feedback as FYI only.
 
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
 
 **Quality gate stance**: Make decisions based on impact and evidence, not preference.
-- Block only for functional correctness, security, or missing-required-functionality issues backed by concrete evidence.
-- Do NOT block for style or cosmetic preferences.
+- Block for: correctness, security, missing functionality, weak tests, and substantive improvements you identified.
+- Do NOT block for: style preferences, cosmetic formatting, naming conventions, or opinions without evidence.
 - If uncertain, inspect files or run lightweight verification before blocking.
 
 ## Output Format

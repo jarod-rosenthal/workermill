@@ -36,10 +36,34 @@ async function initSandbox(cwd: string): Promise<void> {
       sandboxInitPromise = undefined;
       throw new Error(`Sandbox dependencies not available: ${sandboxUnavailableReason}`);
     }
+    // Allow writes to project root + package manager caches so installs work
+    const home = process.env.HOME || "/home/" + (process.env.USER || "user");
+    const cacheAllowList = [
+      path.join(home, ".cache/uv"),       // uv (Python)
+      path.join(home, ".cache/pip"),       // pip
+      path.join(home, ".npm"),             // npm
+      path.join(home, ".local"),           // pip --user, pipx
+      "/tmp",                              // build artifacts, temp files
+    ];
     const config: SandboxRuntimeConfig = {
-      network: { allowedDomains: [], deniedDomains: [] },
+      network: {
+        allowedDomains: [
+          // Package registries — workers need to install dependencies
+          "pypi.org", "files.pythonhosted.org",       // pip / uv
+          "registry.npmjs.org",                        // npm
+          "registry.yarnpkg.com",                      // yarn
+          // Common dev APIs
+          "github.com", "api.github.com", "raw.githubusercontent.com",
+          "objects.githubusercontent.com",
+        ],
+        deniedDomains: [],
+        // Docker socket access — workers run docker compose for services
+        allowUnixSockets: ["/var/run/docker.sock"],
+        // Workers need localhost for DB connections, dev servers, etc.
+        allowLocalBinding: true,
+      },
       filesystem: {
-        allowWrite: [normalizedRoot],
+        allowWrite: [normalizedRoot, ...cacheAllowList],
         denyWrite: [],
         denyRead: [],
       },
@@ -292,6 +316,8 @@ const OUTSIDE_PATHS = ["/tmp", "/var", "/etc", "/opt", "/usr", "/sys", "/proc", 
 
 function referencesOutsidePath(command: string, cwd?: string): string | null {
   if (/^\s*(?:cat|head|tail|less|more|wc|file|stat|which|type|echo)\s/.test(command)) return null;
+  // Docker/compose commands legitimately reference /var/run/docker.sock, /tmp, etc.
+  if (commandUsesDocker(command)) return null;
   for (const p of OUTSIDE_PATHS) {
     if (cwd && cwd.startsWith(p + "/")) continue;
     const regex = new RegExp(`(?:^|\\s|>|"|')${p.replace("/", "\\/")}(?:\\/|\\s|"|'|$)`);

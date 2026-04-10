@@ -8,17 +8,28 @@ const PROJECTS_DIR = path.join(getStateRoot(), "projects");
 
 /**
  * Get the canonical project ID by resolving the realpath of the current working directory.
- * This ensures that symlinked paths resolve to the same ID.
+ * Uses the directory basename as a human-readable slug, with a short hash suffix
+ * to handle collisions (e.g., two repos named "app" in different parent dirs).
+ *
+ * Examples:
+ *   /home/user/github/shipapi-demo  →  shipapi-demo-31d95f21
+ *   /home/user/github/workermill    →  workermill-c324288a
  */
 function getProjectId(cwd?: string): string {
   const dir = cwd || process.cwd();
+  let canonicalPath: string;
   try {
-    const canonicalPath = fs.realpathSync(dir);
-    return crypto.createHash("md5").update(canonicalPath).digest("hex").slice(0, 8);
-  } catch (err) {
-    // Fallback to raw cwd if realpath fails (e.g., non-existent directory)
-    return crypto.createHash("md5").update(dir).digest("hex").slice(0, 8);
+    canonicalPath = fs.realpathSync(dir);
+  } catch {
+    canonicalPath = dir;
   }
+  const hash = crypto.createHash("md5").update(canonicalPath).digest("hex").slice(0, 8);
+  const slug = path.basename(canonicalPath)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug ? `${slug}-${hash}` : hash;
 }
 
 /**
@@ -51,10 +62,19 @@ export function getProjectLearningsPath(cwd?: string): string {
 }
 
 /**
- * Get the path to the project's log file.
+ * Get the path to the project's log file for today (daily rotation).
+ * Format: logs/YYYY-MM-DD.log
  */
 export function getProjectLogPath(cwd?: string): string {
-  return path.join(getProjectRootDir(cwd), "logs", "cli.log");
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return path.join(getProjectRootDir(cwd), "logs", `${today}.log`);
+}
+
+/**
+ * Get the path to the project's logs directory.
+ */
+export function getProjectLogsDir(cwd?: string): string {
+  return path.join(getProjectRootDir(cwd), "logs");
 }
 
 /**
@@ -184,9 +204,30 @@ function migrateGlobalHistory(cwd?: string): void {
 }
 
 /**
+ * Migrate old hash-only project directory to new slug-hash format.
+ * e.g., projects/31d95f21 → projects/shipapi-demo-31d95f21
+ */
+function migrateProjectDir(cwd?: string): void {
+  const dir = cwd || process.cwd();
+  let canonicalPath: string;
+  try { canonicalPath = fs.realpathSync(dir); } catch { canonicalPath = dir; }
+  const hash = crypto.createHash("md5").update(canonicalPath).digest("hex").slice(0, 8);
+  const oldDir = path.join(PROJECTS_DIR, hash);
+  const newDir = getProjectRootDir(cwd);
+  if (oldDir === newDir) return; // already new format or slug is empty
+  if (!fs.existsSync(oldDir) || fs.existsSync(newDir)) return;
+  try {
+    fs.renameSync(oldDir, newDir);
+  } catch {
+    // Ignore — will just create a new directory
+  }
+}
+
+/**
  * Ensure the project directory structure exists.
  */
 export function ensureProjectDirs(cwd?: string): void {
+  migrateProjectDir(cwd);
   migrateGlobalHistory(cwd);
   const rootDir = getProjectRootDir(cwd);
   const sessionsDir = getProjectSessionsDir(cwd);

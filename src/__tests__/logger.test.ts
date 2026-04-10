@@ -10,12 +10,17 @@ describe("logger", () => {
   let expectedHash: string;
   let logFile: string;
 
+  let expectedProjectDir: string;
+
   beforeEach(() => {
     tmp = createTempWorkerMillHome();
     // Use a stable fake project directory so we know the hash
     fakeProjectDir = "/fake/project/dir";
     expectedHash = crypto.createHash("md5").update(fakeProjectDir).digest("hex").slice(0, 8);
-    logFile = path.join(tmp.homeDir, ".workermill", "projects", expectedHash, "logs", "cli.log");
+    const slug = "dir"; // basename of /fake/project/dir
+    expectedProjectDir = `${slug}-${expectedHash}`;
+    const today = new Date().toISOString().slice(0, 10);
+    logFile = path.join(tmp.homeDir, ".workermill", "projects", expectedProjectDir, "logs", `${today}.log`);
 
     vi.spyOn(process, "cwd").mockReturnValue(fakeProjectDir);
     vi.resetModules();
@@ -195,9 +200,9 @@ describe("logger", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // Verify the log lives under the hash we computed from fakeProjectDir
+    // Verify the log lives under the slug-hash directory we computed from fakeProjectDir
     const logsBase = path.join(tmp.homeDir, ".workermill", "projects");
     const entries = fs.readdirSync(logsBase);
-    expect(entries).toContain(expectedHash);
+    expect(entries).toContain(expectedProjectDir);
   });
 });

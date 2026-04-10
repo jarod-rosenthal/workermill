@@ -50,9 +50,9 @@ function detectTicketRef(input: string): { system: "github" | "external"; key: s
   if (/^#\d+$/.test(trimmed) || /^GH[-#]?\d+$/i.test(trimmed)) {
     return { system: "github", key: trimmed };
   }
-  // Jira/Linear: PROJ-123
+  // Jira/Linear: PROJ-123 (case-insensitive input, normalized to uppercase)
   if (/^[A-Z][A-Z0-9]+-\d+$/i.test(trimmed)) {
-    return { system: "external", key: trimmed };
+    return { system: "external", key: trimmed.toUpperCase() };
   }
   return null;
 }
@@ -422,7 +422,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "**Examples:**\n" +
           "- `/build add dark mode to settings` — inline task\n" +
           "- `/build ./specs/auth-redesign.md` — from spec file\n" +
-          "- `/build #42` — from GitHub Issue\n" +
+          "- `/build #123` or `/build GH-123` — from GitHub Issue\n" +
           "- `/build PROJ-123` — from Jira/Linear ticket\n\n" +
           "`/ship` is also accepted as an alias.\n\n" +
           "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +

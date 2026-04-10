@@ -573,9 +573,6 @@ export async function runOrchestration(
 
   // --- Build Report ---
   {
-    const completed = sorted.filter(s => completedStoryIds.includes(s.id));
-    const failed = sorted.filter(s => failedStories.has(s.id));
-    const skipped = sorted.filter(s => skippedStories.has(s.id));
     const lines: string[] = ["", `── Build Report (${manifest.id}) ──`, ""];
     lines.push("Stories:");
     for (const s of sorted) {
@@ -588,25 +585,6 @@ export async function runOrchestration(
         lines.push(`  ⊘ ${idx}. ${s.title} (${s.persona}) — skipped`);
       }
     }
-    lines.push("");
-    // Gate results
-    if (gateResultsSection) {
-      const gatesPassed = gateResultsSection.includes("ALL PASSED");
-      lines.push(`Quality gates: ${gatesPassed ? "✓ all passed" : "✗ failures detected"}`);
-    }
-    // Review result
-    if (reviewEnabled) {
-      if (reviewScore !== null) {
-        lines.push(`Review: ${reviewDecision === "approved" ? "✓" : "✗"} ${reviewScore}/10 (${reviewDecision})`);
-      } else {
-        lines.push(`Review: skipped`);
-      }
-    }
-    lines.push("");
-    lines.push(`Result: ${completed.length} passed · ${failed.length} failed · ${skipped.length} skipped`);
-    if (featureBranch) lines.push(`Branch: ${featureBranch}`);
-    lines.push(`Cost: ~$${costTracker.getTotalCost().toFixed(2)}`);
-    lines.push(`Run: ${manifest.id}`);
     lines.push("");
     for (const line of lines) output.log("system", line);
   }

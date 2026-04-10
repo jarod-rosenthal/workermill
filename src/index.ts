@@ -57,7 +57,7 @@ async function printWelcome(workingDir: string, isFirstRun = false): Promise<voi
     "Switch your planner or reviewer model: `/model planner google/gemini-3.1-pro`.",
     "Use /model <provider>/<model> to switch models mid-session without restarting.",
     "Next time, launch with `workermill --resume` to restore this session's messages and context.",
-    "/build GH-42 or /build #42 fetches a GitHub issue and builds it. Set up with /setup.",
+    "/build #123 or /build GH-123 fetches a GitHub issue and builds it. Set up with /setup.",
     "/build PROJ-123 fetches a Jira or Linear ticket and builds it. Configure with /setup.",
   ];
   console.log(dim(`  ${tips[Math.floor(Math.random() * tips.length)]}`));

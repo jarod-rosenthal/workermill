@@ -2,45 +2,41 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { getStateRoot } from "./state-root.js";
-import { getProjectLogPath, ensureProjectDirs } from "./project-data.js";
+import { getProjectLogPath, getProjectLogsDir, ensureProjectDirs } from "./project-data.js";
 
-// Logs stored in project-specific logs/cli.log
-const LOG_FILE = getProjectLogPath();
-const LOG_DIR = path.dirname(LOG_FILE);
-
+// Daily log rotation: logs/YYYY-MM-DD.log
+let currentLogDate = "";
 let logStream: fs.WriteStream | null = null;
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function migrateLegacyLogs(): void {
-  // Old path using raw cwd hash
+  // Migrate old hash-based log dirs (e.g., ~/.workermill/logs/31d95f21/cli.log)
   const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
   const oldLogDir = path.join(getStateRoot(), "logs", oldHash);
   const oldLogFile = path.join(oldLogDir, "cli.log");
-  const newLogFile = LOG_FILE;
+  if (!fs.existsSync(oldLogFile)) return;
 
-  if (!fs.existsSync(oldLogFile) || fs.existsSync(newLogFile)) return;
+  // Also migrate old project-scoped cli.log to today's dated file
+  const logsDir = getProjectLogsDir();
+  const oldProjectLog = path.join(logsDir, "cli.log");
+  const targets = [oldLogFile];
+  if (fs.existsSync(oldProjectLog)) targets.push(oldProjectLog);
 
-  try {
-    // Move old log to new location
-    fs.renameSync(oldLogFile, newLogFile);
-    // Remove old dir if empty
+  for (const src of targets) {
+    const dest = getProjectLogPath();
+    if (src === dest) continue;
     try {
-      fs.rmdirSync(oldLogDir);
-      const parentDir = path.dirname(oldLogDir);
-      try { fs.rmdirSync(parentDir); } catch {} // logs dir
-    } catch {}
-  } catch (err) {
-    // If rename fails, try copy
-    try {
-      fs.copyFileSync(oldLogFile, newLogFile);
-      if (fs.readFileSync(oldLogFile, 'utf-8') === fs.readFileSync(newLogFile, 'utf-8')) {
-        fs.unlinkSync(oldLogFile);
-        try { fs.rmdirSync(oldLogDir); } catch {}
-        const parentDir = path.dirname(oldLogDir);
-        try { fs.rmdirSync(parentDir); } catch {}
-      } else {
-        try { fs.unlinkSync(newLogFile); } catch {}
-      }
-    } catch (copyErr) {
+      // Append old content to today's log
+      const content = fs.readFileSync(src, "utf-8");
+      fs.appendFileSync(dest, content);
+      fs.unlinkSync(src);
+      // Clean up empty parent dirs
+      try { fs.rmdirSync(path.dirname(src)); } catch {}
+      try { fs.rmdirSync(path.join(getStateRoot(), "logs")); } catch {}
+    } catch {
       // Ignore migration errors
     }
   }
@@ -52,9 +48,17 @@ function ensureLogDir(): void {
 }
 
 function getStream(): fs.WriteStream {
+  const today = todayStr();
+  // Rotate when date changes (long-running sessions spanning midnight)
+  if (logStream && currentLogDate !== today) {
+    logStream.end();
+    logStream = null;
+  }
   if (!logStream) {
     ensureLogDir();
-    logStream = fs.createWriteStream(LOG_FILE, { flags: "a" });
+    const logFile = getProjectLogPath();
+    logStream = fs.createWriteStream(logFile, { flags: "a" });
+    currentLogDate = today;
   }
   return logStream;
 }

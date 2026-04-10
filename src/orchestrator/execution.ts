@@ -230,6 +230,21 @@ After using tools to make changes, add these metadata markers in your text outpu
 - ::file_modified::path for files you modified
 These markers are metadata ONLY — they do not replace actually using tools.
 
+## Completion Summary
+
+When you finish your work, write a structured summary in markdown. This is posted to the issue tracker, so make it useful for humans reviewing the PR. Format:
+
+### What was implemented
+- Bullet points describing what you built or changed, with key details
+
+### Files changed
+- List files created or modified with a one-line description of each
+
+### Verification
+- What you ran to verify correctness and the result
+
+Do NOT write generic filler. Be specific about what was built and how it works.
+
 ## Diagnostics Enforcement
 Run diagnostics on touched files only when the workspace and language server support them for this repo. If LSP is unavailable or not applicable to the stack, do not invent diagnostics workarounds; use the repo's actual verification commands instead.
 ${needsDockerInstructions(story, userTask) ? DOCKER_INSTRUCTIONS : ""}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
@@ -1133,8 +1148,9 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           }
 
           if (text) {
-            // Keep a representative sample for ticket comments.
-            if (!expertSummary) expertSummary = text.slice(0, 2000);
+            // Keep the last substantial text output as the summary for ticket comments.
+            // Early text is usually "I'll start by reading..." — the final text is the real summary.
+            if (text.trim().length > 40) expertSummary = text.slice(0, 2000);
             // Text loop detection
             // Normalize signature: trim, collapse whitespace, lowercase first 200 chars
             const textSig = text.trim().replace(/\s+/g, " ").substring(0, 200).toLowerCase();

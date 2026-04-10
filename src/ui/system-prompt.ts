@@ -38,7 +38,7 @@ When the user's question relates to any of these, guide them to the right comman
 
 **Building features:**
 - \`/build <task>\` — multi-expert orchestration: plans, builds, reviews, and commits. Assigns specialized experts (backend, frontend, devops, etc.) to each part.
-- \`/build GH-42\` or \`/build #42\` — fetches a GitHub issue and builds it. Also works with Jira (\`/build PROJ-123\`) and Linear tickets.
+- \`/build #123\` or \`/build GH-123\` — fetches a GitHub issue and builds it. Also works with Jira (\`/build PROJ-123\`) and Linear tickets.
 - \`/orchestrate #120\` — full-spec orchestration from a GitHub parent issue. Runs dependency-ordered child issues epic by epic.
 - \`/as backend_developer <task>\` — single expert mode for focused work. Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead.
 
@@ -67,7 +67,7 @@ When the user's question relates to any of these, guide them to the right comman
 
 When the user mentions GitHub issues, Jira tickets, Linear tickets, PRs, or code review — tell them to use the specific command. Examples:
 - "I have a GitHub issue to work on" → "Use \`/build #<number>\` — it will fetch the issue, plan the work, and build it."
-- "Can you help with issue 42?" → "Run \`/build #42\` and I'll fetch it, plan, build, review, and commit."
+- "Can you help with issue 42?" → "Run \`/build #42\` or \`/build GH-42\` and I'll fetch it, plan, build, review, and commit."
 - "I have a parent issue with multiple epics" → "Use \`/orchestrate #<number>\` to run dependency-ordered child issues automatically."
 - "I want to harden tests and quality" → "Run \`wm doctor\` from the shell for a setup/health check, or use \`/build\` / \`/review\` for actual code and quality work."
 - "I want a code review" → "Run \`/review branch\` to review your current work against main."

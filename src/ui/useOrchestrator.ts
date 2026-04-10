@@ -70,43 +70,16 @@ function formatCost(cost: number): string {
   return `~$${cost.toFixed(2)}`;
 }
 
-function formatUsageSummary(summary: UsageSummary): string {
-  if (summary.total.inputTokens <= 0 && summary.total.outputTokens <= 0 && summary.total.cost <= 0) {
-    return "";
+function formatModelBreakdown(summary: UsageSummary): string {
+  if (summary.byModel.length === 0) return "";
+
+  const lines: string[] = [];
+  // Sort by cost descending so the most expensive model is first
+  const sorted = [...summary.byModel].sort((a, b) => b.cost - a.cost);
+  for (const model of sorted) {
+    if (model.inputTokens <= 0 && model.outputTokens <= 0) continue;
+    lines.push(`  ${model.provider}/${model.model}: ${formatTokenCount(model.inputTokens)} in · ${formatTokenCount(model.outputTokens)} out · ${formatCost(model.cost)}`);
   }
-
-  const lines: string[] = [
-    `**Usage:** ${formatTokenCount(summary.total.inputTokens)} in · ${formatTokenCount(summary.total.outputTokens)} out · ${formatCost(summary.total.cost)}`,
-    SESSION_SUMMARY_DIVIDER,
-  ];
-
-  const roleOrder: Array<"worker" | "planner" | "reviewer"> = ["worker", "planner", "reviewer"];
-  const rolesNeedingModelBreakdown: Array<"worker" | "planner" | "reviewer"> = [];
-  const roleLines = roleOrder
-    .map((role) => {
-      const data = summary.byRole[role];
-      const roleModels = summary.byModel.filter((model) => model.roles.includes(role));
-      const hasUsage = data.inputTokens > 0 || data.outputTokens > 0 || data.cost > 0;
-      if (!hasUsage) return null;
-      if (roleModels.length > 1) rolesNeedingModelBreakdown.push(role);
-      const modelSuffix = roleModels.length === 1 ? ` (${roleModels[0].provider}/${roleModels[0].model})` : "";
-      return `${role}${modelSuffix}: ${formatTokenCount(data.inputTokens)} in · ${formatTokenCount(data.outputTokens)} out · ${formatCost(data.cost)}`;
-    })
-    .filter((line): line is string => line !== null);
-  lines.push(...roleLines);
-
-  if (rolesNeedingModelBreakdown.length > 0) {
-    lines.push(SESSION_SUMMARY_DIVIDER);
-    lines.push("model breakdown:");
-    for (const role of roleOrder) {
-      if (!rolesNeedingModelBreakdown.includes(role)) continue;
-      const roleModels = summary.byModel.filter((model) => model.roles.includes(role));
-      for (const model of roleModels) {
-        lines.push(`  ${role} · ${model.provider}/${model.model}: ${formatTokenCount(model.inputTokens)} in · ${formatTokenCount(model.outputTokens)} out · ${formatCost(model.cost)}`);
-      }
-    }
-  }
-
   return lines.join("\n");
 }
 
@@ -734,14 +707,14 @@ export function useOrchestrator(
           const secs = elapsed % 60;
           const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
           const parts: string[] = [];
-          if (seenPersonas.size > 0) parts.push(`${seenPersonas.size} expert${seenPersonas.size === 1 ? "" : "s"}`);
-          if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"} shipped`);
+          if (storiesCompleted > 0) parts.push(`${storiesCompleted} ${storiesCompleted === 1 ? "story" : "stories"}`);
           parts.push(timeStr);
+          parts.push(formatCost(usageSummaryRef.current.total.cost));
           addSessionSummaryDivider(addMessage, hasOperationalOutput);
           addMessage(`**Shipped.** ${parts.join(" · ")}`);
-          const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
-          if (usageSummaryMessage) {
-            addMessage(usageSummaryMessage);
+          const modelBreakdown = formatModelBreakdown(usageSummaryRef.current);
+          if (modelBreakdown) {
+            addMessage(modelBreakdown);
           }
           notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
@@ -1148,7 +1121,7 @@ export function useOrchestrator(
           parts.push(timeStr);
           addSessionSummaryDivider(addMessage, hasOperationalOutput);
           addMessage(`**Program complete.** ${parts.join(" · ")}`);
-          const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
+          const usageSummaryMessage = formatModelBreakdown(usageSummaryRef.current);
           if (usageSummaryMessage) addMessage(usageSummaryMessage);
           notifyIfEnabled(config.bell, "WorkerMill", "Program complete");
         } catch (err: unknown) {
@@ -1413,7 +1386,7 @@ export function useOrchestrator(
                 }
               }
             }
-            const usageSummaryMessage = formatUsageSummary(usageSummaryRef.current);
+            const usageSummaryMessage = formatModelBreakdown(usageSummaryRef.current);
             if (usageSummaryMessage) {
               addMessage(usageSummaryMessage);
             }

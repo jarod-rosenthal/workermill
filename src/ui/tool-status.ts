@@ -46,6 +46,9 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   cmd: "bash",
   shell: "bash",
   terminal: "bash",
+  bash_background: "bash",
+  bash_output: "bash",
+  bash_kill: "bash",
   // Common dashed/camel variants
   subagent: "sub_agent",
   "sub-agent": "sub_agent",

@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-04-10
+
 ### Changed
 - **Logs moved to `~/.workermill/logs/<project>/`** — human-readable project slugs with daily rotation (`YYYY-MM-DD.log`). One `logs/` directory, easy to find and grep.
 - **Sandbox allowlists for workers** — package registries (pypi, npm), docker socket, localhost, and cache directories are now accessible inside the OS sandbox. Workers can install dependencies and run docker compose without permission errors.

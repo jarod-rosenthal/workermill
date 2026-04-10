@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [1.0.2] - 2026-04-10
+## [1.1.0] - 2026-04-10
 
 ### Changed
 - **Logs moved to `~/.workermill/logs/<project>/`** — human-readable project slugs with daily rotation (`YYYY-MM-DD.log`). One `logs/` directory, easy to find and grep.

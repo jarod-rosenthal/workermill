@@ -25,7 +25,7 @@ Point it at a ticket. Get a pull request — planned, built by experts, and inde
 
 <br>
 
-<a href="https://www.youtube.com/watch?v=ZXpksHXxQMQ">
+<a href="https://www.youtube.com/watch?v=Q0PBXFaa_KA">
   <img src=".github/assets/demo-preview.jpg" alt="WorkerMill Demo" width="100%" />
 </a>
 

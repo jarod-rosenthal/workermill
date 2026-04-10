@@ -14,14 +14,16 @@ vi.mock("../logger.js", () => ({
 describe("learnings", () => {
   let tmp: TempHome;
   let fakeProjectDir: string;
-  let expectedHash: string;
+  let expectedProjectId: string;
   let learningsFile: string;
 
   beforeEach(() => {
     tmp = createTempWorkerMillHome();
     fakeProjectDir = "/fake/learnings/project";
-    expectedHash = crypto.createHash("md5").update(fakeProjectDir).digest("hex").slice(0, 8);
-    learningsFile = path.join(tmp.homeDir, ".workermill", "projects", expectedHash, "learnings.json");
+    const expectedHash = crypto.createHash("md5").update(fakeProjectDir).digest("hex").slice(0, 8);
+    // Project ID is `<slug>-<hash>`; basename of fakeProjectDir is "project"
+    expectedProjectId = `project-${expectedHash}`;
+    learningsFile = path.join(tmp.homeDir, ".workermill", "projects", expectedProjectId, "learnings.json");
 
     vi.spyOn(process, "cwd").mockReturnValue(fakeProjectDir);
     vi.spyOn(fs, "realpathSync").mockReturnValue(fakeProjectDir);

@@ -55,7 +55,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       const maxAutoRetries = config.program?.maxAutoRetries ?? 1;
       const gateMode = config.program?.gateMode ?? "advisory";
       const gateCount = config.program?.gates?.length ?? 0;
-      const sandboxMode = config.sandbox !== false ? "true" : "false";
+      const sandboxMode = config.sandbox === "os" ? "os" : config.sandbox !== false ? "true" : "false";
       const allowRules = config.permissions?.allow || [];
       const denyRules = config.permissions?.deny || [];
 
@@ -71,7 +71,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         `| Program max auto-retries | ${maxAutoRetries} | \`/settings program.maxAutoRetries <n>\` |\n` +
         `| Program gate mode | ${gateMode} | \`/settings program.gateMode <required/advisory>\` |\n` +
         `| Program gates | ${gateCount} command(s) | Edit \`program.gates\` in \`cli.json\` |\n` +
-        `| Sandbox | ${sandboxMode} | \`/settings sandbox <true/false>\` |\n` +
+        `| Sandbox | ${sandboxMode} | \`/settings sandbox <true/false/os>\` |\n` +
         `| Jira URL | ${config.jira?.baseUrl || "\u2014"} | \`/settings jira.url <url>\` |\n` +
         `| Jira email | ${config.jira?.email || "\u2014"} | \`/settings jira.email <email>\` |\n` +
         `| Jira token | ${config.jira?.apiToken ? "***" : "\u2014"} | \`/settings jira.token <token>\` |\n` +
@@ -245,7 +245,11 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
           config.sandbox = false;
           break;
         }
-        ctx.addSystemMessage("Invalid value for `sandbox`. Use `true` or `false`.");
+        if (normalized === "os") {
+          config.sandbox = "os";
+          break;
+        }
+        ctx.addSystemMessage("Invalid value for `sandbox`. Use `true`, `false`, or `os`.");
         settingApplied = false;
         break;
       }

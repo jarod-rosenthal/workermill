@@ -13,28 +13,28 @@ function todayStr(): string {
 }
 
 function migrateLegacyLogs(): void {
-  // Migrate old hash-based log dirs (e.g., ~/.workermill/logs/31d95f21/cli.log)
+  // Rename old cli.log to today's dated file. Done lazily on first log write.
+  const logsDir = getProjectLogsDir();
+  const oldProjectLog = path.join(logsDir, "cli.log");
+  if (!fs.existsSync(oldProjectLog)) return;
+
+  const dest = getProjectLogPath();
+  if (oldProjectLog === dest) return;
+  try {
+    // Rename is atomic and fast — no reading/writing large files
+    fs.renameSync(oldProjectLog, dest);
+  } catch {
+    // Ignore — old file may be locked or dest may already exist
+  }
+
+  // Also clean up legacy hash-based log dir if it exists
   const oldHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
   const oldLogDir = path.join(getStateRoot(), "logs", oldHash);
   const oldLogFile = path.join(oldLogDir, "cli.log");
-  if (!fs.existsSync(oldLogFile)) return;
-
-  // Also migrate old project-scoped cli.log to today's dated file
-  const logsDir = getProjectLogsDir();
-  const oldProjectLog = path.join(logsDir, "cli.log");
-  const targets = [oldLogFile];
-  if (fs.existsSync(oldProjectLog)) targets.push(oldProjectLog);
-
-  for (const src of targets) {
-    const dest = getProjectLogPath();
-    if (src === dest) continue;
+  if (fs.existsSync(oldLogFile)) {
     try {
-      // Append old content to today's log
-      const content = fs.readFileSync(src, "utf-8");
-      fs.appendFileSync(dest, content);
-      fs.unlinkSync(src);
-      // Clean up empty parent dirs
-      try { fs.rmdirSync(path.dirname(src)); } catch {}
+      fs.renameSync(oldLogFile, dest);
+      try { fs.rmdirSync(oldLogDir); } catch {}
       try { fs.rmdirSync(path.join(getStateRoot(), "logs")); } catch {}
     } catch {
       // Ignore migration errors

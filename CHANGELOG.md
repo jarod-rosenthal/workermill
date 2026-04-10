@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Logs moved to `~/.workermill/logs/<project>/`** — human-readable project slugs with daily rotation (`YYYY-MM-DD.log`). One `logs/` directory, easy to find and grep.
+- **Sandbox allowlists for workers** — package registries (pypi, npm), docker socket, localhost, and cache directories are now accessible inside the OS sandbox. Workers can install dependencies and run docker compose without permission errors.
+- **Review loop receives gate failures** — quality gate failures now flow into the tech lead review instead of bailing out, so the reviewer can request fixes.
+- **Reviewer requests all substantive fixes** — "if you mention it, request the fix" rule prevents the reviewer from labeling real issues as non-blocking and approving anyway. Pure cosmetic issues remain non-blocking.
+- **Build report simplified** — removed redundant quality gates, review score, result count, cost, and run ID lines that the coordinator already reports inline. Footer is a compact one-liner with per-model cost breakdown.
+- **Status bar tool labels shortened** — `bash_background` → `bash-bg`, `sub_agent` → `agent`, `multi_edit_file` → `multi-edit`, etc.
+- **Status bar default model** — removed duplicate `default:` label; model only appears once in the header.
+- **Sandbox setting simplified** — users set `true`/`false` only; OS sandbox upgrade is automatic internally.
+- **Planner descriptions** — expanded example and added explicit instruction for detailed story descriptions to prevent truncation.
+- **Ticket tool promoted** — agents now use the `ticket` tool instead of shelling out to `gh` CLI for issue operations.
+- **Ticket key normalization** — Jira/Linear keys normalized to uppercase on input.
+- **Docker port conflict guidance** — workers check if ports are in use before starting services.
+- **Worker completion summaries** — all personas produce structured markdown summaries (what/files/verification) for ticket comments instead of raw action dumps.
+- **Ticket examples updated** — generic `#123`/`GH-123` references replace hardcoded issue numbers.
+
 ### Added
 - **Strict mode for `/build`** — `--strict` flag or `review.strict: true` config. All gate failures block (not just required ones), review approval required, out-of-scope file edits are blocking. For high-trust workflows.
 - **Recovery mode** — CLI detects interrupted builds on startup and shows guided recovery: branch status, story progress, remaining work, options to `/retry`, `/undo`, or continue.

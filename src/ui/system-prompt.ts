@@ -1,5 +1,6 @@
 import { loadMemories, formatMemoriesForPrompt, migrateOldLearnings } from "../memory.js";
 import { formatProjectInstructions } from "../instructions.js";
+import { formatPromptProjectContext } from "../project-context.js";
 import { getMCPTools } from "../mcp-client.js";
 import { loadCustomCommands } from "../custom-commands.js";
 
@@ -110,7 +111,8 @@ You have a \`memory\` tool for persistent storage across conversations. Use it t
 These are extracted automatically and saved into the structured project memory files.`;
 
   const projectInstructions = formatProjectInstructions(workingDir);
-  let prompt = base + projectInstructions;
+  const projectContext = formatPromptProjectContext(workingDir);
+  let prompt = base + projectInstructions + projectContext;
 
   // Migrate old learnings on first load for this project only.
   migrateOldLearnings(workingDir);

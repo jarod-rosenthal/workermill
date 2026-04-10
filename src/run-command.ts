@@ -2,6 +2,7 @@ import { streamText, stepCountIs } from "ai";
 import { createModel, buildOllamaOptions } from "./engine/model-factory.js";
 import { createToolDefinitions } from "./engine/tools/index.js";
 import { formatProjectInstructions } from "./instructions.js";
+import { formatPromptProjectContext } from "./project-context.js";
 import { loadLearnings } from "./learnings.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
 import type { SandboxSetting } from "./sandbox-mode.js";
@@ -136,6 +137,8 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
   let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
   const instructions = formatProjectInstructions(workingDir);
   if (instructions) systemPrompt += instructions;
+  const projectContext = formatPromptProjectContext(workingDir);
+  if (projectContext) systemPrompt += projectContext;
   const learnings = loadLearnings();
   if (learnings.length > 0) {
     systemPrompt += `\n\n## Project Learnings\n${learnings.map(l => `- ${l}`).join("\n")}`;

@@ -14,6 +14,7 @@ import { createToolDefinitions } from "../engine/tools/index.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
+import { formatPromptProjectContext } from "../project-context.js";
 import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
@@ -422,7 +423,7 @@ export async function runStandaloneReview(
       `${stat ? `File list:\n${stat}` : ""}`;
   }
 
-  const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+  const reviewerProjectInstructions = formatProjectInstructions(workingDir) + formatPromptProjectContext(workingDir);
   const reviewPrompt = `${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Code Changes
 
 The diff below shows what was changed. Use your read_file tool to inspect specific files in detail.
@@ -826,7 +827,7 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
             `${stat ? `File list:\n${stat}` : ""}`;
         }
 
-        const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+        const reviewerProjectInstructions = formatProjectInstructions(workingDir) + formatPromptProjectContext(workingDir);
         const loopGuardSection = isRevision && repeatedBlockerCount >= 2
           ? `## Loop Guard
 

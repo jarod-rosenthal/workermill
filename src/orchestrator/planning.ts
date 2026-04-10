@@ -7,6 +7,7 @@ import { createToolDefinitions } from "../engine/tools/index.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
+import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import type { CliConfig } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
@@ -267,8 +268,10 @@ export async function planStories(
   }
 
   const plannerProjectInstructions = formatProjectInstructions(workingDir);
+  const plannerProjectContext = formatPromptProjectContext(workingDir);
   const plannerPrompt = `You are a senior architect planning an implementation. Your job is to analyze the codebase and produce a plan that sets each worker up for success.
 ${plannerProjectInstructions}
+${plannerProjectContext}
 ## Task
 ${userTask}
 ${inlinedFileContext ? `\n## Referenced Files\n${inlinedFileContext}` : ""}

@@ -19,6 +19,10 @@ vi.mock("../instructions.js", () => ({
   formatProjectInstructions: vi.fn(() => ""),
 }));
 
+vi.mock("../project-context.js", () => ({
+  formatPromptProjectContext: vi.fn(() => ""),
+}));
+
 vi.mock("../mcp-client.js", () => ({
   getMCPTools: vi.fn(() => []),
   getMCPToolDefinitions: vi.fn(() => ({})),
@@ -31,12 +35,14 @@ vi.mock("../mcp-client.js", () => ({
 import { buildSystemPrompt } from "../ui/system-prompt.js";
 import { loadMemories, formatMemoriesForPrompt, migrateOldLearnings } from "../memory.js";
 import { formatProjectInstructions } from "../instructions.js";
+import { formatPromptProjectContext } from "../project-context.js";
 import { getMCPTools } from "../mcp-client.js";
 
 const mockLoadMemories = vi.mocked(loadMemories);
 const mockFormatMemoriesForPrompt = vi.mocked(formatMemoriesForPrompt);
 const mockMigrateOldLearnings = vi.mocked(migrateOldLearnings);
 const mockFormatProjectInstructions = vi.mocked(formatProjectInstructions);
+const mockFormatPromptProjectContext = vi.mocked(formatPromptProjectContext);
 const mockGetMCPTools = vi.mocked(getMCPTools);
 
 describe("buildSystemPrompt", () => {
@@ -46,6 +52,7 @@ describe("buildSystemPrompt", () => {
     mockFormatMemoriesForPrompt.mockReturnValue("");
     mockMigrateOldLearnings.mockReturnValue(undefined);
     mockFormatProjectInstructions.mockReturnValue("");
+    mockFormatPromptProjectContext.mockReturnValue("");
     mockGetMCPTools.mockReturnValue([]);
   });
 
@@ -88,6 +95,18 @@ describe("buildSystemPrompt", () => {
     mockFormatProjectInstructions.mockReturnValue("");
     const prompt = buildSystemPrompt("/project");
     expect(prompt).not.toContain("## Project Instructions");
+  });
+
+  it("includes project context when available", () => {
+    mockFormatPromptProjectContext.mockReturnValue("\n\n## Project Context\n\n- Package manager: pnpm");
+    const prompt = buildSystemPrompt("/project");
+    expect(prompt).toContain("## Project Context");
+    expect(prompt).toContain("Package manager: pnpm");
+  });
+
+  it("passes workingDir to formatPromptProjectContext", () => {
+    buildSystemPrompt("/specific/dir");
+    expect(mockFormatPromptProjectContext).toHaveBeenCalledWith("/specific/dir");
   });
 
   it("includes memory content when formatMemoriesForPrompt returns content", () => {

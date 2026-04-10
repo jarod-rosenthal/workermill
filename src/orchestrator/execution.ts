@@ -12,6 +12,7 @@ import type { AIProvider } from "../engine/types.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
+import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
@@ -1048,7 +1049,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
     const contextBlock = contextParts.join("\n");
 
-    const projectInstructions = formatProjectInstructions(workingDir);
+    const projectInstructions = formatProjectInstructions(workingDir) + formatPromptProjectContext(workingDir);
     const contextWindow = getModelContext(modelName, contextLength);
     const fittedPrompt = fitWorkerPromptToContext({
       personaSystemPrompt: persona.systemPrompt,

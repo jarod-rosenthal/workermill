@@ -6,11 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added
-- **CodeQL workflow** — added JavaScript/TypeScript CodeQL scanning with security-extended and security-and-quality queries.
-
 ### Fixed
-- **CodeQL security cleanup** — pinned third-party scanner actions to commit SHAs, replaced shell-built editor/git/curl execution with argument-based subprocess calls, moved editor temp files into `mkdtemp` directories, fixed grep wildcard stripping, and removed a no-op OpenAI model normalization.
+- **CodeQL setup and security cleanup** — rely on GitHub's default CodeQL setup instead of a duplicate workflow, pinned third-party scanner actions to commit SHAs, replaced shell-built editor/git/curl execution with argument-based subprocess calls, moved editor temp files into `mkdtemp` directories, fixed grep wildcard stripping, and removed a no-op OpenAI model normalization.
 
 ## [1.1.0] - 2026-04-10
 

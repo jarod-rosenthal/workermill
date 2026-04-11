@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 vi.mock("fs", () => ({
@@ -13,6 +14,7 @@ vi.mock("fs", () => ({
     writeFileSync: vi.fn(),
     rmSync: vi.fn(),
     unlinkSync: vi.fn(),
+    mkdtempSync: vi.fn(() => "/tmp/workermill-test"),
     mkdirSync: vi.fn(),
     readdirSync: vi.fn(() => []),
     appendFileSync: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock("fs", () => ({
   writeFileSync: vi.fn(),
   rmSync: vi.fn(),
   unlinkSync: vi.fn(),
+  mkdtempSync: vi.fn(() => "/tmp/workermill-test"),
   mkdirSync: vi.fn(),
   readdirSync: vi.fn(() => []),
   appendFileSync: vi.fn(),
@@ -135,7 +138,7 @@ vi.mock("../checkpoints.js", () => ({
 // ---- Imports ----
 
 import { formatReleaseNotesForDisplay, handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.ts";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import fs from "fs";
 import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig, resolveConfig, getProviderForPersona } from "../config.js";
@@ -1539,7 +1542,7 @@ describe("handleSlashCommand", () => {
   describe("/edit", () => {
     it("submits editor content when non-empty", () => {
       vi.mocked(fs.readFileSync).mockReturnValueOnce("Build a REST API for users");
-      vi.mocked(execSync).mockReturnValue("" as any);
+      vi.mocked(execFileSync).mockReturnValue("" as any);
       const ctx = createContext();
       handleSlashCommand("/edit", ctx);
       expect(fs.writeFileSync).toHaveBeenCalled();
@@ -1549,7 +1552,7 @@ describe("handleSlashCommand", () => {
 
     it("shows message when editor closed with empty content", () => {
       vi.mocked(fs.readFileSync).mockReturnValueOnce("  \n  ");
-      vi.mocked(execSync).mockReturnValue("" as any);
+      vi.mocked(execFileSync).mockReturnValue("" as any);
       const ctx = createContext();
       handleSlashCommand("/edit", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
@@ -1559,7 +1562,7 @@ describe("handleSlashCommand", () => {
     });
 
     it("shows error when editor fails to open", () => {
-      vi.mocked(execSync).mockImplementation(() => { throw new Error("editor not found"); });
+      vi.mocked(execFileSync).mockImplementation(() => { throw new Error("editor not found"); });
       const ctx = createContext();
       handleSlashCommand("/edit", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(

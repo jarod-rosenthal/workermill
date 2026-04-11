@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import * as logger from "./logger.js";
 
 interface ContentPart {
@@ -258,8 +258,9 @@ export async function resolveUrlReferences(input: string): Promise<string> {
     const url = match[1];
     try {
       // Use curl for fetching — avoids adding HTTP dependencies
-      const content = execSync(
-        `curl -sL --max-time 10 --max-filesize 10240 ${JSON.stringify(url)}`,
+      const content = execFileSync(
+        "curl",
+        ["-sL", "--max-time", "10", "--max-filesize", "10240", url],
         { encoding: "utf-8", timeout: 12_000 },
       ).trim();
       result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${content}\n\`\`\`\n`);

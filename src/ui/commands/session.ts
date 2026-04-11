@@ -4,7 +4,7 @@
  * Handles: /model, /cost, /status, /compact, /clear, /edit, /git, /diff, /changed, /sessions
  */
 
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -15,6 +15,10 @@ import { findModelInfo } from "../../provider-registry.js";
 import { getApiKeyEnvVar, isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
+
+function splitEditorCommand(editor: string): string[] {
+  return editor.split(/\s+/).filter(Boolean);
+}
 
 export function handleModelCommand(arg: string, ctx: SlashCommandContext): void {
   if (!arg) {
@@ -228,10 +232,12 @@ export function handleClearCommand(_arg: string, ctx: SlashCommandContext): void
 
 export function handleEditCommand(_arg: string, ctx: SlashCommandContext): void {
   const editor = process.env.EDITOR || process.env.VISUAL || "vi";
-  const tmpFile = path.join(os.tmpdir(), `workermill-${Date.now()}.md`);
+  const editorParts = splitEditorCommand(editor);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workermill-"));
+  const tmpFile = path.join(tmpDir, "input.md");
   try {
     fs.writeFileSync(tmpFile, "", "utf-8");
-    execSync(`${editor} ${tmpFile}`, {
+    execFileSync(editorParts[0] || "vi", [...editorParts.slice(1), tmpFile], {
       cwd: ctx.workingDir,
       stdio: "inherit",
       timeout: 5 * 60 * 1000,
@@ -247,7 +253,7 @@ export function handleEditCommand(_arg: string, ctx: SlashCommandContext): void 
     const errMsg = err instanceof Error ? err.message : String(err);
     ctx.addSystemMessage(`Failed to open editor (\`${editor}\`): ${errMsg}`);
   } finally {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 

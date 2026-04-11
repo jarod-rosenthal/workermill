@@ -256,7 +256,7 @@ export function commitStoryChanges(
     const personaDisplay = persona.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const message = `feat: Story ${storyIndex} - ${storyTitle}\n\nStory: S${storyIndex}\nCo-Authored-By: ${personaDisplay} <workermill@users.noreply.github.com>`;
 
-    execSync(`git commit --no-verify -m "${message.replace(/"/g, '\\"')}"`, { cwd: workingDir, stdio: "pipe" });
+    execFileSync("git", ["commit", "--no-verify", "-m", message], { cwd: workingDir, stdio: "pipe" });
 
     const hash = execSync("git rev-parse --short HEAD", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
     logger.info("Committed story changes", { storyIndex, persona, hash });
@@ -288,7 +288,7 @@ export function commitRevisionChanges(
     const personaDisplay = persona.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const message = `fix: Story ${storyIndex} revision ${revisionRound} - ${storyTitle}\n\nStory: S${storyIndex}\nCo-Authored-By: ${personaDisplay} <workermill@users.noreply.github.com>`;
 
-    execSync(`git commit --no-verify -m "${message.replace(/"/g, '\\"')}"`, { cwd: workingDir, stdio: "pipe" });
+    execFileSync("git", ["commit", "--no-verify", "-m", message], { cwd: workingDir, stdio: "pipe" });
 
     const hash = execSync("git rev-parse --short HEAD", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
     logger.info("Committed revision changes", { storyIndex, persona, revisionRound, hash });

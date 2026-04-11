@@ -9,16 +9,16 @@ vi.mock("../logger.js", () => ({
   error: vi.fn(),
 }));
 
-// Mock child_process.execSync for URL tests — must be hoisted before importing the module
+// Mock child_process.execFileSync for URL tests — must be hoisted before importing the module
 vi.mock("child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("child_process")>();
   return {
     ...actual,
-    execSync: vi.fn(),
+    execFileSync: vi.fn(),
   };
 });
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import {
   parseImageReferences,
   toMessageContent,
@@ -385,7 +385,7 @@ describe("resolveFolderReferences", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveUrlReferences", () => {
-  const mockedExecSync = execSync as ReturnType<typeof vi.fn>;
+  const mockedExecFileSync = execFileSync as ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -395,11 +395,11 @@ describe("resolveUrlReferences", () => {
     const input = "no urls here";
     const result = await resolveUrlReferences(input);
     expect(result).toBe(input);
-    expect(mockedExecSync).not.toHaveBeenCalled();
+    expect(mockedExecFileSync).not.toHaveBeenCalled();
   });
 
   it("replaces @https://url with fetched content in a code block", async () => {
-    mockedExecSync.mockReturnValueOnce("fetched page content");
+    mockedExecFileSync.mockReturnValueOnce("fetched page content");
     const result = await resolveUrlReferences("see @https://example.com/api");
     expect(result).toContain("```");
     expect(result).toContain("// fetched from https://example.com/api");
@@ -408,18 +408,16 @@ describe("resolveUrlReferences", () => {
   });
 
   it("calls curl with the correct flags and URL", async () => {
-    mockedExecSync.mockReturnValueOnce("response body");
+    mockedExecFileSync.mockReturnValueOnce("response body");
     await resolveUrlReferences("@https://api.example.com/data");
-    expect(mockedExecSync).toHaveBeenCalledOnce();
-    const [cmd] = mockedExecSync.mock.calls[0] as [string, ...unknown[]];
-    expect(cmd).toContain("curl -sL");
-    expect(cmd).toContain("--max-time 10");
-    expect(cmd).toContain("--max-filesize 10240");
-    expect(cmd).toContain('"https://api.example.com/data"');
+    expect(mockedExecFileSync).toHaveBeenCalledOnce();
+    const [cmd, args] = mockedExecFileSync.mock.calls[0] as [string, string[], ...unknown[]];
+    expect(cmd).toBe("curl");
+    expect(args).toEqual(["-sL", "--max-time", "10", "--max-filesize", "10240", "https://api.example.com/data"]);
   });
 
   it("replaces URL with (failed to fetch: ...) when curl throws", async () => {
-    mockedExecSync.mockImplementationOnce(() => {
+    mockedExecFileSync.mockImplementationOnce(() => {
       throw new Error("curl: (6) Could not resolve host");
     });
     const result = await resolveUrlReferences("@https://unreachable.invalid");
@@ -427,24 +425,24 @@ describe("resolveUrlReferences", () => {
   });
 
   it("handles http:// URLs in addition to https://", async () => {
-    mockedExecSync.mockReturnValueOnce("plain http response");
+    mockedExecFileSync.mockReturnValueOnce("plain http response");
     const result = await resolveUrlReferences("@http://example.com/page");
     expect(result).toContain("// fetched from http://example.com/page");
     expect(result).toContain("plain http response");
   });
 
   it("handles multiple URL references in one input", async () => {
-    mockedExecSync
+    mockedExecFileSync
       .mockReturnValueOnce("first content")
       .mockReturnValueOnce("second content");
     const result = await resolveUrlReferences("@https://a.com and @https://b.com");
     expect(result).toContain("first content");
     expect(result).toContain("second content");
-    expect(mockedExecSync).toHaveBeenCalledTimes(2);
+    expect(mockedExecFileSync).toHaveBeenCalledTimes(2);
   });
 
   it("trims whitespace from fetched content", async () => {
-    mockedExecSync.mockReturnValueOnce("   trimmed content   ");
+    mockedExecFileSync.mockReturnValueOnce("   trimmed content   ");
     const result = await resolveUrlReferences("@https://example.com");
     expect(result).toContain("trimmed content");
     expect(result).not.toContain("   trimmed content   ");

@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 export const name = "git";
 
@@ -42,6 +42,48 @@ const BLOCKED_PATTERNS = [
   /branch\s+-D\b/,
 ];
 
+function parseArgs(args: string | undefined): string[] {
+  if (!args?.trim()) return [];
+
+  const result: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escaping = false;
+
+  for (const ch of args) {
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaping = true;
+      continue;
+    }
+    if ((ch === "'" || ch === "\"") && !quote) {
+      quote = ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      continue;
+    }
+    if (/\s/.test(ch) && !quote) {
+      if (current) {
+        result.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+
+  if (escaping) current += "\\";
+  if (quote) throw new Error("Unterminated quoted git argument");
+  if (current) result.push(current);
+  return result;
+}
+
 export async function execute({ action, args, cwd }: GitParams): Promise<GitResult> {
   const workDir = cwd || process.cwd();
 
@@ -53,24 +95,42 @@ export async function execute({ action, args, cwd }: GitParams): Promise<GitResu
     }
   }
 
-  const cmdMap: Record<string, string> = {
-    status: `git status${args ? " " + args : " --short"}`,
-    diff: `git diff${args ? " " + args : ""}`,
-    log: `git log${args ? " " + args : " --oneline -20"}`,
-    add: `git add ${args || "."}`,
-    commit: `git commit -m "${(args || "").replace(/"/g, '\\"')}"`,
-    branch: `git branch${args ? " " + args : ""}`,
-    checkout: `git checkout ${args || ""}`,
-    stash: `git stash${args ? " " + args : ""}`,
-  };
-
-  const cmd = cmdMap[action];
-  if (!cmd) {
-    return { success: false, output: "", error: `Unknown git action: ${action}` };
+  let gitArgs: string[];
+  try {
+    switch (action) {
+      case "status":
+        gitArgs = ["status", ...(args ? parseArgs(args) : ["--short"])];
+        break;
+      case "diff":
+        gitArgs = ["diff", ...parseArgs(args)];
+        break;
+      case "log":
+        gitArgs = ["log", ...(args ? parseArgs(args) : ["--oneline", "-20"])];
+        break;
+      case "add":
+        gitArgs = ["add", ...(args ? parseArgs(args) : ["."])];
+        break;
+      case "commit":
+        gitArgs = ["commit", "-m", args || ""];
+        break;
+      case "branch":
+        gitArgs = ["branch", ...parseArgs(args)];
+        break;
+      case "checkout":
+        gitArgs = ["checkout", ...parseArgs(args)];
+        break;
+      case "stash":
+        gitArgs = ["stash", ...parseArgs(args)];
+        break;
+      default:
+        return { success: false, output: "", error: `Unknown git action: ${action}` };
+    }
+  } catch (err) {
+    return { success: false, output: "", error: err instanceof Error ? err.message : String(err) };
   }
 
   try {
-    const output = execSync(cmd, {
+    const output = execFileSync("git", gitArgs, {
       cwd: workDir,
       encoding: "utf-8",
       timeout: 30000,

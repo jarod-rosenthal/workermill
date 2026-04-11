@@ -60,8 +60,7 @@ function resolveBaseProvider(provider: string): string {
 }
 
 function normalizeOpenAIModel(model: string): string {
-  const normalized = model.startsWith("openai/") ? model.slice("openai/".length) : model;
-  return normalized.replace(/^gpt-5\.4-/, "gpt-5.4-");
+  return model.startsWith("openai/") ? model.slice("openai/".length) : model;
 }
 
 function classifyRole(persona: string): UsageRole {

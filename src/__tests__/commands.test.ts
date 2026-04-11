@@ -18,7 +18,7 @@ vi.mock("../session.js", () => ({
 
 import { handleCommand, type CommandContext } from "../commands.js";
 import { CostTracker } from "../cost-tracker.js";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { compactMessages } from "../compaction.js";
 import { listSessions, loadSessionById, deleteSession } from "../session.js";
 
@@ -46,6 +46,7 @@ vi.mock("../engine/model-factory.js", () => ({
 // Mock child_process for /git command
 vi.mock("child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 function createTestContext(overrides: Partial<CommandContext> = {}): CommandContext {
@@ -366,13 +367,10 @@ describe("commands", () => {
       const processInput = vi.fn();
       const ctx = createTestContext({ processInput });
 
-      // Mock execSync to simulate editor writing content to temp file
-      vi.mocked(execSync).mockImplementation((cmd: string) => {
-        // The editor command includes the temp file path — extract it and write content
-        const match = String(cmd).match(/\s(\S*workermill-\d+\.md)\s*$/);
-        if (match) {
-          fs.writeFileSync(match[1], "Fix the login bug");
-        }
+      // Mock execFileSync to simulate editor writing content to temp file
+      vi.mocked(execFileSync).mockImplementation((_cmd: string, args?: readonly string[]) => {
+        const tmpFile = args?.[args.length - 1];
+        if (tmpFile) fs.writeFileSync(tmpFile, "Fix the login bug");
         return "" as any;
       });
 
@@ -385,7 +383,7 @@ describe("commands", () => {
       const ctx = createTestContext({ processInput });
 
       // Editor leaves file empty
-      vi.mocked(execSync).mockImplementation(() => "" as any);
+      vi.mocked(execFileSync).mockImplementation(() => "" as any);
 
       await handleCommand("/edit", ctx);
       expect(processInput).not.toHaveBeenCalled();
@@ -395,7 +393,7 @@ describe("commands", () => {
 
     it("handles editor failure gracefully", async () => {
       const ctx = createTestContext();
-      vi.mocked(execSync).mockImplementation(() => { throw new Error("editor crashed"); });
+      vi.mocked(execFileSync).mockImplementation(() => { throw new Error("editor crashed"); });
 
       await handleCommand("/edit", ctx);
       const logCalls = (console.log as any).mock.calls.flat().join(" ");

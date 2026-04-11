@@ -3,7 +3,7 @@ import ora from "ora";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { createModel } from "./engine/model-factory.js";
 import type { AIProvider } from "./engine/types.js";
 import { compactMessages } from "./compaction.js";
@@ -19,6 +19,10 @@ export interface CommandContext {
   planMode: boolean;
   setPlanMode: (mode: boolean) => void;
   processInput: (input: string) => void;
+}
+
+function splitEditorCommand(editor: string): string[] {
+  return editor.split(/\s+/).filter(Boolean);
 }
 
 export async function handleCommand(
@@ -172,12 +176,13 @@ export async function handleCommand(
 
     case "edit": {
       const editor = process.env.EDITOR || process.env.VISUAL || "vi";
-      const tmpFile = path.join(os.tmpdir(), `workermill-${Date.now()}.md`);
-      fs.writeFileSync(tmpFile, "", "utf-8");
+      const editorParts = splitEditorCommand(editor);
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workermill-"));
+      const tmpFile = path.join(tmpDir, "input.md");
       try {
-        execSync(`${editor} ${tmpFile}`, { stdio: "inherit" });
+        fs.writeFileSync(tmpFile, "", "utf-8");
+        execFileSync(editorParts[0] || "vi", [...editorParts.slice(1), tmpFile], { stdio: "inherit" });
         const content = fs.readFileSync(tmpFile, "utf-8").trim();
-        fs.unlinkSync(tmpFile);
         if (content) {
           ctx.processInput(content);
         } else {
@@ -185,6 +190,8 @@ export async function handleCommand(
         }
       } catch {
         console.log(chalk.red("\n  Editor failed.\n"));
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
       break;
     }

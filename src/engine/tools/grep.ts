@@ -239,7 +239,7 @@ export async function execute({
 
     // Apply file pattern filter if specified
     if (filePattern) {
-      const ext = filePattern.replace("*", "");
+      const ext = filePattern.replace(/\*/g, "");
       filesToSearch = filesToSearch.filter((f) => f.endsWith(ext));
     }
 

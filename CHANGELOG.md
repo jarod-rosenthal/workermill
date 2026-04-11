@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **CodeQL findings** — hardened scheduled-task installation, HTML text extraction, exclusive persona creation, and filesystem tool file operations to reduce command-injection, HTML filtering, temporary-file, and TOCTOU risks.
 - **CodeQL setup and security cleanup** — rely on GitHub's default CodeQL setup instead of a duplicate workflow, pinned third-party scanner actions to commit SHAs, replaced shell-built editor/git/curl execution with argument-based subprocess calls, moved editor temp files into `mkdtemp` directories, fixed grep wildcard stripping, and removed a no-op OpenAI model normalization.
 
 ## [1.1.0] - 2026-04-10

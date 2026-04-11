@@ -1,3 +1,5 @@
+import { htmlToReadableText } from "./html.js";
+
 export const name = "fetch";
 
 export const description =
@@ -37,52 +39,6 @@ interface FetchResult {
   statusCode?: number;
   contentType?: string;
   error?: string;
-}
-
-function htmlToText(html: string): string {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<\/?(p|div|br|h[1-6]|li|tr|blockquote|pre|hr)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function htmlToMarkdown(html: string): string {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, "# $1\n\n")
-    .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, "## $1\n\n")
-    .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, "### $1\n\n")
-    .replace(/<h4[^>]*>([\s\S]*?)<\/h4>/gi, "#### $1\n\n")
-    .replace(/<h5[^>]*>([\s\S]*?)<\/h5>/gi, "##### $1\n\n")
-    .replace(/<h6[^>]*>([\s\S]*?)<\/h6>/gi, "###### $1\n\n")
-    .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/(strong|b)>/gi, "**$2**")
-    .replace(/<(em|i)[^>]*>([\s\S]*?)<\/(em|i)>/gi, "*$2*")
-    .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, "`$1`")
-    .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, "```\n$1\n```\n\n")
-    .replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)")
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, "- $1\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<hr\s*\/?>/gi, "\n---\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 const MAX_CONTENT_SIZE = 512 * 1024;
@@ -133,9 +89,9 @@ export async function execute({
       let content: string;
       if (contentType.includes("text/html") || contentType.includes("xhtml")) {
         if (format === "text") {
-          content = htmlToText(body);
+          content = htmlToReadableText(body, "text");
         } else if (format === "markdown") {
-          content = htmlToMarkdown(body);
+          content = htmlToReadableText(body, "markdown");
         } else {
           content = body;
         }

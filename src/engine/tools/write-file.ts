@@ -60,21 +60,7 @@ export async function execute({
     // Get directory path
     const dirPath = path.dirname(absolutePath);
 
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true });
-    }
-
-    // Check if path exists and is a directory
-    if (fs.existsSync(absolutePath)) {
-      const stats = fs.statSync(absolutePath);
-      if (stats.isDirectory()) {
-        return {
-          success: false,
-          error: `Path is a directory, cannot write as file: ${absolutePath}`,
-        };
-      }
-    }
+    fs.mkdirSync(dirPath, { recursive: true });
 
     // Write or append to file
     if (append) {
@@ -94,6 +80,12 @@ export async function execute({
       linesWritten: content.split("\n").length,
     };
   } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "EISDIR") {
+      return {
+        success: false,
+        error: `Path is a directory, cannot write as file: ${path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)}`,
+      };
+    }
     return {
       success: false,
       error: `Failed to write file: ${(err as Error).message}`,

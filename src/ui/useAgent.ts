@@ -1222,10 +1222,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                 const { ensureMemoriesDir, getMemoriesDir, buildProvenanceHeader } = await import("../engine/tools/memory.js");
                 ensureMemoriesDir(workingDirRef.current);
                 const autoFile = path.join(getMemoriesDir(workingDirRef.current), "auto-learnings.md");
-                const header = fs.existsSync(autoFile) ? "" : buildProvenanceHeader("auto-extracted", "medium") + "# Auto-extracted Learnings\n\nDiscoveries extracted during conversation compaction.\n\n";
+                const header = buildProvenanceHeader("auto-extracted", "medium") + "# Auto-extracted Learnings\n\nDiscoveries extracted during conversation compaction.\n\n";
                 const timestamp = new Date().toISOString().slice(0, 16);
                 const entries = extractedMemories.map(m => `- [${timestamp}] ${m}`).join("\n") + "\n";
-                fs.appendFileSync(autoFile, header + entries, "utf-8");
+                const fd = fs.openSync(autoFile, "a+", 0o600);
+                try {
+                  const stats = fs.fstatSync(fd);
+                  fs.writeFileSync(fd, (stats.size === 0 ? header : "") + entries, "utf-8");
+                } finally {
+                  fs.closeSync(fd);
+                }
               } catch { /* non-fatal */ }
             }
             const compacted = await compactMessages(

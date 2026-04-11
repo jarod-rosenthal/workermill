@@ -38,7 +38,14 @@ export function execGh(args: string[], options?: {
 export function ensureGitignoreSafety(workingDir: string): void {
   const gitignorePath = path.join(workingDir, ".gitignore");
   try {
-    const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, "utf-8") : "";
+    let content = "";
+    try {
+      content = fs.readFileSync(gitignorePath, "utf-8");
+    } catch (err) {
+      if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) {
+        throw err;
+      }
+    }
     const lines = content.split("\n").map(l => l.trim());
     const needed = [
       "node_modules/",

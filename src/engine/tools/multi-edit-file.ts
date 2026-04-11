@@ -78,24 +78,6 @@ export async function execute({
       ? filePath
       : path.resolve(process.cwd(), filePath);
 
-    // Check if file exists
-    if (!fs.existsSync(absolutePath)) {
-      return {
-        success: false,
-        error: `File not found: ${absolutePath}`,
-      };
-    }
-
-    // Check if it's a file (not directory)
-    const stats = fs.statSync(absolutePath);
-    if (stats.isDirectory()) {
-      return {
-        success: false,
-        error: `Path is a directory, not a file: ${absolutePath}`,
-      };
-    }
-
-    // Read file content
     let content = fs.readFileSync(absolutePath, "utf8");
     const originalContent = content;
     const results: EditResultDetail[] = [];
@@ -165,6 +147,21 @@ export async function execute({
       linesDiff: linesDiff > 0 ? `+${linesDiff}` : linesDiff.toString(),
     };
   } catch (err) {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(process.cwd(), filePath);
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+      return {
+        success: false,
+        error: `File not found: ${absolutePath}`,
+      };
+    }
+    if (err instanceof Error && "code" in err && err.code === "EISDIR") {
+      return {
+        success: false,
+        error: `Path is a directory, not a file: ${absolutePath}`,
+      };
+    }
     return {
       success: false,
       error: `Failed to edit file: ${(err as Error).message}`,

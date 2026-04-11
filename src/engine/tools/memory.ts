@@ -20,7 +20,7 @@ export function getMemoriesDir(cwd?: string): string {
 /** Ensure the memories directory exists. */
 export function ensureMemoriesDir(cwd?: string): void {
   const dir = getMemoriesDir(cwd);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
 }
 
 /**
@@ -96,11 +96,15 @@ function handleView(
 ): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  if (!fs.existsSync(resolved)) {
-    return `The path ${virtualPath} does not exist. Please provide a valid path.`;
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+      return `The path ${virtualPath} does not exist. Please provide a valid path.`;
+    }
+    throw err;
   }
-
-  const stat = fs.statSync(resolved);
 
   if (stat.isDirectory()) {
     // List directory contents up to 2 levels deep
@@ -111,7 +115,13 @@ function handleView(
   }
 
   // Read file with line numbers
-  const content = fs.readFileSync(resolved, "utf-8");
+  const fd = fs.openSync(resolved, "r");
+  let content: string;
+  try {
+    content = fs.readFileSync(fd, { encoding: "utf-8" });
+  } finally {
+    fs.closeSync(fd);
+  }
   const allLines = content.split("\n");
 
   if (allLines.length > 999_999) {
@@ -230,7 +240,6 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
   preview: string;
 }> {
   const dir = getMemoriesDir(cwd);
-  if (!fs.existsSync(dir)) return [];
   const results: Array<{
     file: string;
       source?: string;
@@ -247,10 +256,7 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
       if (entry.startsWith(".")) continue;
       const full = path.join(d, entry);
       const rel = prefix ? `${prefix}/${entry}` : entry;
-      const stat = fs.statSync(full);
-      if (stat.isDirectory()) {
-        walk(full, rel);
-      } else {
+      try {
         const content = fs.readFileSync(full, "utf-8");
         const prov = parseProvenance(content);
         // Preview: first non-frontmatter, non-empty line
@@ -266,11 +272,21 @@ export function listMemoriesWithProvenance(cwd?: string): Array<{
           persona: prov?.persona,
           preview,
         });
+      } catch (err) {
+        if (err instanceof Error && "code" in err && err.code === "EISDIR") {
+          walk(full, rel);
+        }
       }
     }
   }
 
-  walk(dir, "");
+  try {
+    walk(dir, "");
+  } catch (err) {
+    if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) {
+      throw err;
+    }
+  }
   return results;
 }
 
@@ -281,12 +297,8 @@ function handleCreate(
 ): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  if (fs.existsSync(resolved)) {
-    return `Error: File ${virtualPath} already exists`;
-  }
-
   const dir = path.dirname(resolved);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   // Add provenance header if the content doesn't already have frontmatter
   const provenanceContext = {
     runId: process.env.WM_RUN_ID,
@@ -294,7 +306,14 @@ function handleCreate(
     persona: process.env.WM_PERSONA,
   };
   const content = fileText.startsWith("---\n") ? fileText : buildProvenanceHeader("agent", "medium", provenanceContext) + fileText;
-  fs.writeFileSync(resolved, content, "utf-8");
+  try {
+    fs.writeFileSync(resolved, content, { encoding: "utf-8", flag: "wx" });
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+      return `Error: File ${virtualPath} already exists`;
+    }
+    throw err;
+  }
   return `File created successfully at: ${virtualPath}`;
 }
 
@@ -306,11 +325,15 @@ function handleStrReplace(
 ): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
-    return `Error: The path ${virtualPath} does not exist. Please provide a valid path.`;
+  let content: string;
+  try {
+    content = fs.readFileSync(resolved, "utf-8");
+  } catch (err) {
+    if (err instanceof Error && "code" in err && (err.code === "ENOENT" || err.code === "EISDIR")) {
+      return `Error: The path ${virtualPath} does not exist. Please provide a valid path.`;
+    }
+    throw err;
   }
-
-  const content = fs.readFileSync(resolved, "utf-8");
   const lines = content.split("\n");
 
   // Find all occurrences
@@ -356,11 +379,15 @@ function handleInsert(
 ): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
-    return `Error: The path ${virtualPath} does not exist`;
+  let content: string;
+  try {
+    content = fs.readFileSync(resolved, "utf-8");
+  } catch (err) {
+    if (err instanceof Error && "code" in err && (err.code === "ENOENT" || err.code === "EISDIR")) {
+      return `Error: The path ${virtualPath} does not exist`;
+    }
+    throw err;
   }
-
-  const content = fs.readFileSync(resolved, "utf-8");
   const lines = content.split("\n");
 
   if (insertLine < 0 || insertLine > lines.length) {
@@ -375,11 +402,14 @@ function handleInsert(
 function handleDelete(virtualPath: string, cwd?: string): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  if (!fs.existsSync(resolved)) {
-    return `Error: The path ${virtualPath} does not exist`;
+  try {
+    fs.rmSync(resolved, { recursive: true, force: false });
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+      return `Error: The path ${virtualPath} does not exist`;
+    }
+    throw err;
   }
-
-  fs.rmSync(resolved, { recursive: true, force: true });
   return `Successfully deleted ${virtualPath}`;
 }
 

@@ -186,7 +186,7 @@ export async function execute({ patch_text }: PatchParams): Promise<PatchResult>
       };
     }
 
-    const pendingWrites: Map<string, string> = new Map();
+    const pendingWrites: Map<string, { content: string; isNew: boolean }> = new Map();
     const pendingDeletes: string[] = [];
     const errors: string[] = [];
 
@@ -197,12 +197,14 @@ export async function execute({ patch_text }: PatchParams): Promise<PatchResult>
         const content = filePatch.hunks
           .flatMap((h) => h.lines.filter((l) => l.type === "add").map((l) => l.content))
           .join("\n") + "\n";
-        pendingWrites.set(targetFile, content);
+        pendingWrites.set(targetFile, { content, isNew: true });
         continue;
       }
 
       if (filePatch.isDelete) {
-        if (!fs.existsSync(filePatch.oldFile)) {
+        try {
+          fs.accessSync(filePatch.oldFile, fs.constants.F_OK);
+        } catch {
           errors.push(`Cannot delete ${filePatch.oldFile}: file not found`);
           continue;
         }
@@ -210,12 +212,16 @@ export async function execute({ patch_text }: PatchParams): Promise<PatchResult>
         continue;
       }
 
-      if (!fs.existsSync(targetFile)) {
-        errors.push(`Cannot patch ${targetFile}: file not found`);
-        continue;
+      let originalContent: string;
+      try {
+        originalContent = fs.readFileSync(targetFile, "utf-8");
+      } catch (err) {
+        if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+          errors.push(`Cannot patch ${targetFile}: file not found`);
+          continue;
+        }
+        throw err;
       }
-
-      const originalContent = fs.readFileSync(targetFile, "utf-8");
       const result = applyHunks(originalContent, filePatch.hunks);
 
       if (result === null) {
@@ -223,7 +229,7 @@ export async function execute({ patch_text }: PatchParams): Promise<PatchResult>
         continue;
       }
 
-      pendingWrites.set(targetFile, result);
+      pendingWrites.set(targetFile, { content: result, isNew: false });
     }
 
     if (errors.length > 0) {
@@ -238,16 +244,13 @@ export async function execute({ patch_text }: PatchParams): Promise<PatchResult>
     const filesCreated: string[] = [];
     const filesDeleted: string[] = [];
 
-    for (const [filePath, content] of pendingWrites) {
+    for (const [filePath, pendingWrite] of pendingWrites) {
       const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      fs.mkdirSync(dir, { recursive: true });
 
-      const isNew = !fs.existsSync(filePath);
-      fs.writeFileSync(filePath, content, "utf-8");
+      fs.writeFileSync(filePath, pendingWrite.content, "utf-8");
 
-      if (isNew) {
+      if (pendingWrite.isNew) {
         filesCreated.push(filePath);
       } else {
         filesModified.push(filePath);

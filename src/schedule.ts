@@ -1,10 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 
 const SCHEDULE_FILE = path.join(getStateRoot(), "schedules.json");
+const SCHEDULE_DIR = path.join(getStateRoot(), "schedule");
 
 export interface ScheduledTask {
   id: string;
@@ -17,10 +18,9 @@ export interface ScheduledTask {
 
 function loadSchedules(): ScheduledTask[] {
   try {
-    if (fs.existsSync(SCHEDULE_FILE)) {
-      return JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf-8")) as ScheduledTask[];
-    }
+    return JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf-8")) as ScheduledTask[];
   } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") return [];
     logger.error("Failed to load schedules", { error: err instanceof Error ? err.message : String(err) });
   }
   return [];
@@ -28,8 +28,74 @@ function loadSchedules(): ScheduledTask[] {
 
 function saveSchedules(schedules: ScheduledTask[]): void {
   const dir = path.dirname(SCHEDULE_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(schedules, null, 2) + "\n", "utf-8");
+}
+
+function safeTaskId(taskId: string): string {
+  return taskId.replace(/[^a-zA-Z0-9_-]/g, "_") || "task";
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function powerShellQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function schedulePaths(taskId: string): { id: string; promptPath: string; scriptPath: string; logPath: string } {
+  const id = safeTaskId(taskId);
+  return {
+    id,
+    promptPath: path.join(SCHEDULE_DIR, `${id}.prompt.txt`),
+    scriptPath: path.join(SCHEDULE_DIR, process.platform === "win32" ? `${id}.ps1` : `${id}.sh`),
+    logPath: path.join(SCHEDULE_DIR, `${id}.log`),
+  };
+}
+
+function writeScheduleFiles(task: ScheduledTask): ReturnType<typeof schedulePaths> {
+  const paths = schedulePaths(task.id);
+  fs.mkdirSync(SCHEDULE_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(paths.promptPath, task.prompt, { encoding: "utf-8", mode: 0o600 });
+
+  if (process.platform === "win32") {
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `Set-Location -LiteralPath ${powerShellQuote(task.workingDir)}`,
+      `$promptText = Get-Content -LiteralPath ${powerShellQuote(paths.promptPath)} -Raw`,
+      `npx workermill --trust -p $promptText *>> ${powerShellQuote(paths.logPath)}`,
+      "",
+    ].join("\n");
+    fs.writeFileSync(paths.scriptPath, script, { encoding: "utf-8", mode: 0o700 });
+  } else {
+    const script = [
+      "#!/bin/sh",
+      "set -eu",
+      `cd ${shellQuote(task.workingDir)}`,
+      `npx workermill --trust -p "$(cat ${shellQuote(paths.promptPath)})" >> ${shellQuote(paths.logPath)} 2>&1`,
+      "",
+    ].join("\n");
+    fs.writeFileSync(paths.scriptPath, script, { encoding: "utf-8", mode: 0o700 });
+    fs.chmodSync(paths.scriptPath, 0o700);
+  }
+
+  return paths;
+}
+
+function removeScheduleFiles(taskId: string): void {
+  const paths = schedulePaths(taskId);
+  for (const file of [paths.promptPath, paths.scriptPath, paths.logPath]) {
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {
+      // Best-effort cleanup only; deleting the schedule should not fail on stale files.
+    }
+  }
+}
+
+function cronLineBelongsToTask(line: string, taskId: string): boolean {
+  return line.includes(`WorkerMill:${safeTaskId(taskId)}`) || line.includes(`WorkerMill:${taskId}`);
 }
 
 /** Parse human-readable schedule into cron expression */
@@ -85,8 +151,7 @@ function parseCron(input: string): string | null {
 /** Install a cron job for a scheduled task */
 function installCron(task: ScheduledTask): boolean {
   const platform = process.platform;
-  const workermill = "npx workermill";
-  const cmd = `cd "${task.workingDir}" && ${workermill} --trust -p "${task.prompt.replace(/"/g, '\\"')}" >> ${getStateRoot()}/schedule-${task.id}.log 2>&1`;
+  const paths = writeScheduleFiles(task);
 
   if (platform === "win32") {
     // Windows: use schtasks
@@ -100,10 +165,18 @@ function installCron(task: ScheduledTask): boolean {
       if (parts[4] !== "*") schedType = "/SC WEEKLY /D MON"; // simplified
       if (hour === "*") schedType = `/SC MINUTE /MO ${minute}`;
 
-      execSync(
-        `schtasks /Create /TN "WorkerMill_${task.id}" ${schedType} /ST ${hour === "*" ? "00" : hour.padStart(2, "0")}:${minute.padStart(2, "0")} /TR "cmd /c ${cmd.replace(/"/g, '\\"')}" /F`,
-        { stdio: "pipe" }
-      );
+      const schtasksArgs = [
+        "/Create",
+        "/TN",
+        `WorkerMill_${paths.id}`,
+        ...schedType.split(" "),
+        "/ST",
+        `${hour === "*" ? "00" : hour.padStart(2, "0")}:${minute.padStart(2, "0")}`,
+        "/TR",
+        `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${paths.scriptPath}"`,
+        "/F",
+      ];
+      execFileSync("schtasks", schtasksArgs, { stdio: "pipe" });
       return true;
     } catch (err) {
       logger.error(`Failed to create Windows scheduled task: ${err}`);
@@ -114,15 +187,15 @@ function installCron(task: ScheduledTask): boolean {
     try {
       let existing = "";
       try {
-        existing = execSync("crontab -l 2>/dev/null", { encoding: "utf-8" });
+        existing = execFileSync("crontab", ["-l"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
       } catch { /* no existing crontab */ }
 
       // Remove any existing entry for this task
-      const lines = existing.split("\n").filter(l => !l.includes(`WorkerMill:${task.id}`));
-      lines.push(`${task.cron} ${cmd} # WorkerMill:${task.id}`);
+      const lines = existing.split("\n").filter(l => !cronLineBelongsToTask(l, task.id));
+      lines.push(`${task.cron} ${shellQuote(paths.scriptPath)} # WorkerMill:${paths.id}`);
 
       const newCrontab = lines.filter(l => l.trim()).join("\n") + "\n";
-      execSync(`echo "${newCrontab.replace(/"/g, '\\"')}" | crontab -`, { stdio: "pipe" });
+      execFileSync("crontab", ["-"], { input: newCrontab, stdio: ["pipe", "pipe", "pipe"] });
       return true;
     } catch (err) {
       logger.error(`Failed to install crontab: ${err}`);
@@ -135,18 +208,20 @@ function installCron(task: ScheduledTask): boolean {
 function removeCron(taskId: string): void {
   if (process.platform === "win32") {
     try {
-      execSync(`schtasks /Delete /TN "WorkerMill_${taskId}" /F`, { stdio: "pipe" });
+      execFileSync("schtasks", ["/Delete", "/TN", `WorkerMill_${safeTaskId(taskId)}`, "/F"], { stdio: "pipe" });
     } catch { /* may not exist */ }
   } else {
     try {
-      const existing = execSync("crontab -l 2>/dev/null", { encoding: "utf-8" });
-      const lines = existing.split("\n").filter(l => !l.includes(`WorkerMill:${taskId}`));
+      const existing = execFileSync("crontab", ["-l"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      const lines = existing.split("\n").filter(l => !cronLineBelongsToTask(l, taskId));
       const newCrontab = lines.filter(l => l.trim()).join("\n") + "\n";
-      execSync(`echo "${newCrontab.replace(/"/g, '\\"')}" | crontab -`, { stdio: "pipe" });
+      execFileSync("crontab", ["-"], { input: newCrontab, stdio: ["pipe", "pipe", "pipe"] });
     } catch (err) {
       logger.debug("Failed to remove crontab entry", { taskId, error: err instanceof Error ? err.message : String(err) });
     }
   }
+
+  removeScheduleFiles(taskId);
 }
 
 export function createSchedule(name: string, prompt: string, schedule: string, workingDir: string): { success: boolean; message: string } {

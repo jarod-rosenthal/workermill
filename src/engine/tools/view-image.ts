@@ -47,22 +47,6 @@ export async function execute({ path: filePath }: ViewImageParams): Promise<View
       ? filePath
       : path.resolve(process.cwd(), filePath);
 
-    if (!fs.existsSync(absolutePath)) {
-      return { success: false, error: `Image not found: ${absolutePath}` };
-    }
-
-    const stats = fs.statSync(absolutePath);
-    if (!stats.isFile()) {
-      return { success: false, error: `Path is not a file: ${absolutePath}` };
-    }
-
-    if (stats.size > MAX_IMAGE_SIZE_BYTES) {
-      return {
-        success: false,
-        error: `Image is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Max size: 10MB.`,
-      };
-    }
-
     const ext = path.extname(absolutePath).toLowerCase();
     const mimeType = MIME_TYPES[ext];
     if (!mimeType) {
@@ -72,15 +56,38 @@ export async function execute({ path: filePath }: ViewImageParams): Promise<View
       };
     }
 
-    const data = fs.readFileSync(absolutePath);
+    const fd = fs.openSync(absolutePath, "r");
+    let data: Buffer;
+    let size: number;
+    try {
+      const stats = fs.fstatSync(fd);
+      if (!stats.isFile()) {
+        return { success: false, error: `Path is not a file: ${absolutePath}` };
+      }
+
+      if (stats.size > MAX_IMAGE_SIZE_BYTES) {
+        return {
+          success: false,
+          error: `Image is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Max size: 10MB.`,
+        };
+      }
+
+      size = stats.size;
+      data = fs.readFileSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     return {
       success: true,
       content: [
-        { type: "text", text: `Loaded image: ${absolutePath} (${Math.round(stats.size / 1024)}KB)` },
+        { type: "text", text: `Loaded image: ${absolutePath} (${Math.round(size / 1024)}KB)` },
         { type: "image", image: data.toString("base64"), mimeType },
       ],
     };
   } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+      return { success: false, error: `Image not found: ${path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)}` };
+    }
     return {
       success: false,
       error: `Failed to read image: ${err instanceof Error ? err.message : String(err)}`,

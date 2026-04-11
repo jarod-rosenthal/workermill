@@ -11,7 +11,7 @@ vi.mock("../logger.js", () => ({
 
 // Mock child_process to prevent actual cron installs
 vi.mock("child_process", () => ({
-  execSync: vi.fn().mockReturnValue(""),
+  execFileSync: vi.fn().mockReturnValue(""),
 }));
 
 describe("schedule", () => {

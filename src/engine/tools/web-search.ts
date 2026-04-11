@@ -5,6 +5,8 @@
  * No API key required — uses DuckDuckGo's public search.
  */
 
+import { htmlToReadableText } from "./html.js";
+
 export const description =
   "Search the web for documentation, error messages, library usage, or any information. Returns search results with titles, URLs, and snippets. Use this when you need up-to-date information that might not be in your training data.";
 
@@ -49,8 +51,8 @@ export async function execute(input: {
     let match;
     while ((match = resultPattern.exec(html)) !== null && results.length < maxResults) {
       const rawUrl = match[1];
-      const title = match[2].replace(/<[^>]+>/g, "").trim();
-      const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+      const title = htmlToReadableText(match[2], "text");
+      const snippet = htmlToReadableText(match[3], "text");
 
       // DuckDuckGo wraps URLs in a redirect — extract the actual URL
       let url = rawUrl;

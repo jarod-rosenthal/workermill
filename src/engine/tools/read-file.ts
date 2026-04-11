@@ -61,34 +61,32 @@ export async function execute({
       ? filePath
       : path.resolve(process.cwd(), filePath);
 
-    // Check if file exists
-    if (!fs.existsSync(absolutePath)) {
-      return {
-        success: false,
-        error: `File not found: ${absolutePath}`,
-      };
-    }
+    const fd = fs.openSync(absolutePath, "r");
+    let content: string;
+    let size: number;
+    try {
+      const stats = fs.fstatSync(fd);
+      if (stats.isDirectory()) {
+        return {
+          success: false,
+          error: `Path is a directory, not a file: ${absolutePath}`,
+        };
+      }
 
-    // Check if it's a file (not directory)
-    const stats = fs.statSync(absolutePath);
-    if (stats.isDirectory()) {
-      return {
-        success: false,
-        error: `Path is a directory, not a file: ${absolutePath}`,
-      };
-    }
+      // Check file size (warn if large)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (stats.size > maxSize) {
+        return {
+          success: false,
+          error: `File is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Max size: 10MB. Use maxLines parameter to read partial content.`,
+        };
+      }
 
-    // Check file size (warn if large)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (stats.size > maxSize) {
-      return {
-        success: false,
-        error: `File is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Max size: 10MB. Use maxLines parameter to read partial content.`,
-      };
+      size = stats.size;
+      content = fs.readFileSync(fd, { encoding });
+    } finally {
+      fs.closeSync(fd);
     }
-
-    // Read file content
-    let content = fs.readFileSync(absolutePath, encoding);
 
     // Handle line-based reading if specified
     if (startLine !== undefined || maxLines !== undefined) {
@@ -114,9 +112,15 @@ export async function execute({
       success: true,
       content,
       path: absolutePath,
-      size: stats.size,
+      size,
     };
   } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+      return {
+        success: false,
+        error: `File not found: ${path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)}`,
+      };
+    }
     return {
       success: false,
       error: `Failed to read file: ${(err as Error).message}`,

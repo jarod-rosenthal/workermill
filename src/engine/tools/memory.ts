@@ -96,28 +96,32 @@ function handleView(
 ): string {
   const resolved = resolvePath(virtualPath, cwd);
 
-  let stat: fs.Stats;
+  let fd: number;
   try {
-    stat = fs.statSync(resolved);
+    fd = fs.openSync(resolved, "r");
   } catch (err) {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") {
       return `The path ${virtualPath} does not exist. Please provide a valid path.`;
     }
+    if (err instanceof Error && "code" in err && err.code === "EISDIR") {
+      const lines: string[] = [];
+      lines.push(`Here're the files and directories up to 2 levels deep in ${virtualPath}, excluding hidden items and node_modules:`);
+      listDir(resolved, virtualPath, 0, 2, lines);
+      return lines.join("\n");
+    }
     throw err;
   }
 
-  if (stat.isDirectory()) {
-    // List directory contents up to 2 levels deep
-    const lines: string[] = [];
-    lines.push(`Here're the files and directories up to 2 levels deep in ${virtualPath}, excluding hidden items and node_modules:`);
-    listDir(resolved, virtualPath, 0, 2, lines);
-    return lines.join("\n");
-  }
-
-  // Read file with line numbers
-  const fd = fs.openSync(resolved, "r");
   let content: string;
   try {
+    if (fs.fstatSync(fd).isDirectory()) {
+      const lines: string[] = [];
+      lines.push(`Here're the files and directories up to 2 levels deep in ${virtualPath}, excluding hidden items and node_modules:`);
+      listDir(resolved, virtualPath, 0, 2, lines);
+      return lines.join("\n");
+    }
+
+    // Read file with line numbers
     content = fs.readFileSync(fd, { encoding: "utf-8" });
   } finally {
     fs.closeSync(fd);

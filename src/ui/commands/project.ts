@@ -277,30 +277,26 @@ export function handlePersonasCommand(arg: string, ctx: SlashCommandContext): vo
     const personaDir = path.join(ctx.workingDir, ".workermill", "personas");
     const personaPath = path.join(personaDir, `${slug}.md`);
 
-    if (fs.existsSync(personaPath)) {
-      ctx.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
-    } else {
-      fs.mkdirSync(personaDir, { recursive: true });
-      const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, multi_edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
-      let fd: number | null = null;
-      try {
-        fd = fs.openSync(personaPath, "wx", 0o600);
-        fs.writeFileSync(fd, template, "utf-8");
-      } catch (err) {
-        if (err instanceof Error && "code" in err && err.code === "EEXIST") {
-          ctx.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
-          return;
-        }
-        throw err;
-      } finally {
-        if (fd !== null) fs.closeSync(fd);
+    fs.mkdirSync(personaDir, { recursive: true });
+    const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, bash_background, bash_output, bash_kill, read_file, write_file, edit_file, multi_edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
+    let fd: number | null = null;
+    try {
+      fd = fs.openSync(personaPath, "wx", 0o600);
+      fs.writeFileSync(fd, template, "utf-8");
+    } catch (err) {
+      if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+        ctx.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
+        return;
       }
-      ctx.addSystemMessage(
-        `**Created** \`.workermill/personas/${slug}.md\`\n\n` +
-        "Edit the file to customize the system prompt, tools, and description. " +
-        "This persona will override the built-in one with the same name, or be available as a new persona for the planner to assign."
-      );
+      throw err;
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
     }
+    ctx.addSystemMessage(
+      `**Created** \`.workermill/personas/${slug}.md\`\n\n` +
+      "Edit the file to customize the system prompt, tools, and description. " +
+      "This persona will override the built-in one with the same name, or be available as a new persona for the planner to assign."
+    );
   } else {
     ctx.addSystemMessage("Usage: `/personas`, `/personas show <name>`, `/personas create <name>`");
   }

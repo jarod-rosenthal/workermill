@@ -345,7 +345,10 @@ program
               issues++;
             }
           } else {
-            const keyRef = p.apiKey; // lgtm[js/clear-text-logging]
+            // `apiKey` is a template reference like `{env:OPENAI_API_KEY}`,
+            // never the raw key. `envVar` below is the environment variable
+            // NAME, not its value, so logging it is safe.
+            const keyRef = p.apiKey;
             if (keyRef?.startsWith("{env:")) {
               const envVar = keyRef.slice(5, -1);
               if (process.env[envVar]) {

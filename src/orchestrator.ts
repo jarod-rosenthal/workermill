@@ -1,5 +1,5 @@
 import { ensureOllamaContext, ensureLmStudioContext } from "./engine/model-factory.js";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
@@ -8,7 +8,6 @@ import { runLifecycleHooks } from "./hooks.js";
 import {
   isGitRepo, getCurrentBranch, createFeatureBranch,
   deriveFeatureBranchName, localBranchExists, deleteLocalBranch,
-  shellArg,
 } from "./git-ops.js";
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
@@ -223,7 +222,7 @@ export async function runOrchestration(
     if (currentBranch !== featureBranch) {
       // Verify branch exists
       try {
-        execSync(`git rev-parse --verify ${shellArg(featureBranch)}`, { cwd: workingDir, stdio: "pipe" });
+        execFileSync("git", ["rev-parse", "--verify", featureBranch], { cwd: workingDir, stdio: "pipe" });
       } catch {
         output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -231,7 +230,7 @@ export async function runOrchestration(
 
       output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
       try {
-        execSync(`git checkout ${shellArg(featureBranch)}`, { cwd: workingDir, stdio: "pipe" });
+        execFileSync("git", ["checkout", featureBranch], { cwd: workingDir, stdio: "pipe" });
       } catch {
         output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };

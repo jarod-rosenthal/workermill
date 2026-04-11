@@ -3,9 +3,8 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { runOrchestration } from "../../orchestrator.js";
-import { shellArg } from "../../git-ops.js";
 import type { CliConfig } from "../../config.js";
 import { loadConfig, saveConfig } from "../../config.js";
 import type { Session } from "../../session.js";
@@ -260,7 +259,7 @@ afterAll(async () => {
   // Clean up PRs first (must happen before branch deletion)
   for (const { dir, prNumber } of cleanupPRs) {
     try {
-      execSync(`gh pr close ${shellArg(String(prNumber))} --delete-branch`, {
+      execFileSync("gh", ["pr", "close", String(prNumber), "--delete-branch"], {
         cwd: dir,
         stdio: "pipe",
         timeout: 30_000,
@@ -273,7 +272,7 @@ afterAll(async () => {
   // Clean up remote branches
   for (const { dir, branch } of cleanupBranches) {
     try {
-      execSync(`git push origin --delete ${shellArg(branch)}`, {
+      execFileSync("git", ["push", "origin", "--delete", branch], {
         cwd: dir,
         stdio: "pipe",
         timeout: 30_000,
@@ -731,7 +730,7 @@ describe("CLI E2E — full lifecycle", () => {
       expect(logs.length).toBeGreaterThan(0);
 
       // Verify: files were modified or created
-      const diffStat = execSync(`git diff --stat ${shellArg(initialBranch)}..HEAD`, {
+      const diffStat = execFileSync("git", ["diff", "--stat", `${initialBranch}..HEAD`], {
         cwd: tempDir,
         encoding: "utf-8",
       }).trim();
@@ -741,13 +740,13 @@ describe("CLI E2E — full lifecycle", () => {
       try {
         // Make sure we're on the feature branch
         if (currentBranch === initialBranch && result.featureBranch) {
-          execSync(`git checkout ${shellArg(result.featureBranch!)}`, {
+          execFileSync("git", ["checkout", result.featureBranch!], {
             cwd: tempDir,
             stdio: "pipe",
           });
         }
 
-        execSync(`git push origin HEAD:${shellArg(branchForPR)} --force`, {
+        execFileSync("git", ["push", "origin", `HEAD:${branchForPR}`, "--force"], {
           cwd: tempDir,
           stdio: "pipe",
           timeout: 60_000,
@@ -757,8 +756,15 @@ describe("CLI E2E — full lifecycle", () => {
         cleanupBranches.push({ dir: tempDir, branch: branchForPR });
 
         // Create PR
-        const prOutput = execSync(
-          `gh pr create --title "E2E test: DELETE endpoint" --body "Automated E2E test — will be closed automatically." --head ${shellArg(branchForPR)} --base main`,
+        const prOutput = execFileSync(
+          "gh",
+          [
+            "pr", "create",
+            "--title", "E2E test: DELETE endpoint",
+            "--body", "Automated E2E test — will be closed automatically.",
+            "--head", branchForPR,
+            "--base", "main",
+          ],
           {
             cwd: tempDir,
             encoding: "utf-8",

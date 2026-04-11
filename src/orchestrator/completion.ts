@@ -1,9 +1,33 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import type { CliConfig, HooksConfig } from "../config.js";
 import * as logger from "../logger.js";
-import { execGh, shellArg } from "../git-ops.js";
+import { execGh } from "../git-ops.js";
+
+/**
+ * Run `git` with an argument array, returning combined stdout+stderr.
+ * Throws an Error whose message contains the combined output so callers
+ * that inspect `String(err)` for patterns like "non-fast-forward" keep working.
+ * Replaces `execSync(\`git ... 2>&1\`)` patterns without invoking a shell.
+ */
+function gitCombined(args: string[], cwd: string): string {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const combined = ((result.stdout || "") + (result.stderr || "")).trim();
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const err = new Error(combined || `git ${args[0]} failed (exit ${result.status})`);
+    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).stdout = result.stdout || undefined;
+    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).stderr = result.stderr || undefined;
+    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).status = result.status;
+    throw err;
+  }
+  return combined;
+}
 import { extractGithubIssueNumber } from "../ticket-ops.js";
 import { runLifecycleHooks } from "../hooks.js";
 import { clearShipRun } from "../ship-state.js";
@@ -89,11 +113,7 @@ export async function runCompletion(args: {
             output.status("Pushing branch...");
             let pushOutput = "";
             try {
-              pushOutput = execSync(`git push -u origin ${shellArg(featureBranch)} 2>&1`, {
-                cwd: workingDir,
-                encoding: "utf-8",
-                stdio: "pipe",
-              }).trim();
+              pushOutput = gitCombined(["push", "-u", "origin", featureBranch], workingDir);
             } catch (pushErr) {
               const msg = String(pushErr);
               const isDiverged = msg.includes("non-fast-forward") || msg.includes("Updates were rejected");
@@ -104,11 +124,7 @@ export async function runCompletion(args: {
                 const confirmed = typeof force === "object" ? force.allowed : force;
                 if (confirmed) {
                   try {
-                    pushOutput = execSync(`git push --force-with-lease -u origin ${shellArg(featureBranch)} 2>&1`, {
-                      cwd: workingDir,
-                      encoding: "utf-8",
-                      stdio: "pipe",
-                    }).trim();
+                    pushOutput = gitCombined(["push", "--force-with-lease", "-u", "origin", featureBranch], workingDir);
                     output.statusDone();
                   } catch (forceErr) {
                     output.statusDone();

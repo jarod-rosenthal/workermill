@@ -29,10 +29,14 @@ Triggered by `/build`. A team of specialized models works together.
 
 Flow:
 ```
-ticket/spec → planner → specialist workers → definition-of-done check → quality gates → tech lead reviewer → commit
+ticket/spec → [spec check] → planner → [plan critic] → specialist workers
+  → definition-of-done check → quality gates → tech lead reviewer → commit
 ```
 
+Bracketed stages are off by default (`review.specCheck`, `review.critic`).
+
 - **Planner** reads the codebase and decomposes the task into scoped stories with specific files, acceptance criteria, and definition-of-done contracts (`requiredFiles`, `requiredTests`, `requiredCommands`)
+- **Plan critic** (optional) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk before any worker starts, refining it until it passes or 3 rounds are spent. Catching a bad plan here is far cheaper than catching it at review.
 - **Workers** execute stories one at a time using their persona's system prompt
 - **Definition-of-done** — after each story, the orchestrator validates that required files and tests exist and required commands pass. Missing artifacts block completion with machine-readable failure codes
 - **Quality gates** — static gates from config plus planner-generated verification commands run before review
@@ -46,7 +50,7 @@ The orchestrator is decomposed into focused modules under `src/orchestrator/`:
 |--------|---------------|
 | `types.ts` | Interfaces: Story, OrchestrationOutput, OrchestrationResult, etc. |
 | `utils.ts` | Error classification, rate limiting, prompt helpers, abort signals |
-| `planning.ts` | Planner prompt, story parsing/normalization, QA participation, topological sort |
+| `planning.ts` | Spec check, planner prompt, plan critic, story parsing/normalization, QA participation, topological sort |
 | `execution.ts` | Story execution loop, tool setup, contract validation, retry/revision |
 | `review.ts` | Tech lead review, revision passes, must-fix tracking, standalone review |
 | `gates.ts` | Quality gates, LSP diagnostics |
@@ -97,13 +101,13 @@ Built-in tools:
 - **Code:** `lsp` (Language Server Protocol integration), `verify` (run build/test commands)
 - **Web:** `fetch` (HTTP), `web_search` (provider-specific)
 - **Agentic:** `sub_agent` (spawn a child agent with worktree isolation), `todo` (task tracking), `memory` (persistent cross-session memory)
-- **Meta:** `tool_metadata` (query tool capabilities and permissions)
+- **Tickets:** `ticket` (fetch, list/search, comment, and transition GitHub/Jira/Linear issues)
 
 ### Memory tool
 
 The `memory` tool gives agents persistent, file-based memory across sessions. Agents check their memory directory at conversation start and save project patterns, corrections, and preferences as they work. Memory is stored per-project under `~/.workermill/projects/<id>/memories/` as plain markdown files. Works with every provider.
 
-Each tool has metadata (`isReadOnly`, `isDestructive`, `concurrencySafe`) used by the permission system and concurrency scheduler.
+Each tool has metadata in `src/engine/tools/tool-metadata.ts` — `isReadOnly`, `isDestructive`, `acceptEditsApproved`, `concurrencySafe` — from which the permission system derives its read-only and accept-edits tool sets, and the concurrency scheduler decides what can run in parallel. It is an internal registry, not a tool agents can call.
 
 ## MCP (Model Context Protocol)
 

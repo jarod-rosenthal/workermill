@@ -98,11 +98,25 @@ Or for a Python project:
 /settings review.criticThreshold 8
 ```
 
-Now every `/build` runs the planning critic. The critic scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk management. Scores below 8 trigger a refinement loop (up to 3 iterations). Workers only start executing after the critic approves.
+Now every `/build` runs the planner critic between planning and execution. It scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk. A score below 8 triggers a refinement pass against the critic's specific issues, up to 3 scoring rounds. Workers only start once the plan passes.
+
+Route the critic to a stronger model than your workers — it reads a plan, not a codebase, so it's cheap:
+
+```
+/settings route critic anthropic
+```
+
+If the plan still doesn't pass after 3 rounds, the remaining issues are printed and you get the usual "Execute this plan?" prompt. To make that a hard stop instead, add strict mode:
+
+```
+/settings review.strict true
+```
 
 **When to use:** Refactors, schema migrations, security-sensitive work, anything where a bad plan costs more than a few critic calls.
 
-**When to skip:** Trivial tasks, quick fixes, exploration. The critic adds latency and tokens.
+**When to skip:** Trivial tasks, quick fixes, exploration. The critic adds latency and tokens to every `/build`.
+
+See [Quality Gates](quality-gates.md#planner-critic) for the full scoring rubric.
 
 ---
 
@@ -326,14 +340,14 @@ When you're ready for a full review and PR:
 
 Review the findings, fix anything flagged, then ship to a PR. You paid cloud costs only for the final review pass, not the iterative development.
 
-**Alternative:** Use the critic loop as a cheap quality check before committing:
+**Alternative:** Use the plan critic as a cheap quality check before any code is written:
 
 ```
 /settings review.critic true
 /build polish the tags feature
 ```
 
-The critic runs on your locally-routed planner. If the plan is weak, it refines it locally too. Only the final review uses cloud if you routed the reviewer there.
+With no `routing.critic` entry, the critic runs on your default provider — so in a fully local setup it scores and refines the plan locally too, at no API cost. Only the final review touches cloud, and only if you routed the reviewer there.
 
 ---
 
@@ -376,7 +390,10 @@ Update it when the project changes significantly (new stack, new conventions). O
 
 Memories persist per project in `~/.workermill/projects/<project-id>/memories/` and load automatically with every session.
 
-**The agent also reads** common standards (priority order): `AGENT.md`, `AGENTS.md`, `.workermill/instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.windsurfrules`, `.windsurf/rules/*`, `.clinerules`, and `.github/copilot-instructions.md`.
+**The agent also reads** common standards, first match wins. Files are checked before directories:
+
+1. `AGENT.md`, `AGENTS.md`, `.workermill/instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.clinerules.md`, `.github/copilot-instructions.md`
+2. `.cursor/rules/*.mdc|.md`, then `.windsurf/rules/*.mdc|.md`
 
 ---
 

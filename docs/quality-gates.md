@@ -1,4 +1,4 @@
-# Spec Check & Quality Gates
+# Spec Check, Plan Critic & Quality Gates
 
 Quality gates run shell commands after all stories complete but **before the tech lead reviewer sees the code**. When a gate fails, the failure output is included in the reviewer's context so they can flag it as a must-fix — no retry loops, no extra model calls.
 
@@ -33,6 +33,55 @@ If you run `/build` unattended (e.g. via a script), suggestions are applied sile
   }
 }
 ```
+
+---
+
+## Planner Critic
+
+The spec check catches a bad *task*. The planner critic catches a bad *plan*.
+
+With `review.critic` enabled, the plan is scored between planning and execution — before a single worker starts. The critic reads the task and the proposed stories and scores them 1-10 across five dimensions:
+
+| Dimension | The question it asks |
+|---|---|
+| **completeness** | Does executing every story actually satisfy the task? Is a required deliverable missing? |
+| **feasibility** | Can a worker execute each story from its description alone? Are the named files and patterns concrete? |
+| **dependencies** | Is the ordering right? Does a story need something a later story creates? |
+| **scope** | Is a story too large for one pass, or so trivial it should be merged? Is there work nobody asked for? |
+| **risk** | Are the risky parts identified? Do `requiredTests`/`requiredCommands` actually prove the story landed? |
+
+A score below `criticThreshold` (default 8) sends the plan back for a targeted refinement pass against the critic's specific issues, then it's scored again — up to 3 rounds.
+
+```
+🔍 Scoring the plan with anthropic/claude-sonnet-4-6 (threshold 8/10)
+🔍 Plan scored 5/10 (needs 8) — no story covers the migration rollback path
+🔍   [completeness] Schema change has no rollback story
+🔍   [risk] requiredCommands don't exercise the new column
+🔍 Refining the plan (round 1 of 2)...
+🔍 Plan approved — 9/10. Rollback and verification now covered.
+```
+
+**If the plan still doesn't pass after 3 rounds**, the remaining issues are printed and the run continues to the normal "Execute this plan?" confirmation — you decide whether it's good enough. Under `review.strict`, it aborts instead.
+
+**A critic that errors never blocks a build.** If the model is unreachable or returns something unparseable, the run proceeds with the planner's original plan and says so.
+
+**Enable it:**
+```
+/settings review.critic true
+/settings review.criticThreshold 8
+```
+
+**Route it to a stronger model.** The critic reads a plan rather than a codebase, so it's cheap to run on a good model even when workers run locally:
+
+```json
+{
+  "routing": { "critic": "anthropic" }
+}
+```
+
+**When to use it:** refactors, schema migrations, security-sensitive work — anything where a bad plan costs more than a few critic calls.
+
+**When to skip it:** trivial tasks, quick fixes, exploration. The critic adds latency and tokens to every `/build`.
 
 ---
 
@@ -232,8 +281,8 @@ The reviewer flags it; the expert fixes it in the revision loop.
 
 | Value | Behavior |
 |-------|----------|
-| `false` (default) | No gates run. Planner does not generate `verificationCommands`. |
-| `true` | Planner generates output-assertion commands per story. Run post-execution before review. |
+| `true` (default) | Planner generates output-assertion commands per story. Run post-execution before review. |
+| `false` | No dynamic gates run. Planner does not generate `verificationCommands`. |
 
 ### `config.qualityGates`
 
@@ -255,6 +304,17 @@ Gates themselves run in parallel. A gate is marked failed on the first command t
 | `false` (default) | No spec check. Planning starts immediately. |
 | `true` | Checks spec for ambiguities before planning. Prompts for up to 3 high-severity gaps. Suggestions applied silently in unattended mode. |
 
+### `config.review.critic`
+
+| Value | Behavior |
+|-------|----------|
+| `false` (default) | No plan critic. Execution starts as soon as you confirm the plan. |
+| `true` | Scores the plan before execution and refines it until it reaches `criticThreshold` or 3 rounds are spent. |
+
+### `config.review.criticThreshold`
+
+Integer 1-10, default `8`. The plan score the critic must reach to approve. Only used when `critic` is `true`.
+
 ---
 
 ## Full Config Example
@@ -265,15 +325,22 @@ Gates themselves run in parallel. A gate is marked failed on the first command t
   "review": {
     "enabled": true,
     "specCheck": true,
+    "critic": true,
+    "criticThreshold": 8,
     "verifyEnabled": true,
     "autoRevise": true
+  },
+  "routing": {
+    "critic": "anthropic"
   }
 }
 ```
 
-With all three enabled:
+With everything enabled:
 1. **Spec check** — you answer 1–3 targeted questions before planning starts
 2. **Planner** runs with your clarified spec, generates stories with `verificationCommands`
-3. **Stories execute** — experts build and self-verify
-4. **Verification gates** run the output assertions from the planner
-5. **Tech lead reviewer** sees gate results alongside the diff
+3. **Plan critic** scores the plan and refines it until it passes
+4. **You confirm** the plan, and the feature branch is created
+5. **Stories execute** — experts build and self-verify
+6. **Verification gates** run the output assertions from the planner
+7. **Tech lead reviewer** sees gate results alongside the diff

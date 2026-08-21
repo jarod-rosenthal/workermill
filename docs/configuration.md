@@ -18,12 +18,18 @@ Both files are plain JSON. The CLI writes the global file when you run `/setting
   "routing": { },
   "review": { },
   "qa": { },
+  "program": { },
   "qualityGates": [ ],
   "permissions": { },
   "hooks": { },
   "mcp": { },
   "sandbox": true,
+  "liveView": "auto",
+  "inlineEditPreview": true,
+  "experimental": false,
+  "editor": "auto",
   "bell": false,
+  "disableModelAutoUpdate": false,
   "ticketSystem": "github",
   "jira": { },
   "linear": { }
@@ -31,6 +37,8 @@ Both files are plain JSON. The CLI writes the global file when you run `/setting
 ```
 
 Every field except `providers` and `default` is optional.
+
+Run `wm schema` to generate a JSON Schema from the live definition — see [Generating configuration schema](#generating-configuration-schema).
 
 ## `providers`
 
@@ -127,7 +135,10 @@ Controls the `/build` review pipeline.
   "maxRevisions": 3,
   "approvalThreshold": 9,
   "autoRevise": false,
+  "strict": false,
   "specCheck": false,
+  "critic": false,
+  "criticThreshold": 8,
   "verifyEnabled": true
 }
 ```
@@ -138,8 +149,25 @@ Controls the `/build` review pipeline.
 | `maxRevisions` | `3` | Max review → revise cycles before giving up |
 | `approvalThreshold` | `9` | Review score (1-10) at or above which the code is approved |
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
+| `strict` | `false` | Zero tolerance: gate failures block, review approval is required, out-of-scope edits are rejected, and an unapproved plan aborts the run |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
+| `critic` | `false` | Between planning and execution: scores the plan and refines it before any worker starts. See below. |
+| `criticThreshold` | `8` | Plan score (1-10) the critic must reach to approve. Only used when `critic` is `true`. |
 | `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
+
+### The planner critic
+
+With `critic` enabled, the plan is scored 1-10 across five dimensions — completeness, feasibility, dependencies, scope, and risk — before any worker starts. A score below `criticThreshold` sends the plan back for a targeted refinement pass, then it's scored again, for up to 3 rounds.
+
+If the plan still hasn't reached the threshold after 3 rounds, the remaining issues are printed and the run continues to the normal "Execute this plan?" confirmation, so you decide. Under `review.strict` it aborts instead.
+
+A critic that errors or times out never blocks a build — the run proceeds with the planner's original version.
+
+The critic runs on whatever provider `routing.critic` points at, falling back to your default. Because it reads the plan rather than the codebase, it's a good place for a stronger model even when workers run locally:
+
+```json
+"routing": { "critic": "anthropic" }
+```
 
 ### Setting from the CLI
 
@@ -148,15 +176,18 @@ Controls the `/build` review pipeline.
 /settings review.maxRevisions 5
 /settings review.threshold 8
 /settings review.autoRevise true
+/settings review.strict true
+/settings review.specCheck true
+/settings review.critic true
+/settings review.criticThreshold 8
 ```
 
-`specCheck` and `verifyEnabled` are not yet exposed via `/settings` — set them directly in `.workermill/config.json`:
+`verifyEnabled` is the one field with no `/settings` key — set it directly in `.workermill/config.json`:
 
 ```json
 {
   "review": {
-    "specCheck": true,
-    "verifyEnabled": true
+    "verifyEnabled": false
   }
 }
 ```
@@ -183,6 +214,50 @@ Controls QA engineer participation in `/build` runs.
 /settings qa.participation default
 /settings qa.participation always
 ```
+
+## `program`
+
+Limits that bound an `/orchestrate` run — the experimental command that decomposes a parent issue into child issues and builds each one. Ignored entirely unless you use `/orchestrate`.
+
+```json
+"program": {
+  "maxIssues": 25,
+  "maxAutoRetries": 1,
+  "gateMode": "advisory",
+  "gates": ["npm run lint", "npm test"]
+}
+```
+
+| Field | Default | Purpose |
+|---|---|---|
+| `maxIssues` | `25` | Abort the run if decomposition produces more sub-issues than this. A runaway-decomposition backstop. |
+| `maxAutoRetries` | `1` | Automatic retries per sub-issue before the run pauses for you |
+| `gateMode` | `"advisory"` | `"required"` makes epic-milestone gate failures block the run; `"advisory"` reports them and continues |
+| `gates` | — | Shell commands run at epic milestones |
+
+### Setting from the CLI
+
+```
+/settings program.maxIssues 10
+/settings program.maxAutoRetries 2
+/settings program.gateMode required
+```
+
+`gates` has no `/settings` key — edit `program.gates` in `cli.json` directly.
+
+`minSubIssues`, `maxSubIssues`, `maxEpics`, and `epicPrompt` are read for backwards compatibility with older configs. `maxSubIssues` still works as a fallback for `maxIssues`; the others are ignored.
+
+## `disableModelAutoUpdate`
+
+Stop the CLI from fetching the remote model catalog in the background. Default `false`.
+
+```json
+"disableModelAutoUpdate": true
+```
+
+Also settable per-run with the `WM_DISABLE_MODEL_AUTO_UPDATE=1` environment variable. There is no `/settings` key — set it in `cli.json` or the environment.
+
+With auto-update off, the CLI uses the model catalog baked into the installed version. Refresh it on demand with `wm models update`.
 
 ## `qualityGates`
 
@@ -401,20 +476,27 @@ Show inline edited-file previews in the chat output and during `/build`. Default
 
 ## `experimental`
 
-Enable experimental commands: `/orchestrate`, `/program`. Default `false`.
+Unlocks `/orchestrate`, the experimental epic-decomposition command. Default `false`.
+
+Without it, `/orchestrate` reports that it's disabled and stops. No other command is gated by this flag — `/voice`, `/chrome`, and `/schedule` are flagged experimental in `/help` but work without it.
 
 ```
 /settings experimental true
 ```
 
+See [`program`](#program) for the limits that bound an `/orchestrate` run.
+
 ## `editor`
 
-Terminal editor preference for the `/editor` command. Default `"auto"` (uses `$EDITOR` or falls back to `nano`).
+Terminal editor used by the `/edit` command. Default `"auto"`.
 
 Options: `"vim"`, `"nano"`, `"auto"`.
 
+`"vim"` and `"nano"` pin the editor regardless of your environment. `"auto"` resolves `$EDITOR`, then `$VISUAL`, then falls back to `vi`.
+
 ```
 /settings editor vim
+/settings editor auto
 ```
 
 ## `sandbox`
@@ -441,6 +523,10 @@ Play a terminal bell and desktop notification when `/build` completes or fails, 
 ```
 /settings bell true
 ```
+
+## `git`
+
+Accepted for backwards compatibility and otherwise inert — it has no fields. Feature-branch names are derived from the repository name automatically. Safe to delete from your config.
 
 ## `ticketSystem`, `jira`, `linear`
 

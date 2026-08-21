@@ -21,6 +21,7 @@ From `package.json`:
 | `npm run dev` | Run from TypeScript source via `tsx` (no build step) |
 | `npm run build` | Build with `tsup` to `dist/` |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | Alias for `typecheck` — there is no separate linter |
 | `npm test` | Run all unit tests via `vitest run` |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:e2e` | E2E tests via `vitest.e2e.config.ts` |
@@ -36,7 +37,7 @@ workermill/
 │   ├── orchestrator/          # Orchestration sub-modules
 │   │   ├── types.ts           # Story, OrchestrationOutput, OrchestrationResult
 │   │   ├── utils.ts           # Error classification, rate limiting, prompt helpers
-│   │   ├── planning.ts        # Planner prompt, story parsing, QA participation
+│   │   ├── planning.ts        # Spec check, planner prompt, plan critic, story parsing
 │   │   ├── execution.ts       # Story execution loop, tool setup, validation
 │   │   ├── review.ts          # Tech lead review, revision passes, must-fix tracking
 │   │   ├── gates.ts           # Quality gates, LSP diagnostics
@@ -57,46 +58,103 @@ workermill/
 │   ├── run-command.ts         # Headless wm run execution
 │   ├── session.ts             # Session persistence and management
 │   ├── session-command.ts     # wm session CLI subcommands
-│   ├── models-command.ts      # wm models CLI subcommands
+│   ├── models-command.ts      # wm models / wm models update subcommands
 │   ├── stats-command.ts       # wm stats CLI subcommand
 │   ├── schema-command.ts      # wm schema CLI subcommand
+│   ├── logs-command.ts        # wm logs CLI subcommand
+│   ├── runs-command.ts        # wm runs CLI subcommands
+│   ├── run-manifest.ts        # Per-/build JSON manifests that wm runs reads
+│   ├── ship-state.ts          # Resumable /build state for /retry
+│   ├── recovery.ts            # Interrupted-build detection on startup
+│   ├── program-bootstrap.ts   # /orchestrate issue decomposition
+│   ├── program-queue.ts       # /orchestrate epic parsing and queueing
+│   ├── program-state.ts       # /orchestrate run state
+│   ├── prd-decomposition-phases.ts # Status labels for planning phases
+│   ├── prompts/               # Standalone prompt templates
 │   ├── project-data.ts        # Project registry and scoped data paths
+│   ├── project-context.ts     # Repo summary injected into prompts
+│   ├── instructions.ts        # AGENT.md / CLAUDE.md / .cursorrules discovery
+│   ├── learnings.ts           # Legacy learnings migration
 │   ├── provider-registry.ts   # Model discovery and provider info
+│   ├── provider-capabilities.ts # Per-provider feature and env-var lookup
+│   ├── remote-models.ts       # Remote model catalog fetch and cache
+│   ├── config/pricing.ts      # Shared pricing tables
 │   ├── live-view-server.ts    # Browser diff preview SSE server
+│   ├── live-view-url.ts       # Live view URL construction
 │   ├── gate-runner.ts         # Quality gate execution
+│   ├── sandbox-mode.ts        # Sandbox mode resolution (true/false/"os")
+│   ├── tool-concurrency.ts    # Parallel tool-call scheduling
+│   ├── deferred-tools.ts      # Lazy tool-schema loading for small models
+│   ├── custom-commands.ts     # .workermill/skills and commands loading
+│   ├── image-support.ts       # @file / @dir / @url / @image resolution
+│   ├── notify.ts              # Terminal bell and desktop notifications
+│   ├── update-check.ts        # npm version check
+│   ├── state-root.ts          # ~/.workermill path resolution
+│   ├── version.ts             # VERSION constant (keep in sync with package.json)
+│   ├── logger.ts              # File logging
+│   ├── commands.ts            # Shared command handlers for headless mode
+│   ├── browser.ts             # /chrome headless browser control
+│   ├── voice.ts               # /voice input
+│   ├── schedule.ts            # /schedule cron tasks
 │   ├── engine/                # AI model factory, tools, types
+│   │   ├── model-factory.ts   # Provider → LanguageModel construction
+│   │   └── tools/             # All agent tools + tool-metadata.ts
 │   ├── providers/             # Provider registry and pricing engines
 │   ├── ui/                    # React + Ink UI components
-│   │   ├── Root.tsx           # App shell
+│   │   ├── Root.tsx           # App shell — owns useAgent + useOrchestrator
 │   │   ├── App.tsx            # Message list + input + status bar
 │   │   ├── Input.tsx          # Multi-line input with history and autocomplete
 │   │   ├── StatusBar.tsx      # Bottom status bar
 │   │   ├── useAgent.ts        # Single-agent state + tool loop
 │   │   ├── useOrchestrator.ts # /build state + orchestrator coordination
-│   │   └── slash-commands.ts  # All slash command handlers
+│   │   ├── slash-commands.ts  # Command dispatch, HELP_TEXT, BUILTIN_COMMANDS
+│   │   ├── commands/          # Slash command handler implementations
+│   │   │   ├── session.ts     # /model, /cost, /status, /compact, /clear, /edit, /git, /diff, /changed, /sessions
+│   │   │   ├── settings.ts    # /settings and every settings key
+│   │   │   ├── permissions.ts # /permissions, /trust
+│   │   │   └── project.ts     # /init, /remember, /forget, /memories, /personas, /skills, /mcp, /projects
+│   │   ├── system-prompt.ts   # Single-agent system prompt assembly
+│   │   └── agent/             # useAgent helper types and utilities
 │   └── __tests__/             # Vitest unit tests
 ├── personas/                  # Built-in persona markdown files
 ├── docs/                      # Documentation
+├── AGENTS.md                  # Behavioral guidance for agents working in this repo
 └── CHANGELOG.md
 ```
 
-Tools (`bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls`, `patch`, `verify`, `todo`, `fetch`, `web_search`, `lsp`, `sub_agent`) live in `src/engine/tools/`.
+All agent tools live in `src/engine/tools/`, registered in `src/engine/tools/index.ts`. `tool-metadata.ts` in that directory is an internal registry, not a tool.
 
 ## Adding Features
 
 ### New slash command
 
-1. Add a `case "yourcommand":` block in `src/ui/slash-commands.ts`
-2. Add the command name to the `BUILTIN_COMMANDS` set at the top of the file (so it shows in autocomplete and isn't shadowed)
-3. Update the `/help` output if the command is user-facing
-4. Add a test in `src/__tests__/slash-commands.test.ts`
+1. Add a `case "yourcommand":` block to the dispatcher in `src/ui/slash-commands.ts`
+2. Put the implementation in the matching `src/ui/commands/` module — `session.ts`, `settings.ts`, `permissions.ts`, or `project.ts` — and call it from the case. Only trivial handlers stay inline in the dispatcher.
+3. Add the command name to the `BUILTIN_COMMANDS` set in `slash-commands.ts` (so it shows in autocomplete and isn't shadowed by a custom command)
+4. Add it to `HELP_TEXT` in the same file if the command is user-facing
+5. Document it in `docs/commands.md`
+6. Add a test in `src/__tests__/slash-commands.test.ts`
+
+`src/__tests__/docs-consistency.test.ts` checks that every command in `HELP_TEXT` has a handler, so step 3 without step 1 fails CI.
 
 ### New tool
 
 1. Create the tool in `src/engine/tools/<name>.ts` using the `tool()` helper from the AI SDK
-2. Export from `src/engine/tools/index.ts`
-3. Add tool metadata to `src/engine/tools/tool-metadata.ts` — mark `isReadOnly`, `isDestructive`, `concurrencySafe` appropriately
-4. Add tests in `src/__tests__/`
+2. Register it in `createToolDefinitions` in `src/engine/tools/index.ts`
+3. Add tool metadata to `src/engine/tools/tool-metadata.ts` — mark `isReadOnly`, `isDestructive`, `acceptEditsApproved`, and `concurrencySafe` appropriately
+4. Add it to the personas that should have it, in `personas/*.md` frontmatter
+5. Update the tools table and count in `README.md`, plus the tool lists in `docs/architecture.md` and `docs/personas.md`
+6. Add tests in `src/__tests__/`
+
+The docs-consistency test asserts the README's tool count matches the number of registered tools, so step 5 is enforced.
+
+### New lifecycle hook event
+
+1. Add the event name to the `LifecycleEvent` union in `src/hooks.ts`
+2. Call `runLifecycleHooks("your_event", config.hooks, workingDir, { ...env })` from wherever it fires
+3. Document the event and its environment variables in `docs/hooks-and-skills.md`
+
+`src/__tests__/hooks.test.ts` fails if an event is declared but never emitted, or emitted but not declared — a hook users can configure must actually fire.
 
 ### New persona
 
@@ -116,9 +174,12 @@ System prompt content here...
 
 ### New settings key
 
-1. Add the field to the relevant interface in `src/config.ts` (`ReviewConfig`, `CliConfig`, etc.)
-2. Add a `case "your.key":` in the `/settings` handler in `src/ui/slash-commands.ts`
-3. Update the settings table output in the same file so users see the current value
+1. Add the field to the relevant interface in `src/config.ts` (`ReviewConfig`, `ProgramConfig`, `CliConfig`, etc.) **and** to the matching Zod schema in the same file — the schema is what `wm schema` emits and what validates loaded config
+2. In `src/ui/commands/settings.ts`: add a lowercase entry to `keyAliases`, a `case "your.key":` to the switch, and the key to the persist list at the bottom of the function
+3. Add a row to the settings table at the top of the same file so `/settings` shows the current value
+4. Document the field in `docs/configuration.md` under its own `## \`fieldName\`` heading
+
+The docs-consistency test checks that every `##` heading in `configuration.md` corresponds to a real field in `config.ts`.
 
 ## Testing
 

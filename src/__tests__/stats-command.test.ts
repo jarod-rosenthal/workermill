@@ -298,6 +298,62 @@ describe("stats-command", () => {
     expect(globalStats.cost_usd).toBe(0.5);
   });
 
+  it("matches --cwd across a symlinked path", async () => {
+    // process.cwd() returns a fully resolved path, but sessions store whatever
+    // path the CLI was handed. On macOS /var is a symlink to /private/var, so
+    // raw string equality never matches. Regression test for that comparison.
+    const realDir = path.join(tmp.homeDir, "real-repo");
+    fs.mkdirSync(realDir, { recursive: true });
+    const linkDir = path.join(tmp.homeDir, "linked-repo");
+    fs.symlinkSync(realDir, linkDir, "dir");
+
+    // Session recorded under the symlinked path...
+    await writeSessionFixture(
+      linkDir,
+      makeSession({ id: "symlinked-session", cwd: linkDir, startedAt: "2026-04-07T10:00:00.000Z", totalCostUsd: 0.2 }),
+    );
+
+    // ...but we run --cwd from the real path.
+    process.chdir(realDir);
+    const stats = JSON.parse(await captureStats({ cwd: true, json: true }));
+    expect(stats.sessions.total).toBe(1);
+  });
+
+  it("includes a matching session even when project meta records a different path", async () => {
+    // Regression: the project-level filter had an empty "it matches" branch that
+    // fell through to an unconditional `continue`, so a project whose meta.json
+    // path did not match was skipped even when its sessions did match.
+    const projectDir = path.join(tmp.homeDir, "repo-e");
+    await writeSessionFixture(
+      projectDir,
+      makeSession({ id: "meta-mismatch", cwd: projectDir, startedAt: "2026-04-07T10:00:00.000Z", totalCostUsd: 0.4 }),
+    );
+
+    // Point the project's meta.json somewhere else entirely.
+    const { getProjectRootDir } = await importModules();
+    const metaPath = path.join(getProjectRootDir(projectDir), "meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    meta.canonicalPath = path.join(tmp.homeDir, "somewhere-else");
+    fs.writeFileSync(metaPath, JSON.stringify(meta), "utf-8");
+
+    process.chdir(projectDir);
+    const stats = JSON.parse(await captureStats({ cwd: true, json: true }));
+    expect(stats.sessions.total).toBe(1);
+    expect(stats.cost_usd).toBe(0.4);
+  });
+
+  it("keeps sessions from other directories out of a --cwd run", async () => {
+    const mine = path.join(tmp.homeDir, "repo-mine");
+    const theirs = path.join(tmp.homeDir, "repo-theirs");
+    await writeSessionFixture(mine, makeSession({ id: "mine", cwd: mine, startedAt: "2026-04-07T10:00:00.000Z", totalCostUsd: 0.1 }));
+    await writeSessionFixture(theirs, makeSession({ id: "theirs", cwd: theirs, startedAt: "2026-04-07T11:00:00.000Z", totalCostUsd: 0.9 }));
+
+    process.chdir(mine);
+    const stats = JSON.parse(await captureStats({ cwd: true, json: true }));
+    expect(stats.sessions.total).toBe(1);
+    expect(stats.cost_usd).toBe(0.1);
+  });
+
   it("counts legacy sessions without cost data and shows the note in human output", async () => {
     const projectDir = path.join(tmp.homeDir, "repo-e");
 

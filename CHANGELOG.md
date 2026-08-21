@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`wm stats --cwd` returned nothing** — two separate bugs in the directory filter. The project-level match had an empty "it matches" branch that fell through to an unconditional `continue`, so a project was skipped even when its sessions matched; and paths were compared as raw strings, so a session recorded under a symlinked path (`/var` vs `/private/var` on macOS, or any symlinked project directory) never matched `process.cwd()`. Filtering is now per session rather than per project — one project directory can hold sessions from more than one working directory — and paths are resolved before comparison.
 - **CodeQL findings** — hardened scheduled-task installation, HTML text extraction, exclusive persona creation, and filesystem tool file operations to reduce command-injection, HTML filtering, temporary-file, and TOCTOU risks.
 - **CodeQL setup and security cleanup** — rely on GitHub's default CodeQL setup instead of a duplicate workflow, pinned third-party scanner actions to commit SHAs, replaced shell-built editor/git/curl execution with argument-based subprocess calls, moved editor temp files into `mkdtemp` directories, fixed grep wildcard stripping, and removed a no-op OpenAI model normalization.
 

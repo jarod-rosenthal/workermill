@@ -297,6 +297,29 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
 /**
  * Collect sessions from all project directories.
  */
+/**
+ * Resolve a path for comparison, following symlinks.
+ *
+ * `process.cwd()` returns a fully resolved path, but stored session and project
+ * paths are whatever the CLI was handed. On macOS `/var` is a symlink to
+ * `/private/var`, so raw string equality would never match a session recorded
+ * under a symlinked path.
+ */
+function canonicalize(dir: string): string {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    // Path no longer exists — compare the stored value as-is.
+    return dir;
+  }
+}
+
+/** Whether two directory paths refer to the same directory. */
+function isSameDirectory(a: string | undefined, b: string): boolean {
+  if (!a) return false;
+  return a === b || canonicalize(a) === canonicalize(b);
+}
+
 function collectAllSessions(threshold: Date | null, cwdFilter?: string): Session[] {
   const projectsDir = path.join(getStateRoot(), "projects");
   const allSessions: Session[] = [];
@@ -325,26 +348,6 @@ function collectAllSessions(threshold: Date | null, cwdFilter?: string): Session
         }
       } catch {}
 
-      // If cwdFilter is set, check if this project matches
-      if (cwdFilter && projectCwd !== cwdFilter) {
-        // Also check the raw project sessions dir for cwd field
-        const rawSessionsDir = path.join(projectsDir, projectId, "sessions");
-        if (fs.existsSync(rawSessionsDir)) {
-          try {
-            const files = fs.readdirSync(rawSessionsDir).filter(f => f.endsWith(".json"));
-            if (files.length > 0) {
-              const firstSession = JSON.parse(fs.readFileSync(path.join(rawSessionsDir, files[0]), "utf-8"));
-              if (firstSession.cwd === cwdFilter) {
-                // This project matches, continue
-              } else {
-                continue;
-              }
-            }
-          } catch {}
-        }
-        continue;
-      }
-
       const files = fs.readdirSync(projectSessionsDir).filter(f => f.endsWith(".json"));
       for (const file of files) {
         try {
@@ -355,6 +358,11 @@ function collectAllSessions(threshold: Date | null, cwdFilter?: string): Session
           // Update cwd from project meta if session doesn't have it
           if (!session.cwd && projectCwd) {
             session.cwd = projectCwd;
+          }
+          // --cwd filters per session, not per project: one directory can hold
+          // sessions from more than one working directory.
+          if (cwdFilter && !isSameDirectory(session.cwd, cwdFilter)) {
+            continue;
           }
           allSessions.push(session);
         } catch (err) {

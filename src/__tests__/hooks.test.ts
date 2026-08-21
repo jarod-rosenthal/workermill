@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "fs";
+import path from "path";
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -288,5 +290,68 @@ describe("runLifecycleHooks", () => {
     };
     runLifecycleHooks("ship_start", hooks, "/work");
     expect(mockExecSync).not.toHaveBeenCalled();
+  });
+});
+
+
+/* -------------------------------------------------------------------------- */
+/*  Lifecycle event coverage                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every event in the LifecycleEvent union must actually be emitted somewhere.
+ *
+ * This catches the failure mode where an event is declared and documented but
+ * no call site ever fires it, so users configure a hook that silently never runs.
+ */
+describe("lifecycle event coverage", () => {
+  const ROOT = path.resolve(__dirname, "..");
+
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "__tests__" || entry.name === "node_modules") continue;
+        walk(full, out);
+      } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it("every declared LifecycleEvent is fired by at least one call site", () => {
+    const hooksSrc = fs.readFileSync(path.join(ROOT, "hooks.ts"), "utf-8");
+    const union = hooksSrc.match(/export type LifecycleEvent =([\s\S]*?);/);
+    expect(union).not.toBeNull();
+    const events = [...union![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+    expect(events.length).toBeGreaterThan(0);
+
+    const sources = walk(ROOT)
+      .filter((f) => !f.endsWith("hooks.ts"))
+      .map((f) => fs.readFileSync(f, "utf-8"))
+      .join("\n");
+
+    const fired = new Set(
+      [...sources.matchAll(/runLifecycleHooks\(\s*"([a-z_]+)"/g)].map((m) => m[1]),
+    );
+
+    const unfired = events.filter((e) => !fired.has(e));
+    expect(unfired, `LifecycleEvent(s) declared but never emitted: ${unfired.join(", ")}`).toEqual([]);
+  });
+
+  it("every fired event name is a declared LifecycleEvent", () => {
+    const hooksSrc = fs.readFileSync(path.join(ROOT, "hooks.ts"), "utf-8");
+    const union = hooksSrc.match(/export type LifecycleEvent =([\s\S]*?);/);
+    const events = new Set([...union![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+
+    const sources = walk(ROOT)
+      .filter((f) => !f.endsWith("hooks.ts"))
+      .map((f) => fs.readFileSync(f, "utf-8"))
+      .join("\n");
+
+    const fired = [...sources.matchAll(/runLifecycleHooks\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+    const unknown = [...new Set(fired)].filter((e) => !events.has(e));
+    expect(unknown, `Fired event(s) not in the LifecycleEvent union: ${unknown.join(", ")}`).toEqual([]);
   });
 });

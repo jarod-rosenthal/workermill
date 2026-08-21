@@ -12,6 +12,8 @@ import { loadPersona, listAvailablePersonas } from "../../personas.js";
 import { hasMCPServers, getMCPTools, hasMCPRegistered, getMCPServerInfo } from "../../mcp-client.js";
 import { loadMemories, addMemory, removeMemory, PRIMARY_MEMORY_FILES } from "../../memory.js";
 import { getProjectRootDir, listProjects } from "../../project-data.js";
+import { resolveConfig } from "../../config.js";
+import { runLifecycleHooks } from "../../hooks.js";
 import { listMemoriesWithProvenance } from "../../engine/tools/memory.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { BUILTIN_COMMANDS } from "../slash-commands.js";
@@ -146,6 +148,13 @@ export function handleRememberCommand(arg: string, ctx: SlashCommandContext): vo
       source: "manual",
       confidence: "high",
     });
+    try {
+      runLifecycleHooks("memory_saved", resolveConfig()?.hooks, ctx.workingDir, {
+        WORKERMILL_MEMORY_TYPE: mem.type,
+        WORKERMILL_MEMORY_CONTENT: mem.content.substring(0, 10000),
+        WORKERMILL_MEMORY_SOURCE: "manual",
+      });
+    } catch { /* hooks are best-effort */ }
     ctx.addSystemMessage(`**Remembered:** ${mem.content}`);
   }
 }

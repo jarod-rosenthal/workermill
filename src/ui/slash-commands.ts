@@ -257,6 +257,8 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Option | What it does |
 |---|---|
 | \`review.specCheck: true\` | Before planning: prompts you to answer up to 3 ambiguities in your task description |
+| \`review.critic: true\` | Between planning and execution: scores the plan 1-10 and refines it until it passes |
+| \`review.criticThreshold: 8\` | Plan score the critic must reach to approve (default 8) |
 | \`review.verifyEnabled: false\` | Disable planner-generated verification commands (enabled by default) |
 | \`qualityGates: [{name, commands}]\` | Static project-wide assertions that run on every \`/build\` — use for invariants like "app starts" |
 

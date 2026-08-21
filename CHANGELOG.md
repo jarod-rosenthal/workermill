@@ -7,10 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Planner critic** — `review.critic` (default off) scores the `/build` plan 1-10 on completeness, feasibility, dependencies, scope, and risk between planning and execution, refining it against the critic's issues until it reaches `review.criticThreshold` (default 8) or three rounds are spent. Routes via `routing.critic`, tracks cost as its own role, and never blocks a build on its own failure. Under `review.strict` an unapproved plan aborts the run instead of falling through to the confirmation prompt. Configure with `/settings review.critic` and `/settings review.criticThreshold`.
 - **Lifecycle hooks now fire for every documented event** — `session_start`, `session_end`, `compact`, `tool_error`, `permission_denied`, `story_complete`, and `memory_saved` were declared and documented but never emitted, so hooks configured for them silently never ran. All seven now fire, each with event-specific environment variables. A test fails the build if an event is ever declared without a call site again.
 - **`/settings review.specCheck` and `/settings editor`** — both had config fields but no way to set them from inside the CLI.
 
 ### Fixed
+- **Planner could assign stories to a persona that doesn't exist** — the JSON-extraction retry prompt listed `fullstack_developer`, which has no persona file. Replaced with the real persona list.
 - **`editor` config setting had no effect** — `/edit` read only `$EDITOR`/`$VISUAL` and ignored the configured value. It now honors `editor` (`vim`/`nano`/`auto`), falling back to `$EDITOR`, `$VISUAL`, then `vi`.
 - **`wm stats --cwd` returned nothing** — two separate bugs in the directory filter. The project-level match had an empty "it matches" branch that fell through to an unconditional `continue`, so a project was skipped even when its sessions matched; and paths were compared as raw strings, so a session recorded under a symlinked path (`/var` vs `/private/var` on macOS, or any symlinked project directory) never matched `process.cwd()`. Filtering is now per session rather than per project — one project directory can hold sessions from more than one working directory — and paths are resolved before comparison.
 - **CodeQL findings** — hardened scheduled-task installation, HTML text extraction, exclusive persona creation, and filesystem tool file operations to reduce command-injection, HTML filtering, temporary-file, and TOCTOU risks.

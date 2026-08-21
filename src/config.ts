@@ -40,6 +40,10 @@ export interface ReviewConfig {
   verifyEnabled?: boolean;
   /** Check the spec for ambiguities before planning and prompt to fill gaps (default: false) */
   specCheck?: boolean;
+  /** Score the plan before execution and refine it until it passes (default: false) */
+  critic?: boolean;
+  /** Plan score required for the critic to approve, 1-10 scale (default: 8) */
+  criticThreshold?: number;
   /** Strict mode — zero tolerance for gate failures, require review approval, block out-of-scope edits (default: false) */
   strict?: boolean;
 }
@@ -376,6 +380,8 @@ export const ReviewConfigSchema = z.object({
   approvalThreshold: z.number().optional(),
   verifyEnabled: z.boolean().optional(),
   specCheck: z.boolean().optional(),
+  critic: z.boolean().optional(),
+  criticThreshold: z.number().optional(),
   strict: z.boolean().optional(),
 });
 

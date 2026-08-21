@@ -22,7 +22,7 @@ export type { OrchestrationOutput, Story, OrchestrationResult, RetryPlan, Standa
 
 // Functions — public API
 export { checkToolPermission } from "./orchestrator/execution.js";
-export { runSpecCheck, classifyComplexity, applyQaParticipation } from "./orchestrator/planning.js";
+export { runSpecCheck, runPlanCritic, classifyComplexity, applyQaParticipation } from "./orchestrator/planning.js";
 export { getStoryDefinitionOfDone, validateStoryContractArtifacts } from "./orchestrator/execution.js";
 export { extractStructuredMustFixItems, mergeMustFixItems, validateTechLeadReviewOutput, runStandaloneReview, runReviewLoop } from "./orchestrator/review.js";
 export type { ReviewLoopResult, ReviewLoopParams } from "./orchestrator/review.js";
@@ -33,7 +33,7 @@ import {
   resolveTaskInput,
   isAbortSignalLike, isAbortControllerLike,
 } from "./orchestrator/utils.js";
-import { planStories, topologicalSort, runSpecCheck as _runSpecCheck, applyQaParticipation as _applyQaParticipation } from "./orchestrator/planning.js";
+import { planStories, topologicalSort, runSpecCheck as _runSpecCheck, runPlanCritic as _runPlanCritic, applyQaParticipation as _applyQaParticipation } from "./orchestrator/planning.js";
 import { executeStories } from "./orchestrator/execution.js";
 import { runReviewLoop as _runReviewLoop } from "./orchestrator/review.js";
 import { runQualityGates } from "./orchestrator/gates.js";
@@ -289,9 +289,29 @@ export async function runOrchestration(
     }
 
     const qaParticipation = config.qa?.participation ?? "default";
-    const plannerStories = _applyQaParticipation(planResult.stories, qaParticipation);
+    let plannerStories = _applyQaParticipation(planResult.stories, qaParticipation);
     if (qaParticipation === "always" && plannerStories.length > planResult.stories.length) {
       output.log("planner", "QA participation is always — added a dedicated qa_engineer validation story.");
+    }
+
+    // Planner critic — score the plan and refine it before any worker starts (off by default)
+    if (config.review?.critic) {
+      const critique = await _runPlanCritic(config, userTask, plannerStories, workingDir, output, abortSignal);
+      plannerStories = _applyQaParticipation(critique.stories, qaParticipation);
+
+      costTracker.addUsage("Critic", critique.provider, critique.model, critique.inputTokens, critique.outputTokens);
+      output.updateCost?.(costTracker.getTotalCost());
+      output.updateUsageSummary?.(costTracker.getUsageSummary());
+
+      if (!critique.approved) {
+        const threshold = config.review?.criticThreshold ?? 8;
+        output.log("critic", `Plan still scores ${critique.score}/10 after ${critique.iterations} rounds (needs ${threshold}).`);
+        if (config.review?.strict) {
+          output.error("Strict mode — the critic did not approve this plan. Refine the spec and try again.");
+          return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+        }
+        output.log("critic", "Proceeding with the best plan produced — review it carefully before confirming.");
+      }
     }
 
     // Show the plan — WorkerMill format

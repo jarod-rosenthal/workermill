@@ -105,6 +105,261 @@ Return up to 3 gaps, or an empty array if the spec is clear enough. When in doub
 }
 
 /* -------------------------------------------------------------------------- */
+/*  runPlanCritic                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** Default plan score required for the critic to approve. */
+export const DEFAULT_CRITIC_THRESHOLD = 8;
+
+/** Maximum critic → refine cycles before the critic gives up and reports its verdict. */
+export const MAX_CRITIC_ITERATIONS = 3;
+
+export interface PlanCritique {
+  score: number;
+  summary: string;
+  issues: Array<{ dimension: string; problem: string; fix: string }>;
+}
+
+export interface PlanCriticResult {
+  /** The plan to execute — refined if the critic improved it, original otherwise. */
+  stories: Story[];
+  /** Whether the final plan met the threshold. */
+  approved: boolean;
+  /** Score of the final plan. */
+  score: number;
+  /** Critique of the final plan — issues left unresolved when `approved` is false. */
+  critique: PlanCritique | null;
+  /** How many scoring rounds ran. */
+  iterations: number;
+  inputTokens: number;
+  outputTokens: number;
+  provider: string;
+  model: string;
+}
+
+/** Render a plan as compact JSON for the critic to read. */
+function formatPlanForCritic(stories: Story[]): string {
+  return JSON.stringify(
+    stories.map((s) => ({
+      id: s.id,
+      title: s.title,
+      persona: s.persona,
+      description: s.description,
+      dependsOn: s.dependsOn,
+      targetFiles: s.targetFiles,
+      referenceFiles: s.referenceFiles,
+      primaryPattern: s.primaryPattern,
+      integrationPoints: s.integrationPoints,
+      assumptions: s.assumptions,
+      nonGoals: s.nonGoals,
+      validationSignal: s.validationSignal,
+      requiredFiles: s.requiredFiles,
+      requiredTests: s.requiredTests,
+      requiredCommands: s.requiredCommands,
+      implementationNotes: s.implementationNotes,
+    })),
+    null,
+    2,
+  );
+}
+
+/**
+ * Score a plan before execution and refine it until it passes.
+ *
+ * Runs after the planner and before workers start. The critic scores the plan
+ * 1-10 across five dimensions; a score below the threshold sends the plan back
+ * for a refinement pass, up to MAX_CRITIC_ITERATIONS rounds.
+ *
+ * Non-fatal by design: any model or parse failure returns the original plan
+ * unchanged rather than blocking the build.
+ */
+export async function runPlanCritic(
+  config: CliConfig,
+  userTask: string,
+  stories: Story[],
+  workingDir: string,
+  output: OrchestrationOutput,
+  abortSignal?: AbortSignal,
+): Promise<PlanCriticResult> {
+  const threshold = config.review?.criticThreshold ?? DEFAULT_CRITIC_THRESHOLD;
+
+  const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config, "critic");
+  if (apiKey) {
+    const envVar = getApiKeyEnvVar(provider);
+    if (envVar && !process.env[envVar]) {
+      const key = apiKey.startsWith("{env:") ? process.env[apiKey.slice(5, -1)] : apiKey;
+      if (key) process.env[envVar] = key;
+    }
+  }
+  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
+
+  const base: Omit<PlanCriticResult, "stories" | "approved" | "score" | "critique" | "iterations"> = {
+    inputTokens: 0,
+    outputTokens: 0,
+    provider,
+    model: modelName,
+  };
+
+  const projectInstructions = formatProjectInstructions(workingDir);
+  const taskForPrompt = truncateForPrompt(userTask, 8_000, "task spec");
+
+  output.log("critic", `Scoring the plan with \x1b[36m${provider}/${modelName}\x1b[0m (threshold ${threshold}/10)`);
+
+  let currentStories = stories;
+  let lastCritique: PlanCritique | null = null;
+  let lastScore = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for (let iteration = 1; iteration <= MAX_CRITIC_ITERATIONS; iteration++) {
+    if (abortSignal?.aborted) break;
+
+    // ── Score the current plan ──
+    let critique: PlanCritique;
+    try {
+      output.status(getPrdDecompositionPhaseLabel("scoring_plan"));
+      const scored = await generateObject({
+        model,
+        abortSignal,
+        schema: z.object({
+          score: z.number().min(1).max(10).describe("Overall plan quality, 1-10"),
+          summary: z.string().describe("One sentence on the plan's biggest weakness, or its strength if it passes"),
+          issues: z.array(z.object({
+            dimension: z.enum(["completeness", "feasibility", "dependencies", "scope", "risk"]),
+            problem: z.string().describe("What is concretely wrong or missing"),
+            fix: z.string().describe("The specific change that would resolve it"),
+          })).max(6),
+        }),
+        prompt: `You are reviewing an implementation plan before it goes to AI worker agents. The workers execute these stories sequentially with no further human input, so a flaw in the plan becomes wasted work.
+${projectInstructions}
+## Original task
+${taskForPrompt}
+
+## Proposed plan
+\`\`\`json
+${truncateForPrompt(formatPlanForCritic(currentStories), 24_000, "plan")}
+\`\`\`
+
+Score the plan 1-10 across these five dimensions:
+
+- **completeness** — does executing every story actually satisfy the task? Are there deliverables the task requires that no story produces?
+- **feasibility** — can a worker execute each story from its description alone? Are the named files, patterns, and integration points concrete?
+- **dependencies** — is the ordering correct? Does a story depend on something a later story creates? Are \`dependsOn\` links accurate?
+- **scope** — is any story too large to complete in one pass, or so trivial it should be merged? Is there work here the task never asked for?
+- **risk** — are the risky parts identified? Do the \`requiredTests\`/\`requiredCommands\` actually prove the story landed?
+
+Scoring guide: 9-10 a worker could execute this as-is. 7-8 minor gaps that a competent worker would fill in. 4-6 real gaps that will cause rework. 1-3 the plan does not address the task.
+
+Report only issues that would change what a worker builds. Do NOT report style preferences, wording, or story naming. If the plan is sound, return an empty issues array and a score of 9 or 10.`,
+      });
+      critique = scored.object;
+      inputTokens += scored.usage?.inputTokens || 0;
+      outputTokens += scored.usage?.outputTokens || 0;
+      output.statusDone();
+    } catch (err) {
+      // Critic failure is non-fatal — proceed with the plan we have.
+      output.statusDone();
+      logger.error("Plan critic scoring failed", { error: err instanceof Error ? err.message : String(err) });
+      output.log("critic", "Could not score the plan — continuing with the planner's version.");
+      return {
+        ...base,
+        stories: currentStories,
+        approved: true,
+        score: lastScore,
+        critique: lastCritique,
+        iterations: iteration - 1,
+        inputTokens,
+        outputTokens,
+      };
+    }
+
+    lastCritique = critique;
+    lastScore = critique.score;
+
+    if (critique.score >= threshold) {
+      output.log("critic", `Plan approved — ${critique.score}/10. ${critique.summary}`);
+      return {
+        ...base,
+        stories: currentStories,
+        approved: true,
+        score: critique.score,
+        critique,
+        iterations: iteration,
+        inputTokens,
+        outputTokens,
+      };
+    }
+
+    output.log("critic", `Plan scored ${critique.score}/10 (needs ${threshold}) — ${critique.summary}`);
+    for (const issue of critique.issues) {
+      output.log("critic", `  [${issue.dimension}] ${issue.problem}`);
+    }
+
+    if (iteration === MAX_CRITIC_ITERATIONS) break;
+
+    // ── Refine the plan against the critique ──
+    output.log("critic", `Refining the plan (round ${iteration} of ${MAX_CRITIC_ITERATIONS - 1})...`);
+    try {
+      output.status(getPrdDecompositionPhaseLabel("refining_plan"));
+      const refined = await generateText({
+        model,
+        abortSignal,
+        prompt: `Revise this implementation plan to resolve the reviewer's issues. Keep everything the reviewer did not object to — this is a targeted revision, not a rewrite.
+${projectInstructions}
+## Original task
+${taskForPrompt}
+
+## Current plan
+\`\`\`json
+${truncateForPrompt(formatPlanForCritic(currentStories), 24_000, "plan")}
+\`\`\`
+
+## Issues to resolve
+${critique.issues.map((iss, n) => `${n + 1}. [${iss.dimension}] ${iss.problem}\n   Suggested fix: ${iss.fix}`).join("\n")}
+
+Return the complete revised plan as a single JSON code block in exactly this shape — every story, not just the changed ones:
+
+\`\`\`json
+{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "dependsOn": ["other-story-id"], "targetFiles": ["path/to/file"], "referenceFiles": ["path/to/pattern"], "primaryPattern": "path/to/pattern", "integrationPoints": ["exact seam"], "nonGoals": ["scope boundary"], "validationSignal": "observable proof of correctness", "requiredFiles": ["path/to/file"], "requiredTests": ["src/__tests__/feature.test.ts"], "requiredCommands": ["npm run typecheck"], "implementationNotes": "Specific patterns, files, integration points" }] }
+\`\`\`
+
+Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead.
+Output ONLY the JSON block, no other text.`,
+        maxOutputTokens: 8192,
+        ...buildOllamaOptions(provider as AIProvider, contextLength),
+      });
+      inputTokens += refined.usage?.inputTokens || 0;
+      outputTokens += refined.usage?.outputTokens || 0;
+      output.statusDone();
+
+      const revised = parseStoriesFromText(refined.text, output);
+      if (revised.length === 0) {
+        logger.error("Plan critic refinement produced no parseable stories");
+        output.log("critic", "Refinement produced no usable plan — keeping the previous version.");
+        break;
+      }
+      currentStories = normalizeStoryDependencies(revised);
+    } catch (err) {
+      output.statusDone();
+      logger.error("Plan critic refinement failed", { error: err instanceof Error ? err.message : String(err) });
+      output.log("critic", "Could not refine the plan — keeping the previous version.");
+      break;
+    }
+  }
+
+  return {
+    ...base,
+    stories: currentStories,
+    approved: false,
+    score: lastScore,
+    critique: lastCritique,
+    iterations: MAX_CRITIC_ITERATIONS,
+    inputTokens,
+    outputTokens,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  classifyComplexity                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -570,7 +825,7 @@ Rules:
           "```json\n" +
           `{ "stories": [{ "id": "kebab-id", "title": "Brief title", "persona": "persona_name", "description": "Scope and what to do", "targetFiles": ["path/to/file"], "referenceFiles": ["path/to/pattern"], "primaryPattern": "path/to/pattern", "integrationPoints": ["exact seam"], "nonGoals": ["scope boundary"], "validationSignal": "observable proof of correctness", "requiredFiles": ["path/to/file"], "requiredTests": ["src/__tests__/feature.test.ts"], "requiredCommands": ["npm run typecheck"], "implementationNotes": "Specific patterns, files, integration points" }] }\n` +
           "```\n\n" +
-          "Valid personas: backend_developer, frontend_developer, fullstack_developer, qa_engineer, devops_engineer, tech_writer.\n" +
+          "Valid personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead.\n" +
           "Output ONLY the JSON block, no other text.",
         maxOutputTokens: 4096,
         abortSignal,

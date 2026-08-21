@@ -203,7 +203,10 @@ import { addMemory, extractMemoryMarkers } from "../memory.js";
 // ---- Helpers ----
 
 function createTempGitRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-orch-test-"));
+  // realpath: on macOS os.tmpdir() is under /var, a symlink to /private/var.
+  // process.chdir() then makes process.cwd() report the resolved path, so a
+  // test comparing against the raw mkdtemp path would never match.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wm-orch-test-")));
   execSync("git init", { cwd: dir, stdio: "pipe" });
   execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
   execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });

@@ -131,6 +131,20 @@ describe("browserOpen — Chrome not found", () => {
 
 describe("findChrome — platform path scanning", () => {
   let originalFetch: typeof globalThis.fetch;
+  const originalPlatform = process.platform;
+
+  /**
+   * Pin process.platform for the duration of a test.
+   *
+   * findChrome picks its candidate list from process.platform, and the two
+   * lists probe differently: linux candidates are bare binary names resolved
+   * with `which`, darwin/win32 candidates are absolute paths checked with
+   * `test -f`. A test that mocks one probe and not the other passes on some
+   * machines and fails on others.
+   */
+  function stubPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  }
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
@@ -139,6 +153,7 @@ describe("findChrome — platform path scanning", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
   });
 
   it("returns null (Chrome not found) when execSync throws for every candidate", async () => {
@@ -159,6 +174,11 @@ describe("findChrome — platform path scanning", () => {
   });
 
   it("proceeds past findChrome when a Chrome candidate is found (spawn called, CDP polling times out)", { timeout: 8000 }, async () => {
+    // The mock below answers `which google-chrome`, which only appears in the
+    // linux candidate list — pin the platform so this doesn't depend on the
+    // machine running the suite.
+    stubPlatform("linux");
+
     // execSync succeeds for `which google-chrome`, fails for everything else
     const execSyncMock = vi.fn((cmd: string) => {
       if (typeof cmd === "string" && cmd.includes("uname")) {
@@ -198,6 +218,37 @@ describe("findChrome — platform path scanning", () => {
 
     // findChrome succeeded → spawn was called → CDP polling timed out
     expect(spawnMock).toHaveBeenCalledOnce();
+    expect(result).toContain("Failed to connect to Chrome");
+  });
+
+  it("finds Chrome on darwin via the absolute-path probe", { timeout: 8000 }, async () => {
+    // darwin candidates are absolute paths checked with `test -f`, not `which`.
+    // This probe had no coverage, which is why a linux-only test could sit red
+    // on macOS without anyone noticing.
+    stubPlatform("darwin");
+
+    const execSyncMock = vi.fn((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("test -f") && cmd.includes("Google Chrome.app")) {
+        return "";
+      }
+      throw new Error("not found");
+    });
+
+    const spawnMock = vi.fn(() => ({
+      pid: 12345, kill: vi.fn(), on: vi.fn(), stdio: "pipe", stdout: null, stderr: null,
+    }));
+
+    vi.doMock("child_process", () => ({ spawn: spawnMock, execSync: execSyncMock }));
+    vi.doMock("../logger.js", () => ({
+      info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn(),
+    }));
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) as typeof globalThis.fetch;
+
+    const { browserOpen } = await freshBrowser();
+    const result = await browserOpen();
+
+    expect(spawnMock).toHaveBeenCalledOnce();
+    expect(spawnMock.mock.calls[0][0]).toContain("Google Chrome");
     expect(result).toContain("Failed to connect to Chrome");
   });
 });

@@ -20,6 +20,7 @@ import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers } from "../mcp-client.js";
 import { getRetryableRun } from "../ship-state.js";
+import { runLifecycleHooks } from "../hooks.js";
 import { shutdown as shutdownLSP } from "../engine/tools/lsp.js";
 import { cleanupStaleWorktrees } from "../engine/tools/sub-agent.js";
 import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
@@ -221,7 +222,8 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/settings key <provider> <key>\` | Add an API key inline |
 | \`/permissions\` | Manage tool permissions (trust/ask/allow/deny) |
 | \`/trust\` | Auto-approve all tools for this session |
-| \`/undo\` | Revert last build's changes |\n| \`/changed\` | Show files changed in this session |
+| \`/undo\` | Revert last build's changes |
+| \`/changed\` | Show files changed in this session |
 | \`/diff\` | Preview uncommitted changes |
 | \`/git\` | Git branch and status |
 | \`/personas\` | List, show, or create personas |
@@ -238,7 +240,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/hooks\` | View pre/post tool hooks |
 | \`/mcp\` | MCP server status |
 | \`/log\` | Recent CLI log entries |
-| \`/edit\` | Open editor for longer input (vim/nano — set with \`/settings editor\`) |
+| \`/edit\` | Open editor for longer input (\`/settings editor vim|nano|auto\`) |
 | \`/chrome\` | Headless Chrome *(experimental)* |
 | \`/voice\` | Voice input *(experimental)* |
 | \`/schedule\` | Scheduled tasks *(experimental)* |
@@ -732,6 +734,14 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "quit":
     case "exit":
     case "q": {
+      try {
+        runLifecycleHooks("session_end", resolveConfig()?.hooks, ctx.workingDir, {
+          WORKERMILL_SESSION_ID: ctx.session.id,
+          WORKERMILL_SESSION_TOKENS: String(ctx.session.totalTokens),
+          WORKERMILL_SESSION_COST: ctx.cost.toFixed(4),
+          WORKERMILL_EXIT_REASON: "command",
+        });
+      } catch { /* hooks are best-effort */ }
       stopAllMCPServers();
       shutdownLSP();
       cleanupStaleWorktrees(ctx.workingDir);

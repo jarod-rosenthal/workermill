@@ -35,6 +35,8 @@ interface AppProps {
   onSubmit: (input: string) => void;
   /** Called when the user presses ESC to cancel the running agent. */
   onCancel: () => void;
+  /** Called just before the process exits, so session-end work can run. */
+  onExit?: () => void;
   /** Called on double-ESC to roll back the last exchange. */
   onRollback: () => RollbackResult;
   /** Called when user cycles permission mode with Shift+Tab. */
@@ -338,12 +340,13 @@ export function App(props: AppProps): React.ReactElement {
   }, []);
 
   const exitNow = useCallback(() => {
+    props.onExit?.();
     stopAllMCPServers();
     shutdownLSP();
     void browserClose();
     exit();
     setTimeout(() => process.exit(0), 100);
-  }, [exit]);
+  }, [exit, props]);
 
   const handleInterrupt = useCallback(() => {
     const now = Date.now();

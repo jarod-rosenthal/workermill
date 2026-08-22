@@ -16,7 +16,7 @@ import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
-import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
+import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { isGitRepo, commitStoryChanges } from "../git-ops.js";
 import { withConcurrencyControl } from "../tool-concurrency.js";
 import { CostTracker } from "../cost-tracker.js";
@@ -860,7 +860,15 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
             const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
-            if (!allowed) return "Tool execution denied by user.";
+            if (!allowed) {
+              runLifecycleHooks("permission_denied", config.hooks, workingDir, {
+                WORKERMILL_TOOL: toolName,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+                WORKERMILL_STORY_ID: story.id,
+                WORKERMILL_STORY_PERSONA: story.persona,
+              });
+              return "Tool execution denied by user.";
+            }
 
             // Track for loop detection
             const sig = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
@@ -894,6 +902,13 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
             const isError = typeof result === "string" && result.startsWith("Error:");
             if (isError) {
               logger.error("Tool error", { persona: story.persona, tool: toolName, result: resultStr });
+              runLifecycleHooks("tool_error", config.hooks, workingDir, {
+                WORKERMILL_TOOL: toolName,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+                WORKERMILL_TOOL_ERROR: resultStr.substring(0, 10000),
+                WORKERMILL_STORY_ID: story.id,
+                WORKERMILL_STORY_PERSONA: story.persona,
+              });
             } else {
               logger.debug("Tool result", { tool: toolName, result: resultStr });
             }
@@ -1232,6 +1247,11 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           storyId: story.id,
           persona: story.persona,
         });
+        runLifecycleHooks("memory_saved", config.hooks, workingDir, {
+          WORKERMILL_MEMORY_TYPE: memory.type,
+          WORKERMILL_MEMORY_CONTENT: memory.content.substring(0, 10000),
+          WORKERMILL_MEMORY_SOURCE: "agent",
+        });
       }
 
       context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
@@ -1363,6 +1383,14 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       completedStoryIds.push(story.id);
+
+      runLifecycleHooks("story_complete", config.hooks, workingDir, {
+        WORKERMILL_STORY_ID: story.id,
+        WORKERMILL_STORY_TITLE: story.title,
+        WORKERMILL_STORY_PERSONA: story.persona,
+        WORKERMILL_STORY_INDEX: String(i + 1),
+        WORKERMILL_STORY_TOTAL: String(sorted.length),
+      });
 
       // Post story completion to ticket — structured update like a real team member
       if (ticketOps) {

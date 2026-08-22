@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../../session.js";
-import { loadConfig, saveConfig } from "../../config.js";
+import { loadConfig, saveConfig, resolveConfig } from "../../config.js";
 import { getChangedFiles } from "../../checkpoints.js";
 import { findModelInfo } from "../../provider-registry.js";
 import { getApiKeyEnvVar, isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
@@ -18,6 +18,21 @@ import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
 
 function splitEditorCommand(editor: string): string[] {
   return editor.split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Resolve the editor for /edit.
+ *
+ * An explicit `editor` config value wins so users can pin an editor without
+ * changing $EDITOR for their whole shell. "auto" (the default) falls back to
+ * the standard environment variables, then to `vi`.
+ */
+export function resolveEditorCommand(
+  configured: "vim" | "nano" | "auto" | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (configured && configured !== "auto") return configured;
+  return env.EDITOR || env.VISUAL || "vi";
 }
 
 export function handleModelCommand(arg: string, ctx: SlashCommandContext): void {
@@ -231,7 +246,11 @@ export function handleClearCommand(_arg: string, ctx: SlashCommandContext): void
 }
 
 export function handleEditCommand(_arg: string, ctx: SlashCommandContext): void {
-  const editor = process.env.EDITOR || process.env.VISUAL || "vi";
+  let configuredEditor: "vim" | "nano" | "auto" | undefined;
+  try {
+    configuredEditor = resolveConfig()?.editor;
+  } catch { /* no config yet — fall back to the environment */ }
+  const editor = resolveEditorCommand(configuredEditor);
   const editorParts = splitEditorCommand(editor);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "workermill-"));
   const tmpFile = path.join(tmpDir, "input.md");

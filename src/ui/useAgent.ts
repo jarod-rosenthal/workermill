@@ -32,7 +32,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
 import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
-import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
+import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import fs from "fs";
 import path from "path";
@@ -322,6 +322,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
     // Ensure project metadata is loaded/created for tracking
     loadProjectMeta(workingDirRef.current);
+
+    runLifecycleHooks("session_start", hooksConfigRef.current, workingDirRef.current, {
+      WORKERMILL_SESSION_ID: sessionRef.current?.id || "",
+      WORKERMILL_PROVIDER: options.provider,
+      WORKERMILL_MODEL: options.model,
+      WORKERMILL_RESUMED: options.resume ? "true" : "false",
+    });
 
     // Set finishedAt on clean exit
     process.on('exit', () => {
@@ -708,6 +715,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               tool: name,
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
+            runLifecycleHooks("permission_denied", hooksConfigRef.current, workingDirRef.current, {
+              WORKERMILL_TOOL: name,
+              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+            });
             setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
             setStatus("streaming");
             return "Tool execution denied by user.";
@@ -802,6 +813,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           } catch (err) {
             const errMsg =
               err instanceof Error ? err.message : String(err);
+            runLifecycleHooks("tool_error", hooksConfigRef.current, workingDirRef.current, {
+              WORKERMILL_TOOL: name,
+              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+              WORKERMILL_TOOL_ERROR: errMsg.substring(0, 10000),
+            });
             setStreamingToolCalls((prev) =>
               prev.map((tc) =>
                 tc.id === callId
@@ -1068,6 +1084,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               source: "agent",
               confidence: "high",
             });
+            runLifecycleHooks("memory_saved", hooksConfigRef.current, workingDirRef.current, {
+              WORKERMILL_MEMORY_TYPE: m.type,
+              WORKERMILL_MEMORY_CONTENT: m.content.substring(0, 10000),
+              WORKERMILL_MEMORY_SOURCE: "agent",
+            });
           }
 
           // Cost tracking — use active refs, not startup options (user may have switched via /model).
@@ -1215,6 +1236,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
                 source: "auto-extracted",
                 confidence: "medium",
               });
+              runLifecycleHooks("memory_saved", hooksConfigRef.current, workingDirRef.current, {
+                WORKERMILL_MEMORY_TYPE: "learning",
+                WORKERMILL_MEMORY_CONTENT: mem.substring(0, 10000),
+                WORKERMILL_MEMORY_SOURCE: "auto-extracted",
+              });
             }
             // Also persist to file-based memory so the memory tool can find them
             if (extractedMemories.length > 0) {
@@ -1245,6 +1271,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               timestamp: new Date().toISOString(),
             }));
             saveSession(session);
+            runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
+              WORKERMILL_COMPACTION_LEVEL: compactionResult.level,
+              WORKERMILL_COMPACTION_TRIGGER: "auto",
+              WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
+              WORKERMILL_MESSAGES_AFTER: String(compacted.length),
+            });
             notifyIfEnabled(bellEnabledRef.current, "WorkerMill", "Auto-compaction complete");
           }
 
@@ -1523,6 +1555,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       timestamp: new Date().toISOString(),
     }));
     saveSession(session);
+
+    runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
+      WORKERMILL_COMPACTION_LEVEL: "soft",
+      WORKERMILL_COMPACTION_TRIGGER: "manual",
+      WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
+      WORKERMILL_MESSAGES_AFTER: String(compacted.length),
+    });
 
     const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
     const afterTokens = Math.round(afterChars / 4);

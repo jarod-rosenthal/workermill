@@ -13,6 +13,7 @@ import type { ToolCallInfo } from "./types.js";
 import { findModelInfo } from "../provider-registry.js";
 import { resolveConfig, getProviderForPersona } from "../config.js";
 import { getProjectHistoryPath } from "../project-data.js";
+import { runLifecycleHooks } from "../hooks.js";
 import { providerNeedsContextOverride } from "../provider-capabilities.js";
 
 /**
@@ -236,6 +237,23 @@ export function Root(props: RootProps): React.ReactElement {
     [agent, props, exit, orchestrator],
   );
 
+  // ------- Session end ------- //
+
+  /**
+   * Fired on the Ctrl+C exit path. The /quit command fires session_end itself,
+   * so the two exits stay symmetric.
+   */
+  const handleExit = useCallback(() => {
+    try {
+      runLifecycleHooks("session_end", resolveConfig()?.hooks, props.workingDir, {
+        WORKERMILL_SESSION_ID: agent.session?.id || "",
+        WORKERMILL_SESSION_TOKENS: String(agent.tokens),
+        WORKERMILL_SESSION_COST: agent.cost.toFixed(4),
+        WORKERMILL_EXIT_REASON: "interrupt",
+      });
+    } catch { /* hooks are best-effort */ }
+  }, [agent, props.workingDir]);
+
   // ------- Shell escape handler ------- //
 
   const handleShellEscape = useCallback(
@@ -321,6 +339,7 @@ export function Root(props: RootProps): React.ReactElement {
       planMode={props.planMode}
       onSubmit={handleSubmit}
       onCancel={orchestrator.running ? orchestrator.cancel : agent.cancel}
+      onExit={handleExit}
       onRollback={agent.rollback}
       onCyclePermissionMode={agent.cyclePermissionMode}
       permissionMode={agent.permissionMode}

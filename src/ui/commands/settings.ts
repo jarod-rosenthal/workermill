@@ -67,6 +67,10 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
         `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
         `| Strict mode | ${config.review?.strict ?? false} | \`/settings review.strict <true/false>\` |\n` +
+        `| Spec check | ${config.review?.specCheck ?? false} | \`/settings review.specCheck <true/false>\` |\n` +
+        `| Plan critic | ${config.review?.critic ?? false} | \`/settings review.critic <true/false>\` |\n` +
+        `| Critic threshold | ${config.review?.criticThreshold ?? 8} | \`/settings review.criticThreshold <n>\` |\n` +
+        `| Editor | ${config.editor ?? "auto"} | \`/settings editor <vim/nano/auto>\` |\n` +
         `| Program max issues | ${maxIssues} | \`/settings program.maxIssues <n>\` |\n` +
         `| Program max auto-retries | ${maxAutoRetries} | \`/settings program.maxAutoRetries <n>\` |\n` +
         `| Program gate mode | ${gateMode} | \`/settings program.gateMode <required/advisory>\` |\n` +
@@ -95,9 +99,10 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       return config.providers?.[provider]?.model || "(unknown)";
     };
 
-    // Show routing — filter out stale entries (e.g. "critic" after removal)
+    // Show routing — "critic" only applies when review.critic is enabled
     const routing = config.routing;
-    const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic");
+    const criticEnabled = config.review?.critic ?? false;
+    const validEntries = Object.entries(routing || {}).filter(([persona]) => persona !== "critic" || criticEnabled);
     const routingRows = [
       ...(showAll
         ? [`| default | ${displayRoutingProvider("default", config.default)} | ${displayRoutingModel(config.default)} | ${config.default} |`]
@@ -128,6 +133,10 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       "review.threshold": "review.threshold",
       "review.autorevise": "review.autoRevise",
       "review.strict": "review.strict",
+      "review.speccheck": "review.specCheck",
+      "review.critic": "review.critic",
+      "review.criticthreshold": "review.criticThreshold",
+      "editor": "editor",
       "qa.participation": "qa.participation",
       "program.maxissues": "program.maxIssues",
       "program.maxautoretries": "program.maxAutoRetries",
@@ -195,6 +204,33 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       }
       case "review.strict": {
         config.review = { ...config.review, strict: boolVal(value) };
+        break;
+      }
+      case "review.specCheck": {
+        config.review = { ...config.review, specCheck: boolVal(value) };
+        break;
+      }
+      case "review.critic": {
+        config.review = { ...config.review, critic: boolVal(value) };
+        break;
+      }
+      case "review.criticThreshold": {
+        const n = parseIntSetting(value, "review.criticThreshold", 1);
+        if (n === null || n > 10) {
+          if (n !== null) ctx.addSystemMessage("Invalid value for `review.criticThreshold`. Use an integer between 1 and 10.");
+          settingApplied = false;
+          break;
+        }
+        config.review = { ...config.review, criticThreshold: n };
+        break;
+      }
+      case "editor": {
+        if (value !== "vim" && value !== "nano" && value !== "auto") {
+          ctx.addSystemMessage("Invalid value for `editor`. Use `vim`, `nano`, or `auto`.");
+          settingApplied = false;
+          break;
+        }
+        config.editor = value;
         break;
       }
       case "qa.participation": {
@@ -383,7 +419,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         break;
     }
 
-    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.strict", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
+    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.strict", "review.specCheck", "review.critic", "review.criticThreshold", "editor", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
       saveConfig(config);
       ctx.addSystemMessage(`**Updated** \`${key}\` \u2192 \`${value}\` (saved to ~/.workermill/cli.json)`);
       if (key === "route") {

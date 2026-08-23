@@ -4,6 +4,8 @@ export type PrdDecompositionPhase =
   | "calling_llm"
   | "streaming"
   | "repairing_spec"
+  | "scoring_plan"
+  | "refining_plan"
   | "parsing"
   | "creating_board";
 
@@ -13,6 +15,8 @@ const PHASE_LABELS: Record<PrdDecompositionPhase, string> = {
   calling_llm: "Calling LLM...",
   streaming: "Streaming response...",
   repairing_spec: "Repairing spec...",
+  scoring_plan: "Scoring the plan...",
+  refining_plan: "Refining the plan...",
   parsing: "Parsing JSON...",
   creating_board: "Creating board...",
 };

@@ -477,6 +477,128 @@ describe("orchestrator", () => {
       ).resolves.not.toThrow();
     });
 
+    it("does not run the plan critic unless review.critic is enabled", async () => {
+      const { generateObject } = await import("ai");
+      vi.mocked(generateObject).mockClear();
+
+      const config = { ...createTestConfig(), review: { enabled: false } };
+      const output = createMockOutput();
+
+      await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      const scoringCalls = vi.mocked(generateObject).mock.calls.filter(
+        ([opts]) => typeof (opts as any)?.prompt === "string" && (opts as any).prompt.includes("Score the plan"),
+      );
+      expect(scoringCalls).toHaveLength(0);
+      expect(output.logs.some((l) => l.startsWith("[critic]"))).toBe(false);
+    });
+
+    it("runs the plan critic before execution when review.critic is enabled", async () => {
+      const { generateObject } = await import("ai");
+      vi.mocked(generateObject).mockClear();
+      vi.mocked(generateObject).mockImplementation(async (opts: any) => {
+        if (typeof opts?.prompt === "string" && opts.prompt.includes("Score the plan")) {
+          return {
+            object: { score: 9, summary: "Covers the endpoint and its regression test.", issues: [] },
+            usage: { inputTokens: 300, outputTokens: 120 },
+          } as any;
+        }
+        return { object: { complexity: "multi", reason: "Multiple concerns" } } as any;
+      });
+
+      const config = { ...createTestConfig(), review: { enabled: false, critic: true } };
+      const output = createMockOutput();
+
+      await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      const criticLogs = output.logs.filter((l) => l.startsWith("[critic]"));
+      expect(criticLogs.some((l) => l.includes("Scoring the plan"))).toBe(true);
+      expect(criticLogs.some((l) => l.includes("Plan approved — 9/10"))).toBe(true);
+
+      // The critic must score BEFORE any worker runs, or it is not a gate.
+      const criticIndex = output.logs.findIndex((l) => l.startsWith("[critic]"));
+      const workerIndex = output.logs.findIndex((l) => l.startsWith("[backend_developer]"));
+      expect(criticIndex).toBeGreaterThanOrEqual(0);
+      expect(workerIndex).toBeGreaterThan(criticIndex);
+    });
+
+    it("executes the critic's refined plan, not the planner's original", async () => {
+      const { generateObject, generateText } = await import("ai");
+      vi.mocked(generateObject).mockClear();
+      vi.mocked(generateText).mockClear();
+
+      let scoringRound = 0;
+      vi.mocked(generateObject).mockImplementation(async (opts: any) => {
+        if (typeof opts?.prompt === "string" && opts.prompt.includes("Score the plan")) {
+          scoringRound++;
+          return scoringRound === 1
+            ? {
+                object: {
+                  score: 4,
+                  summary: "No story covers the rollback path.",
+                  issues: [{ dimension: "completeness", problem: "No rollback story", fix: "Add one" }],
+                },
+                usage: { inputTokens: 300, outputTokens: 120 },
+              } as any
+            : { object: { score: 9, summary: "Rollback now covered.", issues: [] }, usage: {} } as any;
+        }
+        return { object: { complexity: "multi", reason: "Multiple concerns" } } as any;
+      });
+
+      vi.mocked(generateText).mockResolvedValue({
+        text: '```json\n{ "stories": [{ "id": "refined-story", "title": "Refined by the critic", "persona": "backend_developer", "description": "The revised scope." }] }\n```',
+        usage: { inputTokens: 400, outputTokens: 500 },
+      } as any);
+
+      const config = { ...createTestConfig(), review: { enabled: false, critic: true } };
+      const output = createMockOutput();
+
+      await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      // Refinement ran, and the story queued for execution is the refined one.
+      // Assert on the planner's story-queue lines specifically — the planner's
+      // raw streamed text still mentions the original title, since it streams
+      // before the critic runs.
+      expect(vi.mocked(generateText)).toHaveBeenCalled();
+      const queued = output.logs.filter((l) => /\[planner\] Story \d+: \[/.test(l));
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toContain("Refined by the critic");
+      expect(queued[0]).not.toContain("Set up API endpoint");
+    });
+
+    it("aborts the run in strict mode when the critic never approves", async () => {
+      const { generateObject, generateText } = await import("ai");
+      vi.mocked(generateObject).mockClear();
+      vi.mocked(generateObject).mockImplementation(async (opts: any) => {
+        if (typeof opts?.prompt === "string" && opts.prompt.includes("Score the plan")) {
+          return {
+            object: {
+              score: 3,
+              summary: "Still does not address the task.",
+              issues: [{ dimension: "scope", problem: "Too big", fix: "Split it" }],
+            },
+            usage: {},
+          } as any;
+        }
+        return { object: { complexity: "multi", reason: "Multiple concerns" } } as any;
+      });
+      vi.mocked(generateText).mockResolvedValue({
+        text: '```json\n{ "stories": [{ "id": "still-bad", "title": "Still bad", "persona": "backend_developer", "description": "No better." }] }\n```',
+        usage: {},
+      } as any);
+
+      const config = { ...createTestConfig(), review: { enabled: false, critic: true, strict: true } };
+      const output = createMockOutput();
+
+      const result = await runOrchestration(config as any, "Add a health check endpoint", true, false, output);
+
+      expect(result.stories).toEqual([]);
+      expect(result.featureBranch).toBeNull();
+      expect(output.errors.some((e) => e.includes("critic did not approve"))).toBe(true);
+      // No worker ran.
+      expect(output.logs.some((l) => l.startsWith("[backend_developer]"))).toBe(false);
+    });
+
     it("saves high-confidence explicit memory markers for the current project", async () => {
       const cwd = createTempGitRepo();
       const oldCwd = process.cwd();

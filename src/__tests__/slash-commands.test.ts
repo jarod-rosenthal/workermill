@@ -772,6 +772,61 @@ describe("handleSlashCommand", () => {
       );
     });
 
+    it("shows the critic and editor settings under /settings all", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings all", ctx);
+      const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(msg).toContain("Plan critic");
+      expect(msg).toContain("Critic threshold");
+      expect(msg).toContain("Spec check");
+      expect(msg).toContain("Editor");
+    });
+
+    it("updates review.critic", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.critic true", ctx);
+      expect(saveConfig).toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Updated")
+      );
+    });
+
+    it("updates review.criticThreshold", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.criticThreshold 7", ctx);
+      expect(saveConfig).toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Updated")
+      );
+    });
+
+    it("rejects a criticThreshold outside 1-10", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.criticThreshold 42", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("between 1 and 10")
+      );
+    });
+
+    it("updates editor to a supported value", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings editor vim", ctx);
+      expect(saveConfig).toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Updated")
+      );
+    });
+
+    it("rejects an unsupported editor value", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings editor emacs", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Use `vim`, `nano`, or `auto`")
+      );
+    });
+
     it("rejects unknown setting", () => {
       const ctx = createContext();
       handleSlashCommand("/settings nonexistent.key value", ctx);

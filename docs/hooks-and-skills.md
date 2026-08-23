@@ -103,18 +103,22 @@ Non-zero exit codes from post-hooks are logged but don't abort further tool call
 
 ### Lifecycle events
 
-| Event | When it fires |
-|---|---|
-| `session_start` | CLI session begins |
-| `session_end` | CLI session ends |
-| `ship_start` | `/build` orchestration begins |
-| `ship_complete` | `/build` orchestration finishes (success or failure) |
-| `review_complete` | Tech lead review finishes |
-| `compact` | Context compaction triggered |
-| `tool_error` | Any tool execution error |
-| `permission_denied` | User denied a tool permission |
-| `story_complete` | An individual `/build` story finishes |
-| `memory_saved` | A `::learning::` or `::remember::` marker was extracted |
+| Event | When it fires | Extra environment variables |
+|---|---|---|
+| `session_start` | CLI session begins | `WORKERMILL_SESSION_ID`, `WORKERMILL_PROVIDER`, `WORKERMILL_MODEL`, `WORKERMILL_RESUMED` |
+| `session_end` | CLI session ends, via `/quit` or `Ctrl+C` | `WORKERMILL_SESSION_ID`, `WORKERMILL_SESSION_TOKENS`, `WORKERMILL_SESSION_COST`, `WORKERMILL_EXIT_REASON` (`command` or `interrupt`) |
+| `ship_start` | `/build` orchestration begins | `WORKERMILL_TASK` |
+| `ship_complete` | `/build` orchestration finishes (success or failure) | See the `/build` payload below |
+| `review_complete` | Tech lead review finishes | Review score and verdict |
+| `compact` | Context compaction runs | `WORKERMILL_COMPACTION_LEVEL` (`soft`/`hard`), `WORKERMILL_COMPACTION_TRIGGER` (`auto`/`manual`), `WORKERMILL_MESSAGES_BEFORE`, `WORKERMILL_MESSAGES_AFTER` |
+| `tool_error` | A tool call throws or returns an error | `WORKERMILL_TOOL`, `WORKERMILL_TOOL_INPUT`, `WORKERMILL_TOOL_ERROR` |
+| `permission_denied` | You denied a tool permission prompt | `WORKERMILL_TOOL`, `WORKERMILL_TOOL_INPUT` |
+| `story_complete` | An individual `/build` story finishes | `WORKERMILL_STORY_ID`, `WORKERMILL_STORY_TITLE`, `WORKERMILL_STORY_PERSONA`, `WORKERMILL_STORY_INDEX`, `WORKERMILL_STORY_TOTAL` |
+| `memory_saved` | A memory was saved — an agent marker, a pre-compaction extraction, or `/remember` | `WORKERMILL_MEMORY_TYPE`, `WORKERMILL_MEMORY_CONTENT`, `WORKERMILL_MEMORY_SOURCE` (`agent`/`auto-extracted`/`manual`) |
+
+`WORKERMILL_EVENT` is set on every lifecycle hook. Events that fire in both single-agent chat and `/build` (`tool_error`, `permission_denied`, `memory_saved`) also set the `WORKERMILL_STORY_*` variables when the trigger came from a `/build` story.
+
+Lifecycle hooks are fire-and-forget: a hook that fails logs an error and never blocks the CLI. Only **pre-tool** hooks can block a tool call — see [Pre-tool hook](#pre-tool-hook).
 
 ### HTTP hooks
 
@@ -134,6 +138,8 @@ The POST body includes tool input, output, success status, and event name where 
 | `WORKERMILL_TOOL_OUTPUT` | post hooks only | Tool result string (truncated to 10KB) |
 | `WORKERMILL_TOOL_SUCCESS` | post hooks only | `"true"` or `"false"` |
 | `WORKERMILL_EVENT` | lifecycle hooks | Event name (e.g. `"ship_complete"`) |
+
+Lifecycle events set additional variables — see the [table above](#lifecycle-events). Any variable carrying tool input, tool output, an error, or memory content is truncated to 10KB.
 
 Hooks run in the working directory at CLI launch, so you can use relative paths to project scripts.
 
@@ -207,10 +213,12 @@ Files are loaded from four locations with these source labels:
 
 | Location | Scope |
 |---|---|
-| `.workermill/commands/*.md` | Project, team-wide (commit to repo) |
-| `~/.workermill/commands/*.md` | User, every project |
-| `.workermill/skills/*.md` | Project skills (alternative path) |
-| `~/.workermill/skills/*.md` | User skills (alternative path) |
+| `.workermill/skills/*.md` | Project, team-wide (commit to repo) |
+| `~/.workermill/skills/*.md` | User, every project |
+| `.workermill/commands/*.md` | Project (alternative path) |
+| `~/.workermill/commands/*.md` | User (alternative path) |
+
+Listed in load order — the first directory to define a given command name wins, and a built-in command always shadows a custom one with the same name.
 
 `commands` and `skills` are treated identically — use either directory name.
 

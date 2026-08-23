@@ -153,7 +153,7 @@ Ask it to fix a bug, explain a function, or refactor a module. It reads your cod
 Unlike single-model tools, WorkerMill never lets the same model review its own code.
 
 1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
-2. **A critic** (optional) scores the plan 1-10 on completeness, feasibility, and risk — refining it up to 3 times until it passes. Bad plans get caught before a single line of code is written.
+2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk — refining it until it passes or 3 rounds are spent. Bad plans get caught before a single line of code is written.
 3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run on local models, affordable cloud APIs, or any provider you choose.
 4. **Quality gates** run after each story — your tests, linter, LSP diagnostics. Failures get injected into the reviewer's context.
 5. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
@@ -244,6 +244,8 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 | `/review branch` | Tech lead review of feature branch diff vs main |
 | `/review diff` | Review uncommitted changes only |
 | `/review #42` | Review a GitHub PR by number |
+| `/pause` | Pause or resume a running `/build` (also `Ctrl+P`) |
+| `/cancel` | Cancel whatever is running (same as `ESC`) |
 
 </details>
 
@@ -309,14 +311,14 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 <details>
 <summary><strong>Experimental</strong></summary>
 
-Requires `"experimental": true` in your config.
-
 | Command | What it does |
 |---------|-------------|
 | `/chrome` | Headless Chrome for testing and scraping |
 | `/voice` | Voice input — speak your task |
 | `/schedule` | Scheduled recurring tasks |
 | `/orchestrate` | Epic decomposition — break parent issues into child issues and execute |
+
+Only `/orchestrate` is gated behind `"experimental": true` (`/settings experimental true`). The rest work without it — they're listed here because the UX is still rough.
 
 </details>
 
@@ -329,6 +331,7 @@ Run outside the interactive session from a normal terminal prompt.
 |---------|-------------|
 | `wm run <prompt>` | Headless prompt execution — runs a single prompt and exits |
 | `wm models [filter]` | List available AI models with live provider discovery |
+| `wm models update` | Refresh the model catalog from its remote source |
 | `wm session list` | List saved sessions |
 | `wm session show <id>` | Show a specific session's details |
 | `wm stats` | Cross-session usage analytics and cost summary |
@@ -341,7 +344,7 @@ Run outside the interactive session from a normal terminal prompt.
 
 </details>
 
-**Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
+**Shortcuts:** `!command` runs shell directly · `ESC` cancels · `ESC ESC` rolls back last exchange · `Shift+Tab` cycles permission mode · `Ctrl+P` pauses/resumes `/build` · `@file.ts` inlines code · `@dir/` inlines tree · `@url` fetches content · `@image.png` sends to vision models
 
 ---
 
@@ -405,6 +408,7 @@ WorkerMill gives its agents 23 tools — file operations, shell, search, git, we
 | `read_file` | Read files with line ranges |
 | `write_file` | Create new files |
 | `edit_file` / `multi_edit_file` | Surgical edits with diff-based patching |
+| `patch` | Apply a unified diff across multiple files at once |
 | `glob` | Find files by pattern |
 | `grep` | Search file contents with regex |
 | `ls` | Directory listing |

@@ -29,7 +29,31 @@ Accepts inline text, a `.md` file path, or a ticket reference. Ticket references
 - Stays on the feature branch when done so you can review, test, and push manually
 - On failure, state is saved to disk — use `/retry` to resume
 
-**The planner critic** (off by default) runs before workers start. Enable with `/settings review.critic true`. It scores the plan 1-10 and refines it up to 3 times before execution.
+**The planner critic** (off by default) runs between planning and execution. Enable with `/settings review.critic true`. It scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk; anything below the threshold (`review.criticThreshold`, default 8) goes back for a refinement pass, up to 3 scoring rounds. See [Quality Gates](quality-gates.md#planner-critic).
+
+### `/pause`
+
+Pause a running `/build` orchestration, or resume a paused one. The current story finishes its in-flight tool call, then the run holds until you resume.
+
+Also bound to `Ctrl+P`.
+
+### `/cancel`
+
+Cancel whatever is currently running — a `/build` orchestration or a single-agent turn. Same as pressing `ESC`.
+
+A cancelled `/build` leaves its state on disk, so `/retry` can pick it back up.
+
+### `/orchestrate <#issue>` *(experimental)*
+
+Decompose a parent GitHub issue into child issues and run `/build` across each one in turn.
+
+Requires `/settings experimental true` — without it the command reports that it's disabled and stops.
+
+```
+/orchestrate #120
+```
+
+Bounded by the `program` config block — `program.maxIssues` (default 25) aborts a run whose decomposition explodes, `program.maxAutoRetries` (default 1) controls per-issue retries, and `program.gateMode` decides whether epic-milestone gates are advisory or required. See the [Configuration reference](configuration.md#program).
 
 ### `/as <persona> <task>`
 
@@ -126,9 +150,15 @@ List recent saved sessions with their IDs, names, message counts, and dates.
 
 Sessions persist automatically after each turn. Resume the last one by launching with `wm --resume`.
 
-### `/editor`
+### `/edit`
 
-Open `$EDITOR` for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Alt/Option+Enter` instead.
+Open a terminal editor for multi-line input. The editor's contents are submitted when you save and quit. For quick multi-line input without leaving the terminal, use `Shift+Enter` or `Alt/Option+Enter` instead.
+
+The editor is chosen in this order: the `editor` config value (`/settings editor vim|nano|auto`), then `$EDITOR`, then `$VISUAL`, then `vi`.
+
+### `/changed`
+
+List the files this session has touched, tracked independently from git via the same checkpoints `/undo` uses. Useful for seeing your own footprint when the working tree already had unrelated changes in it.
 
 ### `/git`
 
@@ -146,7 +176,7 @@ Show uncommitted changes in the working directory with syntax highlighting.
 
 Analyze the codebase and generate an `AGENT.md` project instructions file. The agent reads this (or other supported instruction files) on every turn as part of its system prompt.
 
-`AGENT.md` is WorkerMill's default, but the CLI also recognizes common formats like `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.windsurfrules`, `.windsurf/rules/*`, `.clinerules`, and `.github/copilot-instructions.md`.
+`AGENT.md` is WorkerMill's default, but the CLI also recognizes `AGENTS.md`, `.workermill/instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.clinerules.md`, and `.github/copilot-instructions.md`, then the `.cursor/rules/` and `.windsurf/rules/` directories. The first source with content wins — files are checked before directories.
 
 ### `/remember <text>`
 
@@ -181,6 +211,10 @@ Personas are loaded from (in precedence order):
 3. `cli/personas/*.md` — bundled with the CLI
 
 See the [Personas guide](personas.md) for the file format, tool restrictions, and how to write custom ones.
+
+### `/projects`
+
+List every project WorkerMill has been run in, with its session count and last-used date. Project data lives under `~/.workermill/projects/<project-id>/`.
 
 ### `/skills`
 
@@ -245,17 +279,28 @@ View all settings or update a single key. Saves to `~/.workermill/cli.json`.
 See the [Configuration reference](configuration.md) for every key and its behavior. Quick summary:
 
 ```
-/settings                                    # Show all
+/settings                                    # Compact view
+/settings all                                # Every setting, including advanced
 /settings ollama.host <url>
 /settings ollama.context <tokens>
 /settings review.enabled <true|false>
 /settings review.maxRevisions <n>
 /settings review.threshold <n>
-/settings review.critic <true|false>
-/settings review.criticThreshold <n>
 /settings review.autoRevise <true|false>
+/settings review.strict <true|false>
+/settings review.specCheck <true|false>
+/settings review.critic <true|false>
+/settings review.criticThreshold <1-10>
+/settings qa.participation <default|always>
+/settings program.maxIssues <n>
+/settings program.maxAutoRetries <n>
+/settings program.gateMode <required|advisory>
 /settings sandbox <true|false|os>
+/settings liveView <true|false>
+/settings ui.inlineEditPreview <true|false>
+/settings editor <vim|nano|auto>
 /settings bell <true|false>
+/settings experimental <true|false>
 /settings tickets <github|jira|linear>
 /settings jira.url <url>
 /settings jira.email <email>
@@ -264,6 +309,10 @@ See the [Configuration reference](configuration.md) for every key and its behavi
 /settings route <persona> <provider>
 /settings key <provider> <api-key>
 ```
+
+Key names are matched case-insensitively. `/config` is an alias for `/settings`.
+
+Anything not in this list is rejected with "Unknown setting" — `qualityGates`, `permissions`, `hooks`, and `mcp` are edited directly in `cli.json`.
 
 ### `/setup`
 
@@ -300,6 +349,9 @@ These work but the UX is rough — expect sharp edges.
 | `/voice` | | Voice input — speak your task (requires system audio tooling) |
 | `/chrome` | `/browser` | Headless Chrome browser automation |
 | `/schedule` | | Scheduled recurring tasks via cron |
+| `/orchestrate` | | Epic decomposition across sub-issues — [documented above](#orchestrate-issue-experimental) |
+
+`/orchestrate` is the only one gated behind `/settings experimental true`. The rest are available without it.
 
 ---
 
@@ -339,6 +391,10 @@ These work but the UX is rough — expect sharp edges.
 
 These run outside the interactive session — from a normal terminal prompt.
 
+### `wm chat` (default)
+
+The interactive session. Running `wm` with no subcommand runs `wm chat` — you never need to type it. Its flags are the [CLI launch flags](#cli-launch-flags) below.
+
 ### `wm run [prompt...]`
 
 Headless (non-interactive) prompt execution. Runs a single prompt through the agent and exits.
@@ -361,6 +417,19 @@ wm run --json "what framework does this project use"
 | `--full-disk` | Allow tools to access files outside working directory |
 
 Useful for scripting, CI pipelines, and automation. The agent has full tool access (subject to permissions) but no interactive prompts.
+
+### `wm model [provider/model]`
+
+Show or change the default model without starting a session.
+
+```bash
+wm model                              # Print the default and any per-role routing
+wm model ollama/qwen3-coder:30b       # Set the default provider and model
+```
+
+With no argument it prints the current default plus the routing table. With a `provider/model` argument it sets `providers.<provider>.model` and makes that provider the default, writing both to `~/.workermill/cli.json`.
+
+The provider must already exist in your config — add one first with `/settings key <provider> <api-key>` inside a session, or `wm` to re-run setup.
 
 ### `wm models [filter]`
 
@@ -389,6 +458,18 @@ wm models --json                   # Machine-readable JSON array
 
 **How it relates to `/model` autocomplete:** `wm models` probes only explicitly configured hosts (safe for scripting). The `/model` input autocomplete inside a session also probes the default Ollama (`localhost:11434`) and LM Studio (`localhost:1234`) ports even when they're not in config, so tab-completion works out of the box for users running local models without explicit configuration.
 
+#### `wm models update [source]`
+
+Refresh the model catalog from its remote source instead of waiting for the automatic background update.
+
+```bash
+wm models update                   # Update from the default source
+wm models update --force           # Ignore the cache/ETag and refetch
+wm models update --json            # Machine-readable result
+```
+
+Automatic updates can be turned off entirely with `disableModelAutoUpdate` — see the [Configuration reference](configuration.md#disablemodelautoupdate).
+
 ### `wm logs`
 
 Stream or tail the CLI log file for the current project.
@@ -416,18 +497,43 @@ wm session rename <id> <name>      # Rename a session
 wm session delete <id>             # Delete a session
 ```
 
-Session IDs accept prefix matching — `wm session show abc` matches a session starting with `abc`.
+Session IDs accept prefix matching — `wm session show abc` matches a session starting with `abc`. Every subcommand takes `--json`.
 
 ### `wm stats`
 
 Show cross-session usage analytics: total tokens, estimated cost, messages, and sessions — aggregated from all saved session data.
 
 ```bash
-wm stats                           # Human-readable summary
+wm stats                           # Last 30 days, all projects
+wm stats --days 7                  # Look back N days
+wm stats --all                     # Every session, regardless of age
+wm stats --cwd                     # Only sessions from the current directory
 wm stats --json                    # Machine-readable JSON output
 ```
 
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--days <n>` | Look back N days (default: 30) |
+| `--all` | Include all sessions regardless of age |
+| `--cwd` | Scope to sessions started in the current working directory |
+| `--json` | Emit raw JSON for scripting |
+
 Token counts are broken down by input and output. Cost estimates use the pricing data from each session's provider.
+
+### `wm runs <subcommand>`
+
+Inspect past `/build` runs. Every `/build` writes a JSON manifest with its stories, outcomes, cost, and review result, so you can audit a run long after the session ended.
+
+```bash
+wm runs                            # List recent runs (same as `wm runs list`)
+wm runs list --json                # Machine-readable list
+wm runs show <id>                  # Full detail for one run
+wm runs last                       # The most recent run
+```
+
+Run IDs accept prefix matching, the same as `wm session show`. Every subcommand takes `--json`.
 
 ### `wm schema`
 
@@ -457,6 +563,7 @@ wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
 wm --trust                  # Skip all tool permission prompts
 wm --auto-revise            # Auto-revise after a failed review without prompting
+wm --strict                 # Strict mode — zero gate failures, require review approval, block scope drift
 wm --full-disk              # Allow tools to access files outside working directory
 wm --max-tokens <n>         # Maximum output tokens per response
 wm --live-view              # Enable live browser diff view
@@ -466,4 +573,4 @@ wm --version                # Print CLI version
 wm --help                   # Show launch flags
 ```
 
-`--provider`, `--model`, `--trust`, `--auto-revise`, `--full-disk`, `--max-tokens`, and `--live-view` apply only for the current launch and are not written to config.
+`--provider`, `--model`, `--trust`, `--auto-revise`, `--strict`, `--full-disk`, `--max-tokens`, and `--live-view` apply only for the current launch and are not written to config.

@@ -77,7 +77,7 @@ The planner wrote text analysis but didn't output a JSON stories block. The CLI 
 
 - Tightening the ticket requirements (clearer acceptance criteria)
 - Switching planner model to a stronger one: `/settings route planner anthropic` then `/model planner anthropic/claude-opus-4-6`
-- Enabling the critic loop: `/settings review.critic true` (scores the plan and forces revision until it passes)
+- Enabling the plan critic: `/settings review.critic true` (scores the plan and refines it until it passes — see [Quality Gates](quality-gates.md#planner-critic))
 
 ### Model switching fails
 

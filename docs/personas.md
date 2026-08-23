@@ -88,6 +88,8 @@ Available tools for the `tools` frontmatter array:
 
 **Agentic:** `sub_agent`, `todo`, `memory`
 
+**Tickets:** `ticket`
+
 The `memory` tool is available to all personas — it provides persistent cross-session memory stored as markdown files. Read-only personas (like `planner` and `tech_lead`) restrict their other tools to read operations. Worker personas typically get the full set.
 
 ## Routing Personas to Providers
@@ -105,6 +107,8 @@ Each persona can run on a different AI provider via the `routing` config:
   }
 }
 ```
+
+Alongside persona slugs, routing accepts three orchestration roles: `planner`, `tech_lead` (the reviewer), and `critic` (the optional [plan critic](quality-gates.md#planner-critic)).
 
 Custom persona slugs work in routing just like built-in ones. Set routing from the CLI:
 

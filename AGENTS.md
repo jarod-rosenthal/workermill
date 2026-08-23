@@ -1,82 +1,82 @@
 # AGENTS.md
 
-This file provides behavioral guidance for AI coding agents working in this repository. For codebase documentation, commands, and architecture details, see `CLAUDE.md`.
+Guidance for AI coding agents working in the **WorkerMill CLI** repository.
 
-## Communication Style
+This file is loaded automatically as project context by WorkerMill, Claude Code, Cursor, and other agent tools. Keep it accurate — a wrong statement here misleads every agent that reads it.
 
-**Be transparent and narrate your work.** Share what you're doing before starting, what you find during exploration, your reasoning on decisions, and summarize what was done after completing work.
+## What This Repository Is
 
-**Parallelize your work whenever possible.** Run independent tasks concurrently - for example, build API while updating frontend, or deploy while writing tests. Use background tasks and parallel tool calls to maximize efficiency.
+A single-package **TypeScript CLI**, published to npm as `workermill`. It is a terminal-native AI coding agent: you run `wm` in a project and it plans, writes, and reviews code using whatever LLM providers you configure.
 
-## Agent Workflow Guidelines
+There is **no server, no database, no frontend, and no API package**. Everything is one Node process. If you find yourself looking for `api/`, `frontend/`, or a migrations directory, you are thinking of a different project.
 
-**Spawn parallel agents for cross-stack work.** This is a full-stack app where API, frontend, and infrastructure work can run concurrently.
+| | |
+|---|---|
+| Language | TypeScript, ESM only |
+| Terminal UI | React + [Ink](https://github.com/vadimdemedes/ink) |
+| LLM layer | [Vercel AI SDK](https://sdk.vercel.ai) v6 |
+| CLI framework | Commander.js |
+| Tests | Vitest |
+| Runtime | Node 20+ |
 
-| Task | Parallel Approach |
-|------|-------------------|
-| Add new API endpoint + UI | Agent 1: backend route, Agent 2: frontend page |
-| Add new model + routes | Agent 1: TypeORM model + migration, Agent 2: API routes |
-| Type checking | Run `npx tsc --noEmit` in api/ and frontend/ in parallel |
+For the source map and architecture, read [docs/contributing.md](docs/contributing.md) and [docs/architecture.md](docs/architecture.md).
 
-## Progress Tracking
+## Commands
 
-For multi-phase implementations, track progress in a local progress file to enable resumption if interrupted.
+```bash
+npm run dev          # Run from source via tsx, no build step
+npm run typecheck    # tsc --noEmit
+npm run lint         # Alias for typecheck — there is no ESLint in this repo
+npm test             # vitest run
+npx vitest run src/__tests__/foo.test.ts    # Single test file
+npm run build        # tsup → dist/
+./build.sh           # Clean build + invariant checks (version sync, bundle contents)
+```
 
-## Task Prioritization
+Run `npm run typecheck` and `npm test` before declaring work finished. CI runs typecheck, lint, build, and the unit suite on every PR.
 
-When working on tasks:
+## Non-Negotiables
 
-1. **Understand before acting** - Read relevant files before making changes
-2. **Verify assumptions** - Check existing patterns in the codebase
-3. **Small, focused changes** - Avoid over-engineering or scope creep
-4. **Test your changes** - Run type checking (`npm run typecheck`) after modifications
+**ESM import paths need `.js` extensions.** `import { foo } from "./bar.js"` even though the file is `bar.ts`. This is not optional — the build breaks without it.
 
-## File Operation Preferences
+**`src/version.ts` must match `package.json`.** `build.sh` fails the build if they diverge. Use `./build.sh --bump patch` to change both at once.
 
-- **Prefer editing over creating** - Modify existing files rather than creating new ones
-- **No unnecessary files** - Don't create README, documentation, or config files unless explicitly requested
-- **Follow existing patterns** - Match the code style and structure already in the codebase
+**No `any` without a comment explaining the SDK type gap it works around.** TypeScript runs in strict mode.
 
-## Jira Ticket Handling
+**Never touch the model defaults, provider routing, or the default provider** without being asked. These are deliberate choices, not accidents.
 
-When creating Jira tickets via MCP tools:
+## Docs Are Enforced by Tests
 
-**NEVER add labels when creating tickets.** The `workermill` label triggers automatic AI worker deployment. Only add labels after the ticket is created and with explicit user approval.
+`src/__tests__/docs-consistency.test.ts` and `src/__tests__/hooks.test.ts` fail the build when code and documentation drift apart:
 
-Correct workflow:
-1. Create ticket with NO labels
-2. Show user the ticket
-3. Ask "Ready to add the workermill label to trigger the worker?"
-4. Only add label after explicit confirmation
+- Every command in `HELP_TEXT` must have a handler
+- Every `wm` subcommand documented in `docs/commands.md` must be registered in `src/index.ts`
+- Every `##` config heading in `docs/configuration.md` must be a real field in `src/config.ts`
+- The tool count and persona count in `README.md` must match reality
+- Every declared `LifecycleEvent` must actually be emitted somewhere
 
-## Deployment Awareness
+So documentation is part of the change, not follow-up work. [docs/contributing.md](docs/contributing.md#adding-features) lists exactly which files to touch when adding a command, tool, setting, or lifecycle event.
 
-After any deployment:
-1. Verify the deployment succeeded
-2. Mention the deployment in your summary
-3. Provide the relevant URL for verification
+## Conventions
 
-## When to Ask vs. Proceed
+**Slash commands** dispatch from `src/ui/slash-commands.ts` but are implemented in `src/ui/commands/{session,settings,permissions,project}.ts`. Put new logic in the right module rather than growing the dispatcher.
 
-**Ask first when:**
-- Making architectural changes to proven patterns (see "DO NOT CHANGE" section in CLAUDE.md)
-- Changing default models, AI providers, or model configurations
-- Unsure about requirements or approach
-- Task involves infrastructure or security changes
+**New settings keys** need four things in `src/ui/commands/settings.ts`: a `keyAliases` entry, a `case` in the switch, a row in the display table, and the key in the persist allowlist at the bottom. Miss the allowlist and the setting silently fails to save.
 
-**Proceed when:**
-- Task is clearly defined with specific requirements
-- Following established patterns in the codebase
-- Making routine code changes (bug fixes, features matching existing patterns)
+**Tests** live in `src/__tests__/`. Use `createTempWorkerMillHome()` from `src/__tests__/helpers/` instead of hardcoding paths — tests that write to a real `~/.workermill` will corrupt the developer's config. Mock `streamText`/`generateText` via `vi.mocked()`; assert on observable behavior, not internals.
 
-## Error Handling
+**Prefer editing existing files.** Don't create new README, docs, or config files unless asked.
 
-When encountering errors:
+## Working Style
 
-1. **Git Bash issues** - If commands fail with syntax errors involving `$(...)` or variable expansion, spawn a Task agent instead of debugging
-2. **Build failures** - Check if the error is in your code or infrastructure; report infrastructure issues rather than attempting fixes
+**Read before changing.** Find the existing pattern — this codebase is internally consistent, and matching it matters more than any individual preference.
 
-## References
+**Small, focused changes.** No speculative abstractions, no backwards-compatibility shims nobody asked for, no scope creep.
 
-- **Codebase documentation**: `CLAUDE.md`
-- **Worker container instructions**: `worker/AGENTS.md`
+**Narrate as you go.** Say what you're about to do, what you found, and what you changed.
+
+**Ask first when:** changing model defaults or provider routing, altering the orchestration flow, or touching anything security-related. **Proceed when:** the task is clearly specified and follows an established pattern.
+
+## Reporting
+
+When something fails, say so plainly and include the output. A test suite with three pre-existing failures is worth reporting as three pre-existing failures — don't paper over it, and don't claim a fix you haven't verified.

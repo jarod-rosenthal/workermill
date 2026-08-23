@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Professional AI coding team in your terminal. Multi-expert orchestration with planning, execution, and review — ensuring quality code through governance, not just generation.",
   "type": "module",
   "bin": {

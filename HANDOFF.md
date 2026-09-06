@@ -1,6 +1,6 @@
 # WorkerMill recovery handoff
 
-Updated UTC: 2026-09-06T20:21:04.629168+00:00. User-authorized recovery repair batch is implemented and qualified on `reliability/core`. Base: `f613413b`; the local repair commit immediately following that base contains the tested implementation. No release, push, paid evaluation, or unrelated feature expansion.
+Updated UTC: 2026-09-06T20:21:04.629168+00:00. User-authorized recovery repair batch is implemented and qualified on `reliability/core`. Base: `f613413b`; `08077002` contains the tested implementation. No release, push, paid evaluation, or unrelated feature expansion.
 
 **Current qualification: 1,643 passed, zero failed, one pre-existing skipped test across 107 files; typecheck and build passed on Node 22.22.2.** The original 80 failures are resolved. Read the final checkpoint below before acting; historical audit sections preserve the evidence from the broken head.
 
@@ -119,7 +119,7 @@ Coordinator added three manifest tests after the full run: pending completion re
 
 ## Qualified repair checkpoint
 
-- Base `f613413b` plus this repair's tracked implementation diff and new manifest runtime test; branch `reliability/core`. No provider/model defaults or routing changed.
+- Tested implementation commit: `08077002`; base `f613413b`; branch `reliability/core`. No provider/model defaults or routing changed.
 - Saved R15b event seams `7aa8e089` integrated with orchestration active/progress/final persistence, typed planner exit reasons, actual attempt/review events, identity preflight, and retry run IDs. Success is recorded after completion settles and cleanup succeeds. Blocked completion/gates/review and cleanup failure record failed outcomes; cancellation is distinct from teardown's internal abort.
 - Browser production remains identical to base. Corrected the fixture's asynchronous handshake race; all original assertions retained. Added bounded non-settling cancellation coverage. Browser worker commits `9ca76df3` and `cd42e38e` remain preserved on `recovery/browser` but their production workaround is intentionally absent from core.
 - `npm test` exit 0: **1,643 passed, 0 failed, 1 skipped, 107 files**, 31.14s, started 2026-09-06 16:19:42 EDT. Runtime process/server fixtures used normal approved execution outside the outer restricted sandbox. Final log: `/tmp/workermill-recovery-repair-full.log`; failed first qualification: `/tmp/workermill-recovery-repair-first-full.log`. These portable counts are authoritative without those temporary logs.

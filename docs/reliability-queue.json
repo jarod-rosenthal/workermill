@@ -13,6 +13,18 @@
     "retrospective": "recovery/2026-09-06-retrospective.md",
     "note": "Historical task completion entries below do not qualify this HEAD. R15a is integrated with an incompatible orchestration caller; R15b event seams survive unintegrated at 7aa8e089. This snapshot is historical; see HANDOFF.md for the resumed repair and current qualification."
   },
+  "repairSnapshot": {
+    "implementationHead": "08077002",
+    "qualification": "unit_typecheck_build_passed",
+    "unitTests": {
+      "passed": 1643,
+      "failed": 0,
+      "skipped": 1,
+      "files": 107
+    },
+    "handoff": "../HANDOFF.md",
+    "note": "Recovery regression batch complete; R15/R23 acceptance reconciliation and broader reliability backlog remain unfinished. Historical recoverySnapshot is preserved."
+  },
   "integrationBranch": "reliability/core",
   "maxImplementationWorkers": 2,
   "schedulingRule": "All parent dependencies must be integrated; exclusive locks and write paths must not overlap. Explicit dispatch locks override inherited parent locks only for that package's documented write scope. If dispatches are present, dispatch only those suffix packages using their after edges and document-defined scope; the parent completes when all packages integrate. Read the full task block before dispatch. This is not a directly executable WorkerMill plan.",

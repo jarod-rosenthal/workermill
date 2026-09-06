@@ -1,14 +1,12 @@
 # WorkerMill recovery handoff
 
-Checkpoint: 2026-09-06 21:21 UTC. Integration branch `reliability/core`; current saved HEAD `d699d474`, latest implementation `36471d14`. User authorized finishing the remaining reliability work as far as possible. R15/R23, R16a/b, R18a/b1 accepted. Latest combined qualification: **1,675 passed, zero failed, one existing skip; typecheck/build passed.** Core clean at checkpoint before this docs edit.
+Checkpoint: 2026-09-06 21:24 UTC. Integration branch `reliability/core`; latest implementation `47dc4d7f`. User authorized finishing remaining reliability work as far as possible. R15/R23, all R16, R18a/b1/b2 accepted. Latest combined qualification: **1,588 passed, zero failed, one existing skip, 110 test files; typecheck/build passed.** Test count decreased because copied UI/policy helpers were removed with coverage mapping in `docs/recovery/r16-coverage.md`, not because failed tests were skipped.
 
-Active batch (two implementation workers):
-- `/root/r16c_lifecycle`, worktree `/home/user/github/workermill-r16c-cont`, branch `reliability/r16c-cont`, base `d699d474`: test-only mounted lifecycle/resume/child coverage and copied-helper removal. Dirty candidate; root focused four files passed 32 tests, exit 0. Remaining copied useAgent helpers and precise coverage documentation being corrected before acceptance.
-- `/root/r18b2_headless`, worktree `/home/user/github/workermill-r18b2-cont`, branch `reliability/r18b2-cont`, same base: candidate `e7674a1b`, root focused four files passed 28 tests, exit 0. Correcting all-zero total fallback completeness and cumulative-session comment. Not integrated yet.
+Accepted candidates: R16c `ed038c9e` -> core `47dc4d7f`; R18b2 `e7674a1b`/`83967db8` -> core `6a402911`/`4a295f3f`, root regression `6eaaeab9`. Full `npm test` exit0, Node22.22.2/Linux, 31.08sec, supplemental log `/tmp/workermill-r16c-r18b2-qualified.log`. `npm run typecheck` and `npm run build` exit0. Core source clean; this checkpoint edits docs only.
 
-Workers must not request escalated tool calls: these stalled in the delegated environment. Freeze/report sandbox EPERM; coordinator runs the focused command through normal escalation. Root focused commands use plain `npm test -- <files>` under Node 22.22.2. Worker candidates require coordinator review and combined full qualification before advancing. No failed integrated check is currently unresolved.
+Next batch (two implementation workers, isolated worktrees from this qualified implementation plus checkpoint): R18b3 owns `src/ui/useAgent.ts`, session-accounting helpers and chat tests; R17 owns package test scripts, CI workflow, packaged/PTY tests/helpers only. R17 can progress independently of chat. R18c orchestration ledger follows chat; split its adapter and storage work before dispatch if necessary. No paid model evaluation, publication, push, release, or worktree cleanup.
 
-Next action: review corrected candidates, integrate and qualify together, then dispatch sequential R18b3 chat accounting alongside R17 packaged CLI/CI qualification once R16c meets acceptance. R18c orchestration ledger follows chat; split its adapter and storage work before dispatch if necessary. No live paid evaluation, publication, push, release, or worktree cleanup.
+Workers must not request escalated tool calls: these stalled in the delegated environment. Freeze/report sandbox EPERM; coordinator runs focused commands through normal escalation. Worker candidates require review and full combined qualification before acceptance. No failed integrated check is currently unresolved. Read appended historical checkpoints for earlier evidence; this header is current.
 
 ## Historical audit state (before the repair below)
 

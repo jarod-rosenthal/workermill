@@ -168,17 +168,23 @@ function childContext(parent: ToolExecutionContext | undefined, scope: PathScope
 }
 
 /** Every child tool takes the same policy/hook/cancellation path as parent tools. */
-export function wrapChildTools(tools: Record<string, ChildTool>, context: ToolExecutionContext, onFailure?: (error: unknown) => void): Record<string, ChildTool> {
+export function wrapChildTools(
+  tools: Record<string, ChildTool>,
+  context: ToolExecutionContext,
+  onFailure?: (error: unknown) => void,
+  pending?: Set<Promise<unknown>>,
+): Record<string, ChildTool> {
   return Object.fromEntries(Object.entries(tools).flatMap(([toolName, definition]) => {
     if (!definition.execute || toolName === "sub_agent") return [];
     const execute = definition.execute;
-    return [[toolName, { ...definition, execute: async (input: Record<string, unknown>) => {
-      try {
-        return await executeToolCall(toolName, input, () => execute(input), context);
-      } catch (error) {
+    return [[toolName, { ...definition, execute: (input: Record<string, unknown>) => {
+      const call = executeToolCall(toolName, input, () => execute(input), context).catch((error: unknown) => {
         onFailure?.(error);
         throw error;
-      }
+      });
+      pending?.add(call);
+      void call.then(() => pending?.delete(call), () => pending?.delete(call));
+      return call;
     } }]];
   }));
 }
@@ -208,10 +214,11 @@ async function runSubAgent(
   let outputTokens = 0;
   let terminalError: unknown;
   let result: SubAgentResult;
+  const pending = new Set<Promise<unknown>>();
   const tools = wrapChildTools(rawTools, context, (error) => {
     terminalError ??= error;
     controller.abort();
-  });
+  }, pending);
   try {
     if (context.signal.aborted) throw new Error("Sub-agent cancelled before model startup.");
     // ChildTool is structural because dynamic SDK schemas erase input generics.
@@ -246,6 +253,13 @@ async function runSubAgent(
       success: false, content, turnsUsed,
       error: `Sub-agent failed: ${cause instanceof Error ? cause.message : String(cause)}`,
     };
+  }
+  // Transport failure can finish before concurrently dispatched tool calls.
+  // Await the whole tool lifetime, including hooks, not only OS process exit.
+  controller.abort();
+  await Promise.allSettled([...pending]);
+  if (result.success && terminalError) {
+    result = { success: false, content, turnsUsed, error: `Sub-agent failed: ${terminalError instanceof Error ? terminalError.message : String(terminalError)}` };
   }
   try {
     await onUsage?.({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });

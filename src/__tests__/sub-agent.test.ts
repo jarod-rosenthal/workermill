@@ -10,6 +10,7 @@ vi.mock("ai", async (importOriginal) => ({ ...(await importOriginal<typeof impor
 import { createToolDefinitions } from "../engine/tools/index.js";
 import { createSubAgentExecutor, createWorktree, type ChildTool } from "../engine/tools/sub-agent.js";
 import type { ToolExecutionContext } from "../engine/tool-executor.js";
+import { getOSSandboxDependencyStatus } from "../sandbox-mode.js";
 
 const dirs: string[] = [];
 function repo(): string {
@@ -139,4 +140,43 @@ describe("isolated sub-agents", () => {
     expect(result.error).toContain("read-only");
     expect(fs.existsSync(path.join(workingDir, ".workermill", "worktrees"))).toBe(false);
   });
+
+  it("contains Git clean filters invoked while inspecting an OS child", async (test) => {
+    const status = getOSSandboxDependencyStatus();
+    if (!status.supported || status.errors.length) {
+      const reason = status.errors.join(", ") || "unsupported platform";
+      if (process.env.WM_REQUIRE_OS_SANDBOX === "1") throw new Error(reason);
+      test.skip(reason);
+      return;
+    }
+    const workingDir = repo();
+    const parent = { ...context(workingDir), effectiveSandbox: "os" as const };
+    const definitions = createToolDefinitions(workingDir, {} as never, "os", { executionContext: parent }) as Record<string, ChildTool>;
+    sdk.action = "empty";
+    stream();
+    const probe = String(await definitions.sub_agent.execute!({ prompt: "OS probe", isolated: true }));
+    if (/operation not permitted|unshare|sandbox unavailable/i.test(probe) && process.env.WM_REQUIRE_OS_SANDBOX !== "1") {
+      test.skip(probe);
+      return;
+    }
+    expect(probe).toContain("Confirmed empty and removed");
+
+    const sentinel = path.join(workingDir, "filter-parent-sentinel");
+    execFileSync("git", ["config", "filter.inspect.clean", `printf ran > filter-ran; printf escaped > ${JSON.stringify(sentinel)}; cat`], { cwd: workingDir });
+    sdk.streamText.mockImplementation((options: { tools: Record<string, ChildTool> }) => ({
+      textStream: (async function* () {
+        await options.tools.write_file.execute!({ path: ".gitattributes", content: "base.txt filter=inspect\n" });
+        await options.tools.write_file.execute!({ path: "base.txt", content: "changed\n" });
+        yield "done";
+      })(),
+      text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
+    const result = String(await definitions.sub_agent.execute!({ prompt: "change filtered file", isolated: true }));
+    const child = result.match(/worktree `([^`]+)`/)?.[1];
+    expect(child).toBeDefined();
+    // Positive evidence that the filter actually ran, not merely that an
+    // unavailable sandbox or earlier tool failure prevented its execution.
+    expect(fs.readFileSync(path.join(child!, "filter-ran"), "utf8")).toBe("ran");
+    expect(fs.existsSync(sentinel)).toBe(false);
+  }, 15_000);
 });

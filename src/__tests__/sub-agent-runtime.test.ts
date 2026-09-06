@@ -145,8 +145,8 @@ describe("sub-agent runtime boundaries", () => {
     const outputs: unknown[] = [];
     installStream([{ name: "write_file", input: { path: sentinel, content: "absolute escape" } }], "done", undefined, outputs);
     const result = await executor(workspace, parentContext(workspace))({ prompt: "attempt escape", isolated: true });
-    expect(String(outputs[0])).toContain("Error:");
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/outside|scope|escape/i);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("safe\n");
   });
 
@@ -160,8 +160,8 @@ describe("sub-agent runtime boundaries", () => {
     const outputs: unknown[] = [];
     installStream([{ name: "write_file", input: { path: "escape-link", content: "symlink escape" } }], "done", undefined, outputs);
     const result = await executor(workspace, parentContext(workspace))({ prompt: "attempt symlink escape", isolated: true });
-    expect(String(outputs[0])).toContain("Error:");
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/outside|scope|escape/i);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("safe\n");
   });
 
@@ -230,7 +230,7 @@ describe("sub-agent runtime boundaries", () => {
     await expect(executor(workspace, parentContext(workspace))({ prompt: "active loop", isolated: true, maxTurns: 1 })).resolves.toMatchObject({ success: false });
 
     installStream([], "ordinary final answer");
-    await expect(executor(workspace, parentContext(workspace))({ prompt: "ordinary", isolated: true })).resolves.toMatchObject({ success: true, content: expect.stringContaining("ordinary final answer") });
+    await expect(executor(workspace, parentContext(workspace))({ prompt: "ordinary", isolated: true, maxTurns: 1 })).resolves.toMatchObject({ success: true, content: expect.stringContaining("ordinary final answer") });
   });
 
   it("registry-created sub_agent cancels its child command before returning a model failure", async () => {

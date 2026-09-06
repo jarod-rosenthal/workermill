@@ -291,7 +291,7 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 | `/changed` | Show files changed in this session |
 | `/git` | Branch and status |
 | `/permissions` | Manage tool allow/deny rules |
-| `/trust` | Auto-approve all tools for this session |
+| `/trust` | Approve ordinary tools for this session; deny/ask and safety rules still apply |
 
 </details>
 
@@ -419,7 +419,7 @@ WorkerMill gives its agents 23 tools — file operations, shell, search, git, we
 | `web_search` | Search the web |
 | `fetch` | HTTP requests |
 | `download_file` | Download files with checksum verification |
-| `sub_agent` | Spawn isolated workers in git worktrees |
+| `sub_agent` | Scoped child workers; preserve changed worktrees for review ([isolation and recovery](docs/architecture.md#child-agents-and-recovering-their-work)) |
 | `view_image` | Send images to vision models |
 | `todo` | Track tasks within a session |
 | `verify` | Run quality gate commands |

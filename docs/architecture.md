@@ -121,6 +121,16 @@ Pass `runId`, `signal`, `scope`, and global-user `sandboxCapabilities` in the fo
 
 Background commands use the same process lifecycle in path/full-disk mode, retain at most 100 KiB of output, and have a 15-minute deadline. OS mode rejects background commands because the singleton sandbox configuration must remain leased for the entire command. Retrieve or cancel a background shell with its owning run ID; run cleanup must await `cleanupScopedBackgroundProcesses(runId)`. Global cleanup is reserved for CLI exit. A Git worktree or a background shell ID does not grant additional permissions.
 
+### Child agents and recovering their work
+
+An isolated `sub_agent` gets a unique branch and checkout beneath `.workermill/worktrees/`. It inherits the parent's permission restrictions and cancellation signal, but has its own run ID and tool closures. A full-disk parent does not give a child full-disk access. Non-isolated children are read-only; children cannot spawn further children. The default child limit is 20 steps (configurable from 1 to 50), with a five-minute deadline.
+
+Child command processes are stopped and awaited before inspecting the checkout. Failed, cancelled, dirty, committed-only, or uninspectable work is preserved. Automatic removal is limited to successful checkouts confirmed to have no changes or new commits. The result reports the branch and worktree path; it does not automatically merge child work into the parent.
+
+To inspect a preserved result, use its reported path with `git -C <child-path> status`, `git -C <child-path> log -1`, and `git -C <child-path> diff`. Review and commit any uncommitted work there before selectively cherry-picking its commits into your target branch. Remove the worktree and branch only after deciding that their contents are no longer needed.
+
+OS-mode children run shell and registered Git commands through the OS boundary. Git commits require narrow write access to the child's administrative directory, its unique branch/log namespace, and the **shared Git object store**. The parent checkout, Git configuration, hooks, and unrelated refs are not write grants. Because the object store is shared, this is not complete Git-metadata isolation; use a separate repository copy for hostile workloads requiring that guarantee. Path-only mode checks explicit tool paths but cannot contain arbitrary shell code.
+
 ## MCP (Model Context Protocol)
 
 The CLI auto-detects MCP servers from:

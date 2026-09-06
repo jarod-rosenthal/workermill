@@ -435,18 +435,16 @@ export function useOrchestrator(
     commitPreviewLine("");
   }, [commitPreviewLine]);
 
-  useEffect(() => () => {
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-  }, []);
-
   // ------------------------------------------------------------------
   // cancel()
   // ------------------------------------------------------------------
 
   const cancel = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-    }
+    const controller = abortRef.current;
+    // An idle cancel is intentionally a no-op: it must not leave a stale
+    // "Cancelling" status after a completed run.
+    if (!controller) return;
+    controller.abort();
     // If orchestration is waiting on a confirm/prompt promise, resolve it so
     // the async run can unwind instead of keeping the UI in a stale "running" state.
     setConfirmRequest((req) => {
@@ -464,6 +462,23 @@ export function useOrchestrator(
     releasePauseWaiters();
   }, [releasePauseWaiters, setPausedState, setStatusMessage]);
 
+  useEffect(() => () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    const controller = abortRef.current;
+    if (!controller) return;
+    controller.abort();
+    setConfirmRequest((request) => {
+      request?.resolve(false);
+      return null;
+    });
+    setPromptRequest((request) => {
+      request?.resolve("");
+      return null;
+    });
+    setPausedState(false);
+    releasePauseWaiters();
+  }, [releasePauseWaiters, setPausedState]);
+
   // ------------------------------------------------------------------
   // start()
   // ------------------------------------------------------------------
@@ -476,8 +491,9 @@ export function useOrchestrator(
       ticketKey?: string,
       options?: OrchestratorStartOptions,
     ) => {
-      // Abort any previous run
-      if (abortRef.current) abortRef.current.abort();
+      // Claim synchronously. React state has not necessarily rendered yet,
+      // so `running` cannot prevent two same-tick starts from overlapping.
+      if (abortRef.current) return;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -596,6 +612,7 @@ export function useOrchestrator(
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     if (mode) {
                       resolve({ allowed: yes, mode });
@@ -613,6 +630,7 @@ export function useOrchestrator(
                   question,
                   suggestion,
                   resolve: (answer: string) => {
+                    if (abortRef.current !== controller) return;
                     setPromptRequest(null);
                     resolve(answer || suggestion);
                   },
@@ -751,7 +769,7 @@ export function useOrchestrator(
 
   const startProgram = useCallback(
     (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => {
-      if (abortRef.current) abortRef.current.abort();
+      if (abortRef.current) return;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -917,6 +935,7 @@ export function useOrchestrator(
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     if (mode) resolve({ allowed: yes, mode });
                     else resolve(yes);
@@ -930,6 +949,7 @@ export function useOrchestrator(
                   question,
                   suggestion,
                   resolve: (answer: string) => {
+                    if (abortRef.current !== controller) return;
                     setPromptRequest(null);
                     resolve(answer || suggestion);
                   },
@@ -1195,7 +1215,7 @@ export function useOrchestrator(
 
   const review = useCallback(
     (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => {
-      if (running) return;
+      if (abortRef.current) return;
       setRunning(true);
       setPausedState(false);
       setStatusMessage("Reviewing...");
@@ -1280,6 +1300,7 @@ export function useOrchestrator(
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean) => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     resolve(yes);
                   },

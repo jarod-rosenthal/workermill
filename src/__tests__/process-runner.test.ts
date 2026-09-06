@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { cancelRunProcesses, runProcess } from "../engine/process-runner.js";
+import { cancelAndWaitForRunProcesses, cancelRunProcesses, runProcess } from "../engine/process-runner.js";
 
 const request = (overrides: Partial<Parameters<typeof runProcess>[0]> = {}) => ({
   runId: "test-run",
@@ -17,6 +17,20 @@ const request = (overrides: Partial<Parameters<typeof runProcess>[0]> = {}) => (
 });
 
 describe("process runner", () => {
+  it("awaits owned process cleanup without cancelling another run", async () => {
+    const controller = new AbortController();
+    const owned = runProcess(request({ runId: "awaited-owner", command: "sleep 30", signal: controller.signal }));
+    const other = runProcess(request({ runId: "unrelated-owner", command: "sleep 0.1; printf alive" }));
+    controller.abort();
+    await Promise.all([
+      cancelAndWaitForRunProcesses("awaited-owner"),
+      cancelAndWaitForRunProcesses("awaited-owner"),
+    ]);
+    await expect(owned).resolves.toMatchObject({ reason: "cancelled" });
+    await expect(other).resolves.toMatchObject({ reason: "exited", exitCode: 0, stdout: "alive" });
+    await expect(cancelAndWaitForRunProcesses("awaited-owner")).resolves.toBeUndefined();
+  });
+
   it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])("rejects invalid timeout %s before spawning", async (timeoutMs) => {
     const result = await runProcess(request({ timeoutMs, command: "printf should-not-run" }));
     expect(result.reason).toBe("spawn_failed");

@@ -48,6 +48,7 @@ interface ActiveProcess {
 }
 
 const activeByRun = new Map<string, Set<ActiveProcess>>();
+const idleWaiters = new Map<string, Set<() => void>>();
 const LEGACY_RUN_ID = "__legacy_bash_processes__";
 
 function addActive(process: ActiveProcess): void {
@@ -62,7 +63,12 @@ function addActive(process: ActiveProcess): void {
 function removeActive(process: ActiveProcess): void {
   const processes = activeByRun.get(process.runId);
   processes?.delete(process);
-  if (processes && processes.size === 0) activeByRun.delete(process.runId);
+  if (processes && processes.size === 0) {
+    activeByRun.delete(process.runId);
+    const waiters = idleWaiters.get(process.runId);
+    idleWaiters.delete(process.runId);
+    for (const resolve of waiters ?? []) resolve();
+  }
 }
 
 function groupExists(pid: number): boolean {
@@ -339,6 +345,18 @@ export function cancelRunProcesses(runId: string): void {
   const processes = activeByRun.get(runId);
   if (!processes) return;
   for (const process of [...processes]) requestTermination(process, "cancelled");
+}
+
+/** Abort the caller's signal first so new processes cannot start during cleanup. */
+export async function cancelAndWaitForRunProcesses(runId: string): Promise<void> {
+  if (!activeByRun.get(runId)?.size) return;
+  const done = new Promise<void>((resolve) => {
+    const waiters = idleWaiters.get(runId) ?? new Set<() => void>();
+    waiters.add(resolve);
+    idleWaiters.set(runId, waiters);
+  });
+  cancelRunProcesses(runId);
+  await done;
 }
 
 /**

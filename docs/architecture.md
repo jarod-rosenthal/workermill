@@ -171,6 +171,8 @@ Prompt, pre-hook, checkpoint, post-hook, and event callbacks receive the executi
 
 Do not copy the decision table into new adapters or wrap already-governed tools repeatedly. Deferred and MCP tools need the same boundary as built-ins; unknown tools are not assumed read-only. See `tool-policy.test.ts` and `tool-executor.test.ts` for executable contract examples.
 
+Planner and reviewer tool contexts are read-only, even if a custom persona lists write, shell, or child-agent tools. Revision workers use ordinary mutating-worker permissions: an explicit deny still wins over session trust. Each review attempt and revision has its own run ID, and its tool context shares the model attempt's timeout signal. A cancelled attempt cannot use its tools to continue writing. This policy boundary does not establish that the review is correct or that later repository changes remain verified.
+
 ## Context Management
 
 Long conversations hit context window limits. Three layers of compaction run automatically:
@@ -198,7 +200,7 @@ Pre- and post-tool hooks run shell commands or HTTP requests around tool executi
 
 ## Costs & Tokens
 
-`CostTracker` accumulates usage across every model call and reports per-role costs via `/cost` and the status bar. Pricing data lives in `src/providers/*/pricing.ts`.
+`CostTracker` reports recorded model usage and estimated per-role costs via `/cost` and the status bar. Pricing data lives in `src/providers/*/pricing.ts`. These figures are not provider invoices or a complete billing ledger; missing usage and unknown pricing must not be interpreted as free execution.
 
 ## What the CLI Is Not
 

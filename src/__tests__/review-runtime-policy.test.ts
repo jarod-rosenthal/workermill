@@ -198,4 +198,40 @@ describe("review runtime policy", () => {
     await expect(runStandaloneReview({ ...config(), sandbox: "os" }, output([]), "branch")).rejects.toThrow("OS sandbox unavailable");
     expect(createModel).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])("revision writes obey current deny rules (denied=%s)", async (denied) => {
+    const sentinel = path.join(workspace, "live-revision.txt");
+    fs.writeFileSync(sentinel, "unchanged");
+    const attempts: string[] = [];
+    let invocation = 0;
+    vi.mocked(streamText).mockImplementation(((options: StreamOptions) => {
+      invocation++;
+      if (invocation === 1) return result(REVISION_NEEDED);
+      if (invocation === 2) return result("revision complete", async () => {
+        try {
+          await options.tools!.write_file!.execute!({ path: sentinel, content: "revised" });
+          attempts.push("executed");
+        } catch (error) {
+          attempts.push(error instanceof Error && "code" in error ? String(error.code) : "unknown");
+        }
+      });
+      return result(APPROVED);
+    }) as typeof streamText);
+
+    await runReviewLoop({
+      config: { ...config(), permissions: denied ? { deny: ["write_file"] } : { allow: ["write_file"] } },
+      output: output([]), sorted: [{ id: "revision", title: "Revision", persona: "worker", description: "Fix it" }],
+      context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    });
+
+    expect(attempts).toEqual([denied ? "denied" : "executed"]);
+    expect(fs.readFileSync(sentinel, "utf8")).toBe(denied ? "unchanged" : "revised");
+    expect(runPreHooksWithBlocking).toHaveBeenCalledTimes(denied ? 0 : 1);
+    expect(checkpoint).toHaveBeenCalledTimes(denied ? 0 : 1);
+    expect(runHooks).toHaveBeenCalledTimes(denied ? 0 : 1);
+  });
 });

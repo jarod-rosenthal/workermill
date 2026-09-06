@@ -214,6 +214,8 @@ Acceptance: malicious or misconfigured read-only persona tools cannot mutate; st
 
 Verification: plan-critic, orchestrator, focused planning/review policy tests. Handoff: audited entry-point list and tool capability matrix.
 
+Dispatch R09a for `planning.ts`, the tool-entry-point audit of `program-bootstrap.ts`, and planner/critic runtime tests. Prove the actual planner factory cannot turn a malicious persona's write or child tool into a mutation, and a pre-aborted plan never calls the model. Dispatch R09b after R09a integrates for `review.ts` and standalone/inline/revision runtime tests. Bind tools to each review timeout signal (not merely the outer signal); revision tools use mutating-worker policy with current permissions. R09b removes the legacy concurrency wrapper from its own paths. Both dispatches preserve provider selections, review thresholds, and revision limits; neither changes completion gating (R13).
+
 ### R10 — Constrain and preserve isolated sub-agent work
 
 Priority P0; small-model task with security review; dependencies R04, R05; lock `tool-registry`.

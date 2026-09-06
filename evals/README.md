@@ -36,6 +36,12 @@ temporary directory. The included validator only checks deterministic fixture
 behavior; it is not OS/process security containment. Running untrusted code
 requires a real sandbox.
 
+Acceptance tests establish only the listed observable behavior. For refactors,
+they check that extracted modules expose the requested functions and preserve
+the wrapper results; a human must still check actual delegation, duplication,
+and maintainability against the rubric. Passing these small fixtures does not
+establish production readiness or comparative model quality.
+
 ## Add or run a fixture
 
 Keep fixtures dependency-free and use harmless temporary workspaces. Add a

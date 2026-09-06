@@ -67,6 +67,9 @@ Export createRetryPolicy({ baseMs, maxMs }) from src/main.mjs. Its returned poli
 
 async function accepts(root, mainUrl, timeoutMs) {
   return runNode(root, `import * as app from ${JSON.stringify(mainUrl)};
+let extracted;
+try { extracted = await import(new URL("./retry-policy.mjs", ${JSON.stringify(mainUrl)})); } catch { process.exit(3); }
+if (typeof extracted.createRetryPolicy !== "function") process.exit(3);
 if (typeof app.createRetryPolicy !== "function") process.exit(3);
 const policy = app.createRetryPolicy({baseMs:25,maxMs:90});
 if (policy.delayFor(0) !== 25 || policy.delayFor(2) !== 90 || !policy.shouldRetry(429) || !policy.shouldRetry(503) || policy.shouldRetry(400)) process.exit(3);

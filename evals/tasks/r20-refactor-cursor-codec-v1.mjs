@@ -65,6 +65,9 @@ Export decodeCursor(cursor) and encodeCursor(offset, total) from src/main.mjs, a
 
 async function accepts(root, mainUrl, timeoutMs) {
   return runNode(root, `import * as app from ${JSON.stringify(mainUrl)};
+let extracted;
+try { extracted = await import(new URL("./cursor-codec.mjs", ${JSON.stringify(mainUrl)})); } catch { process.exit(3); }
+if (typeof extracted.decodeCursor !== "function" || typeof extracted.encodeCursor !== "function") process.exit(3);
 if (typeof app.decodeCursor !== "function" || typeof app.encodeCursor !== "function") process.exit(3);
 if (app.decodeCursor(null) !== 0 || app.decodeCursor("2") !== 2 || app.decodeCursor("02") !== null || app.decodeCursor("-1") !== null || app.encodeCursor(2,3) !== "2" || app.encodeCursor(3,3) !== null) process.exit(3);
 const items = ["a","b","c"]; const first = app.nextPage(items, null); const second = app.nextPage(items, first.cursor);

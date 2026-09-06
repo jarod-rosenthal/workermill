@@ -66,6 +66,9 @@ Expose indexRecipients(records) from src/main.mjs as the reusable public boundar
 
 async function accepts(root, mainUrl, timeoutMs) {
   return runNode(root, `import * as app from ${JSON.stringify(mainUrl)};
+let extracted;
+try { extracted = await import(new URL("./recipient-index.mjs", ${JSON.stringify(mainUrl)})); } catch { process.exit(3); }
+if (typeof extracted.indexRecipients !== "function") process.exit(3);
 if (typeof app.indexRecipients !== "function") process.exit(3);
 const records = [{email:" ANA@EXAMPLE.TEST ",name:" Ana "},{email:"ana@example.test",name:"Later"},{email:"   ",name:"Ignored"},{email:"bob@example.test",name:" Bob "}];
 const expected = [{email:"ana@example.test",name:"Ana"},{email:"bob@example.test",name:"Bob"}];

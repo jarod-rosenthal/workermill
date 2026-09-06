@@ -61,6 +61,9 @@ Expose projectRun(run) from src/main.mjs and have renderRun delegate to it. Pres
 
 async function accepts(root, mainUrl, timeoutMs) {
   return runNode(root, `import * as app from ${JSON.stringify(mainUrl)};
+let extracted;
+try { extracted = await import(new URL("./report-projection.mjs", ${JSON.stringify(mainUrl)})); } catch { process.exit(3); }
+if (typeof extracted.projectRun !== "function") process.exit(3);
 if (typeof app.projectRun !== "function") process.exit(3);
 const run = {id:"r-7",outcome:"partial",gates:[{id:"lint"},{id:"test"}],review:"rejected"};
 const before = JSON.stringify(run); const expected = {id:"r-7",outcome:"partial",gateCount:2,approved:false};

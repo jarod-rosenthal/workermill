@@ -1,129 +1,163 @@
-/**
- * Run manifest — persists a full record of every /build run for debugging,
- * analytics, and reproducibility.
- *
- * Stored at ~/.workermill/projects/<id>/runs/<run-id>.json
- */
-
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
+/** Persistent, deliberately small evidence for a /build run. */
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { z } from "zod";
 import { getProjectRootDir } from "./project-data.js";
-import * as logger from "./logger.js";
+import type { QualityGateResult } from "./orchestrator/gates.js";
+import type { ReviewOutcome } from "./orchestrator/review.js";
+import type { RepositoryFingerprintResult } from "./repository-fingerprint.js";
+
+export const RUN_MANIFEST_VERSION = 2 as const;
+const MAX_ITEMS = 2_000;
+const MAX_TEXT = 5_000;
+const MAX_SHORT_TEXT = 500;
+const runIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+export type RunPhase = "active" | "terminal";
+export type RunOutcome = "success" | "partial" | "failed" | "cancelled";
+export type TerminalReason = "success" | "partial" | "cancelled" | "planner_failed" | "planning_rejected" | "permission_blocked" | "required_gate_failed" | "review_rejected" | "verification_failed" | "completion_blocked" | "cleanup_failed" | "no_progress" | "provider_failed" | "unknown";
 
 export interface RunManifestStory {
-  id: string;
-  title: string;
-  persona: string;
-  provider?: string;
-  model?: string;
-  status: "completed" | "failed" | "skipped";
-  retryCount: number;
-  failureCode?: string;
-  inputTokens?: number;
-  outputTokens?: number;
+  id: string; title: string; persona: string; provider?: string; model?: string;
+  status: "completed" | "failed" | "skipped"; retryCount: number; failureCode?: string;
+  inputTokens?: number; outputTokens?: number;
 }
-
-export interface RunManifestGate {
-  name: string;
-  passed: boolean;
-  output?: string;
+export interface RunManifestPlannedStory { id: string; title: string; persona: string; }
+export interface RunManifestStoryAttempt {
+  storyId: string; attempt: number; status: "started" | "completed" | "failed" | "cancelled";
+  startedAt: string; completedAt?: string; failureCode?: string;
+  /** Binding only; never endpoint, key, prompt, or tool payload. */
+  provider?: string; model?: string; role?: string;
 }
-
+/** Typed R13 gate evidence, intentionally without command output. */
+export type RunManifestGate = Pick<QualityGateResult, "id" | "name" | "source" | "required" | "status" | "passed">;
+/** Typed review evidence, intentionally without feedback or model text. */
 export interface RunManifestReview {
-  round: number;
-  provider: string;
-  model: string;
-  score: number;
-  decision: "approved" | "revision_needed" | "rejected";
-  inputTokens?: number;
-  outputTokens?: number;
+  round: number; provider: string; model: string; score?: number;
+  decision?: "approved" | "revision_needed" | "rejected";
+  outcome: Pick<ReviewOutcome, "kind" | "approved" | "decision" | "score">;
+  inputTokens?: number; outputTokens?: number;
 }
+export type RunManifestFingerprint = Pick<RepositoryFingerprintResult, "verified"> & {
+  algorithm?: "sha256"; head?: string; digest?: string; reason?: string;
+};
 
 export interface RunManifest {
-  id: string;
-  startedAt: string;
-  completedAt?: string;
-  userTask: string;
-  ticketKey?: string;
-  featureBranch?: string | null;
-  mainBranch?: string;
-  outcome: "success" | "partial" | "failed" | "cancelled";
+  version: typeof RUN_MANIFEST_VERSION;
+  id: string; startedAt: string; completedAt?: string; phase: RunPhase; terminalReason?: TerminalReason; priorRunId?: string;
+  userTask: string; ticketKey?: string; featureBranch?: string | null; mainBranch?: string; outcome: RunOutcome;
+  /** Existing summary retained for current callers and concise renderers. */
   stories: RunManifestStory[];
-  gates: RunManifestGate[];
-  reviews: RunManifestReview[];
-  totalCost: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
+  plannedStories: RunManifestPlannedStory[];
+  attempts: RunManifestStoryAttempt[];
+  gates: RunManifestGate[]; reviews: RunManifestReview[]; fingerprint?: RunManifestFingerprint;
+  effectiveSandbox?: "none" | "path" | "os";
+  totalCost: number; totalInputTokens: number; totalOutputTokens: number;
 }
 
-function runsDir(cwd?: string): string {
-  return path.join(getProjectRootDir(cwd), "runs");
+/** A readable pre-R15 record. It is explicitly not verified R13 evidence. */
+export interface LegacyRunManifest {
+  version: 0; phase: "legacy"; evidenceLimitation: "legacy_unverified";
+  id: string; startedAt: string; completedAt?: string; userTask: string; ticketKey?: string;
+  featureBranch?: string | null; mainBranch?: string; outcome: RunOutcome; stories: RunManifestStory[];
+  gates: Array<{ name: string; passed: boolean }>;
+  reviews: Array<{ round: number; provider: string; model: string; score: number; decision: "approved" | "revision_needed" | "rejected" }>;
+  totalCost: number; totalInputTokens: number; totalOutputTokens: number;
 }
+export type StoredRunManifest = RunManifest | LegacyRunManifest;
+export function isActiveRunManifest(manifest: StoredRunManifest): manifest is RunManifest & { phase: "active" } { return manifest.version === RUN_MANIFEST_VERSION && manifest.phase === "active"; }
+export function isTerminalRunManifest(manifest: StoredRunManifest): manifest is RunManifest & { phase: "terminal"; completedAt: string; terminalReason: TerminalReason } { return manifest.version === RUN_MANIFEST_VERSION && manifest.phase === "terminal"; }
 
-/** Generate a short deterministic run ID. */
-export function generateRunId(): string {
-  return `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`;
-}
+const boundedString = (max = MAX_SHORT_TEXT) => z.string().min(1).max(max);
+const optionalBoundedString = (max = MAX_SHORT_TEXT) => boundedString(max).optional();
+const nonNegative = z.number().finite().nonnegative();
+const dateString = z.string().refine((value) => Number.isFinite(Date.parse(value)), "invalid ISO date");
+const safeId = boundedString(128).regex(runIdPattern, "invalid run ID");
+const storySchema = z.object({ id: safeId, title: boundedString(), persona: boundedString(), provider: optionalBoundedString(), model: optionalBoundedString(), status: z.enum(["completed", "failed", "skipped"]), retryCount: z.number().int().nonnegative(), failureCode: optionalBoundedString(), inputTokens: nonNegative.optional(), outputTokens: nonNegative.optional() }).strict();
+const plannedStorySchema = z.object({ id: safeId, title: boundedString(), persona: boundedString() }).strict();
+const attemptSchema = z.object({ storyId: safeId, attempt: z.number().int().positive(), status: z.enum(["started", "completed", "failed", "cancelled"]), startedAt: dateString, completedAt: dateString.optional(), failureCode: optionalBoundedString(), provider: optionalBoundedString(), model: optionalBoundedString(), role: optionalBoundedString() }).strict();
+const gateSchema = z.object({ id: boundedString(), name: boundedString(), source: z.enum(["static", "required_command", "planner_verification"]), required: z.boolean(), status: z.enum(["passed", "failed", "cancelled"]), passed: z.boolean() }).strict();
+const reviewOutcomeSchema = z.object({ kind: z.enum(["approved", "disabled", "revision_needed", "rejected", "revision_exhausted", "revision_declined", "parse_failed", "provider_failed", "timed_out", "cancelled", "unavailable", "unverified"]), approved: z.boolean(), decision: z.enum(["approved", "revision_needed", "rejected"]).optional(), score: nonNegative.optional() }).strict();
+const reviewSchema = z.object({ round: z.number().int().positive(), provider: boundedString(), model: boundedString(), score: nonNegative.optional(), decision: z.enum(["approved", "revision_needed", "rejected"]).optional(), outcome: reviewOutcomeSchema, inputTokens: nonNegative.optional(), outputTokens: nonNegative.optional() }).strict();
+const fingerprintSchema = z.object({ verified: z.boolean(), algorithm: z.literal("sha256").optional(), head: optionalBoundedString(), digest: optionalBoundedString(), reason: optionalBoundedString() }).strict().superRefine((value, ctx) => {
+  if (value.verified && (!value.algorithm || !value.head || !value.digest)) ctx.addIssue({ code: "custom", message: "verified fingerprint is incomplete" });
+  if (!value.verified && !value.reason) ctx.addIssue({ code: "custom", message: "unverified fingerprint needs a reason" });
+});
+const currentSchema = z.object({
+  version: z.literal(RUN_MANIFEST_VERSION), id: safeId, startedAt: dateString, completedAt: dateString.optional(), phase: z.enum(["active", "terminal"]), terminalReason: z.enum(["success", "partial", "cancelled", "planner_failed", "planning_rejected", "permission_blocked", "required_gate_failed", "review_rejected", "verification_failed", "completion_blocked", "cleanup_failed", "no_progress", "provider_failed", "unknown"]).optional(), priorRunId: safeId.optional(),
+  userTask: z.string().max(MAX_TEXT), ticketKey: optionalBoundedString(), featureBranch: z.union([boundedString(), z.null()]).optional(), mainBranch: optionalBoundedString(), outcome: z.enum(["success", "partial", "failed", "cancelled"]),
+  stories: z.array(storySchema).max(MAX_ITEMS), plannedStories: z.array(plannedStorySchema).max(MAX_ITEMS), attempts: z.array(attemptSchema).max(MAX_ITEMS), gates: z.array(gateSchema).max(MAX_ITEMS), reviews: z.array(reviewSchema).max(MAX_ITEMS), fingerprint: fingerprintSchema.optional(), effectiveSandbox: z.enum(["none", "path", "os"]).optional(), totalCost: nonNegative, totalInputTokens: nonNegative, totalOutputTokens: nonNegative,
+}).strict().superRefine((value, ctx) => {
+  if (value.phase === "active" && (value.completedAt || value.terminalReason)) ctx.addIssue({ code: "custom", message: "active manifests cannot have terminal fields" });
+  if (value.phase === "terminal" && (!value.completedAt || !value.terminalReason)) ctx.addIssue({ code: "custom", message: "terminal manifests require completedAt and terminalReason" });
+});
+const legacySchema = z.object({
+  id: safeId, startedAt: dateString, completedAt: dateString.optional(), userTask: z.string().max(MAX_TEXT), ticketKey: optionalBoundedString(), featureBranch: z.union([boundedString(), z.null()]).optional(), mainBranch: optionalBoundedString(), outcome: z.enum(["success", "partial", "failed", "cancelled"]), stories: z.array(storySchema).max(MAX_ITEMS), gates: z.array(z.object({ name: boundedString(), passed: z.boolean(), output: z.string().max(1024 * 1024).optional() }).strict()).max(MAX_ITEMS), reviews: z.array(z.object({ round: z.number().int().positive(), provider: boundedString(), model: boundedString(), score: nonNegative, decision: z.enum(["approved", "revision_needed", "rejected"]), inputTokens: nonNegative.optional(), outputTokens: nonNegative.optional() }).strict()).max(MAX_ITEMS), totalCost: nonNegative, totalInputTokens: nonNegative, totalOutputTokens: nonNegative,
+}).strict();
 
-/** Create a new empty run manifest. */
+function runsDir(cwd?: string): string { return path.join(getProjectRootDir(cwd), "runs"); }
+export function isValidRunId(id: string): boolean { return runIdPattern.test(id); }
+export function getRunManifestPath(runId: string, cwd?: string): string | null { return isValidRunId(runId) ? path.join(runsDir(cwd), `${runId}.json`) : null; }
+export function generateRunId(): string { return `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`; }
+
 export function createRunManifest(userTask: string, ticketKey?: string): RunManifest {
+  return { version: RUN_MANIFEST_VERSION, id: generateRunId(), startedAt: new Date().toISOString(), phase: "active", userTask: userTask.slice(0, MAX_TEXT), ticketKey, outcome: "partial", stories: [], plannedStories: [], attempts: [], gates: [], reviews: [], totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 };
+}
+
+function allowlistedManifest(manifest: RunManifest): RunManifest {
   return {
-    id: generateRunId(),
-    startedAt: new Date().toISOString(),
-    userTask: userTask.slice(0, 5000),
-    ticketKey,
-    outcome: "cancelled",
-    stories: [],
-    gates: [],
-    reviews: [],
-    totalCost: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
+    version: RUN_MANIFEST_VERSION, id: manifest.id, startedAt: manifest.startedAt, completedAt: manifest.completedAt, phase: manifest.phase, terminalReason: manifest.terminalReason, priorRunId: manifest.priorRunId, userTask: manifest.userTask.slice(0, MAX_TEXT), ticketKey: manifest.ticketKey, featureBranch: manifest.featureBranch, mainBranch: manifest.mainBranch, outcome: manifest.outcome,
+    stories: manifest.stories.map(({ id, title, persona, provider, model, status, retryCount, failureCode, inputTokens, outputTokens }) => ({ id, title, persona, provider, model, status, retryCount, failureCode, inputTokens, outputTokens })),
+    plannedStories: manifest.plannedStories.map(({ id, title, persona }) => ({ id, title, persona })),
+    attempts: manifest.attempts.map(({ storyId, attempt, status, startedAt, completedAt, failureCode, provider, model, role }) => ({ storyId, attempt, status, startedAt, completedAt, failureCode, provider, model, role })),
+    gates: manifest.gates.map(({ id, name, source, required, status, passed }) => ({ id, name, source, required, status, passed })),
+    reviews: manifest.reviews.map(({ round, provider, model, score, decision, outcome, inputTokens, outputTokens }) => ({ round, provider, model, score, decision, outcome: { kind: outcome.kind, approved: outcome.approved, decision: outcome.decision, score: outcome.score }, inputTokens, outputTokens })),
+    fingerprint: manifest.fingerprint ? { verified: manifest.fingerprint.verified, algorithm: manifest.fingerprint.algorithm, head: manifest.fingerprint.head, digest: manifest.fingerprint.digest, reason: manifest.fingerprint.reason } : undefined,
+    effectiveSandbox: manifest.effectiveSandbox, totalCost: manifest.totalCost, totalInputTokens: manifest.totalInputTokens, totalOutputTokens: manifest.totalOutputTokens,
   };
 }
 
-/** Save the run manifest to disk. */
+/** Atomically replace one validated manifest. Persistence errors intentionally reach the caller. */
 export function saveRunManifest(manifest: RunManifest, cwd?: string): void {
+  const checked = currentSchema.parse(allowlistedManifest(manifest));
+  const dir = runsDir(cwd);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const target = getRunManifestPath(checked.id, cwd);
+  if (!target) throw new Error(`Invalid run manifest ID: ${checked.id}`);
+  const temp = path.join(dir, `.${checked.id}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
+  let descriptor: number | undefined;
   try {
-    const dir = runsDir(cwd);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `${manifest.id}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(manifest, null, 2) + "\n", "utf-8");
-  } catch (err) {
-    logger.warn("Failed to save run manifest", { id: manifest.id, error: err instanceof Error ? err.message : String(err) });
+    descriptor = fs.openSync(temp, "wx", 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(checked, null, 2)}\n`, "utf8");
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.renameSync(temp, target);
+  } catch (error) {
+    if (descriptor !== undefined) try { fs.closeSync(descriptor); } catch { /* best effort */ }
+    try { fs.unlinkSync(temp); } catch { /* owned temp may not have been created */ }
+    throw new Error(`Failed to persist run manifest ${checked.id}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
-/** Load a run manifest by ID. */
-export function loadRunManifest(runId: string, cwd?: string): RunManifest | null {
-  try {
-    const filePath = path.join(runsDir(cwd), `${runId}.json`);
-    if (!fs.existsSync(filePath)) return null;
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as RunManifest;
-  } catch {
-    return null;
-  }
+function parseLoaded(value: unknown): StoredRunManifest | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.version === RUN_MANIFEST_VERSION) { const parsed = currentSchema.safeParse(record); return parsed.success ? parsed.data : null; }
+  if (record.version !== undefined) return null;
+  const parsed = legacySchema.safeParse(record);
+  if (!parsed.success) return null;
+  const legacy = parsed.data;
+  return { version: 0, phase: "legacy", evidenceLimitation: "legacy_unverified", id: legacy.id, startedAt: legacy.startedAt, completedAt: legacy.completedAt, userTask: legacy.userTask, ticketKey: legacy.ticketKey, featureBranch: legacy.featureBranch, mainBranch: legacy.mainBranch, outcome: legacy.outcome, stories: legacy.stories, gates: legacy.gates.map(({ name, passed }) => ({ name, passed })), reviews: legacy.reviews.map(({ round, provider, model, score, decision }) => ({ round, provider, model, score, decision })), totalCost: legacy.totalCost, totalInputTokens: legacy.totalInputTokens, totalOutputTokens: legacy.totalOutputTokens };
 }
-
-/** List all run manifests, newest first. */
-export function listRunManifests(cwd?: string, limit = 20): RunManifest[] {
+function loadPath(filePath: string): StoredRunManifest | null { try { return parseLoaded(JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown); } catch { return null; } }
+export function loadRunManifest(runId: string, cwd?: string): StoredRunManifest | null { const target = getRunManifestPath(runId, cwd); return target ? loadPath(target) : null; }
+/** List valid records newest first; corrupt/unsupported files never break `wm runs`. */
+export function listRunManifests(cwd?: string, limit = 20): StoredRunManifest[] {
+  if (!Number.isInteger(limit) || limit < 0) return [];
   try {
-    const dir = runsDir(cwd);
-    if (!fs.existsSync(dir)) return [];
-    const files = fs.readdirSync(dir)
-      .filter(f => f.endsWith(".json"))
-      .sort()
-      .reverse()
-      .slice(0, limit);
-    return files
-      .map(f => {
-        try {
-          return JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8")) as RunManifest;
-        } catch { return null; }
-      })
-      .filter((m): m is RunManifest => m !== null);
-  } catch {
-    return [];
-  }
+    const records = fs.readdirSync(runsDir(cwd)).filter((file) => file.endsWith(".json")).map((file) => loadPath(path.join(runsDir(cwd), file))).filter((manifest): manifest is StoredRunManifest => manifest !== null).sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt) || right.id.localeCompare(left.id));
+    return records.slice(0, limit);
+  } catch { return []; }
 }

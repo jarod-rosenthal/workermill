@@ -115,6 +115,16 @@ describe("recovery mode", () => {
     }
   });
 
+  it("treats a real bounded Git probe failure as unknown, not as a deleted branch", async () => {
+    const nonRepository = fs.mkdtempSync(path.join(os.tmpdir(), "wm-recovery-probe-failure-"));
+    try {
+      const { probeBranchExists } = await import("../recovery.js");
+      expect(probeBranchExists(nonRepository, "feature/not-proven-missing")).toBe("unknown");
+    } finally {
+      fs.rmSync(nonRepository, { recursive: true, force: true });
+    }
+  });
+
   it("prints a recovery prompt with remaining stories and options", async () => {
     const { printRecoveryPrompt } = await import("../recovery.js");
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});

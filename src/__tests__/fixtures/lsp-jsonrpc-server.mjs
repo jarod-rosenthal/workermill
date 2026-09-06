@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 
 const [mode = "normal", marker] = process.argv.slice(2);
 
@@ -9,10 +9,12 @@ if (mode === "write-marker") {
 }
 
 if (mode === "late-child") {
-  setTimeout(() => {
-    if (marker) writeFileSync(marker, "late");
-    process.exit(0);
-  }, 500);
+  process.on("SIGTERM", () => {
+    // The fixture proves the owner escalates TERM to KILL for descendants.
+  });
+  if (marker) writeFileSync(marker, String(process.pid));
+  process.send?.({ ready: true });
+  setInterval(() => {}, 1_000);
 }
 
 let buffer = Buffer.alloc(0);
@@ -24,19 +26,27 @@ function send(message) {
 
 function handle(message) {
   if (message.method === "initialize") {
-    if (mode === "hang-initialize") return;
+    if (mode === "hang-initialize") {
+      if (marker) writeFileSync(`${marker}.initialize`, "started");
+      return;
+    }
     send({ jsonrpc: "2.0", id: message.id, result: { capabilities: { diagnosticProvider: {} } } });
     return;
   }
   if (typeof message.id !== "number") return;
-  if (mode === "hang-request") return;
+  if (mode === "hang-request") {
+    if (marker) writeFileSync(`${marker}.request`, "started");
+    return;
+  }
   if (mode === "orphan-after-ready") {
-    if (marker && !existsSync(`${marker}.started`)) writeFileSync(`${marker}.started`, "ready");
-    spawn(process.execPath, [new URL(import.meta.url).pathname, "late-child", marker], {
+    const child = spawn(process.execPath, [new URL(import.meta.url).pathname, "late-child", marker], {
       detached: false,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
-    process.exit(0);
+    child.once("message", (ready) => {
+      if (ready?.ready) process.exit(0);
+    });
+    return;
   }
   if (mode === "oversized-response") {
     send({ jsonrpc: "2.0", id: message.id, result: "x".repeat(4096) });

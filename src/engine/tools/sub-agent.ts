@@ -120,8 +120,9 @@ interface WorktreeState { kind: "empty" | "changed" | "unknown"; diffStat: strin
 async function inspectWorktree(worktree: WorktreeInfo, context: ToolExecutionContext): Promise<WorktreeState> {
   // Status/diff can execute configured Git clean filters. They must not run
   // on the host outside an OS child's boundary, even during finalization.
-  const inspectionSignal = AbortSignal.timeout(5_000);
+  const inspectionSignal = AbortSignal.any([context.signal, AbortSignal.timeout(5_000)]);
   const inspectGit = async (args: readonly string[]): Promise<string> => {
+    inspectionSignal.throwIfAborted();
     const command = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args]
       .map((arg) => "'" + arg.replace(/'/g, "'\\''") + "'").join(" ");
     const result = await runScopedProcess({
@@ -134,9 +135,11 @@ async function inspectWorktree(worktree: WorktreeInfo, context: ToolExecutionCon
       capabilities: { allowedNetworkDomains: [], allowLocalBinding: false, allowDockerSocket: false },
     });
     if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) throw new Error("Unable to inspect complete child state");
+    inspectionSignal.throwIfAborted();
     return result.stdout.trim();
   };
   try {
+    inspectionSignal.throwIfAborted();
     const status = await inspectGit(["status", "--porcelain", "--untracked-files=all", "--ignored=matching"]);
     const head = await inspectGit(["rev-parse", "HEAD"]);
     const diffStat = [
@@ -145,7 +148,10 @@ async function inspectWorktree(worktree: WorktreeInfo, context: ToolExecutionCon
       head === worktree.startHead ? "" : await inspectGit(["diff", "--no-ext-diff", "--no-textconv", "--stat", `${worktree.startHead}..HEAD`]),
     ].filter(Boolean).join("\n");
     return { kind: !status && head === worktree.startHead ? "empty" : "changed", diffStat: diffStat || (head === worktree.startHead ? "(no diff stat available)" : "(committed changes)") };
-  } catch { return { kind: "unknown", diffStat: "(unable to inspect worktree state)" }; }
+  } catch (error) {
+    if (inspectionSignal.aborted) throw error;
+    return { kind: "unknown", diffStat: "(unable to inspect worktree state)" };
+  }
 }
 async function removeConfirmedEmptyWorktree(workingDir: string, worktree: WorktreeInfo, signal: AbortSignal, runId: string): Promise<void> {
   await gitAdmin(workingDir, ["worktree", "remove", worktree.worktreePath], signal, runId);
@@ -264,10 +270,9 @@ async function runSubAgent(
   }
   // Transport failure can finish before concurrently dispatched tool calls.
   // Await the whole tool lifetime, including hooks, not only OS process exit.
-  // A normal completed child may still perform conservative administrative
-  // inspection. Abort only failing attempts; successful dispatched tools are
-  // drained before their owner proceeds.
-  if (!result.success || terminalError) controller.abort();
+  // The model/tool lifetime always closes after its stream settles. The outer
+  // administrative lifetime remains live for worktree inspection/removal.
+  controller.abort(new Error("Sub-agent model attempt finished"));
   await Promise.allSettled([...pending]);
   if (result.success && terminalError) {
     result = { success: false, content, turnsUsed, error: `Sub-agent failed: ${terminalError instanceof Error ? terminalError.message : String(terminalError)}` };
@@ -292,20 +297,23 @@ export function createSubAgentExecutor(
     }
     const parent = options.executionContext;
     const lifetime = childAbortController(parent?.signal);
-    const signal = lifetime.controller.signal;
+    const outerSignal = lifetime.controller.signal;
+    const modelController = new AbortController();
+    const modelSignal = AbortSignal.any([outerSignal, modelController.signal]);
     let context: ToolExecutionContext | undefined;
     let worktree: WorktreeInfo | undefined;
     let result: SubAgentResult = { success: false, content: "", turnsUsed: 0, error: "Child did not start." };
     try {
-      if (signal.aborted) throw new Error("Parent run is cancelled.");
+    try {
+      if (outerSignal.aborted) throw new Error("Parent run is cancelled.");
       if (isolated) {
         if (!parent) throw new Error("A parent permission context is required for isolated work.");
         const state = parent.getPermissionState();
         if (state.mode === "plan" || state.readOnlyRole) throw new Error("Parent permission state is read-only.");
-        worktree = await createWorktree(workingDir, prompt, signal, `child-admin-${crypto.randomUUID()}`);
-        context = childContext(parent, worktree.scope, false, signal);
+        worktree = await createWorktree(workingDir, prompt, outerSignal, `child-admin-${crypto.randomUUID()}`);
+        context = childContext(parent, worktree.scope, false, modelSignal);
         const checkout = await runScopedProcess({
-          runId: context.runId, signal, cwd: worktree.worktreePath,
+          runId: context.runId, signal: modelSignal, cwd: worktree.worktreePath,
           command: "git -c core.hooksPath=/dev/null -c core.fsmonitor=false read-tree --reset -u HEAD",
           timeoutMs: 30_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
         }, {
@@ -324,11 +332,11 @@ export function createSubAgentExecutor(
           model, options.createTools(worktree.worktreePath, worktree.scope, context),
           prompt, maxTurns,
           `Work only in isolated checkout ${worktree.worktreePath}. Changes remain on your branch for review. Do not spawn children. Path checks are not arbitrary-shell containment.`,
-          context, lifetime.controller, options.onUsage,
+          context, modelController, options.onUsage,
         );
       } else {
         const scope = parent?.scope ?? createPathScope(workingDir);
-        context = childContext(parent, scope, true, signal);
+        context = childContext(parent, scope, true, modelSignal);
         // Rebuild closures with the child's scope/signal instead of retaining
         // full-disk or stale parent execution options.
         const rebuilt = options.createTools(workingDir, scope, context);
@@ -337,7 +345,7 @@ export function createSubAgentExecutor(
         result = await runSubAgent(
           model, tools, prompt, maxTurns,
           "Explore the codebase using read-only tools. Do not modify files or spawn children. Provide specific findings.",
-          context, lifetime.controller, options.onUsage,
+          context, modelController, options.onUsage,
         );
       }
     } catch (error) {
@@ -346,15 +354,12 @@ export function createSubAgentExecutor(
         error: `Sub-agent failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     } finally {
-      // A successful child still needs a live signal for its conservative
-      // worktree inspection/removal below. Failed or cancelled children are
-      // aborted before cleanup and are always preserved.
-      if (!result?.success || signal.aborted) lifetime.controller.abort();
+      modelController.abort(new Error("Sub-agent model cleanup"));
       if (context) {
         const cleanup = await Promise.allSettled([
-          cancelAndWaitForRunProcesses(context.runId),
-          cleanupScopedBackgroundProcesses(context.runId),
-          shutdownLSPRun(context.runId),
+          Promise.resolve().then(() => cancelAndWaitForRunProcesses(context!.runId)),
+          Promise.resolve().then(() => cleanupScopedBackgroundProcesses(context!.runId)),
+          Promise.resolve().then(() => shutdownLSPRun(context!.runId)),
         ]);
         const failures = cleanup.filter((entry): entry is PromiseRejectedResult => entry.status === "rejected");
         if (failures.length) {
@@ -365,19 +370,25 @@ export function createSubAgentExecutor(
         };
         }
       }
-      lifetime.dispose();
     }
 
     if (!worktree) return result;
     const identity = `Branch \`${worktree.branchName}\`; worktree \`${worktree.worktreePath}\`.`;
     // Unsuccessful children are always preserved; do not delay cancellation
     // by invoking repository-defined filters merely to produce a diff summary.
-    const state: WorktreeState = result.success && context
-      ? await inspectWorktree(worktree, context)
-      : { kind: "unknown", diffStat: "(inspection skipped after failure or cancellation)" };
+    let state: WorktreeState = { kind: "unknown", diffStat: "(inspection skipped after failure or cancellation)" };
+    if (result.success && context) {
+      try {
+        const administrativeContext = { ...context, signal: outerSignal };
+        state = await inspectWorktree(worktree, administrativeContext);
+      } catch (error) {
+        result = { ...result, success: false, error: `Child inspection cancelled: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }
     if (result.success && state.kind === "empty") {
       try {
-        await removeConfirmedEmptyWorktree(workingDir, worktree, signal, `child-admin-${crypto.randomUUID()}`);
+        outerSignal.throwIfAborted();
+        await removeConfirmedEmptyWorktree(workingDir, worktree, outerSignal, `child-admin-${crypto.randomUUID()}`);
         return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` };
       } catch (error) {
         return {
@@ -392,6 +403,10 @@ export function createSubAgentExecutor(
     return result.success
       ? { ...result, content: `${result.content}\n\n${identity} ${detail}` }
       : { ...result, error: `${result.error ?? "Sub-agent failed"}\n\n${identity} ${detail}` };
+    } finally {
+      lifetime.controller.abort(new Error("Sub-agent administrative lifetime finished"));
+      lifetime.dispose();
+    }
   };
 }
 

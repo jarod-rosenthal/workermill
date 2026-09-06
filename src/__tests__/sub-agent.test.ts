@@ -52,6 +52,11 @@ function stream(): void {
     finishReason: Promise.resolve("stop"),
   }));
 }
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: Error) => void } {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  return { promise: new Promise<T>((yes, no) => { resolve = yes; reject = no; }), resolve, reject };
+}
 
 async function waitForFile(file: string): Promise<void> {
   if (fs.existsSync(file)) return;
@@ -104,6 +109,57 @@ describe("isolated sub-agents", () => {
     } finally {
       process.env.PATH = oldPath;
     }
+  });
+
+  it("preserves worktree and reports failure when parent cancels a started inspection", async () => {
+    const workingDir = repo();
+    const wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-git-inspection-"));
+    dirs.push(wrapperDir);
+    const ready = path.join(wrapperDir, "inspection-started");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    fs.writeFileSync(path.join(wrapperDir, "git"), [
+      "#!/bin/sh", "for arg in \"$@\"; do",
+      `  if [ \"$arg\" = status ]; then touch \"${ready}\"; while :; do sleep 1; done; fi`,
+      "done", `exec \"${realGit}\" \"$@\"`, "",
+    ].join("\n"));
+    fs.chmodSync(path.join(wrapperDir, "git"), 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${wrapperDir}:${oldPath ?? ""}`;
+    const parentAbort = new AbortController();
+    try {
+      sdk.action = "empty";
+      stream();
+      const executor = createSubAgentExecutor({} as never, workingDir, {}, {
+        executionContext: { ...context(workingDir), signal: parentAbort.signal }, createTools: () => ({}),
+      });
+      const running = executor({ prompt: "cancel inspection", isolated: true });
+      await waitForFile(ready);
+      parentAbort.abort(new Error("cancel inspection"));
+      const result = await running;
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("inspection");
+      const child = result.error?.match(/worktree `([^`]+)`/)?.[1];
+      expect(child && fs.existsSync(child)).toBe(true);
+    } finally { process.env.PATH = oldPath; }
+  });
+
+  it("drains a late captured model-tool rejection after normal stream completion", async () => {
+    const workingDir = repo();
+    const started = deferred<void>();
+    const toolFailure = deferred<string>();
+    sdk.streamText.mockImplementation((options: { tools: Record<string, ChildTool> }) => ({
+      textStream: (async function* () { void options.tools.read_file.execute?.({ path: "base.txt" }); await started.promise; yield "done"; })(),
+      text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
+    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: () => toolFailure.promise } }, {
+      executionContext: context(workingDir), createTools: () => ({ read_file: { execute: () => toolFailure.promise } }),
+    });
+    const running = executor({ prompt: "read", isolated: false });
+    started.resolve();
+    toolFailure.reject(new Error("late tool failure"));
+    const result = await running;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("late tool failure");
   });
 
   it("rejects a child explicit-file escape and preserves the failed worktree", async () => {

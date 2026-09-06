@@ -17,7 +17,7 @@ There is **no server, no database, no frontend, and no API package**. Everything
 | LLM layer | [Vercel AI SDK](https://sdk.vercel.ai) v6 |
 | CLI framework | Commander.js |
 | Tests | Vitest |
-| Runtime | Node 20+ |
+| Runtime | Node 22.12+ |
 
 For the source map and architecture, read [docs/contributing.md](docs/contributing.md) and [docs/architecture.md](docs/architecture.md).
 

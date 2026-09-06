@@ -4,7 +4,7 @@ Thanks for considering a contribution. WorkerMill CLI is Apache 2.0 licensed.
 
 ## Development Setup
 
-**Prerequisites:** Node.js 20+, Git, an LLM provider (Ollama for fully local, or an API key for a cloud provider).
+**Prerequisites:** Node.js 22.12+, Git, an LLM provider (Ollama for fully local, or an API key for a cloud provider). Ink 7 requires Node 22; the current Vite development dependency requires at least 22.12 on that release line.
 
 ```bash
 git clone https://github.com/jarod-rosenthal/workermill.git

@@ -14,7 +14,7 @@ Point it at a ticket. Get a pull request — planned, built by experts, and inde
 
 [![npm version](https://img.shields.io/npm/v/workermill?color=blue)](https://www.npmjs.com/package/workermill)
 [![npm downloads](https://img.shields.io/npm/dw/workermill?color=blue)](https://www.npmjs.com/package/workermill)
-![Node.js](https://img.shields.io/badge/Node.js_20+-339933?style=flat&logo=node.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js_22.12+-339933?style=flat&logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
 [![GitHub stars](https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social)](https://github.com/jarod-rosenthal/workermill/stargazers)
 [![License](https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue)](https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE)
@@ -51,7 +51,7 @@ wm doctor
 
 No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
 
-**Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
+**Requirements:** Node.js 22.12+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
 
 ---
 

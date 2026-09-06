@@ -217,7 +217,7 @@ Pre- and post-tool hooks run shell commands or HTTP requests around tool executi
 
 ## Costs & Tokens
 
-`CostTracker` records observed calls for run roles, child calls, compaction, failures, and retries once, then reports estimated per-role costs via `/cost` and the status bar. Unknown pricing is excluded and incomplete usage is labelled. Local API cost can be $0 while hardware and electricity remain unestimated. A run view is per-run; a session view is cumulative and preserves legacy history. Program decomposition occurs outside a build-run ledger. These figures are not provider invoices or application-wide billing totals. See the [qualification record](recovery/r24-qualification.md) for regression evidence and limits.
+`CostTracker` records observed calls for run roles, child calls, compaction, failures, and retries once, retains role/model buckets in session records and `wm stats`, and reports the cumulative estimate via `/cost` and the status bar. Unknown pricing is excluded and incomplete usage is labelled. Local API cost can be $0 while hardware and electricity remain unestimated. A run view is per-run; a session view is cumulative and preserves legacy history. Program decomposition occurs outside a build-run ledger. These figures are not provider invoices or application-wide billing totals. See the [qualification record](recovery/r24-qualification.md) for regression evidence and limits.
 
 ## What the CLI Is Not
 

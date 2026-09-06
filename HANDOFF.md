@@ -12,6 +12,8 @@ Qualification worktree `/home/user/github/workermill-qualification-cont`, branch
 
 No paid models, publication, pushes, PRs, releases, or cleanup of preserved worktrees. Workers never escalate (host hangs); root handles sandbox-required qualification. Checkpoint before dispatch/integration, after failures, and every 15 minutes. Current source review/evidence map: docs/recovery/r24-qualification.md. Final update must refresh retrospective and continuation inventory. Historical snapshots follow.
 
+R22 candidate f5a70abc integrated; worker documentation checks 78 passed and typecheck passed. Root corrected the architecture's /cost breakdown claim and added concise headless/sandbox migration release notes. Final combined source/docs commit will now run typecheck, full suite, build and installed package/PTY suite. No remaining implementation worker is active.
+
 ## Historical audit state (before the repair below)
 
 - Repository: `/home/user/github/workermill`, a single-package TypeScript CLI, npm package `workermill` (commands `wm` / `workermill`). This is not the archived server/frontend project.

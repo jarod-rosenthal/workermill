@@ -274,11 +274,11 @@ program
 
     // Check Node.js version
     const nodeVersion = process.version;
-    const major = parseInt(nodeVersion.slice(1), 10);
-    if (major >= 20) {
+    const [major, minor] = nodeVersion.slice(1).split(".").map(Number);
+    if (major > 22 || (major === 22 && minor >= 12)) {
       console.log(chalk.green("  ✓") + ` Node.js ${nodeVersion}`);
     } else {
-      console.log(chalk.red("  ✗") + ` Node.js ${nodeVersion} — requires 20+`);
+      console.log(chalk.red("  ✗") + ` Node.js ${nodeVersion} — requires 22.12+`);
       issues++;
     }
 

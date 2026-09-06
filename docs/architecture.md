@@ -109,13 +109,17 @@ The `memory` tool gives agents persistent, file-based memory across sessions. Ag
 
 Each tool has metadata in `src/engine/tools/tool-metadata.ts` — `isReadOnly`, `isDestructive`, `acceptEditsApproved`, `concurrencySafe` — from which the permission system derives its read-only and accept-edits tool sets, and the concurrency scheduler decides what can run in parallel. It is an internal registry, not a tool agents can call.
 
-### Filesystem scope and foreground processes
+### Filesystem scope and command processes
 
 `src/engine/path-policy.ts` canonicalizes explicit file-tool paths, following existing symlinks and resolving the nearest existing parent of new files. Multi-file patches validate every target before writing. Additional file or directory access must be supplied explicitly through `createToolDefinitions` options as `extraPathGrants`, with `read` or `read_write` access; an absolute image path is not itself a grant. Full-disk mode disables containment checks, not canonicalization. Application memory uses a separate state-directory scope.
 
 These path checks are not an OS sandbox: they do not contain arbitrary shell code or eliminate filesystem races. Git worktrees separate changes, not permissions.
 
-`src/engine/process-runner.ts` owns foreground shell processes by run ID. It accepts an abort signal, timeout, and output bound; on cancellation it sends TERM followed by KILL to the Unix process group. Output truncation is reported explicitly. Native Windows execution requires WSL. Adapters must pass their own run ID and signal to get run-scoped cancellation; an omitted ID uses the legacy foreground-bash cancellation scope.
+`src/engine/process-runner.ts` owns shell processes by run ID. It accepts an abort signal, timeout, and output bound; on cancellation it sends TERM followed by KILL to the Unix process group. Output truncation is reported explicitly. Native Windows execution requires WSL. Adapters must pass their own run ID and signal to get run-scoped cancellation; an omitted ID uses the legacy foreground-bash cancellation scope.
+
+Pass `runId`, `signal`, `scope`, and global-user `sandboxCapabilities` in the fourth argument to `createToolDefinitions`. Reuse the same canonical scope for the run: do not recreate grants from raw paths for each command. Tools bind that scope to `runScopedProcess`; gate callers can use `createScopedCommandRunner` with the same scope and capabilities. Explicit OS setup or teardown failure is non-success, never permission to retry the raw command. The runtime has [documented filesystem and network exceptions](configuration.md#sandboxcapabilities).
+
+Background commands use the same process lifecycle in path/full-disk mode, retain at most 100 KiB of output, and have a 15-minute deadline. OS mode rejects background commands because the singleton sandbox configuration must remain leased for the entire command. Retrieve or cancel a background shell with its owning run ID; run cleanup must await `cleanupScopedBackgroundProcesses(runId)`. Global cleanup is reserved for CLI exit. A Git worktree or a background shell ID does not grant additional permissions.
 
 ## MCP (Model Context Protocol)
 

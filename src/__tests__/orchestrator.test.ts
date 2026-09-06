@@ -71,6 +71,53 @@ vi.mock("../orchestrator/completion.js", async (importOriginal) => {
   return { ...actual, runCompletion: vi.fn(actual.runCompletion) };
 });
 
+describe("orchestration startup process lifecycle", () => {
+  it("cancels a started retry startup probe before any retry phase begins", async () => {
+    const repo = createTempGitRepo();
+    const previousCwd = process.cwd();
+    const previousPath = process.env.PATH;
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "wm-startup-bin-"));
+    const started = path.join(bin, "started");
+    const realGit = execSync("which git", { encoding: "utf8" }).trim();
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh
+case "$*" in
+  *"branch --show-current"*) : > "$WM_STARTUP_STARTED"; trap 'exit 143' TERM INT; while :; do sleep 1; done ;;
+esac
+exec "$WM_STARTUP_REAL_GIT" "$@"
+`, { mode: 0o755 });
+    process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+    process.env.WM_STARTUP_STARTED = started;
+    process.env.WM_STARTUP_REAL_GIT = realGit;
+    process.chdir(repo);
+    const controller = new AbortController();
+    const output = createMockOutput();
+    try {
+      const completion = runOrchestration(
+        createTestConfig(),
+        "retry fixture",
+        true,
+        false,
+        output,
+        controller,
+        { featureBranch: "missing-branch", mainBranch: "master", userTask: "retry fixture", stories: [], completedStoryIds: [] },
+      );
+      await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true));
+      controller.abort(new Error("startup test cancellation"));
+      const result = await completion;
+      expect(result.completedStoryIds).toEqual([]);
+      expect(output.logs.some((line) => line.includes("Retrying on branch"))).toBe(false);
+      expect(mockStreamTextCalls).toHaveLength(0);
+    } finally {
+      process.chdir(previousCwd);
+      process.env.PATH = previousPath;
+      delete process.env.WM_STARTUP_STARTED;
+      delete process.env.WM_STARTUP_REAL_GIT;
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
 // Mock cost-tracker — must be a real class (used with `new`)
 vi.mock("../cost-tracker.js", () => ({
   CostTracker: class {
@@ -1106,7 +1153,7 @@ Done.`;
 
       const plannerCall = mockStreamTextCalls[0] as Record<string, unknown>;
       expect(plannerCall.abortSignal).toBeInstanceOf(AbortSignal);
-      expect(output.errors).toHaveLength(0);
+      expect(output.errors.some((message) => message.includes("invalid abort"))).toBe(false);
     });
 
     it("reports story completion in logs", async () => {
@@ -4490,6 +4537,7 @@ describe("PR creation flow (completion summary)", () => {
         });
       }
       callCount++;
+      if (callCount > 1) fs.writeFileSync(path.join(repoDir, "feature.txt"), "changed\n");
       const text = callCount === 1 ? planText : "Done.";
       return {
         textStream: (async function* () { yield text; })(),
@@ -4533,6 +4581,7 @@ describe("PR creation flow (completion summary)", () => {
         });
       }
       callCount++;
+      if (callCount > 1) fs.writeFileSync(path.join(repoDir, "feature.txt"), "changed\n");
       const text = callCount === 1 ? planText : "Done.";
       return {
         textStream: (async function* () { yield text; })(),

@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -8,7 +9,12 @@ import {
 import { getStateRoot } from "../state-root.js";
 import { getOSSandboxDependencyStatus } from "../sandbox-mode.js";
 import type { SandboxCapabilities } from "../config.js";
-import { createPathScope, type PathGrant, type PathScope } from "./path-policy.js";
+import {
+  canonicalizePath,
+  getPathGrantKind,
+  resolvePath,
+  type PathScope,
+} from "./path-policy.js";
 import { runProcess, type ProcessRequest, type ProcessResult } from "./process-runner.js";
 
 export type { SandboxCapabilities } from "../config.js";
@@ -48,6 +54,21 @@ function cancelled(): ProcessResult {
 /** A FIFO lease for the singleton sandbox manager, cancellable while waiting. */
 class SandboxLease {
   private tail = Promise.resolve();
+  private resetRequired = false;
+
+  async resetBeforeInitialize(manager: ScopedProcessDependencies["sandboxManager"]): Promise<void> {
+    if (!this.resetRequired) return;
+    await manager.reset();
+    this.resetRequired = false;
+  }
+
+  markResetRequired(): void {
+    this.resetRequired = true;
+  }
+
+  markResetComplete(): void {
+    this.resetRequired = false;
+  }
 
   acquire(signal: AbortSignal): Promise<() => void> {
     let releaseTurn!: () => void;
@@ -81,9 +102,8 @@ class SandboxLease {
 
 const sandboxLease = new SandboxLease();
 
-function writableGrants(scope: PathScope, capabilities: SandboxCapabilities | undefined): string[] {
-  const grants = [...scope.extraGrants, ...(capabilities?.extraPathGrants ?? [])];
-  return grants.filter((grant) => grant.access === "read_write").map((grant) => grant.root);
+function writableGrants(scope: PathScope): string[] {
+  return scope.extraGrants.filter((grant) => grant.access === "read_write").map((grant) => grant.root);
 }
 
 function runtimeConfig(
@@ -107,10 +127,36 @@ function runtimeConfig(
       // Reads are runtime-default allow except for these sensitive locations.
       // This intentionally does not claim that every host read is confined.
       denyRead: [path.join(os.homedir(), ".ssh"), stateRoot],
-      allowWrite: [scope.workspace, ...writableGrants(scope, capabilities), tempDir],
+      allowWrite: [scope.workspace, ...writableGrants(scope), tempDir],
       denyWrite: [],
     },
   };
+}
+
+/**
+ * A PathScope is a frozen authorization decision. Do not recanonicalize it:
+ * a symlink or file-to-directory replacement must not expand an old grant.
+ */
+function assertUnchangedScope(scope: PathScope): void {
+  if (canonicalizePath(scope.workspace) !== scope.workspace) {
+    throw new Error("OS sandbox workspace changed after it was authorized");
+  }
+  for (const grant of scope.extraGrants) {
+    if (canonicalizePath(grant.root) !== grant.root) {
+      throw new Error(`OS sandbox path grant changed after it was authorized: ${grant.root}`);
+    }
+    if (getPathGrantKind(grant) !== "directory") {
+      // File/exact grants deliberately cannot become directory capabilities.
+      try {
+        const stat = statSync(grant.root);
+        if (stat.isDirectory()) {
+          throw new Error(`OS sandbox non-directory grant became a directory: ${grant.root}`);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("OS sandbox")) throw error;
+      }
+    }
+  }
 }
 
 /**
@@ -139,6 +185,7 @@ export function createScopedProcessRunner(
 
     let release: (() => void) | undefined;
     let tempDir: string | undefined;
+    let phase: "setup" | "execution" = "setup";
     try {
       try {
         release = await sandboxLease.acquire(request.signal);
@@ -147,28 +194,46 @@ export function createScopedProcessRunner(
       }
       if (request.signal.aborted) return cancelled();
 
-      // Canonicalize every explicit capability root before it reaches runtime.
-      const scope = createPathScope(options.scope.workspace, [
-        ...options.scope.extraGrants,
-        ...(options.capabilities?.extraPathGrants ?? []),
-      ]);
+      try {
+        await sandboxLease.resetBeforeInitialize(dependencies.sandboxManager);
+      } catch (error) {
+        return failed(`OS sandbox reset is still required; command was not executed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (request.signal.aborted) return cancelled();
+
+      // Callers must create the scope once, including any approved global
+      // grants. Raw capability roots are not reauthorized per command here.
+      const scope = options.scope;
+      assertUnchangedScope(scope);
+      const cwd = resolvePath(scope, request.cwd, "read_write");
       tempDir = await mkdtemp(path.join(os.tmpdir(), "workermill-sandbox-"));
       if (request.signal.aborted) return cancelled();
       await dependencies.sandboxManager.initialize(runtimeConfig(scope, options.capabilities, tempDir, dependencies.platform));
       if (request.signal.aborted) return cancelled();
       const command = await dependencies.sandboxManager.wrapWithSandbox(request.command, undefined, undefined, request.signal);
       if (request.signal.aborted) return cancelled();
+      phase = "execution";
       return await dependencies.runProcess({
         ...request,
+        cwd,
         env: { ...request.env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir },
         command,
       });
     } catch (error) {
-      return failed(`OS sandbox setup failed; command was not executed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      return phase === "setup"
+        ? failed(`OS sandbox setup failed; command was not executed: ${message}`)
+        : failed(`OS sandbox execution failed after command started: ${message}`);
     } finally {
       if (release) {
         try { dependencies.sandboxManager.cleanupAfterCommand(); } catch { /* best effort */ }
-        try { await dependencies.sandboxManager.reset(); } catch { /* retained lease prevents concurrent reset */ }
+        try {
+          await dependencies.sandboxManager.reset();
+          sandboxLease.markResetComplete();
+        } catch {
+          // Do not initialize a potentially stale singleton profile next time.
+          sandboxLease.markResetRequired();
+        }
         try {
           if (tempDir) await rm(tempDir, { recursive: true, force: true });
         } finally {

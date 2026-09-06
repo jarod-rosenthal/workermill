@@ -15,8 +15,8 @@ export interface PathScope {
   extraGrants: readonly PathGrant[];
 }
 
-type GrantKind = "file" | "directory" | "exact";
-const grantKinds = new WeakMap<object, GrantKind>();
+export type PathGrantKind = "file" | "directory" | "exact";
+const grantKinds = new WeakMap<object, PathGrantKind>();
 
 export interface ResolvePathOptions {
   /** Full-disk mode still canonicalizes paths, but does not apply containment. */
@@ -91,7 +91,7 @@ function isWithin(root: string, candidate: string): boolean {
 
 function canonicalGrant(grant: PathGrant): PathGrant {
   const root = canonicalizePath(grant.root);
-  let kind: GrantKind = "exact";
+  let kind: PathGrantKind = "exact";
   try {
     kind = fs.statSync(root).isDirectory() ? "directory" : "file";
   } catch (error) {
@@ -100,6 +100,11 @@ function canonicalGrant(grant: PathGrant): PathGrant {
   const normalized = { root, access: grant.access };
   grantKinds.set(normalized, kind);
   return normalized;
+}
+
+/** Return the identity captured when a grant was canonicalized into a scope. */
+export function getPathGrantKind(grant: PathGrant): PathGrantKind {
+  return grantKinds.get(grant) ?? "exact";
 }
 
 /** Create a scope and canonicalize its workspace and explicit grants once. */

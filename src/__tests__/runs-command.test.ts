@@ -72,6 +72,12 @@ describe("runs-command", () => {
     expect(logSpy).toHaveBeenNthCalledWith(2, "null");
   });
 
+  it("renders an active run as in-progress in JSON", () => {
+    listRunManifestsMock.mockReturnValue([makeRun({ phase: "active", outcome: "in_progress" })]);
+    runsList({ json: true });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"outcome": "in_progress"'));
+  });
+
   it("shows a run by exact id in json mode", () => {
     listRunManifestsMock.mockReturnValue([
       makeRun({ id: "run-abc123" }),

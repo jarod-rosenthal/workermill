@@ -125,6 +125,33 @@ describe("recovery mode", () => {
     }
   });
 
+  it("keeps saved recovery state when Git times out and reports branch status unknown", async () => {
+    const repo = createTempGitRepo();
+    try {
+      vi.resetModules();
+      vi.doMock("child_process", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("child_process")>();
+        return {
+          ...actual,
+          execFileSync: vi.fn(() => {
+            throw Object.assign(new Error("git timed out"), { code: "ETIMEDOUT", status: null });
+          }),
+        };
+      });
+      const { saveShipRun } = await import("../ship-state.js");
+      const { detectInterruptedBuild } = await import("../recovery.js");
+      saveShipRun({
+        workingDir: repo, featureBranch: "feat/unknown", mainBranch: "main", userTask: "Recover safely",
+        stories: [{ id: "s:1", title: "Pending", persona: "backend_developer", description: "pending", dependencies: [] } as any],
+        completedStoryIds: [], updatedAt: new Date().toISOString(),
+      });
+      expect(detectInterruptedBuild(repo)).toMatchObject({ branchExists: "unknown", remainingCount: 1 });
+    } finally {
+      vi.doUnmock("child_process");
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("prints a recovery prompt with remaining stories and options", async () => {
     const { printRecoveryPrompt } = await import("../recovery.js");
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});

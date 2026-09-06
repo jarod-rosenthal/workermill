@@ -23,6 +23,7 @@ function formatDate(iso: string): string {
 
 function outcomeLabel(outcome: string): string {
   switch (outcome) {
+    case "in_progress": return chalk.cyan("◌ in progress");
     case "success": return chalk.green("✓ success");
     case "partial": return chalk.yellow("◐ partial");
     case "failed": return chalk.red("✗ failed");
@@ -65,7 +66,7 @@ export function runsList(options: { json?: boolean }): void {
     const date = run.startedAt ? formatDate(run.startedAt) : "unknown";
     const cost = run.totalCost > 0 ? ` · $${run.totalCost.toFixed(2)}` : "";
     const branch = run.featureBranch ? ` · ${run.featureBranch}` : "";
-    const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : "";
+    const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : run.phase === "active" ? chalk.cyan(" · active") : "";
 
     console.log(
       `  ${chalk.dim(run.id)}  ${date}  ${outcomeLabel(run.outcome)}  ${completed}/${total} stories${cost}${branch}${limitation}`

@@ -41,6 +41,20 @@ describe("createScriptedModel", () => {
     scripted.assertComplete();
   });
 
+  it("preserves missing and partial usage through the real SDK", async () => {
+    const scripted = createScriptedModel([
+      { text: "missing", usage: null },
+      { text: "partial", usage: { inputTokens: 8, cacheReadTokens: 3, cacheCreationTokens: 2 } },
+    ]);
+    const missing = streamText({ model: scripted.model, prompt: "missing" });
+    await missing.text;
+    expect(await missing.totalUsage).toMatchObject({ inputTokens: undefined, outputTokens: undefined });
+    const partial = await generateText({ model: scripted.model, prompt: "partial" });
+    expect(partial.usage).toMatchObject({ inputTokens: 8, outputTokens: undefined,
+      inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 2 } });
+    scripted.assertComplete();
+  });
+
   it("records an abort after a stream has started", async () => {
     const controller = new AbortController();
     const scripted = createScriptedModel([{ waitForAbort: true }]);

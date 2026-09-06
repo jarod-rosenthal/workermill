@@ -9,6 +9,8 @@ import { MockLanguageModelV3 } from "ai/test";
 export interface ScriptedUsage {
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
 }
 
 export interface ScriptedToolCall {
@@ -20,7 +22,8 @@ export interface ScriptedToolCall {
 export interface ScriptedResponse {
   text?: string;
   toolCalls?: readonly ScriptedToolCall[];
-  usage?: ScriptedUsage;
+  /** Omit for reported zeroes; null means no usage report; objects preserve missing dimensions. */
+  usage?: ScriptedUsage | null;
   finishReason?: LanguageModelV3FinishReason["unified"];
   /** Keep the stream open until its SDK abort signal fires. */
   waitForAbort?: boolean;
@@ -158,9 +161,10 @@ function abortableStream(signal: AbortSignal | undefined, id: string, abortedCal
   });
 }
 
-function usageFor(usage: ScriptedUsage | undefined): LanguageModelV3Usage {
+function usageFor(usage: ScriptedUsage | null | undefined): LanguageModelV3Usage {
+  const observed = usage === undefined ? { inputTokens: 0, outputTokens: 0 } : usage;
   return {
-    inputTokens: { total: usage?.inputTokens ?? 0, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: usage?.outputTokens ?? 0, text: usage?.outputTokens ?? 0, reasoning: undefined },
+    inputTokens: { total: observed?.inputTokens, noCache: undefined, cacheRead: observed?.cacheReadTokens, cacheWrite: observed?.cacheCreationTokens },
+    outputTokens: { total: observed?.outputTokens, text: observed?.outputTokens, reasoning: undefined },
   };
 }

@@ -23,11 +23,13 @@ import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
 import { getProviderForPersona, loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
-import { getDiffForReview, getDiffSinceCommit, getHeadHash, captureStoryPriorWork, commitRevisionChanges } from "../git-ops.js";
+import { getDiffForReview, getDiffSinceCommit, getUncommittedDiffForReview, getHeadHash, captureStoryPriorWork } from "../git-ops.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { checkpoint } from "../checkpoints.js";
 import { durablePermissionRules } from "../safety.js";
 import { resolveSandboxMode } from "../sandbox-mode.js";
+import { captureRepositoryFingerprint, type VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
+import { prepareCandidate } from "./candidate.js";
 
 import type {
   OrchestrationOutput,
@@ -438,6 +440,13 @@ export function buildReviewBlockerSignature(
  * Run a standalone Tech Lead review against the current branch or uncommitted changes.
  * Uses the same model, prompt, and scoring as the orchestrator review loop.
  */
+function removeReviewArtifact(file: string): void {
+  try { fs.unlinkSync(file); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export async function runStandaloneReview(
   config: CliConfig,
   output: OrchestrationOutput,
@@ -456,6 +465,8 @@ export async function runStandaloneReview(
   }
 
   const workingDir = process.cwd();
+  let standaloneDiffFile: string | undefined;
+  try {
   const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
 
   // Set API key
@@ -498,12 +509,7 @@ export async function runStandaloneReview(
   } else if (normalizedTarget === "diff") {
     // Uncommitted changes only
     try {
-      const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim();
-      const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim();
+      const { stat, diff } = getUncommittedDiffForReview(workingDir);
       if (stat) codeDiff += `## Uncommitted Changes\n${stat}\n\n`;
       if (diff) codeDiff += diff;
     } catch { /* not a git repo */ }
@@ -532,12 +538,15 @@ export async function runStandaloneReview(
   const revContextWindow = getModelContext(revModel, revCtx);
   const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
   if (codeDiff.length > maxDiffChars) {
-    const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
-    try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+    const diffFile = path.join(workingDir, `.workermill-review-diff-${randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(diffFile, codeDiff, { encoding: "utf-8", flag: "wx" });
+      standaloneDiffFile = diffFile;
+    } catch { /* best effort */ }
     const stat = codeDiff.match(/## (?:Branch Diff|Uncommitted|PR).*?\n([\s\S]*?)\n\n/)?.[1] || "";
     codeDiff = codeDiff.slice(0, maxDiffChars) +
       `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
-      `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+      `**Full diff saved to:** \`${standaloneDiffFile ?? "(unavailable)"}\` — use \`read_file ${standaloneDiffFile ?? "(unavailable)"}\` to review the complete diff.\n\n` +
       `${stat ? `File list:\n${stat}` : ""}`;
   }
 
@@ -744,10 +753,16 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   }
   output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
 
-  // Clean up temp file
-  try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
-
   return { score, decision, feedback, reviewText };
+  } finally {
+    if (standaloneDiffFile) {
+      try { removeReviewArtifact(standaloneDiffFile); }
+      catch (error) {
+        output.error(`Review artifact cleanup failed: ${String(error)}`);
+        return null;
+      }
+    }
+  }
 }
 
 
@@ -762,6 +777,8 @@ export interface ReviewLoopResult {
   aborted: boolean;
   /** Typed result for completion policy; callers must not infer approval from review prose. */
   outcome: ReviewOutcome;
+  /** The exact candidate examined by the final reviewer round. */
+  fingerprint?: VerifiedRepositoryFingerprint;
 }
 
 export type ReviewOutcomeKind =
@@ -775,7 +792,8 @@ export type ReviewOutcomeKind =
   | "provider_failed"
   | "timed_out"
   | "cancelled"
-  | "unavailable";
+  | "unavailable"
+  | "unverified";
 
 export interface ReviewOutcome {
   kind: ReviewOutcomeKind;
@@ -860,6 +878,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
 
   // Run inline review with revision loop
   let finalReviewText = ""; // Captures the approved review for use in PR body
+  let reviewedFingerprint: VerifiedRepositoryFingerprint | undefined;
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
     if (abortSignal?.aborted) {
@@ -899,6 +918,20 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
         return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false, error: "Review paused or cancelled." } };
       }
       const isRevision = reviewRound > 1;
+      // Capture evidence at the actual reviewer round, after all prior
+      // revision work. A HEAD alone is insufficient when the index or
+      // untracked files changed.
+      const fingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+      if (!fingerprint.verified) {
+        // Keep the review runtime usable for non-repository standalone callers,
+        // but deliberately provide no approval evidence. The orchestration
+        // boundary will therefore block publication rather than promote this
+        // result to a verified final state.
+        reviewedFingerprint = undefined;
+        logger.warn("Review state could not be fingerprinted", { reason: fingerprint.reason, reviewRound });
+      } else {
+        reviewedFingerprint = fingerprint;
+      }
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions - 1}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
@@ -906,6 +939,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
       let lastReviewFailure: ReviewOutcome | undefined;
+      let reviewDiffFile: string | undefined;
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
         const mustFixSection = isRevision && openMustFixItems.length > 0
@@ -969,12 +1003,7 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
         } else {
           // Fallback: uncommitted changes diff
           try {
-            const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
-              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-            }).trim();
-            const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
-              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-            }).trim();
+            const { stat, diff } = getUncommittedDiffForReview(workingDir);
             if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
             if (diff) codeDiff += diff;
           } catch { /* not a git repo */ }
@@ -987,12 +1016,15 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
         const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
         if (codeDiff.length > maxDiffChars) {
           // Write full diff to a temp file so the reviewer can read_file it
-          const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
-          try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+          const diffFile = path.join(workingDir, `.workermill-review-diff-${randomUUID()}.tmp`);
+          try {
+            fs.writeFileSync(diffFile, codeDiff, { encoding: "utf-8", flag: "wx" });
+            reviewDiffFile = diffFile;
+          } catch { /* best effort */ }
           const stat = codeDiff.match(/## Branch Diff.*?\n([\s\S]*?)\n\n/)?.[1] || "";
           codeDiff = codeDiff.slice(0, maxDiffChars) +
             `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
-            `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+            `**Full diff saved to:** \`${reviewDiffFile ?? "(unavailable)"}\` — use \`read_file ${reviewDiffFile ?? "(unavailable)"}\` to review the complete diff.\n\n` +
             `${stat ? `File list:\n${stat}` : ""}`;
         }
 
@@ -1193,6 +1225,12 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         logger.debug("Reviewer output", { reviewRound, text: reviewText });
 
         output.statusDone();
+        // This is an owned reviewer input, never a deliverable. It must be
+        // gone before a revision worker or final evidence can see the tree.
+        if (reviewDiffFile) {
+          removeReviewArtifact(reviewDiffFile);
+          reviewDiffFile = undefined;
+        }
 
         // Extract review decision — 3-tier system matching WorkerMill worker
         const threshold = config.review?.approvalThreshold ?? 9;
@@ -1573,10 +1611,21 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             revisionTimedAbort.dispose();
           }
 
-          // Commit revision changes — checkpoint on the feature branch
+          // Commit revision changes through the bounded candidate process. Git
+          // filters are executable and must not bypass the selected sandbox.
           if (featureBranch) {
-            const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
-            if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
+            const prepared = await prepareCandidate({
+              config, workingDir, featureBranch,
+              runId: `${reviewRunId}-revision-${reviewRound}-${story.id}`,
+              signal: abortSignal, sandboxed: effectiveSandbox,
+            });
+            if (!prepared.prepared) {
+              return {
+                finalReviewText: "", aborted: true,
+                outcome: { kind: "provider_failed", approved: false, error: `Revision candidate preparation failed: ${prepared.reason ?? "unknown error"}` },
+              };
+            }
+            output.coordinatorLog(`Prepared revision ${reviewRound} for story ${i + 1}.`);
           }
         }
         // Loop back to review again
@@ -1600,9 +1649,23 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         output.log("system", `Review skipped: ${errMsg}`);
         outcome = lastReviewFailure ?? reviewOutcomeFromError(err, false, abortSignal?.aborted === true);
         break;
+      } finally {
+        // Includes retry/return/provider-error paths. Failure to remove an
+        // owned artifact must not silently yield usable review evidence.
+        if (reviewDiffFile) {
+          try { removeReviewArtifact(reviewDiffFile); }
+          catch (error) {
+            output.error(`Review artifact cleanup failed: ${String(error)}`);
+            return { finalReviewText: "", aborted: true, outcome: { kind: "unverified", approved: false, error: "Review artifact cleanup failed." } };
+          }
+        }
       }
     } // end review loop
   }
 
-  return { finalReviewText, aborted: false, outcome };
+  if (outcome.approved && !reviewedFingerprint) {
+    outcome = { kind: "unverified", approved: false, error: "Reviewer state could not be verified." };
+    finalReviewText = "";
+  }
+  return { finalReviewText, aborted: false, outcome, fingerprint: reviewedFingerprint };
 }

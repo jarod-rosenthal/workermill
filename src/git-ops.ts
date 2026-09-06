@@ -415,14 +415,8 @@ export function captureStoryPriorWork(
  */
 export function getDiffForReview(workingDir: string, mainBranch: string): { stat: string; diff: string } {
   try {
-    const stat = execSync(
-      `git diff --stat ${mainBranch}..HEAD 2>/dev/null || true`,
-      { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },
-    ).trim();
-    const diff = execSync(
-      `git diff ${mainBranch}..HEAD 2>/dev/null || true`,
-      { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },
-    ).trim();
+    const stat = readReviewDiff(workingDir, ["--stat", `${mainBranch}..HEAD`]);
+    const diff = readReviewDiff(workingDir, [`${mainBranch}..HEAD`]);
     return { stat, diff };
   } catch {
     return { stat: "", diff: "" };
@@ -435,12 +429,24 @@ export function getDiffForReview(workingDir: string, mainBranch: string): { stat
  */
 export function getDiffSinceCommit(workingDir: string, commitHash: string): string {
   try {
-    return execSync(
-      `git diff ${commitHash}..HEAD 2>/dev/null || true`,
-      { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },
-    ).trim();
+    return readReviewDiff(workingDir, [`${commitHash}..HEAD`]);
   } catch {
     return "";
+  }
+}
+
+/** Review reads must not invoke repository-configured external diff/textconv. */
+function readReviewDiff(workingDir: string, args: string[]): string {
+  return execFileSync("git", ["-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", ...args, "--"], {
+    cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000, maxBuffer: 16 * 1024 * 1024,
+  }).trim();
+}
+
+export function getUncommittedDiffForReview(workingDir: string): { stat: string; diff: string } {
+  try { return { stat: readReviewDiff(workingDir, ["--stat", "HEAD"]), diff: readReviewDiff(workingDir, ["HEAD"]) }; }
+  catch {
+    try { return { stat: readReviewDiff(workingDir, ["--stat"]), diff: readReviewDiff(workingDir, []) }; }
+    catch { return { stat: "", diff: "" }; }
   }
 }
 

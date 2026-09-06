@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 vi.mock("../logger.js", () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock("../engine/model-factory.js", () => ({
@@ -273,6 +274,9 @@ describe("review runtime policy", () => {
   });
 
   it("returns approved, revision-exhausted, and cancelled outcomes from real review parsing", async () => {
+    // An approved publication outcome needs real repository-state evidence.
+    execFileSync("git", ["init"], { cwd: workspace, stdio: "pipe" });
+    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "initial"], { cwd: workspace, stdio: "pipe" });
     const base = {
       output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,

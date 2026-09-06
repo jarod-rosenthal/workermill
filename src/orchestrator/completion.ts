@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import { execSync, spawnSync } from "child_process";
 import type { CliConfig, HooksConfig } from "../config.js";
 import * as logger from "../logger.js";
@@ -12,10 +10,12 @@ import { execGh } from "../git-ops.js";
  * Replaces `execSync(\`git ... 2>&1\`)` patterns without invoking a shell.
  */
 function gitCombined(args: string[], cwd: string): string {
-  const result = spawnSync("git", args, {
+  const result = spawnSync("git", ["-c", "core.fsmonitor=false", ...args], {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
+    timeout: 120_000,
+    maxBuffer: 1024 * 1024,
   });
   const combined = ((result.stdout || "") + (result.stderr || "")).trim();
   if (result.error) throw result.error;
@@ -35,8 +35,10 @@ import { stopAllMCPServers } from "../mcp-client.js";
 import type { CostTracker } from "../cost-tracker.js";
 import type { LiveViewServer } from "../live-view-server.js";
 import { extractExecErrorDetail, clipLogText } from "./utils.js";
-import { extractReviewFeedback, parseRequiredReviewOutcome } from "./review.js";
-import type { OrchestrationOutput, Story, OrchestrationResult } from "./types.js";
+import { captureRepositoryFingerprint } from "../repository-fingerprint.js";
+export { prepareCandidate } from "./candidate.js";
+import type { OrchestrationOutput, Story, OrchestrationResult, CompletionEvidence } from "./types.js";
+import { fingerprintsMatch } from "./types.js";
 
 export interface TicketOpsLike {
   postComment(comment: string): Promise<void>;
@@ -47,9 +49,14 @@ export function shouldTransitionTicketOnPrOpen(ticketSystem: string | undefined)
   return (ticketSystem || "").toLowerCase() !== "github";
 }
 
+/** Typed policy is authoritative; review prose is only presentation. */
+function hasBlockingGateFailure(evidence: CompletionEvidence, strict: boolean): boolean {
+  return evidence.gateResults.some((gate) => gate.status !== "passed" && (strict || gate.required));
+}
+
 /**
  * Handles the completion phase of orchestration:
- * - Shows branch summary and commits remaining changes
+ * - Checks final evidence and shows the prepared branch summary
  * - Prompts to push and create PR (with force-push for diverged branches)
  * - Posts PR review comment
  * - Closes ticket for non-GitHub trackers
@@ -72,29 +79,62 @@ export async function runCompletion(args: {
   resolvedTicketSystem: string;
   liveViewServer?: LiveViewServer;
   hooks: HooksConfig | undefined;
+  evidence: CompletionEvidence;
+  abortSignal?: AbortSignal;
 }): Promise<OrchestrationResult> {
   const {
     config, output, sorted, completedStoryIds, featureBranch, mainBranch,
     workingDir, userTask, costTracker, finalReviewText, ticketKey,
-    ticketOps, resolvedTicketSystem, liveViewServer, hooks,
+    ticketOps, resolvedTicketSystem, liveViewServer, hooks, evidence, abortSignal,
   } = args;
+
+  const strict = config.review?.strict === true;
+  const publicationAllowed = async (): Promise<boolean> => {
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Publication blocked: build cancelled.");
+      return false;
+    }
+    if (hasBlockingGateFailure(evidence, strict)) {
+      output.error("Publication blocked: required quality gates are not passing.");
+      return false;
+    }
+    if (strict && config.review?.enabled !== false && !evidence.reviewOutcome.approved) {
+      output.error(`Publication blocked: strict mode requires reviewer approval (review: ${evidence.reviewOutcome.kind}).`);
+      return false;
+    }
+    const current = await captureRepositoryFingerprint(workingDir, abortSignal);
+    if (!fingerprintsMatch(evidence.fingerprint, current)) {
+      output.error(`Publication blocked: final evidence is stale${current.verified ? "." : ` (${current.reason})`}`);
+      return false;
+    }
+    if (featureBranch) {
+      try {
+        const checkedOut = gitCombined(["branch", "--show-current"], workingDir);
+        const branchHead = gitCombined(["rev-parse", "--verify", "--end-of-options", `refs/heads/${featureBranch}`], workingDir);
+        if (checkedOut !== featureBranch || branchHead !== evidence.fingerprint.head) {
+          output.error("Publication blocked: the expected feature branch no longer points at the verified candidate.");
+          return false;
+        }
+      } catch {
+        output.error("Publication blocked: could not verify the checked-out feature branch.");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (!await publicationAllowed()) {
+    stopAllMCPServers();
+    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+  }
 
   // --- Completion Summary ---
   try {
     if (featureBranch) {
       // Show branch summary
-      const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      const commitCount = gitCombined(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"], workingDir);
 
       output.log("system", `Branch: ${featureBranch} (${commitCount} commits)`);
-
-      // Commit any remaining uncommitted changes
-      try {
-        execSync("git add .", { cwd: workingDir, stdio: "pipe" });
-        const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-        if (status) {
-          execSync('git commit --no-verify -m "chore: uncommitted changes from /build session"', { cwd: workingDir, stdio: "pipe" });
-        }
-      } catch { /* nothing to commit */ }
 
       // Check if remote exists for PR
       let hasRemote = false;
@@ -109,6 +149,11 @@ export async function runCompletion(args: {
         const confirmed = typeof cr === "object" ? cr.allowed : cr;
         logger.info("PR prompt answered", { confirmed, featureBranch, mainBranch });
         if (confirmed) {
+          // A human prompt is an arbitrary pause. Recheck evidence immediately
+          // afterwards, before any remote or ticket side effect.
+          if (!await publicationAllowed()) {
+            return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+          }
           try {
             output.status("Pushing branch...");
             let pushOutput = "";
@@ -123,6 +168,9 @@ export async function runCompletion(args: {
                 const force = await output.confirm("Force-push with --force-with-lease? (safe if you reset the branch yourself)");
                 const confirmed = typeof force === "object" ? force.allowed : force;
                 if (confirmed) {
+                  if (!await publicationAllowed()) {
+                    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+                  }
                   try {
                     pushOutput = gitCombined(["push", "--force-with-lease", "-u", "origin", featureBranch], workingDir);
                     output.statusDone();
@@ -130,12 +178,12 @@ export async function runCompletion(args: {
                     output.statusDone();
                     output.log("system", `Force-push also failed: ${String(forceErr)}`);
                     output.log("system", `Push manually: \`git push --force-with-lease -u origin ${featureBranch}\``);
-                    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+                    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
                   }
                 } else {
                   output.statusDone();
                   output.log("system", `Branch is local. Push manually: \`git push --force-with-lease -u origin ${featureBranch}\``);
-                  return { stories: sorted, completedStoryIds, featureBranch, userTask };
+                  return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
                 }
               } else {
                 throw pushErr;
@@ -149,6 +197,9 @@ export async function runCompletion(args: {
 
             // Try to create PR with gh CLI
             try {
+              if (!await publicationAllowed()) {
+                return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+              }
               const storyTitles = sorted.map(s => s.title).join(", ");
               const prTitle = storyTitles.length > 70 ? storyTitles.slice(0, 67) + "..." : storyTitles;
               logger.info("Creating pull request", { featureBranch, mainBranch, prTitle });
@@ -186,6 +237,9 @@ export async function runCompletion(args: {
               // close on merge via PR keywords (e.g. "Closes #123"), not on PR open.
               if (ticketOps && shouldTransitionTicketOnPrOpen(resolvedTicketSystem)) {
                 try {
+                  if (!await publicationAllowed()) {
+                    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+                  }
                   await ticketOps.transitionTo("done");
                   output.log("system", `Closed ${ticketKey}`);
                 } catch {
@@ -197,12 +251,14 @@ export async function runCompletion(args: {
               // Matches worker/epic/coordinator-review.ts ensureGitHubReviewPosted()
               if (finalReviewText) {
                 try {
-                  const parsedPrReview = parseRequiredReviewOutcome(finalReviewText);
-                  const reviewScore = parsedPrReview.score;
-                  const feedback = extractReviewFeedback(finalReviewText, parsedPrReview.decision);
-                  const emoji = reviewScore >= (config.review?.approvalThreshold ?? 9) ? "✅" : "🔄";
+                  if (!await publicationAllowed()) return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+                  const reviewScore = evidence.reviewOutcome.score;
+                  const decision = evidence.reviewOutcome.decision;
+                  const feedback = evidence.reviewOutcome.feedback;
+                  if (reviewScore === undefined || !decision || !feedback) throw new Error("No structured review decision available for PR comment");
+                  const emoji = evidence.reviewOutcome.approved ? "✅" : "🔄";
                   const reviewBody = `## ${emoji} Tech Lead Review\n\n**Code Quality Score:** ${reviewScore}/10\n\n${feedback}`;
-                  const reviewFlag = reviewScore >= (config.review?.approvalThreshold ?? 9) ? "--approve" : "--request-changes";
+                  const reviewFlag = evidence.reviewOutcome.approved ? "--approve" : "--request-changes";
                   execSync(
                     `gh pr review --body-file - ${reviewFlag} 2>&1`,
                     { cwd: workingDir, encoding: "utf-8", input: reviewBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
@@ -247,8 +303,8 @@ export async function runCompletion(args: {
         output.log("system", `No remote configured. Branch: \`${featureBranch}\``);
       }
     } else {
-      // No feature branch — old behavior, commit uncommitted changes
-      const diff = execSync("git diff --stat 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      // No feature branch: show local changes without mutating verified state.
+      const diff = gitCombined(["diff", "--stat", "--no-ext-diff", "--no-textconv"], workingDir);
       const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
       if (diff || untracked) {
         output.coordinatorLog(`${diff ? diff.split("\n").length : 0} modified, ${untracked ? untracked.split("\n").filter(Boolean).length : 0} new files`);
@@ -262,19 +318,28 @@ export async function runCompletion(args: {
   output.updateCost?.(costTracker.getTotalCost());
   output.updateUsageSummary?.(costTracker.getUsageSummary());
 
-  // On full success: clear retry state. Stay on the feature branch so the
-  // developer can review, test, and push when ready.
-  if (featureBranch && completedStoryIds.length === sorted.length) {
-    clearShipRun(featureBranch);
+  const beforeShipComplete = await captureRepositoryFingerprint(workingDir, abortSignal);
+  if (abortSignal?.aborted || !fingerprintsMatch(evidence.fingerprint, beforeShipComplete)) {
+    output.error("Completion blocked: final evidence changed before ship_complete.");
+    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
   }
-
   runLifecycleHooks("ship_complete", hooks, workingDir, {
     WORKERMILL_COST: costTracker.getTotalCost().toFixed(4),
   });
+  const afterShipComplete = await captureRepositoryFingerprint(workingDir, abortSignal);
+  const shipCompleteChangedSource = abortSignal?.aborted === true
+    || !fingerprintsMatch(evidence.fingerprint, beforeShipComplete)
+    || !fingerprintsMatch(beforeShipComplete, afterShipComplete);
+  if (shipCompleteChangedSource) {
+    output.error("ship_complete changed local source or invalidated final evidence; the changed state is not verified.");
+  }
 
   // Post final completion to ticket — matches worker/epic/coordinator-review.ts
-  if (ticketOps) {
+  if (ticketOps && !shipCompleteChangedSource) {
     try {
+      if (!await publicationAllowed()) {
+        return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+      }
       const { GitHubCommentFormat } = await import("../ticket-ops.js");
       const completedCount = sorted.filter((s) => completedStoryIds.includes(s.id)).length;
       const storyList = sorted.map((s, i) => {
@@ -289,12 +354,16 @@ export async function runCompletion(args: {
     }
   }
 
-  // Clean up temp review diff file
-  try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
+  // Keep recovery until every awaited completion step has finished and the
+  // final local state still matches its evidence.
+  if (!shipCompleteChangedSource && !await publicationAllowed()) {
+    return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
+  }
+  if (!shipCompleteChangedSource && featureBranch && completedStoryIds.length === sorted.length) clearShipRun(featureBranch);
 
   // Emit run complete event
-  if (liveViewServer) {
-    const commitCount = featureBranch ? parseInt(execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim()) : 0;
+  if (liveViewServer && !shipCompleteChangedSource) {
+    const commitCount = featureBranch ? parseInt(gitCombined(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"], workingDir), 10) : 0;
     liveViewServer.emitRunComplete(featureBranch || "main", commitCount);
   }
 
@@ -306,5 +375,5 @@ export async function runCompletion(args: {
   // Keep live view server alive for the current CLI session so users can
   // keep the same browser tab open across multiple /build runs.
 
-  return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
+  return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: shipCompleteChangedSource };
 }

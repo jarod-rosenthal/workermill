@@ -1,4 +1,7 @@
 import type { UsageSummary } from "../cost-tracker.js";
+import type { RepositoryFingerprintResult, VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
+import type { QualityGateResult } from "./gates.js";
+import type { ReviewOutcome } from "./review.js";
 
 export interface OrchestrationOutput {
   /** Log a message from a persona */
@@ -97,6 +100,8 @@ export interface OrchestrationResult {
   featureBranch: string | null;
   userTask: string;
   mainBranch?: string;
+  /** Final hooks changed source after verified publication, so retry remains available. */
+  completionInvalidated?: boolean;
 }
 
 /** Retry plan — skips planning, resumes from first incomplete story. */
@@ -112,4 +117,18 @@ export interface StandaloneReviewResult {
   decision: "approved" | "revision_needed" | "rejected";
   feedback: string;
   reviewText: string;
+}
+
+/** Evidence that must still describe the repository when publication begins. */
+export interface CompletionEvidence {
+  fingerprint: VerifiedRepositoryFingerprint;
+  gateResults: QualityGateResult[];
+  reviewOutcome: ReviewOutcome;
+}
+
+export function fingerprintsMatch(
+  expected: VerifiedRepositoryFingerprint,
+  actual: RepositoryFingerprintResult,
+): actual is VerifiedRepositoryFingerprint {
+  return actual.verified && actual.head === expected.head && actual.digest === expected.digest;
 }

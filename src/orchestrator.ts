@@ -38,6 +38,8 @@ import { executeStories } from "./orchestrator/execution.js";
 import { runReviewLoop as _runReviewLoop } from "./orchestrator/review.js";
 import { runQualityGates } from "./orchestrator/gates.js";
 import { runCompletion } from "./orchestrator/completion.js";
+import { prepareCandidate } from "./orchestrator/candidate.js";
+import { captureRepositoryFingerprint } from "./repository-fingerprint.js";
 
 // Re-export from completion module for backward compatibility
 export { shouldTransitionTicketOnPrOpen } from "./orchestrator/completion.js";
@@ -547,24 +549,79 @@ export async function runOrchestration(
     }
   }
 
-  // --- Post-execution quality gates ---
-  const gatesResult = await runQualityGates({
-    config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id, sandboxed,
+  // Final candidate preparation belongs before all final evidence. In
+  // particular, completion must never create a commit after approval.
+  const preparation = await prepareCandidate({
+    config, workingDir, featureBranch, runId: manifest.id, signal: abortSignal, sandboxed,
   });
-  const { gateResultsSection } = gatesResult;
+  if (!preparation.prepared) {
+    output.error(`Candidate preparation failed: ${preparation.reason ?? "unknown error"}`);
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
+
+  let gateFingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+  if (!gateFingerprint.verified) {
+    output.error(`Could not verify candidate state before quality gates: ${gateFingerprint.reason}`);
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
+
+  // Gates are permitted to change code, but their result is evidence only for
+  // the state they leave behind. Stabilize a small finite number of times.
+  let gatesResult;
+  const gateStabilizationCap = 2;
+  for (let attempt = 1; attempt <= gateStabilizationCap; attempt++) {
+    gatesResult = await runQualityGates({
+      config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id, sandboxed,
+    });
+    // R12's typed early exit is terminal. Do not run a second pass that can
+    // replace the failed evidence with a later success.
+    if (gatesResult.earlyExit) {
+      stopAllMCPServers();
+      try {
+        const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
+        shutdownLSP();
+      } catch { /* language server may not have started */ }
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    const afterGates = await captureRepositoryFingerprint(workingDir, abortSignal);
+    if (!afterGates.verified) {
+      output.error(`Could not verify repository state after quality gates: ${afterGates.reason}`);
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    if (afterGates.digest === gateFingerprint.digest && afterGates.head === gateFingerprint.head) {
+      gateFingerprint = afterGates;
+      break;
+    }
+    gateFingerprint = afterGates;
+    if (attempt === gateStabilizationCap) {
+      output.error("Quality gates changed the candidate repeatedly; publication is blocked with local work preserved.");
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    // A gate can legitimately write generated source. Commit that exact
+    // candidate before the next verification pass; otherwise a later push
+    // could publish an older HEAD than the evidence described.
+    const rePreparation = await prepareCandidate({
+      config, workingDir, featureBranch, runId: `${manifest.id}-gate-${attempt}`,
+      signal: abortSignal, sandboxed,
+    });
+    if (!rePreparation.prepared) {
+      output.error(`Candidate preparation after quality gates failed: ${rePreparation.reason ?? "unknown error"}`);
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    const preparedFingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+    if (!preparedFingerprint.verified) {
+      output.error(`Could not verify prepared candidate after quality gates: ${preparedFingerprint.reason}`);
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    gateFingerprint = preparedFingerprint;
+    output.coordinatorLog("Quality gates changed the candidate; re-running final verification once.");
+  }
+  // The loop either assigned it or returned above.
+  let gateResultsSection = gatesResult!.gateResultsSection;
 
   // A required (or strict) gate failure is terminal for this run. Preserve the
   // feature branch and ship state so `/retry` can continue after the failure,
   // but do not let review or completion publish an unverified change.
-  if (gatesResult.earlyExit) {
-    stopAllMCPServers();
-    try {
-      const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
-      shutdownLSP();
-    } catch { /* language server may not have started */ }
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
-  }
-
   // Run inline review with revision loop
   const reviewLoopResult = await _runReviewLoop({
     config, output, sorted, context, userTask,
@@ -577,6 +634,40 @@ export async function runOrchestration(
     return { stories: sorted, completedStoryIds, featureBranch, userTask };
   }
   const finalReviewText = reviewLoopResult.finalReviewText;
+
+  if (config.review?.strict === true && config.review?.enabled !== false && !reviewLoopResult.outcome.approved) {
+    output.error(`Strict mode requires a valid review approval (review: ${reviewLoopResult.outcome.kind}).`);
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
+  if (config.review?.strict === true && reviewLoopResult.outcome.approved && !reviewLoopResult.fingerprint) {
+    output.error("Strict mode cannot publish an approval without verified reviewer-state evidence.");
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
+
+  // Review evidence must describe the current tree. Re-run gates only when
+  // review/revisions changed it; unchanged candidates avoid redundant gates.
+  const afterReview = await captureRepositoryFingerprint(workingDir, abortSignal);
+  const reviewFingerprint = reviewLoopResult.fingerprint ?? (config.review?.enabled === false ? gateFingerprint : undefined);
+  const reviewEvidenceStale = !afterReview.verified || (reviewFingerprint !== undefined
+    && (afterReview.digest !== reviewFingerprint.digest || afterReview.head !== reviewFingerprint.head));
+  if (reviewEvidenceStale) {
+    output.error(`Final review evidence is stale${afterReview.verified ? "." : ` (${afterReview.reason})`}; publication is blocked.`);
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
+  if (afterReview.digest !== gateFingerprint.digest || afterReview.head !== gateFingerprint.head) {
+    const finalGates = await runQualityGates({
+      config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id, sandboxed,
+    });
+    if (finalGates.earlyExit) return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    const afterFinalGates = await captureRepositoryFingerprint(workingDir, abortSignal);
+    if (!afterFinalGates.verified || afterFinalGates.digest !== afterReview.digest || afterFinalGates.head !== afterReview.head) {
+      output.error("Final quality gates changed the reviewed candidate; approval is invalid and publication is blocked.");
+      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
+    gateFingerprint = afterFinalGates;
+    gatesResult = finalGates;
+    gateResultsSection = finalGates.gateResultsSection;
+  }
 
   // --- Populate and save run manifest ---
   manifest.featureBranch = featureBranch;
@@ -599,13 +690,6 @@ export async function runOrchestration(
   }));
   const allCompleted = completedStoryIds.length === sorted.length;
   const anyCompleted = completedStoryIds.length > 0;
-  const reviewEnabled = config.review?.enabled !== false;
-  const reviewScore = reviewLoopResult.finalReviewText
-    ? (() => { const m = reviewLoopResult.finalReviewText.match(/CODE_QUALITY_SCORE:\s*(\d+)/); return m ? parseInt(m[1]) : null; })()
-    : null;
-  const reviewDecision = reviewLoopResult.finalReviewText
-    ? (reviewScore !== null && reviewScore >= (config.review?.approvalThreshold ?? 9) ? "approved" : "revision_needed")
-    : reviewEnabled ? "skipped" : "disabled";
   manifest.outcome = allCompleted ? "success" : anyCompleted ? "partial" : "failed";
   saveRunManifest(manifest);
 
@@ -633,5 +717,7 @@ export async function runOrchestration(
     workingDir, userTask, costTracker, finalReviewText, ticketKey,
     ticketOps, resolvedTicketSystem, liveViewServer,
     hooks: config.hooks,
+    evidence: { fingerprint: gateFingerprint, gateResults: gatesResult!.gateResults, reviewOutcome: reviewLoopResult.outcome },
+    abortSignal,
   });
 }

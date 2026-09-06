@@ -4,6 +4,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+// A failed fake-clock test must not freeze real Git/process cleanup in later cases.
+afterEach(() => vi.useRealTimers());
+
 // ---- Mocks must be declared before any imports from the module under test ----
 
 // Mock logger to avoid file writes
@@ -3418,7 +3421,9 @@ FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
   });
 
   it("retries the revision worker when it is rate limited", async () => {
-    vi.useFakeTimers();
+    // Revision preparation now waits on real Git I/O. Continue advancing the
+    // clock while that I/O completes and schedules the subsequent retry delay.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = `\`\`\`json
 {

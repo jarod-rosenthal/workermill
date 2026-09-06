@@ -218,11 +218,11 @@ Verification: plan-critic, orchestrator, focused planning/review policy tests. H
 
 Priority P0; small-model task with security review; dependencies R04, R05; lock `tool-registry`.
 
-Files: `src/engine/tools/{sub-agent,index}.ts`, new `src/__tests__/sub-agent.test.ts`; existing isolated-subagent E2E test as a read-only scenario reference.
+Files: `src/engine/tools/{sub-agent,index,git}.ts`, new `src/__tests__/{sub-agent,git-tool}.test.ts`; existing isolated-subagent E2E test as a read-only scenario reference. The Git tool adapter must use the shared scoped process runner too: Git options such as `diff --output` can write files without a bash tool call.
 
 Remove the unsandboxed child factory. Inherit/narrow parent permissions, cancellation, allowed paths, and model usage reporting callback. Give write-capable children a worktree-root scope plus the minimum necessary Git metadata capability; do not grant arbitrary parent-repository writes. Use execFile/argument arrays for worktree operations. Capture starting commit and compare against it: the current `HEAD ^HEAD~0` expression cannot detect new commits. Preserve committed-only changes and include branch/worktree identity in every result. Make collisions safe for branch names as well as directory paths. No recursive sub-agent spawning.
 
-Acceptance: child cannot modify the parent sentinel or escape via a symlink; parent cancellation ends child commands/model stream; concurrent children stay separate; committed-only work is reported and preserved; failed/cancelled dirty worktrees remain inspectable; only confirmed empty worktrees are cleaned. Tests mock the LLM and use real temporary Git repositories.
+Acceptance: child explicit file tools cannot modify the parent sentinel or escape via a symlink; OS-mode shell and Git output writes cannot escape the granted paths. Path mode must not be described as arbitrary-shell containment. Parent cancellation ends child commands/model stream; concurrent children stay separate; committed-only work is reported and preserved; failed/cancelled dirty worktrees remain inspectable; only confirmed empty worktrees are cleaned. Tests mock the LLM and use real temporary Git repositories, including a successful OS-mode child commit before testing write denial. Document the shared Git object-store capability rather than claiming complete metadata isolation.
 
 Verification: new unit/runtime sub-agent tests; no paid E2E needed. Handoff: worktree lifecycle and exact Git metadata exception.
 

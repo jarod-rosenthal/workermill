@@ -1105,7 +1105,7 @@ Done.`;
       await runOrchestration(config, "Add endpoint", true, false, output, { bad: "signal" } as unknown as AbortSignal);
 
       const plannerCall = mockStreamTextCalls[0] as Record<string, unknown>;
-      expect(plannerCall.abortSignal).toBeUndefined();
+      expect(plannerCall.abortSignal).toBeInstanceOf(AbortSignal);
       expect(output.errors).toHaveLength(0);
     });
 

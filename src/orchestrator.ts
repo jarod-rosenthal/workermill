@@ -12,9 +12,7 @@ import {
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
-import { cancelAndWaitForRunProcesses } from "./engine/process-runner.js";
-import { cleanupScopedBackgroundProcesses } from "./engine/tools/bash-background.js";
-import { shutdownLSPRun } from "./engine/tools/lsp.js";
+import { createAttemptResources } from "./engine/run-resources.js";
 import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
@@ -75,7 +73,7 @@ export async function runOrchestration(
   // Every orchestration owns a controller, including signal-only callers.
   // This gives finalization one cancellation boundary without ever stopping a
   // concurrently running orchestration.
-  const abortController = suppliedAbortController ?? new AbortController();
+  const abortController = new AbortController();
   const abortSignal = abortController.signal;
   const forwardAbort = () => abortController.abort(suppliedAbortSignal?.reason);
   if (suppliedAbortSignal && suppliedAbortSignal !== abortSignal) {
@@ -91,36 +89,15 @@ export async function runOrchestration(
 
   const workingDir = process.cwd();
   let mcpResources: ReturnType<typeof createMCPRunResources> | undefined;
-  const cleanupErrors: unknown[] = [];
+  const resourceController = new AbortController();
+  const resourceSignal = AbortSignal.any([abortSignal, resourceController.signal]);
+  const resources = createAttemptResources(manifest.id, () => resourceController.abort(), [() => mcpResources?.close()]);
   const cleanupRunResources = async (): Promise<void> => {
-    // Always attempt every owned cleanup. A failure is visible and prevents a
-    // later run from inheriting a silently-live resource.
-    const settled = await Promise.allSettled([
-      cancelAndWaitForRunProcesses(manifest.id),
-      cleanupScopedBackgroundProcesses(manifest.id),
-      shutdownLSPRun(manifest.id),
-      mcpResources?.close() ?? Promise.resolve(),
-    ]);
-    for (const result of settled) if (result.status === "rejected") cleanupErrors.push(result.reason);
-    if (cleanupErrors.length) {
-      const detail = cleanupErrors.map(error => error instanceof Error ? error.message : String(error)).join("; ");
-      output.error(`Run cleanup failed: ${detail}`);
-      logger.error("Run-scoped orchestration cleanup failed", { runId: manifest.id, detail });
+    try { await resources.close(); }
+    catch (error) {
+      output.error(error instanceof Error ? error.message : String(error));
+      throw error;
     }
-  };
-  const closeSourceChangingResources = async (): Promise<boolean> => {
-    const settled = await Promise.allSettled([
-      cancelAndWaitForRunProcesses(manifest.id),
-      cleanupScopedBackgroundProcesses(manifest.id),
-      shutdownLSPRun(manifest.id),
-      mcpResources?.close() ?? Promise.resolve(),
-    ]);
-    const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failures.length === 0) return true;
-    const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
-    output.error(`Candidate preparation blocked: run resource cleanup failed: ${detail}`);
-    logger.error("Source-changing resource cleanup failed", { runId: manifest.id, detail });
-    return false;
   };
 
   try {
@@ -244,7 +221,7 @@ export async function runOrchestration(
   // Start MCP servers as resources owned by this run. Global MCP teardown is
   // reserved for CLI exit and must never close another active run.
   const skipAutoDetect = isLocalProvider(defaultProvider.provider);
-  mcpResources = createMCPRunResources({ runId: manifest.id, workspace: workingDir, signal: abortSignal });
+  mcpResources = createMCPRunResources({ runId: manifest.id, workspace: workingDir, signal: resourceSignal });
   const mcpConfig = skipAutoDetect
     ? (config.mcp || {})
     : await autoDetectMCPServersForRun(config.mcp || {}, { runId: manifest.id, workspace: workingDir, signal: abortSignal });
@@ -610,9 +587,7 @@ export async function runOrchestration(
   // particular, completion must never create a commit after approval.
   // Worker/MCP/LSP lifetimes are closed before source-changing preparation so
   // neither a late tool result nor a server request can invalidate evidence.
-  if (!await closeSourceChangingResources()) {
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
-  }
+  await cleanupRunResources();
   const preparation = await prepareCandidate({
     config, workingDir, featureBranch, runId: manifest.id, signal: abortSignal, sandboxed,
   });
@@ -778,6 +753,7 @@ export async function runOrchestration(
     abortSignal,
   });
   } finally {
+    abortController.abort(new Error("Orchestration finished"));
     suppliedAbortSignal?.removeEventListener("abort", forwardAbort);
     await cleanupRunResources();
   }

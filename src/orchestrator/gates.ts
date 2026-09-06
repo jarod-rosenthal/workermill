@@ -260,6 +260,7 @@ export async function runQualityGates(args: {
       [...context.filesCreated, ...context.filesModified],
       workingDir,
       (message) => output.coordinatorLog(message),
+      abortSignal,
     );
     if (diagResult.section) gateResultsSection += diagResult.section;
   }

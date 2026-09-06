@@ -7,6 +7,7 @@ import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
 import { createPathScope } from "../engine/path-policy.js";
 import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
+import { createAttemptResources } from "../engine/run-resources.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
@@ -519,6 +520,12 @@ export async function planStories(
   if (abortSignal?.aborted) return cancelled();
   if (sandboxed === "os") resolveSandboxMode("os");
 
+  const controller = new AbortController();
+  const signal = abortSignal ? AbortSignal.any([abortSignal, controller.signal]) : controller.signal;
+  const runId = randomUUID();
+  const resources = createAttemptResources(runId, () => controller.abort(new Error("Planner attempt finished")));
+  try {
+
   const planner = loadPersona("planner");
   if (pProvider && pApiKey) {
       const envVar = getApiKeyEnvVar(pProvider);
@@ -528,10 +535,9 @@ export async function planStories(
       }
   }
 
-  const signal = abortSignal ?? new AbortController().signal;
   const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
   const executionContext: ToolExecutionContext = {
-    runId: randomUUID(),
+    runId,
     workspace: scope.workspace,
     scope,
     effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
@@ -566,10 +572,10 @@ export async function planStories(
         readOnlyTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            return executeToolCall(toolName, input, async () => {
+            return resources.track(executeToolCall(toolName, input, async () => {
               output.toolCall("planner", toolName, input);
               return toolDef.execute(input);
-            }, executionContext);
+            }, executionContext));
           },
         };
       }
@@ -761,7 +767,7 @@ Rules:
     // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
     const planStream = streamText({
       model: plannerModel,
-      abortSignal,
+      abortSignal: signal,
       system: planner?.systemPrompt || "You are an implementation planner.",
       prompt: plannerPrompt,
       tools: readOnlyTools as ToolSet,
@@ -789,6 +795,7 @@ Rules:
     if (lineBuffer.trim()) {
       output.log("planner", lineBuffer);
     }
+    await resources.settleTools();
     if (abortSignal?.aborted) {
       // The text stream may have ended just as cancellation arrived. Retain
       // usage that the transport has already made available without parsing a
@@ -818,6 +825,7 @@ Rules:
       logger.info("Model performance", { provider: pProvider, model: pModel, tokPerSec: planTokPerSec });
     }
   } catch (planErr) {
+    await resources.close();
     output.statusDone();
     if (abortSignal?.aborted) {
       logger.info("Planner cancelled by user");
@@ -996,6 +1004,9 @@ Rules:
     inputTokens: planUsage?.inputTokens || 0,
     outputTokens: planUsage?.outputTokens || 0,
   };
+  } finally {
+    await resources.close();
+  }
 }
 
 /* -------------------------------------------------------------------------- */

@@ -30,9 +30,7 @@ import { durablePermissionRules } from "../safety.js";
 import { resolveSandboxMode } from "../sandbox-mode.js";
 import { captureRepositoryFingerprint, type VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
 import { prepareCandidate } from "./candidate.js";
-import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
-import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
-import { shutdownLSPRun } from "../engine/tools/lsp.js";
+import { createAttemptResources, ResourceCleanupError, type AttemptResources } from "../engine/run-resources.js";
 
 import type {
   OrchestrationOutput,
@@ -68,20 +66,6 @@ import { emitFailureCode, extractCheckpointTargets, formatToolCallDisplay } from
 // ---------------------------------------------------------------------------
 type AnyToolDef = any;
 
-async function cleanupReviewAttempt(runId: string, output: OrchestrationOutput): Promise<void> {
-  const settled = await Promise.allSettled([
-    cancelAndWaitForRunProcesses(runId),
-    cleanupScopedBackgroundProcesses(runId),
-    shutdownLSPRun(runId),
-  ]);
-  const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failures.length) {
-    const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
-    output.error(`Review attempt cleanup failed: ${detail}`);
-    logger.error("Review attempt cleanup failed", { runId, detail });
-  }
-}
-
 const reviewSessionPermissionRules = new WeakMap<Set<string>, string[]>();
 
 function getReviewSessionPermissionRules(sessionAllow: Set<string>): readonly string[] {
@@ -116,6 +100,7 @@ function createReviewTools(args: {
   sandboxed: boolean | "os";
   signal: AbortSignal;
   runId: string;
+  resources: AttemptResources;
   readOnlyRole: boolean;
   trustAll?: boolean | (() => boolean);
   sessionAllow?: Set<string>;
@@ -184,7 +169,7 @@ function createReviewTools(args: {
     const original = toolDef.execute;
     selected[toolName] = {
       ...toolDef,
-      execute: (input: Record<string, unknown>) => executeToolCall(toolName, input, () => original(input), executionContext),
+      execute: (input: Record<string, unknown>) => args.resources.track(executeToolCall(toolName, input, () => original(input), executionContext)),
     };
   }
   return selected;
@@ -633,6 +618,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
       if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
       const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+      const resources = createAttemptResources(`${reviewRunId}-standalone-${attempt}`, () => timedAbort.abort());
       let attemptReviewerOutput = "";
       let attemptReviewerFinalText = "";
       let attemptReviewerVisibleText = "";
@@ -647,6 +633,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           sandboxed,
           signal: timedAbort.signal,
           runId: `${reviewRunId}-standalone-${attempt}`,
+          resources,
           readOnlyRole: true,
         });
         const reviewStream = streamText({
@@ -678,6 +665,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timedAbort,
           "Tech Lead review",
         );
+        await resources.settleTools();
         if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
         attemptReviewerFinalText = result.finalText;
         const stepText = attemptReviewerOutput.trim();
@@ -696,6 +684,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         lastReviewError = undefined;
         break;
       } catch (err) {
+        await resources.close();
         lastReviewError = err;
         const transient = isTransientError(err);
         const rl = isRateLimitError(err);
@@ -720,8 +709,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           stack: err instanceof Error ? err.stack : undefined,
         });
       } finally {
-        await cleanupReviewAttempt(`${reviewRunId}-standalone-${attempt}`, output);
-        timedAbort.dispose();
+        try { await resources.close(); } finally { timedAbort.dispose(); }
       }
     }
     if (lastReviewError) throw lastReviewError;
@@ -1166,6 +1154,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
           if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
           const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+          const resources = createAttemptResources(`${reviewRunId}-inline-${reviewRound}-${attempt}`, () => timedAbort.abort());
           try {
             const reviewerTools = createReviewTools({
               persona: reviewer,
@@ -1177,6 +1166,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               sandboxed: effectiveSandbox,
               signal: timedAbort.signal,
               runId: `${reviewRunId}-inline-${reviewRound}-${attempt}`,
+              resources,
               readOnlyRole: true,
             });
             const reviewStream = streamText({
@@ -1207,6 +1197,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timedAbort,
               "Tech Lead review",
             );
+            await resources.settleTools();
             if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
             reviewUsage = result.usage;
@@ -1214,6 +1205,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             lastReviewFailure = undefined;
             break;
           } catch (err) {
+            await resources.close();
             lastReviewError = err;
             lastReviewFailure = reviewOutcomeFromError(err, timedAbort.didTimeout(), abortSignal?.aborted === true);
             const transient = isTransientError(err);
@@ -1231,8 +1223,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               stack: err instanceof Error ? err.stack : undefined,
             });
           } finally {
-            await cleanupReviewAttempt(`${reviewRunId}-inline-${reviewRound}-${attempt}`, output);
-            timedAbort.dispose();
+            try { await resources.close(); } finally { timedAbort.dispose(); }
           }
         }
         if (lastReviewError) throw lastReviewError;
@@ -1492,6 +1483,7 @@ Working directory: ${workingDir}`;
 
           const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
           const revisionAttemptRunId = `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`;
+          const resources = createAttemptResources(revisionAttemptRunId, () => revisionTimedAbort.abort());
           try {
             if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
             const storyTools = createReviewTools({
@@ -1504,6 +1496,7 @@ Working directory: ${workingDir}`;
               sandboxed: effectiveSandbox,
               signal: revisionTimedAbort.signal,
               runId: revisionAttemptRunId,
+              resources,
               readOnlyRole: false,
               trustAll,
               sessionAllow,
@@ -1577,6 +1570,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             });
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
+            await resources.settleTools();
             const revUsage = await revStream.totalUsage;
             if (revisionTimedAbort.signal.aborted) {
               return {
@@ -1603,8 +1597,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
           } catch (err) {
+            const attemptWasAborted = revisionTimedAbort.signal.aborted;
+            await resources.close();
             output.statusDone();
-            if (revisionTimedAbort.signal.aborted) {
+            if (attemptWasAborted) {
               return {
                 finalReviewText: "", aborted: true,
                 outcome: reviewOutcomeFromError(err, revisionTimedAbort.didTimeout(), abortSignal?.aborted === true),
@@ -1630,8 +1626,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
           } finally {
-            await cleanupReviewAttempt(revisionAttemptRunId, output);
-            revisionTimedAbort.dispose();
+            try { await resources.close(); } finally { revisionTimedAbort.dispose(); }
           }
 
           // Commit revision changes through the bounded candidate process. Git
@@ -1654,6 +1649,10 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         // Loop back to review again
       } catch (err) {
         output.statusDone();
+        if (err instanceof ResourceCleanupError) {
+          output.error(err.message);
+          return { finalReviewText: "", aborted: true, outcome: { kind: "unverified", approved: false, error: err.message } };
+        }
         if (isBalanceOrQuotaError(err)) {
           const shouldStop = await pauseForBalanceIssue("Tech Lead review");
           if (shouldStop) {

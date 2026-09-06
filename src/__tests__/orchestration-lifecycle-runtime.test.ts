@@ -102,15 +102,16 @@ describe("orchestration lifecycle runtime", () => {
       text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }),
     }));
     gate.resolve();
-    const result = await executeStories({
-      sorted: [{ id: "cleanup", title: "cleanup", persona: "worker", description: "run" }], completedStoryIds: [],
+    const completedStoryIds: string[] = [];
+    await expect(executeStories({
+      sorted: [{ id: "cleanup", title: "cleanup", persona: "worker", description: "run" }], completedStoryIds,
       config: { providers: { test: { model: "lifecycle-test" } }, default: "test" } as never,
       output, trustAll: true, sandboxed: true, userTask: "run", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       sessionAllow: new Set(), workingDir: workspace, costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
       featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, runId: "lifecycle", ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
-    });
+    })).rejects.toThrow("LSP close failed");
     expect(shutdownLSPRun).toHaveBeenCalled();
-    expect(result.completedStoryIds).toEqual([]);
+    expect(completedStoryIds).toEqual([]);
   });
 });

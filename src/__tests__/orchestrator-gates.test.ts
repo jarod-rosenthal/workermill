@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("../engine/tools/lsp.js", () => ({
-  loadTsconfigExcludes: vi.fn(() => []),
-  execute: vi.fn(),
-}));
+vi.mock("../engine/tools/lsp.js", () => {
+  const execute = vi.fn();
+  return {
+    loadTsconfigExcludes: vi.fn(() => []), execute,
+    createLSPRunResources: () => ({ execute, close: vi.fn(async () => {}) }),
+    shutdownLSPRun: vi.fn(async () => {}),
+  };
+});
 
 const mockRunGate = vi.fn();
 vi.mock("../gate-runner.js", () => ({

@@ -24,8 +24,7 @@ import { isGitRepo, commitStoryChanges } from "../git-ops.js";
 import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
 import { randomUUID } from "node:crypto";
-import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
-import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
+import { createAttemptResources, ResourceCleanupError } from "../engine/run-resources.js";
 import * as lspTool from "../engine/tools/lsp.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
 
@@ -617,7 +616,9 @@ export async function runDiagnosticsOnTouchedFiles(
   touchedFiles: string[],
   workingDir: string,
   log: (msg: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ errorCount: number; section: string }> {
+  signal?.throwIfAborted();
   if (touchedFiles.length === 0) return { errorCount: 0, section: "" };
 
   // Filter out tsconfig-excluded files (test files produce false-positive diagnostics)
@@ -628,6 +629,11 @@ export async function runDiagnosticsOnTouchedFiles(
   });
   if (unique.length === 0) return { errorCount: 0, section: "" };
 
+  const controller = new AbortController();
+  const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const lsp = lspTool.createLSPRunResources({ runId: `diagnostics-${randomUUID()}`, workspace: workingDir, signal: ownedSignal });
+  try {
+
   log(`Running diagnostics on ${unique.length} touched file(s)...`);
   let totalErrors = 0;
   let lspAvailable = true;
@@ -636,7 +642,9 @@ export async function runDiagnosticsOnTouchedFiles(
     try {
       const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
       if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
-      const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
+      signal?.throwIfAborted();
+      const r = await lsp.execute({ action: "diagnostics", file: resolvedPath, format: "json" });
+      signal?.throwIfAborted();
       if (r.success && r.content) {
         try {
           const parsed = JSON.parse(r.content);
@@ -660,6 +668,7 @@ export async function runDiagnosticsOnTouchedFiles(
         log(`✗ ${filePath}: ${r.error}`);
       }
     } catch (err) {
+      signal?.throwIfAborted();
       log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -673,6 +682,10 @@ export async function runDiagnosticsOnTouchedFiles(
       : "";
 
   return { errorCount: totalErrors, section };
+  } finally {
+    controller.abort();
+    try { await lsp.close(); } catch (error) { throw new ResourceCleanupError([error]); }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -866,6 +879,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     // An attempt gets an identity before model/tool construction so its
     // processes, LSP session, and tool calls cannot collide with a retry.
     const attemptRunId = `${params.runId ?? "story"}-worker-${story.id}-${revision}-${randomUUID()}`;
+    const attemptResources = createAttemptResources(attemptRunId, () => loopAbort.abort(new Error("Worker attempt finished")));
+    try {
     const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
     const executionContext: ToolExecutionContext = {
       runId: attemptRunId,
@@ -971,7 +986,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       sandboxCapabilities: config.sandboxCapabilities,
     });
     const personaTools: Record<string, AnyToolDef> = {};
-    const pendingToolCalls = new Set<Promise<unknown>>();
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
       if (toolDef) personaTools[toolName] = toolDef;
@@ -998,7 +1012,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       const execute = (input: Record<string, unknown>): Promise<unknown> => {
         const invocation = (async (): Promise<unknown> => {
         try {
-          return await executeToolCall(toolName, input, () => original(input), executionContext);
+          return await executeToolCall(toolName, input, () => original(input, { abortSignal: combinedSignal }), executionContext);
         } catch (error) {
           if (error instanceof ToolExecutionError) {
             if (error.code === "cancelled") {
@@ -1020,9 +1034,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           throw error;
         }
         })();
-        pendingToolCalls.add(invocation);
-        void invocation.finally(() => pendingToolCalls.delete(invocation));
-        return invocation;
+        return attemptResources.track(invocation);
       };
       personaTools[toolName] = { ...toolDef, execute };
     }
@@ -1199,9 +1211,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         if (!combinedSignal.aborted) throw error;
       }
 
-      const settledTools = await Promise.allSettled([...pendingToolCalls]);
-      const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failedTool) throw failedTool.reason;
+      await attemptResources.settleTools();
 
       // Check abort immediately after stream ends — user may have pressed ESC
       if (combinedSignal.aborted) {
@@ -1357,6 +1367,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         [...context.filesCreated, ...context.filesModified],
         workingDir,
         (msg) => output.log(story.persona, msg),
+        combinedSignal,
       );
       const diagnosticErrors = diagResult.errorCount;
 
@@ -1438,6 +1449,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
+      // Abort/drain before a prompt, retry delay, workspace restore, or retry.
+      await attemptResources.close();
 
       // If user cancelled (ESC), exit immediately — don't retry or classify
       if (abortSignal?.aborted) {
@@ -1534,20 +1547,15 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       }
       failedStories.add(story.id);
       break;
+    }
     } finally {
-      // Do not let an attempt's tool/process/LSP lifetime survive a retry or
-      // a provider failure.  Attempt cleanup is scoped, never global.
-      loopAbort.abort(new Error("Worker attempt finished"));
-      const cleanup = await Promise.allSettled([
-        cancelAndWaitForRunProcesses(attemptRunId),
-        cleanupScopedBackgroundProcesses(attemptRunId),
-        lspTool.shutdownLSPRun(attemptRunId),
-      ]);
-      const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failures.length) {
-        const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
-        output.error(`Worker attempt cleanup failed: ${detail}`);
-        logger.error("Worker attempt cleanup failed", { runId: attemptRunId, detail });
+      try { await attemptResources.close(); }
+      catch (error) {
+        const index = completedStoryIds.indexOf(story.id);
+        if (index >= 0) completedStoryIds.splice(index, 1);
+        failedStories.add(story.id);
+        output.error(error instanceof Error ? error.message : String(error));
+        throw error instanceof ResourceCleanupError ? error : new ResourceCleanupError([error]);
       }
     }
 

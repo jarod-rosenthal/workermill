@@ -1,9 +1,12 @@
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
@@ -13,6 +16,7 @@ import type { CliConfig } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import * as logger from "../logger.js";
 import { getPrdDecompositionPhaseLabel } from "../prd-decomposition-phases.js";
+import { resolveSandboxMode } from "../sandbox-mode.js";
 
 import type { Story, OrchestrationOutput } from "./types.js";
 import {
@@ -135,6 +139,8 @@ export interface PlanCriticResult {
   outputTokens: number;
   provider: string;
   model: string;
+  /** Cancellation is terminal; callers must not treat the retained plan as approved. */
+  cancelled?: boolean;
 }
 
 /** Render a plan as compact JSON for the critic to read. */
@@ -191,14 +197,27 @@ export async function runPlanCritic(
       if (key) process.env[envVar] = key;
     }
   }
-  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
-
   const base: Omit<PlanCriticResult, "stories" | "approved" | "score" | "critique" | "iterations"> = {
     inputTokens: 0,
     outputTokens: 0,
     provider,
     model: modelName,
   };
+
+  const cancelled = (iterations: number): PlanCriticResult => ({
+    ...base,
+    stories,
+    approved: false,
+    score: 0,
+    critique: null,
+    iterations,
+    cancelled: true,
+  });
+
+  // Avoid starting a model call when the orchestration was already cancelled.
+  if (abortSignal?.aborted) return cancelled(0);
+
+  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
   const projectInstructions = formatProjectInstructions(workingDir);
   const taskForPrompt = truncateForPrompt(userTask, 8_000, "task spec");
@@ -212,7 +231,7 @@ export async function runPlanCritic(
   let outputTokens = 0;
 
   for (let iteration = 1; iteration <= MAX_CRITIC_ITERATIONS; iteration++) {
-    if (abortSignal?.aborted) break;
+    if (abortSignal?.aborted) return cancelled(iteration - 1);
 
     // ── Score the current plan ──
     let critique: PlanCritique;
@@ -257,6 +276,7 @@ Report only issues that would change what a worker builds. Do NOT report style p
       outputTokens += scored.usage?.outputTokens || 0;
       output.statusDone();
     } catch (err) {
+      if (abortSignal?.aborted) return cancelled(iteration - 1);
       // Critic failure is non-fatal — proceed with the plan we have.
       output.statusDone();
       logger.error("Plan critic scoring failed", { error: err instanceof Error ? err.message : String(err) });
@@ -340,6 +360,7 @@ Output ONLY the JSON block, no other text.`,
       }
       currentStories = normalizeStoryDependencies(revised);
     } catch (err) {
+      if (abortSignal?.aborted) return cancelled(iteration);
       output.statusDone();
       logger.error("Plan critic refinement failed", { error: err instanceof Error ? err.message : String(err) });
       output.log("critic", "Could not refine the plan — keeping the previous version.");
@@ -468,9 +489,23 @@ export async function planStories(
   abortSignal?: AbortSignal,
   _rateLimitRetries = 0,
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
-  const planner = loadPersona("planner");
-
   const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
+  const cancelled = () => ({
+    stories: [],
+    provider: pProvider,
+    model: pModel,
+    inputTokens: 0,
+    outputTokens: 0,
+    rejected: true,
+    rejectionReason: "Cancelled",
+  });
+
+  // Cancellation and an explicitly unavailable OS sandbox are terminal before
+  // either the model or tool factory gets a chance to start work.
+  if (abortSignal?.aborted) return cancelled();
+  if (sandboxed === "os") resolveSandboxMode("os");
+
+  const planner = loadPersona("planner");
   if (pProvider && pApiKey) {
       const envVar = getApiKeyEnvVar(pProvider);
       if (envVar && !process.env[envVar]) {
@@ -479,8 +514,35 @@ export async function planStories(
       }
   }
 
+  const signal = abortSignal ?? new AbortController().signal;
+  const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+  const executionContext: ToolExecutionContext = {
+    runId: randomUUID(),
+    workspace: scope.workspace,
+    scope,
+    effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
+    signal,
+    allowedNetworkDomains: config.sandboxCapabilities?.allowedNetworkDomains,
+    allowLocalBinding: config.sandboxCapabilities?.allowLocalBinding,
+    allowDockerSocket: config.sandboxCapabilities?.allowDockerSocket,
+    getPermissionState: () => ({
+      mode: "default",
+      trustAll: false,
+      sessionAllow: new Set<string>(),
+      rules: config.permissions ?? {},
+      // Planner personas are read-only regardless of their on-disk tool list.
+      readOnlyRole: true,
+      workspace: scope.workspace,
+    }),
+  };
   const plannerModel = createModel(pProvider as AIProvider, pModel, pHost, pCtx, pApiKey);
-  const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed);
+  const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed, {
+    runId: executionContext.runId,
+    signal,
+    scope,
+    sandboxCapabilities: config.sandboxCapabilities,
+    executionContext,
+  });
 
   const readOnlyTools: Record<string, AnyToolDef> = {};
   if (planner) {
@@ -490,9 +552,10 @@ export async function planStories(
         readOnlyTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            output.toolCall("planner", toolName, input);
-            const result = await toolDef.execute(input);
-            return result;
+            return executeToolCall(toolName, input, async () => {
+              output.toolCall("planner", toolName, input);
+              return toolDef.execute(input);
+            }, executionContext);
           },
         };
       }
@@ -712,8 +775,18 @@ Rules:
     if (lineBuffer.trim()) {
       output.log("planner", lineBuffer);
     }
+    if (abortSignal?.aborted) {
+      output.statusDone();
+      output.coordinatorLog("Build cancelled by user.");
+      return cancelled();
+    }
     planText = await planStream.text;
     planUsage = await planStream.totalUsage;
+    if (abortSignal?.aborted) {
+      output.statusDone();
+      output.coordinatorLog("Build cancelled by user.");
+      return cancelled();
+    }
     // Track tok/s for planner model
     const planElapsed = (Date.now() - planStart) / 1000;
     const planOutTokens = planUsage?.outputTokens || 0;
@@ -817,6 +890,11 @@ Rules:
     logger.info("Planner JSON extraction retry", { planTextLength: planText.length });
 
     try {
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled();
+      }
       const extractionInput = truncateForPrompt(planText, 12_000, "planner analysis");
       const extractionResult = await generateText({
         model: plannerModel,
@@ -830,6 +908,12 @@ Rules:
         maxOutputTokens: 4096,
         abortSignal,
       });
+
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled();
+      }
 
       const retryStories = parseStoriesFromText(extractionResult.text, output);
       if (retryStories.length > 0) {
@@ -845,6 +929,11 @@ Rules:
         };
       }
     } catch (extractErr) {
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled();
+      }
       logger.error("JSON extraction retry failed", { error: extractErr instanceof Error ? extractErr.message : String(extractErr) });
     }
 

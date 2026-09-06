@@ -4,6 +4,15 @@
   "baselineCommit": "9e317488",
   "specification": "docs/reliability-plan.md",
   "status": "in_progress",
+  "recoverySnapshot": {
+    "date": "2026-09-06",
+    "implementationHead": "22ba7d7c0d12dd9bed85586fcbf6f966030245c7",
+    "qualification": "failed",
+    "unitTests": {"passed": 1550, "failed": 80, "skipped": 1},
+    "handoff": "../HANDOFF.md",
+    "retrospective": "recovery/2026-09-06-retrospective.md",
+    "note": "Historical task completion entries below do not qualify this HEAD. R15a is integrated with an incompatible orchestration caller; R15b event seams survive unintegrated at 7aa8e089. Current work is recovery documentation, not resumed implementation."
+  },
   "integrationBranch": "reliability/core",
   "maxImplementationWorkers": 2,
   "schedulingRule": "All parent dependencies must be integrated; exclusive locks and write paths must not overlap. Explicit dispatch locks override inherited parent locks only for that package's documented write scope. If dispatches are present, dispatch only those suffix packages using their after edges and document-defined scope; the parent completes when all packages integrate. Read the full task block before dispatch. This is not a directly executable WorkerMill plan.",

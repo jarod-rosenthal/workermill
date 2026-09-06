@@ -24,3 +24,8 @@ If you're just getting started, read the [project README](../README.md) first �
 
 - **[Architecture](architecture.md)** — how the CLI is put together: execution modes, tool system, MCP, permission layers, compaction, safety.
 - **[Contributing](contributing.md)** — dev setup, source layout, how to add commands / tools / personas, test conventions, release process.
+
+## Reliability project recovery
+
+- **[Current handoff](../HANDOFF.md)** — saved branch state, known failed checks, and the next bounded task.
+- **[September 6 retrospective](recovery/2026-09-06-retrospective.md)** — incident evidence, completed and remaining work, and continuity safeguards.

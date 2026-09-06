@@ -6,9 +6,10 @@
  * filesystem monitor are not part of evidence collection.
  */
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 
 export interface VerifiedRepositoryFingerprint {
   verified: true;
@@ -60,16 +61,20 @@ const GIT_PREFIX = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=fals
 const MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_WORKING_TREE_BYTES = 64 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
 
-function git(workingDir: string, args: string[]): Buffer {
-  return execFileSync("git", [...GIT_PREFIX, ...args], {
+async function git(workingDir: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
+  if (signal?.aborted) throw new Error("repository fingerprint cancelled");
+  const { stdout } = await execFileAsync("git", [...GIT_PREFIX, ...args], {
     cwd: workingDir,
     encoding: "buffer",
-    stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0" },
     timeout: 10_000,
     maxBuffer: MAX_GIT_OUTPUT_BYTES,
+    signal,
+    killSignal: "SIGKILL",
   });
+  return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
 }
 
 function unverified(reason: string): UnverifiedRepositoryFingerprint {
@@ -130,13 +135,21 @@ function parsePathList(raw: Buffer): string[] | null {
   return entries;
 }
 
-function readMetadata(workingDir: string): GitMetadata | UnverifiedRepositoryFingerprint {
+function cancelled(): UnverifiedRepositoryFingerprint {
+  return unverified("repository fingerprint cancelled");
+}
+
+function isCancelled(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
+
+async function readMetadata(workingDir: string, signal?: AbortSignal): Promise<GitMetadata | UnverifiedRepositoryFingerprint> {
   try {
-    const head = git(workingDir, ["rev-parse", "--verify", "HEAD"]).toString("utf8").trim();
+    const head = (await git(workingDir, ["rev-parse", "--verify", "HEAD"], signal)).toString("utf8").trim();
     if (!/^[0-9a-f]{40,64}$/i.test(head)) return unverified("repository HEAD is unavailable");
-    const rawIndex = git(workingDir, ["ls-files", "-s", "-z"]);
-    const rawHeadTree = git(workingDir, ["ls-tree", "-r", "-z", "HEAD"]);
-    const rawUntracked = git(workingDir, ["ls-files", "--others", "--exclude-standard", "-z"]);
+    const rawIndex = await git(workingDir, ["ls-files", "-s", "-z"], signal);
+    const rawHeadTree = await git(workingDir, ["ls-tree", "-r", "-z", "HEAD"], signal);
+    const rawUntracked = await git(workingDir, ["ls-files", "--others", "--exclude-standard", "-z"], signal);
     const index = parseIndex(rawIndex);
     const headTree = parseTree(rawHeadTree);
     const untracked = parsePathList(rawUntracked);
@@ -147,15 +160,22 @@ function readMetadata(workingDir: string): GitMetadata | UnverifiedRepositoryFin
     }
     return { head, index, headTree, untracked, rawIndex, rawHeadTree, rawUntracked };
   } catch {
+    if (isCancelled(signal)) return cancelled();
     return unverified("repository metadata could not be collected");
   }
 }
 
-function repositoryRoot(workingDir: string): string | UnverifiedRepositoryFingerprint {
+async function repositoryRoot(workingDir: string, signal?: AbortSignal): Promise<string | UnverifiedRepositoryFingerprint> {
   try {
-    const root = git(workingDir, ["rev-parse", "--show-toplevel"]).toString("utf8").trim();
-    return fs.realpathSync(root);
+    const root = (await git(workingDir, ["rev-parse", "--show-toplevel"], signal)).toString("utf8").trim();
+    const canonicalRoot = fs.realpathSync(root);
+    const canonicalWorkingDir = fs.realpathSync(workingDir);
+    if (canonicalWorkingDir !== canonicalRoot && !canonicalWorkingDir.startsWith(canonicalRoot + path.sep)) {
+      return unverified("working directory is outside the resolved repository root");
+    }
+    return canonicalRoot;
   } catch {
+    if (isCancelled(signal)) return cancelled();
     return unverified("repository root could not be resolved");
   }
 }
@@ -189,11 +209,12 @@ function contentDigest(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function collectWorkingEntries(root: string, metadata: GitMetadata): WorkingEntry[] | UnverifiedRepositoryFingerprint {
+function collectWorkingEntries(root: string, metadata: GitMetadata, signal?: AbortSignal): WorkingEntry[] | UnverifiedRepositoryFingerprint {
   const paths = new Set([...metadata.index.map((entry) => entry.path), ...metadata.headTree.map((entry) => entry.path), ...metadata.untracked]);
   const entries: WorkingEntry[] = [];
   let totalBytes = 0;
   for (const relativePath of [...paths].sort()) {
+    if (isCancelled(signal)) return cancelled();
     const absolutePath = path.resolve(root, relativePath);
     if (absolutePath !== root && !absolutePath.startsWith(root + path.sep)) return unverified("repository path escaped its working directory");
     try {
@@ -292,16 +313,18 @@ function frame(hash: ReturnType<typeof createHash>, tag: string, value: string |
  * unstable collection is deliberately unverified; callers must not treat it
  * as evidence matching a previous snapshot.
  */
-export function captureRepositoryFingerprint(workingDir: string): RepositoryFingerprintResult {
-  const root = repositoryRoot(workingDir);
+export async function captureRepositoryFingerprint(workingDir: string, signal?: AbortSignal): Promise<RepositoryFingerprintResult> {
+  if (isCancelled(signal)) return cancelled();
+  const root = await repositoryRoot(workingDir, signal);
   if (typeof root !== "string") return root;
-  const initial = readMetadata(root);
+  const initial = await readMetadata(root, signal);
   if (isUnverified(initial)) return initial;
-  const firstWorkingEntries = collectWorkingEntries(root, initial);
+  const firstWorkingEntries = collectWorkingEntries(root, initial, signal);
   if (isUnverified(firstWorkingEntries)) return firstWorkingEntries;
-  const secondWorkingEntries = collectWorkingEntries(root, initial);
+  const secondWorkingEntries = collectWorkingEntries(root, initial, signal);
   if (isUnverified(secondWorkingEntries)) return secondWorkingEntries;
-  const finalMetadata = readMetadata(root);
+  if (isCancelled(signal)) return cancelled();
+  const finalMetadata = await readMetadata(root, signal);
   if (isUnverified(finalMetadata)) return finalMetadata;
   if (!sameMetadata(initial, finalMetadata) || !sameWorkingEntries(firstWorkingEntries, secondWorkingEntries)) {
     return unverified("repository changed during fingerprint collection");

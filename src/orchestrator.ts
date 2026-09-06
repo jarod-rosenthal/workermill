@@ -107,6 +107,11 @@ export async function runOrchestration(
 
   const workingDir = process.cwd();
   const costTracker = new CostTracker();
+  const observePlanningUsage = async (observation: Parameters<typeof costTracker.recordCall>[0]) => {
+    if (!costTracker.recordCall(observation)) return;
+    output.updateCost?.(costTracker.getTotalCost());
+    output.updateUsageSummary?.(costTracker.getUsageSummary());
+  };
   const completedStoryIds: string[] = [...(retryPlan?.completedStoryIds ?? [])];
   let featureBranch: string | null = retryPlan?.featureBranch ?? null;
   let mainBranch = retryPlan?.mainBranch ?? "main";
@@ -456,17 +461,12 @@ export async function runOrchestration(
 
     // Spec check — identify ambiguities before the planner runs (off by default)
     if (config.review?.specCheck) {
-      userTask = await _runSpecCheck(config, userTask, output, abortSignal);
+      userTask = await _runSpecCheck(config, userTask, output, abortSignal, observePlanningUsage);
     }
 
     // Planner runs on the current branch — no branch created yet
     terminalReason = "planner_failed";
-    const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
-
-    // Track planner cost
-    costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
-    output.updateCost?.(costTracker.getTotalCost());
-    output.updateUsageSummary?.(costTracker.getUsageSummary());
+    const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal, 0, observePlanningUsage);
 
     // Handle planner rejection — still on original branch, nothing to clean up
     if (planResult.rejected) {
@@ -487,12 +487,8 @@ export async function runOrchestration(
 
     // Planner critic — score the plan and refine it before any worker starts (off by default)
     if (config.review?.critic) {
-      const critique = await _runPlanCritic(config, userTask, plannerStories, workingDir, output, abortSignal);
+      const critique = await _runPlanCritic(config, userTask, plannerStories, workingDir, output, abortSignal, observePlanningUsage);
       plannerStories = _applyQaParticipation(critique.stories, qaParticipation);
-
-      costTracker.addUsage("Critic", critique.provider, critique.model, critique.inputTokens, critique.outputTokens);
-      output.updateCost?.(costTracker.getTotalCost());
-      output.updateUsageSummary?.(costTracker.getUsageSummary());
 
       if (critique.cancelled || abortSignal?.aborted) {
         output.coordinatorLog("Build cancelled during plan critique.");

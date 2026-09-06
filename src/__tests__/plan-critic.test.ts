@@ -118,6 +118,28 @@ describe("runPlanCritic", () => {
     expect(result.outputTokens).toBe(400);
   });
 
+  it("reports every score and refinement call with distinct ledger identities", async () => {
+    mockGenerateObject
+      .mockResolvedValueOnce(scored(4, [{ dimension: "completeness", problem: "no tests", fix: "add a test story" }]))
+      .mockResolvedValueOnce(scored(9));
+    mockGenerateText.mockResolvedValueOnce({
+      text: '```json\n{ "stories": [{ "id": "one", "title": "Add endpoint", "persona": "backend_developer", "description": "Add a health endpoint" }] }\n```',
+      usage: { inputTokens: 200, outputTokens: 300 },
+    });
+    const onUsage = vi.fn();
+
+    await runPlanCritic(createConfig(), "task", STORIES, "/work", createOutput(), undefined, onUsage);
+
+    expect(onUsage).toHaveBeenCalledTimes(3);
+    const observations = onUsage.mock.calls.map(([observation]) => observation);
+    expect(new Set(observations.map((observation) => observation.callId)).size).toBe(3);
+    expect(observations.map((observation) => observation.usage)).toEqual([
+      { inputTokens: 100, outputTokens: 50 },
+      { inputTokens: 200, outputTokens: 300 },
+      { inputTokens: 100, outputTokens: 50 },
+    ]);
+  });
+
   it("gives up after MAX_CRITIC_ITERATIONS and reports the plan as unapproved", async () => {
     const issues = [{ dimension: "scope", problem: "too big", fix: "split it" }];
     mockGenerateObject.mockResolvedValue(scored(3, issues));
@@ -140,12 +162,14 @@ describe("runPlanCritic", () => {
     mockGenerateObject.mockRejectedValueOnce(new Error("model unavailable"));
 
     const output = createOutput();
-    const result = await runPlanCritic(createConfig(), "task", STORIES, "/work", output);
+    const onUsage = vi.fn();
+    const result = await runPlanCritic(createConfig(), "task", STORIES, "/work", output, undefined, onUsage);
 
     // Critic failure must never block a build
     expect(result.approved).toBe(true);
     expect(result.stories).toEqual(STORIES);
     expect(output.logs.some((l) => l.includes("Could not score the plan"))).toBe(true);
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ persona: "Critic", usage: undefined, usageComplete: false }));
   });
 
   it("keeps the previous plan when refinement produces no parseable stories", async () => {

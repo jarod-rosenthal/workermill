@@ -157,6 +157,36 @@ describe("planner runtime policy", () => {
     expect(result.outputTokens).toBe(1);
   });
 
+  it("reports the actual planner call once, retaining completed step usage", async () => {
+    vi.mocked(streamText).mockImplementation(((options: StreamOptions): StreamResult => {
+      options.onStepFinish?.();
+      return {
+        textStream: (async function* () { yield PLAN; })(),
+        text: Promise.resolve(PLAN),
+        totalUsage: Promise.resolve({ inputTokens: 5, outputTokens: 7 }),
+      };
+    }) as typeof streamText);
+    const onUsage = vi.fn();
+
+    await planStories(config(), "Plan safely", workspace, true, output([]), undefined, 0, onUsage);
+
+    expect(onUsage).toHaveBeenCalledOnce();
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+      persona: "Planner",
+      usage: { inputTokens: 5, outputTokens: 7 },
+      usageComplete: true,
+    }));
+  });
+
+  it("reports a missing observation when a started planner call fails", async () => {
+    vi.mocked(streamText).mockImplementation((() => { throw new Error("provider unavailable"); }) as typeof streamText);
+    const onUsage = vi.fn();
+
+    await planStories(config(), "Plan safely", workspace, true, output([]), undefined, 0, onUsage);
+
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ persona: "Planner", usage: undefined, usageComplete: false }));
+  });
+
   it("fails an explicitly unavailable OS sandbox before model work", async () => {
     vi.mocked(resolveSandboxMode).mockImplementation(() => {
       throw new Error("OS sandbox unavailable");

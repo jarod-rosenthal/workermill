@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { runNode, validateVariants, printValidation } from "./r20-helper.mjs";
+import { initialRevision, runNode, validateVariants, printValidation } from "./r20-helper.mjs";
 
 const base = {
   "package.json": '{"type":"module"}\n',
@@ -19,9 +18,8 @@ const reference = { ...base, "src/outbox.mjs": `export function recoverOutbox(st
 }
 export function nextDelivery(state) { return state.pending[0] ?? null; }\n` };
 const incomplete = { ...reference, "src/outbox.mjs": reference["src/outbox.mjs"].replace("...state.pending, ...state.sending", "...state.sending") };
-function revision(files) { return `sha256:${createHash("sha256").update(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)).map(([p, c]) => `${p}\\0${c}`).join("\\0")).digest("hex")}`; }
 export const fixture = {
-  taskId: "r20-feature-webhook-recovery-v1", category: "feature", initialRevision: revision(base),
+  taskId: "r20-feature-webhook-recovery-v1", category: "feature", initialRevision: initialRevision(base),
   prompt: "Implement outbox recovery after an interrupted webhook delivery. Move undelivered sending events back to pending, preserve pending order, clear sending, skip delivered events, and do not duplicate ids. resumeDelivery must expose the first recovered event.",
   workspace: { files: base, writableFiles: ["src/outbox.mjs"], network: false, timeoutMs: 2000, toolchain: "Node.js >=22.12; built-in modules only; ESM" },
   acceptance: "Recovery is idempotent and resumes the oldest undelivered event without resurrecting delivered work.",

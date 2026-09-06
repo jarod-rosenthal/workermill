@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { runNode, validateVariants, printValidation } from "./r20-helper.mjs";
+import { initialRevision, runNode, validateVariants, printValidation } from "./r20-helper.mjs";
 
 const base = {
   "package.json": '{"type":"module"}\n',
@@ -16,9 +15,8 @@ const reference = { ...base, "src/notes.mjs": `export function renderRelease(tit
   return lines.join("\\n") + "\\n";
 }\n` };
 const incomplete = { ...base, "src/notes.mjs": reference["src/notes.mjs"].replace('"## Changes"', '"Changes"') };
-function revision(files) { return `sha256:${createHash("sha256").update(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)).map(([p, c]) => `${p}\\0${c}`).join("\\0")).digest("hex")}`; }
 export const fixture = {
-  taskId: "r20-feature-release-notes-v1", category: "feature", initialRevision: revision(base),
+  taskId: "r20-feature-release-notes-v1", category: "feature", initialRevision: initialRevision(base),
   prompt: "Add a structured release-notes format: an H1 title, a Changes H2, one bullet per change, and exactly one trailing newline. Empty changes must still render a valid section. Keep the public publishableRelease wrapper working.",
   workspace: { files: base, writableFiles: ["src/notes.mjs"], network: false, timeoutMs: 2000, toolchain: "Node.js >=22.12; built-in modules only; ESM" },
   acceptance: "Release notes have stable Markdown structure for empty and non-empty change lists through the public wrapper.",

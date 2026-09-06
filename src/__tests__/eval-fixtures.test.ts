@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -74,6 +75,12 @@ describe("R20c offline feature fixtures", () => {
     expect(fixtures.every((item) => item.category === "feature" && item.workspace.network === false)).toBe(true);
     expect(fixtures.every((item) => item.workspace.toolchain.includes("22.12"))).toBe(true);
     expect(expiringCache.workspace.writableFiles).toEqual(["src/cache.mjs", "src/main.mjs"]);
+    for (const item of fixtures) {
+      const material = Object.entries(item.workspace.files).sort(([a], [b]) => a.localeCompare(b))
+        .map(([filePath, contents]) => `${filePath}\0${contents}`).join("\0");
+      const independentlyComputed = `sha256:${createHash("sha256").update(material).digest("hex")}`;
+      expect(item.initialRevision).toBe(independentlyComputed);
+    }
     const results = await Promise.all([
       validateReleaseNotes(), validateWebhookRecovery(), validateTagFilter(), validateExpiringCache(), validateDailySummary(),
     ]);

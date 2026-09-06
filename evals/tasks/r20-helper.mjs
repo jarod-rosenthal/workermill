@@ -3,8 +3,17 @@ import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const OUTPUT_LIMIT = 16_384;
+
+// New R20c fixtures share this exact algorithm so their pinned revisions are
+// stable over their sorted workspace paths and raw file bytes.
+export function initialRevision(files) {
+  const material = Object.entries(files).sort(([a], [b]) => a.localeCompare(b))
+    .map(([filePath, contents]) => `${filePath}\0${contents}`).join("\0");
+  return `sha256:${createHash("sha256").update(material).digest("hex")}`;
+}
 
 export async function materialize(root, files) {
   for (const [relativePath, contents] of Object.entries(files)) {

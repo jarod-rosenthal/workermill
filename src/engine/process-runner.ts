@@ -9,6 +9,8 @@ export interface ProcessRequest {
   timeoutMs: number;
   maxOutputBytes: number;
   terminationGraceMs: number;
+  /** Observe output as it arrives without taking bounded capture ownership. */
+  onOutput?: (stream: "stdout" | "stderr", chunk: Buffer) => void;
 }
 
 export interface ProcessResult {
@@ -278,8 +280,23 @@ export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
     });
     addActive(processState);
 
-    child.stdout?.on("data", (chunk: Buffer) => appendOutput(processState, "stdout", chunk));
-    child.stderr?.on("data", (chunk: Buffer) => appendOutput(processState, "stderr", chunk));
+    child.stdout?.on("data", (chunk: Buffer) => {
+      try {
+        request.onOutput?.("stdout", chunk);
+      } catch {
+        // Output observers are advisory. A parser or watcher must not break
+        // process cleanup or leave the child running.
+      }
+      appendOutput(processState, "stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      try {
+        request.onOutput?.("stderr", chunk);
+      } catch {
+        // See stdout observer handling above.
+      }
+      appendOutput(processState, "stderr", chunk);
+    });
     child.once("error", (error) => {
       if (!processState.parentClosed) {
         processState.parentClosed = true;

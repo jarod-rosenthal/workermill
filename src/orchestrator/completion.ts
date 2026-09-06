@@ -1,32 +1,60 @@
-import { execSync, spawnSync } from "child_process";
+import crypto from "crypto";
 import type { CliConfig, HooksConfig } from "../config.js";
 import * as logger from "../logger.js";
-import { execGh } from "../git-ops.js";
+import { runProcess } from "../engine/process-runner.js";
 
 /**
- * Run `git` with an argument array, returning combined stdout+stderr.
- * Throws an Error whose message contains the combined output so callers
- * that inspect `String(err)` for patterns like "non-fast-forward" keep working.
- * Replaces `execSync(\`git ... 2>&1\`)` patterns without invoking a shell.
+ * Runs publication commands through the run-scoped async process runner.
+ * Dynamic values are single-quoted before crossing its shell boundary.
  */
-function gitCombined(args: string[], cwd: string): string {
-  const result = spawnSync("git", ["-c", "core.fsmonitor=false", ...args], {
+function shellArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function completionProcess(
+  runId: string,
+  executable: "git" | "gh",
+  args: string[],
+  cwd: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<string> {
+  const command = [executable, ...args].map(shellArg).join(" ");
+  const result = await runProcess({
+    runId,
+    command,
     cwd,
-    encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"],
-    timeout: 120_000,
-    maxBuffer: 1024 * 1024,
+    signal,
+    timeoutMs,
+    maxOutputBytes: 1024 * 1024,
+    terminationGraceMs: 1_000,
   });
-  const combined = ((result.stdout || "") + (result.stderr || "")).trim();
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const err = new Error(combined || `git ${args[0]} failed (exit ${result.status})`);
-    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).stdout = result.stdout || undefined;
-    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).stderr = result.stderr || undefined;
-    (err as unknown as { stdout?: string; stderr?: string; status: number | null }).status = result.status;
-    throw err;
+  const combined = `${result.stdout}${result.stderr}`.trim();
+  if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
+    const reason = result.outputTruncated
+      ? "output truncated"
+      : result.reason === "timed_out"
+        ? "timed out"
+        : result.reason === "cancelled"
+          ? "cancelled"
+          : result.reason === "spawn_failed"
+            ? "failed to start"
+            : `exit ${result.exitCode}`;
+    const error = new Error(combined || `${executable} ${args[0] ?? ""} ${reason}`);
+    Object.assign(error, {
+      stdout: result.stdout || undefined,
+      stderr: result.stderr || undefined,
+      status: result.exitCode,
+      publicationReason: reason,
+    });
+    throw error;
   }
   return combined;
+}
+
+function completionSignal(abortSignal: AbortSignal | undefined): AbortSignal {
+  if (abortSignal) return abortSignal;
+  return new AbortController().signal;
 }
 import { extractGithubIssueNumber } from "../ticket-ops.js";
 import { runLifecycleHooks } from "../hooks.js";
@@ -79,6 +107,8 @@ export async function runCompletion(args: {
   liveViewServer?: LiveViewServer;
   hooks: HooksConfig | undefined;
   evidence: CompletionEvidence;
+  /** Parent run identity for publication subprocess ownership. */
+  runId?: string;
   abortSignal?: AbortSignal;
 }): Promise<OrchestrationResult> {
   const {
@@ -88,6 +118,14 @@ export async function runCompletion(args: {
   } = args;
 
   const strict = config.review?.strict === true;
+  const runId = args.runId ?? `completion-${crypto.randomUUID()}`;
+  const signal = completionSignal(abortSignal);
+  const gitRead = (gitArgs: string[]): Promise<string> =>
+    completionProcess(runId, "git", ["-c", "core.fsmonitor=false", ...gitArgs], workingDir, signal, 10_000);
+  const gitPublish = (gitArgs: string[]): Promise<string> =>
+    completionProcess(runId, "git", ["-c", "core.fsmonitor=false", ...gitArgs], workingDir, signal, 120_000);
+  const ghPublish = (ghArgs: string[]): Promise<string> =>
+    completionProcess(runId, "gh", ghArgs, workingDir, signal, 120_000);
   const publicationAllowed = async (): Promise<boolean> => {
     if (abortSignal?.aborted) {
       output.coordinatorLog("Publication blocked: build cancelled.");
@@ -108,8 +146,8 @@ export async function runCompletion(args: {
     }
     if (featureBranch) {
       try {
-        const checkedOut = gitCombined(["branch", "--show-current"], workingDir);
-        const branchHead = gitCombined(["rev-parse", "--verify", "--end-of-options", `refs/heads/${featureBranch}`], workingDir);
+        const checkedOut = await gitRead(["branch", "--show-current"]);
+        const branchHead = await gitRead(["rev-parse", "--verify", "--end-of-options", `refs/heads/${featureBranch}`]);
         if (checkedOut !== featureBranch || branchHead !== evidence.fingerprint.head) {
           output.error("Publication blocked: the expected feature branch no longer points at the verified candidate.");
           return false;
@@ -130,14 +168,14 @@ export async function runCompletion(args: {
   try {
     if (featureBranch) {
       // Show branch summary
-      const commitCount = gitCombined(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"], workingDir);
+      const commitCount = await gitRead(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"]);
 
       output.log("system", `Branch: ${featureBranch} (${commitCount} commits)`);
 
       // Check if remote exists for PR
       let hasRemote = false;
       try {
-        const remote = execSync("git remote get-url origin 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+        const remote = await gitRead(["remote", "get-url", "origin"]);
         hasRemote = !!remote;
       } catch { /* no remote */ }
 
@@ -156,7 +194,7 @@ export async function runCompletion(args: {
             output.status("Pushing branch...");
             let pushOutput = "";
             try {
-              pushOutput = gitCombined(["push", "-u", "origin", featureBranch], workingDir);
+              pushOutput = await gitPublish(["push", "-u", "origin", featureBranch]);
             } catch (pushErr) {
               const msg = String(pushErr);
               const isDiverged = msg.includes("non-fast-forward") || msg.includes("Updates were rejected");
@@ -170,7 +208,7 @@ export async function runCompletion(args: {
                     return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
                   }
                   try {
-                    pushOutput = gitCombined(["push", "--force-with-lease", "-u", "origin", featureBranch], workingDir);
+                    pushOutput = await gitPublish(["push", "--force-with-lease", "-u", "origin", featureBranch]);
                     output.statusDone();
                   } catch (forceErr) {
                     output.statusDone();
@@ -224,9 +262,8 @@ export async function runCompletion(args: {
               }
               prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
               const prBody = prParts.join("\n");
-              const prUrl = execGh(
-                ["pr", "create", "--title", prTitle, "--body-file", "-", "--head", featureBranch, "--base", mainBranch],
-                { cwd: workingDir, input: prBody },
+              const prUrl = await ghPublish(
+                ["pr", "create", "--title", prTitle, "--body", prBody, "--head", featureBranch, "--base", mainBranch],
               );
               logger.info("Pull request created", { prUrl, featureBranch, mainBranch });
               output.log("system", `Pull request created: ${prUrl}`);
@@ -257,10 +294,7 @@ export async function runCompletion(args: {
                   const emoji = evidence.reviewOutcome.approved ? "✅" : "🔄";
                   const reviewBody = `## ${emoji} Tech Lead Review\n\n**Code Quality Score:** ${reviewScore}/10\n\n${feedback}`;
                   const reviewFlag = evidence.reviewOutcome.approved ? "--approve" : "--request-changes";
-                  execSync(
-                    `gh pr review --body-file - ${reviewFlag} 2>&1`,
-                    { cwd: workingDir, encoding: "utf-8", input: reviewBody, stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
-                  );
+                  await ghPublish(["pr", "review", "--body", reviewBody, reviewFlag]);
                 } catch (reviewCommentErr) {
                   logger.warn("Failed to post structured PR review comment", {
                     error: reviewCommentErr instanceof Error ? reviewCommentErr.message : String(reviewCommentErr),
@@ -302,8 +336,13 @@ export async function runCompletion(args: {
       }
     } else {
       // No feature branch: show local changes without mutating verified state.
-      const diff = gitCombined(["diff", "--stat", "--no-ext-diff", "--no-textconv"], workingDir);
-      const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      const diff = await gitRead(["diff", "--stat", "--no-ext-diff", "--no-textconv"]);
+      let untracked = "";
+      try {
+        untracked = await gitRead(["ls-files", "--others", "--exclude-standard"]);
+      } catch {
+        // A summary probe is best-effort; it must not be mistaken for publish success.
+      }
       if (diff || untracked) {
         output.coordinatorLog(`${diff ? diff.split("\n").length : 0} modified, ${untracked ? untracked.split("\n").filter(Boolean).length : 0} new files`);
       }
@@ -361,7 +400,7 @@ export async function runCompletion(args: {
 
   // Emit run complete event
   if (liveViewServer && !shipCompleteChangedSource) {
-    const commitCount = featureBranch ? parseInt(gitCombined(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"], workingDir), 10) : 0;
+    const commitCount = featureBranch ? parseInt(await gitRead(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"]), 10) : 0;
     liveViewServer.emitRunComplete(featureBranch || "main", commitCount);
   }
 

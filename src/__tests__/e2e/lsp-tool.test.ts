@@ -1,21 +1,16 @@
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
-import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
 import { execute, shutdown } from "../../engine/tools/lsp.js";
 
 let tempDir: string;
-let lsAvailable = true;
+// Real language servers must not be downloaded or contacted by the test suite.
+// Protocol/lifecycle coverage uses the local fixture in lsp-run-resources.test.ts.
+let lsAvailable = false;
 
 beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lsp-test-"));
-
-  // Create a minimal package.json so npm install works
-  fs.writeFileSync(
-    path.join(tempDir, "package.json"),
-    JSON.stringify({ name: "lsp-test", private: true, dependencies: { typescript: "^5" } }),
-  );
 
   fs.writeFileSync(
     path.join(tempDir, "tsconfig.json"),
@@ -47,22 +42,6 @@ console.log(result);
 `,
   );
 
-  // Install typescript so the language server can resolve types
-  try {
-    execSync("npm install --ignore-scripts", { cwd: tempDir, stdio: "pipe", timeout: 30000 });
-  } catch {
-    // If npm install fails, tests will degrade gracefully
-  }
-
-  // Probe whether the language server actually works by running a quick symbols call.
-  // If the server isn't installed or can't start, mark lsAvailable = false so tests skip.
-  // Probe whether the LS actually returns valid results.
-  // typescript-language-server may be installed but return unexpected response shapes
-  // (e.g. SymbolInformation[] instead of DocumentSymbol[]), causing the tool to error.
-  const probe = await execute({ action: "symbols", file: path.join(tempDir, "math.ts") }, tempDir);
-  if (!probe.success) {
-    lsAvailable = false;
-  }
 });
 
 afterAll(() => {

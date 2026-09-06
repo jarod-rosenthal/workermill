@@ -54,6 +54,8 @@ export interface ToolDefinitionOptions {
   scope?: PathScope;
   /** R10 plumbing only; policy wrapping remains the caller's responsibility. */
   executionContext?: ToolExecutionContext;
+  /** Run-owned LSP lifetime. Callers await close() during their run teardown. */
+  lspResources?: lspTool.LSPRunResources;
   /** Receives child model usage once, for the future run ledger adapter. */
   onSubAgentUsage?: (usage: subAgentTool.SubAgentUsage) => void | Promise<void>;
 }
@@ -128,6 +130,24 @@ export function createToolDefinitions(
   ]);
   const runId = options.runId ?? options.executionContext?.runId;
   const signal = options.signal ?? options.executionContext?.signal;
+  // Bind the LSP adapter to the context used to create these definitions.
+  // In particular, child factories receive their child run ID and signal,
+  // rather than a parent closure's lifetime.
+  const providedLspResources = options.lspResources;
+  const suppliedLspResources = providedLspResources && providedLspResources.runId === runId && providedLspResources.workspace === pathScope.workspace
+    ? providedLspResources
+    : undefined;
+  let createdLspResources: lspTool.LSPRunResources | undefined;
+  const getLspResources = (): lspTool.LSPRunResources | undefined => {
+    if (suppliedLspResources) return suppliedLspResources;
+    if (!runId || !signal) return undefined;
+    createdLspResources ??= lspTool.createLSPRunResources({
+      runId,
+      workspace: pathScope.workspace,
+      signal,
+    });
+    return createdLspResources;
+  };
   const commandRunner = createScopedCommandRunner({ sandbox: requestedSandbox === "os" ? "os" : false, scope: pathScope, capabilities: sandboxCapabilities });
   const resolveToolPath = (inputPath: string, access: PathAccess = "read"): string =>
     resolvePath(pathScope, inputPath, access, { enforceScope: pathSandboxed });
@@ -748,7 +768,11 @@ export function createToolDefinitions(
           resolvedFile = resolveToolPath(resolvedFile!, "read");
         }
         const resolvedTargetPath = targetPath ? resolveToolPath(targetPath, "read") : undefined;
-        const result = await lspTool.execute({ action, file: resolvedFile, line, character, path: resolvedTargetPath, severity, format, symbol, include_declaration }, pathScope.workspace);
+        const input = { action, file: resolvedFile, line, character, path: resolvedTargetPath, severity, format, symbol, include_declaration };
+        const lspResources = getLspResources();
+        const result = lspResources
+          ? await lspResources.execute(input)
+          : await lspTool.execute(input, pathScope.workspace);
         if (result.success) {
           return result.content || "No results.";
         }

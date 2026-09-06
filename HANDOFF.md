@@ -14,6 +14,8 @@ The retrospective now includes continuation results, and `docs/recovery/2026-09-
 
 Checkpoint addition: R18c3a integrated as 45b2437f/946f023a; candidate test correction adds the output spy and planner/worker/failed-review/review exact-sum contract. Root review found child usage had not adopted shared zero-placeholder handling; replaced duplicate normalization with model-usage helpers and added positive-step/true-zero regressions. This combined tree is pending qualification; no downstream dispatch until checks pass.
 
+4c7cbc05 full qualification: 1 failed, 1,604 passed, one existing skip; typecheck passed. The sole failure was an old expected review token value (5) in the expanded fixture whose successful review now reports 23. Root aligned the expectation with the named fixture observation; all ledger assertions remain. Requalification pending; downstream remains stopped.
+
 ## Historical audit state (before the repair below)
 
 - Repository: `/home/user/github/workermill`, a single-package TypeScript CLI, npm package `workermill` (commands `wm` / `workermill`). This is not the archived server/frontend project.

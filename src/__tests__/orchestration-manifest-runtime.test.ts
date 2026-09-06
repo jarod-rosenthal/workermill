@@ -126,7 +126,7 @@ describe("orchestration manifest runtime", () => {
     const manifest = loadRunManifest(result.runId!, dir)!;
     expect(manifest).toMatchObject({ phase: "terminal", terminalReason: "success", outcome: "success" });
     expect(manifest.attempts).toMatchObject([{ storyId: "one", provider: "worker-provider", status: "completed" }]);
-    expect(manifest.reviews).toMatchObject([{ provider: "review-provider", inputTokens: 5, outcome: { decision: "approved" } }]);
+    expect(manifest.reviews).toMatchObject([{ provider: "review-provider", inputTokens: 23, outcome: { decision: "approved" } }]);
     expect(result.usageLedger).toEqual(manifest.usageLedger);
     expect(rendered.updateUsageLedger).toHaveBeenLastCalledWith(manifest.usageLedger);
     expect(manifest.usageLedger).toMatchObject({ calls: [

@@ -186,6 +186,8 @@ Do not copy the decision table into new adapters or wrap already-governed tools 
 
 Planner and reviewer tool contexts are read-only, even if a custom persona lists write, shell, or child-agent tools. Revision workers use ordinary mutating-worker permissions: an explicit deny still wins over session trust. Each review attempt and revision has its own run ID, and its tool context shares the model attempt's timeout signal. A cancelled attempt cannot use its tools to continue writing. This policy boundary does not establish that the review is correct or that later repository changes remain verified.
 
+Review repository context uses `createReviewGit` with the selected process scope and parent cancellation signal. Branch names are literal arguments resolved to commit identities before diff/history reads. Git external diff, text conversion, hooks, and filesystem-monitor callbacks are disabled for these reads; configured clean filters remain inside the selected OS boundary. A failed or truncated read is unavailable evidence, not an empty successful diff. Path-only mode does not contain those filters.
+
 ## Context Management
 
 Long conversations hit context window limits. Three layers of compaction run automatically:

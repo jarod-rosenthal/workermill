@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { cancelRunProcesses, runProcess } from "../engine/process-runner.js";
 
@@ -64,9 +65,12 @@ describe("process runner", () => {
       expect(Number.isInteger(childPid)).toBe(true);
       let childRunning = true;
       try {
-        const stat = fs.readFileSync(`/proc/${childPid}/stat`, "utf8");
-        childRunning = !/\)\s+Z\s/.test(stat);
-      } catch {
+        const stat = execFileSync("ps", ["-o", "stat=", "-p", String(childPid)], { encoding: "utf8" }).trim();
+        childRunning = stat.length > 0 && !stat.startsWith("Z");
+      } catch (error) {
+        // ps exits 1 when the PID no longer exists. Other failures must not
+        // masquerade as successful cleanup (including on hosts without /proc).
+        if (!(error && typeof error === "object" && "status" in error && error.status === 1)) throw error;
         childRunning = false;
       }
       expect(childRunning).toBe(false);

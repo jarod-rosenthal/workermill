@@ -143,6 +143,8 @@ Acceptance: a 500 ms child permits an event-loop heartbeat before exit; abort of
 
 Verification: named process/bash tests. Handoff: runner signature and cancellation ownership. Do not redesign the Ink renderer here.
 
+Integrated handoff: `runProcess(ProcessRequest)` and `cancelRunProcesses(runId)` live in `src/engine/process-runner.ts`. Requests carry `runId`, `command`, `cwd`, optional `env`, `signal`, `timeoutMs`, `maxOutputBytes`, and `terminationGraceMs`. Results distinguish `exited`, `cancelled`, `timed_out`, and `spawn_failed`, with nullable exit code and output truncation flag. Bash accepts optional `signal`/`runId`; legacy cancellation affects only unscoped bash calls until adapter migration. Descendants are terminated on shell exit even when they retain inherited pipes. Native Windows requires WSL. This does not yet migrate verification, gates, background tools, or every caller's cancellation context (R05–R11).
+
 ### R03 — Canonical filesystem scope for explicit file tools
 
 Priority P0; small-model task with security review; dependencies none; lock `tool-registry`.
@@ -154,6 +156,8 @@ Centralize realpath containment for reads, writes, directories, patches, multi-e
 Acceptance: traversal, sibling-prefix, existing symlink, symlinked parent for a new file, absolute out-of-root path, and one invalid target among many are rejected before mutation. In-root and explicitly granted paths work. Full-disk mode is tested separately. Tests use harmless temporary fixtures only.
 
 Verification: path-policy, multi-edit-file, download-file, image-support tests. Handoff: resolver/grant signatures and complete audited tool list.
+
+Integrated handoff: `createPathScope(workspace, extraGrants)` and `resolvePath(scope, inputPath, access, options)` live in `src/engine/path-policy.ts`; grants use `{ root, access: "read" | "read_write" }`. The tool factory's fourth argument is an options object, currently `{ extraPathGrants?: readonly PathGrant[] }`; extend this object in R05 rather than introducing a competing signature. Canonical paths reach file read/write/edit/multi-edit, glob/grep/ls, download destinations, images, LSP, patch, and shell/verify working directories. Shell working directories require write access. Patch scope was narrowly expanded to `tools/patch.ts` so authorization and application share header parsing. Memory retains its separate application-state scope; arbitrary shell access, child factories, and filesystem races remain later-task/OS-isolation concerns.
 
 ### R04 — Shared permission decision and tool-execution contract
 

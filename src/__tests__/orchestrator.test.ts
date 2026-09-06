@@ -50,6 +50,11 @@ vi.mock("../hooks.js", () => ({
 
 // Mock mcp-client — prevent Docker Desktop detection from hanging in tests
 vi.mock("../mcp-client.js", () => ({
+  createMCPRunResources: vi.fn(() => ({
+    register: vi.fn(), ensureStarted: vi.fn().mockResolvedValue(undefined),
+    getToolDefinitions: vi.fn(() => ({})), close: vi.fn().mockResolvedValue(undefined),
+  })),
+  autoDetectMCPServersForRun: vi.fn(async (existing: Record<string, unknown>) => existing),
   startAllMCPServers: vi.fn().mockResolvedValue(undefined),
   getMCPToolDefinitions: vi.fn(() => ({})),
   getMCPToolDefinitionsAsync: vi.fn().mockResolvedValue({}),
@@ -738,7 +743,7 @@ describe("orchestrator", () => {
       expect(mockStreamTextCalls).toHaveLength(2);
       expect(output.logs.join(" ")).not.toContain("No remote configured");
       expect(output.logs.join(" ")).not.toContain("Branch:");
-      expect(stopAllMCPServers).toHaveBeenCalled();
+      expect(stopAllMCPServers).not.toHaveBeenCalled();
       expect(result.featureBranch).toBeTruthy();
       expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
       const savedRuns = JSON.parse(fs.readFileSync(path.join(getStateRoot(), "ship-runs.json"), "utf-8")) as Record<string, unknown>;
@@ -792,7 +797,7 @@ describe("orchestrator", () => {
       expect(mockStreamTextCalls).toHaveLength(2);
       expect(output.logs.join(" ")).not.toContain("No remote configured");
       expect(output.logs.join(" ")).not.toContain("Branch:");
-      expect(stopAllMCPServers).toHaveBeenCalled();
+      expect(stopAllMCPServers).not.toHaveBeenCalled();
       expect(result.featureBranch).toBeTruthy();
       expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
     });

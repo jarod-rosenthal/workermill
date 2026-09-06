@@ -31,7 +31,6 @@ function gitCombined(args: string[], cwd: string): string {
 import { extractGithubIssueNumber } from "../ticket-ops.js";
 import { runLifecycleHooks } from "../hooks.js";
 import { clearShipRun } from "../ship-state.js";
-import { stopAllMCPServers } from "../mcp-client.js";
 import type { CostTracker } from "../cost-tracker.js";
 import type { LiveViewServer } from "../live-view-server.js";
 import { extractExecErrorDetail, clipLogText } from "./utils.js";
@@ -124,7 +123,6 @@ export async function runCompletion(args: {
   };
 
   if (!await publicationAllowed()) {
-    stopAllMCPServers();
     return { stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch, completionInvalidated: true };
   }
 
@@ -366,11 +364,6 @@ export async function runCompletion(args: {
     const commitCount = featureBranch ? parseInt(gitCombined(["rev-list", "--count", `refs/heads/${mainBranch}..HEAD`, "--"], workingDir), 10) : 0;
     liveViewServer.emitRunComplete(featureBranch || "main", commitCount);
   }
-
-  // Stop MCP servers and language server
-  stopAllMCPServers();
-  const { shutdown: shutdownLSP } = await import("../engine/tools/lsp.js");
-  shutdownLSP();
 
   // Keep live view server alive for the current CLI session so users can
   // keep the same browser tab open across multiple /build runs.

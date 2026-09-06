@@ -9,6 +9,7 @@ import { executeToolCall, type ToolExecutionContext } from "../tool-executor.js"
 import { cancelAndWaitForRunProcesses } from "../process-runner.js";
 import { runScopedProcess } from "../scoped-process.js";
 import { cleanupScopedBackgroundProcesses } from "./bash-background.js";
+import { shutdownLSPRun } from "./lsp.js";
 import type { PermissionState } from "../tool-policy.js";
 
 export const name = "sub_agent";
@@ -336,19 +337,22 @@ export function createSubAgentExecutor(
       };
     } finally {
       lifetime.controller.abort();
-      try {
-        if (context) {
-          await cancelAndWaitForRunProcesses(context.runId);
-          await cleanupScopedBackgroundProcesses(context.runId);
-        }
-      } catch (error) {
+      if (context) {
+        const cleanup = await Promise.allSettled([
+          cancelAndWaitForRunProcesses(context.runId),
+          cleanupScopedBackgroundProcesses(context.runId),
+          shutdownLSPRun(context.runId),
+        ]);
+        const failures = cleanup.filter((entry): entry is PromiseRejectedResult => entry.status === "rejected");
+        if (failures.length) {
+          const detail = failures.map(entry => entry.reason instanceof Error ? entry.reason.message : String(entry.reason)).join("; ");
         result = {
           success: false, content: "", turnsUsed: 0,
-          error: `Child cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+          error: `Child cleanup failed: ${detail}`,
         };
-      } finally {
-        lifetime.dispose();
+        }
       }
+      lifetime.dispose();
     }
 
     if (!worktree) return result;

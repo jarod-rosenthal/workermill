@@ -11,7 +11,10 @@ import {
 } from "./git-ops.js";
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
-import { startAllMCPServers, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
+import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
+import { cancelAndWaitForRunProcesses } from "./engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "./engine/tools/bash-background.js";
+import { shutdownLSPRun } from "./engine/tools/lsp.js";
 import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
@@ -61,22 +64,67 @@ export async function runOrchestration(
   // Create run manifest — persisted throughout for debugging and analytics
   const manifest = createRunManifest(userTask, ticketKey);
 
-  const abortController = isAbortControllerLike(abortControllerOrSignal)
+  const suppliedAbortController = isAbortControllerLike(abortControllerOrSignal)
     ? abortControllerOrSignal
     : undefined;
-  const abortSignal = isAbortControllerLike(abortControllerOrSignal)
+  const suppliedAbortSignal = isAbortControllerLike(abortControllerOrSignal)
     ? abortControllerOrSignal.signal
     : isAbortSignalLike(abortControllerOrSignal)
       ? abortControllerOrSignal
       : undefined;
+  // Every orchestration owns a controller, including signal-only callers.
+  // This gives finalization one cancellation boundary without ever stopping a
+  // concurrently running orchestration.
+  const abortController = suppliedAbortController ?? new AbortController();
+  const abortSignal = abortController.signal;
+  const forwardAbort = () => abortController.abort(suppliedAbortSignal?.reason);
+  if (suppliedAbortSignal && suppliedAbortSignal !== abortSignal) {
+    if (suppliedAbortSignal.aborted) forwardAbort();
+    else suppliedAbortSignal.addEventListener("abort", forwardAbort, { once: true });
+  }
 
-  if (abortControllerOrSignal != null && !abortController && !abortSignal) {
+  if (abortControllerOrSignal != null && !suppliedAbortController && !suppliedAbortSignal) {
     logger.warn("Ignoring invalid abort argument passed to runOrchestration", {
       type: typeof abortControllerOrSignal,
     });
   }
 
-  if (abortSignal?.aborted) {
+  const workingDir = process.cwd();
+  let mcpResources: ReturnType<typeof createMCPRunResources> | undefined;
+  const cleanupErrors: unknown[] = [];
+  const cleanupRunResources = async (): Promise<void> => {
+    // Always attempt every owned cleanup. A failure is visible and prevents a
+    // later run from inheriting a silently-live resource.
+    const settled = await Promise.allSettled([
+      cancelAndWaitForRunProcesses(manifest.id),
+      cleanupScopedBackgroundProcesses(manifest.id),
+      shutdownLSPRun(manifest.id),
+      mcpResources?.close() ?? Promise.resolve(),
+    ]);
+    for (const result of settled) if (result.status === "rejected") cleanupErrors.push(result.reason);
+    if (cleanupErrors.length) {
+      const detail = cleanupErrors.map(error => error instanceof Error ? error.message : String(error)).join("; ");
+      output.error(`Run cleanup failed: ${detail}`);
+      logger.error("Run-scoped orchestration cleanup failed", { runId: manifest.id, detail });
+    }
+  };
+  const closeSourceChangingResources = async (): Promise<boolean> => {
+    const settled = await Promise.allSettled([
+      cancelAndWaitForRunProcesses(manifest.id),
+      cleanupScopedBackgroundProcesses(manifest.id),
+      shutdownLSPRun(manifest.id),
+      mcpResources?.close() ?? Promise.resolve(),
+    ]);
+    const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length === 0) return true;
+    const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
+    output.error(`Candidate preparation blocked: run resource cleanup failed: ${detail}`);
+    logger.error("Source-changing resource cleanup failed", { runId: manifest.id, detail });
+    return false;
+  };
+
+  try {
+  if (abortSignal.aborted) {
     output.coordinatorLog("Build cancelled before startup.");
     return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
   }
@@ -128,7 +176,7 @@ export async function runOrchestration(
         }
       }
 
-      const ops = new TicketOps(ticketKey, ticketSystem);
+      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal });
       if (!ops.isAvailable()) {
         const hints: Record<string, string> = {
           github: "Ensure GITHUB_TOKEN is set or run `gh auth login`. Repo detected from git remote.",
@@ -165,7 +213,7 @@ export async function runOrchestration(
     try {
       const { TicketOps } = await import("./ticket-ops.js");
       const ticketSystem = resolvedTicketSystem;
-      const ops = new TicketOps(ticketKey, ticketSystem);
+      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal });
       logger.info("TicketOps availability check", {
         ticketKey, ticketSystem, isAvailable: ops.isAvailable(),
         hasToken: !!process.env.GITHUB_TOKEN,
@@ -193,18 +241,20 @@ export async function runOrchestration(
     liveViewServer.setAbortController(abortController);
   }
 
-  // Start MCP servers — skip auto-detect for local models (tool overload causes XML fallback)
+  // Start MCP servers as resources owned by this run. Global MCP teardown is
+  // reserved for CLI exit and must never close another active run.
   const skipAutoDetect = isLocalProvider(defaultProvider.provider);
+  mcpResources = createMCPRunResources({ runId: manifest.id, workspace: workingDir, signal: abortSignal });
   const mcpConfig = skipAutoDetect
     ? (config.mcp || {})
-    : autoDetectMCPServers(config.mcp || {});
+    : await autoDetectMCPServersForRun(config.mcp || {}, { runId: manifest.id, workspace: workingDir, signal: abortSignal });
   if (Object.keys(mcpConfig).length > 0) {
     output.coordinatorLog(`Starting ${Object.keys(mcpConfig).length} MCP server(s)...`);
-    await startAllMCPServers(mcpConfig);
+    mcpResources.register(mcpConfig);
+    await mcpResources.ensureStarted();
   }
 
   const costTracker = new CostTracker();
-  const workingDir = process.cwd();
   const persistedMemories = loadMemories(workingDir);
   const context: SharedContext = {
     filesCreated: [],
@@ -274,6 +324,7 @@ export async function runOrchestration(
       output.log("system", `You're on \`${originalBranch}\`, not a trunk branch. New work will stack on top of it and the PR will target \`${originalBranch}\` as its base.`);
       output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/build\` again.`);
       const r = await output.confirm("Continue and stack on this branch?");
+      if (abortSignal.aborted) return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
       const confirmed = typeof r === "object" ? r.allowed : r;
       if (!confirmed) {
         return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
@@ -365,6 +416,7 @@ export async function runOrchestration(
       let proceed = false;
       try {
         const r = await output.confirm("Execute this plan?");
+        if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         proceed = typeof r === "object" ? r.allowed : r;
       } catch (err) {
         logger.debug("Plan confirmation failed", { error: err instanceof Error ? err.message : String(err) });
@@ -401,6 +453,7 @@ export async function runOrchestration(
       output.log("system", `- **Yes** → delete it and start fresh from \`${mainBranch}\``);
       output.log("system", `- **No** → continue on the existing branch`);
       const resetR = await output.confirm(`Reset \`${derivedBranch}\` and start fresh?`);
+      if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       const reset = typeof resetR === "object" ? resetR.allowed : resetR;
       if (reset) {
         try {
@@ -412,6 +465,7 @@ export async function runOrchestration(
         }
       } else {
         const continueR = await output.confirm(`Continue on existing \`${derivedBranch}\`?`);
+        if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         const cont = typeof continueR === "object" ? continueR.allowed : continueR;
         if (!cont) {
           output.log("system", "Cancelled. Run `/build` again after resolving the branch.");
@@ -426,6 +480,7 @@ export async function runOrchestration(
     if (!branchAlreadyAcknowledged && !(typeof trustAll === "function" ? trustAll() : trustAll)) {
       const branchName = derivedBranch ?? "a feature branch";
       const r = await output.confirm(`About to create and check out \`${branchName}\`. Continue?`);
+      if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       const allowed = typeof r === "object" ? r.allowed : r;
       if (!allowed) {
         output.coordinatorLog("Cancelled.");
@@ -478,6 +533,7 @@ export async function runOrchestration(
       const proceedResult = await output.confirm(
         "Provider balance/quota issue detected. Continue after updating provider credentials or balance?",
       );
+      if (abortSignal.aborted) return true;
       const proceed = typeof proceedResult === "object" ? proceedResult.allowed : proceedResult;
       if (!proceed) {
         return true;
@@ -516,6 +572,7 @@ export async function runOrchestration(
     liveViewServer,
     ticketOps,
     runId: manifest.id,
+    getMCPToolDefinitions: () => mcpResources?.getToolDefinitions() ?? {},
     waitWhilePaused,
     pauseForBalanceIssue,
     logRetryHint,
@@ -551,6 +608,11 @@ export async function runOrchestration(
 
   // Final candidate preparation belongs before all final evidence. In
   // particular, completion must never create a commit after approval.
+  // Worker/MCP/LSP lifetimes are closed before source-changing preparation so
+  // neither a late tool result nor a server request can invalidate evidence.
+  if (!await closeSourceChangingResources()) {
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
   const preparation = await prepareCandidate({
     config, workingDir, featureBranch, runId: manifest.id, signal: abortSignal, sandboxed,
   });
@@ -576,11 +638,6 @@ export async function runOrchestration(
     // R12's typed early exit is terminal. Do not run a second pass that can
     // replace the failed evidence with a later success.
     if (gatesResult.earlyExit) {
-      stopAllMCPServers();
-      try {
-        const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
-        shutdownLSP();
-      } catch { /* language server may not have started */ }
       return { stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     const afterGates = await captureRepositoryFingerprint(workingDir, abortSignal);
@@ -720,4 +777,8 @@ export async function runOrchestration(
     evidence: { fingerprint: gateFingerprint, gateResults: gatesResult!.gateResults, reviewOutcome: reviewLoopResult.outcome },
     abortSignal,
   });
+  } finally {
+    suppliedAbortSignal?.removeEventListener("abort", forwardAbort);
+    await cleanupRunResources();
+  }
 }

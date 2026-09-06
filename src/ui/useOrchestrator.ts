@@ -23,7 +23,6 @@ import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state
 import { execGh, getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
-import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
 import type { ToolCallInfo } from "./types.js";
 
 const PREVIEW_THROTTLE_MS = 120;
@@ -447,7 +446,6 @@ export function useOrchestrator(
   const cancel = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
-      abortRef.current = null;
     }
     // If orchestration is waiting on a confirm/prompt promise, resolve it so
     // the async run can unwind instead of keeping the UI in a stale "running" state.
@@ -459,13 +457,12 @@ export function useOrchestrator(
       if (req) req.resolve("");
       return null;
     });
-    setRunning(false);
-    setStatusMessage("");
-    clearPreviewLine();
-    cleanupAllBackgroundProcesses();
+    // Keep the UI busy until the orchestration finalizer drains its owned
+    // resources.  Global cleanup here would also kill an independent run.
+    setStatusMessage("Cancelling — waiting for active work to stop...");
     setPausedState(false);
     releasePauseWaiters();
-  }, [clearPreviewLine, releasePauseWaiters, setPausedState, setStatusMessage]);
+  }, [releasePauseWaiters, setPausedState, setStatusMessage]);
 
   // ------------------------------------------------------------------
   // start()
@@ -729,6 +726,8 @@ export function useOrchestrator(
             notifyIfEnabled(config?.bell, "WorkerMill", "Ship failed");
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");
@@ -1151,6 +1150,8 @@ export function useOrchestrator(
             addMessage(`**Program failed:** ${msg}`);
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");
@@ -1400,6 +1401,8 @@ export function useOrchestrator(
             addMessage(`**Review failed:** ${msg}`);
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");

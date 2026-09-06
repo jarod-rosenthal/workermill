@@ -9,6 +9,11 @@ import { fixture as pagination, validateFixture as validatePagination } from "..
 import { fixture as deepConfig, validateFixture as validateDeepConfig } from "../../evals/tasks/r20-bugfix-deep-config.mjs";
 import { fixture as queueRecovery, validateFixture as validateQueueRecovery } from "../../evals/tasks/r20-bugfix-queue-recovery.mjs";
 import { fixture as retryBackoff, validateFixture as validateRetryBackoff } from "../../evals/tasks/r20-bugfix-retry-backoff.mjs";
+import { fixture as releaseNotes, validateFixture as validateReleaseNotes } from "../../evals/tasks/r20-feature-release-notes-v1.mjs";
+import { fixture as webhookRecovery, validateFixture as validateWebhookRecovery } from "../../evals/tasks/r20-feature-webhook-recovery-v1.mjs";
+import { fixture as tagFilter, validateFixture as validateTagFilter } from "../../evals/tasks/r20-feature-tag-filter-v1.mjs";
+import { fixture as expiringCache, validateFixture as validateExpiringCache } from "../../evals/tasks/r20-feature-expiring-cache-v1.mjs";
+import { fixture as dailySummary, validateFixture as validateDailySummary } from "../../evals/tasks/r20-feature-daily-summary-v1.mjs";
 
 describe("R20a offline fixture", () => {
   it("distinguishes baseline, reference, and incomplete solutions", async () => {
@@ -52,6 +57,26 @@ describe("R20b offline bug-fix fixtures", () => {
       expect(item.workspace.toolchain).toContain("22.12");
     }
     const results = await Promise.all([validateFixture(), validatePagination(), validateDeepConfig(), validateQueueRecovery(), validateRetryBackoff()]);
+    for (const result of results) {
+      expect(result.baselineFails).toBe(true);
+      expect(result.referencePasses).toBe(true);
+      expect(result.incompleteFails).toBe(true);
+      expect(result.outcomes.baseline.code).toBe(3);
+      expect(result.outcomes.incomplete.code).toBe(3);
+    }
+  });
+});
+
+describe("R20c offline feature fixtures", () => {
+  it("has five distinct dependency-free feature tasks with semantic incomplete failures", async () => {
+    const fixtures = [releaseNotes, webhookRecovery, tagFilter, expiringCache, dailySummary];
+    expect(new Set(fixtures.map((item) => item.taskId)).size).toBe(5);
+    expect(fixtures.every((item) => item.category === "feature" && item.workspace.network === false)).toBe(true);
+    expect(fixtures.every((item) => item.workspace.toolchain.includes("22.12"))).toBe(true);
+    expect(expiringCache.workspace.writableFiles).toEqual(["src/cache.mjs", "src/main.mjs"]);
+    const results = await Promise.all([
+      validateReleaseNotes(), validateWebhookRecovery(), validateTagFilter(), validateExpiringCache(), validateDailySummary(),
+    ]);
     for (const result of results) {
       expect(result.baselineFails).toBe(true);
       expect(result.referencePasses).toBe(true);

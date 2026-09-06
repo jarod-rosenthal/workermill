@@ -28,6 +28,14 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
+      - name: Install Linux sandbox dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap socat ripgrep
+
+      - name: Install macOS sandbox dependency
+        if: runner.os == 'macOS'
+        run: command -v rg || brew install ripgrep
+
       - name: Install dependencies
         run: npm ci
 

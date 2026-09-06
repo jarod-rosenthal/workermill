@@ -187,10 +187,10 @@ describe("installed package and supported OS runtime", () => {
     }
   });
 
-  it("keeps the installed interactive UI responsive in a PTY and cancels without provider credentials", async () => {
+  it("keeps the installed interactive UI responsive in a PTY and cancels without provider credentials", async (test) => {
     if (process.platform === "win32") {
       // Native Windows shells are outside R17 support; WSL is covered by Linux.
-      console.log("Skipping PTY check: native Windows shell support is not in the supported matrix");
+      test.skip("Native Windows shell support is outside the supported matrix; use WSL.");
       return;
     }
     const installedRequire = createRequire(path.join(installRoot, "node_modules", "workermill", "package.json"));

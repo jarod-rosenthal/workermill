@@ -1,7 +1,6 @@
 # WorkerMill reliability implementation plan
 
-Status: proposed implementation backlog; no implementation performed by this plan.
-Baseline: commit `9e317488`, package version `1.1.1`. Revalidate the checkout before starting.
+Contributor implementation guide. Use [reliability-queue.json](reliability-queue.json) for task status and ownership; this document defines scope, dependencies, and acceptance criteria, not release guarantees.
 
 ## Objective and scope
 
@@ -9,27 +8,9 @@ Make WorkerMill's ticket-to-PR workflow trustworthy and measurable: consistent p
 
 This document is the task specification. [reliability-queue.json](reliability-queue.json) is a dependency/ownership index for a coordinator, not an executable WorkerMill plan or a command to launch agents. There are 24 work items, decomposed into 38 individually dispatchable packages. Do not feed the backlog into one `/build`: WorkerMill's main story executor is sequential, and its current isolated sub-agent path is itself being repaired.
 
-The requested deliverable is planning. Implementation, publishing issues/PRs, running paid evaluations, and releasing packages have not been performed. Once implementation is requested, the decisions below are the proposed contract to implement; do not rediscover them in every worker session.
+Use the task contracts below when implementing changes. Publishing issues/PRs, paid evaluations, and package releases require separate authorization. User-facing behavior belongs in the configuration, commands, and architecture references; avoid adding chronological implementation reports to those documents.
 
-## Evidence and corrections to the initial assessment
-
-| Finding | Source to read | Consequence |
-| --- | --- | --- |
-| Headless tools bypass the interactive permission wrapper | `src/run-command.ts`, `src/ui/useAgent.ts` | The same configured deny rule can behave differently by entry point. |
-| Isolated child tools use `createToolDefinitions(worktreePath, model, false)` | `src/engine/tools/index.ts` | A worktree is not a security boundary. |
-| Bash uses a main-thread `Atomics.wait`; its cancellation function is empty | `src/engine/tools/bash.ts` | Long commands block UI/event processing; cancellation is ineffective. |
-| Verify and gate runners directly spawn shells | `src/engine/tools/verify.ts`, `src/gate-runner.ts` | OS-sandbox and cancellation behavior diverge. |
-| Production orchestration ignores `gatesResult.earlyExit` | `src/orchestrator.ts` after `runQualityGates` | Even a required/strict gate failure can enter review. This is more serious than advisory default gates alone. |
-| Verification precedes reviewer edits | `src/orchestrator.ts`, `src/orchestrator/review.ts` | An earlier pass does not prove the delivered revision passes. |
-| Manifest arrays are initialized but not populated; outcome largely follows story completion | `src/run-manifest.ts`, `src/orchestrator.ts` | Reports do not reliably establish verified success. |
-| Reviewer role falls back to the configured default model | `src/config.ts:getProviderForPersona` | Separate review invocation exists; a different underlying model is not guaranteed. |
-| Several agent tests copy decision logic | `src/__tests__/useAgent*.test.ts` | Passing tests may not establish production behavior. |
-
-Clarifications: the CLI entry point already resolves the default headless sandbox to path mode; do not describe all `wm run` calls as full-disk by default. `review.strict` already exists; repair its enforcement instead of inventing a second strict mode. A path check cannot contain arbitrary shell commands. OS isolation, tool permissions, and Git worktree separation are distinct controls.
-
-Baseline checks from the assessment: typecheck and direct tsup bundling passed. The isolated-state suite reported 1,474 passed / 6 failed / 1 skipped; the six failures were state-root assumptions, and the three affected files passed 65/65 tests without the override. This was not a clean full-suite pass under one environment. Live-provider E2E and comparative evaluations were not run. Earlier ad hoc shell probes timed out; use the deterministic process tests below to establish cancellation and responsiveness, not those probes as performance measurements.
-
-## Proposed behavior contracts
+## Target behavior contracts
 
 1. **Permission precedence:** explicit deny is absolute, including under trust/bypass. Explicit ask is not silently converted into allow. Plan mode cannot acquire write tools through deferred loading, MCP, or sub-agents. Preserve existing modes otherwise; establish a single tested decision table for discrepancies. Dangerous-command confirmation cannot override a matching deny rule.
 2. **Headless execution:** use the same decision function. When a decision needs a human, return `permission_required` and a nonzero CLI result without executing the tool or waiting on stdin. Existing allow rules are the automation mechanism. `--full-disk` changes filesystem scope, not permission grants. Do not add an implicit blanket approval mode.
@@ -58,7 +39,7 @@ These are deliberate behavior changes, particularly headless permission enforcem
 - Workers run focused tests while iterating. Before declaring their task finished they run `npm run typecheck` and `npm test`, as repository instructions require. Do not repeatedly run the full suite during unchanged iterations. The coordinator runs the full suite once per integrated batch and build once at the batch boundary. `lint` is currently the same typecheck; do not run both locally merely to duplicate work.
 - No live model calls for unit/runtime integration tests. Do not retry deterministic test failures with a larger LLM until the error has been examined. Paid benchmark work starts only with an explicit run/model/hardware/spend configuration.
 - Keep worker handoffs under 300 words: commit/base, changed files, acceptance outcomes, test commands/results, known limitations, and newly exported interface signatures. Store full test output as artifacts, not repeated chat messages.
-- Measure model input/output tokens and retries per task if the host exposes them. Set a session budget before launching implementation using available host controls; do not invent token-limit flags or promise a cap the host does not enforce. This plan's two research workers received narrow, independent read-only assignments.
+- Measure model input/output tokens and retries per task if the host exposes them. Use available host budget controls when configured; do not invent token-limit flags or promise a cap the host does not enforce.
 
 ### Scheduling guide
 
@@ -452,8 +433,6 @@ The implementation is qualified when configured permissions behave consistently 
 
 Commercial/product validation is a separate outcome: measured accepted-task cost, reliability, latency, and human correction. Completion of this code backlog alone does not establish the README's cost/quality proposition.
 
-## Validation of this planning deliverable
+## Maintaining the queue
 
-The queue parses as JSON; all 24 task IDs are unique; parent and suffix-package dependency orders are acyclic; all task section anchors and suffix specifications exist; 38 leaf packages are defined; and R19/R20/R21 are outside the first-release dependency closure. File-lock conflicts identified during two focused smaller-model reviews were removed from the suggested schedule.
-
-After adding these documentation files, `npm run typecheck` passed. The full unit suite under isolated temporary state reproduced the baseline result: 1,474 passed, six failed, one skipped, across 69 passing and three failing files. The failures remain the state-root expectations in logs-command, provider-registry, and maturity-features tests, tracked by R01. No runtime implementation or paid evaluation was performed. Only this document and the queue index were added.
+Keep task IDs unique, dependencies acyclic, section anchors valid, and exclusive write ownership non-overlapping. Aggregate tasks finish only after every suffix package is integrated and checked. Keep R19/R20/R21 outside the first-release dependency closure. Record completion evidence in the queue; update user-facing reference pages when behavior changes, rather than copying test-run histories into them.

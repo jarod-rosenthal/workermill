@@ -96,7 +96,7 @@ Tools live in `src/engine/tools/`.
 Built-in tools:
 
 - **File:** `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `patch`, `glob`, `grep`, `ls`, `view_image`, `download_file`
-- **Shell:** `bash` (sandboxed via worker thread), `bash_background`, `bash_output`, `bash_kill`
+- **Shell:** `bash` (asynchronous foreground process), `bash_background`, `bash_output`, `bash_kill`
 - **Git:** `git` (branch, commit, diff, log — blocks destructive ops)
 - **Code:** `lsp` (Language Server Protocol integration), `verify` (run build/test commands)
 - **Web:** `fetch` (HTTP), `web_search` (provider-specific)
@@ -108,6 +108,14 @@ Built-in tools:
 The `memory` tool gives agents persistent, file-based memory across sessions. Agents check their memory directory at conversation start and save project patterns, corrections, and preferences as they work. Memory is stored per-project under `~/.workermill/projects/<id>/memories/` as plain markdown files. Works with every provider.
 
 Each tool has metadata in `src/engine/tools/tool-metadata.ts` — `isReadOnly`, `isDestructive`, `acceptEditsApproved`, `concurrencySafe` — from which the permission system derives its read-only and accept-edits tool sets, and the concurrency scheduler decides what can run in parallel. It is an internal registry, not a tool agents can call.
+
+### Filesystem scope and foreground processes
+
+`src/engine/path-policy.ts` canonicalizes explicit file-tool paths, following existing symlinks and resolving the nearest existing parent of new files. Multi-file patches validate every target before writing. Additional file or directory access must be supplied explicitly through `createToolDefinitions` options as `extraPathGrants`, with `read` or `read_write` access; an absolute image path is not itself a grant. Full-disk mode disables containment checks, not canonicalization. Application memory uses a separate state-directory scope.
+
+These path checks are not an OS sandbox: they do not contain arbitrary shell code or eliminate filesystem races. Git worktrees separate changes, not permissions.
+
+`src/engine/process-runner.ts` owns foreground shell processes by run ID. It accepts an abort signal, timeout, and output bound; on cancellation it sends TERM followed by KILL to the Unix process group. Output truncation is reported explicitly. Native Windows execution requires WSL. Adapters must pass their own run ID and signal to get run-scoped cancellation; an omitted ID uses the legacy foreground-bash cancellation scope.
 
 ## MCP (Model Context Protocol)
 
@@ -135,7 +143,7 @@ On top of modes, **rule-based permissions** accept pattern matching:
 - `write_file(*.env)` — deny writes to env files
 - `read_file(.ssh/*)` — deny reads from ssh directory
 
-Rules are evaluated in deny → allow → ask order. Deny always wins.
+Rule matching evaluates deny → ask → allow. An ask rule takes precedence over an allow rule.
 
 ## Context Management
 

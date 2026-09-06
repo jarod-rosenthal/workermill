@@ -1,5 +1,7 @@
 import { ensureOllamaContext, ensureLmStudioContext } from "./engine/model-factory.js";
 import { execFileSync, execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
@@ -11,7 +13,7 @@ import {
 } from "./git-ops.js";
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
-import { startAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
+import { startAllMCPServers, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
 import { resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
@@ -537,6 +539,19 @@ export async function runOrchestration(
     config, output, sorted, completedStoryIds, context, workingDir,
   });
   const { gateResultsSection } = gatesResult;
+
+  // A required (or strict) gate failure is terminal for this run. Preserve the
+  // feature branch and ship state so `/retry` can continue after the failure,
+  // but do not let review or completion publish an unverified change.
+  if (gatesResult.earlyExit) {
+    try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
+    stopAllMCPServers();
+    try {
+      const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
+      shutdownLSP();
+    } catch { /* language server may not have started */ }
+    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
 
   // Run inline review with revision loop
   const reviewLoopResult = await _runReviewLoop({

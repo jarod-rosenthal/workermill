@@ -682,9 +682,55 @@ describe("orchestrator", () => {
 
       expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
       expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
-      // Gate failures now flow into the review loop instead of bailing out,
-      // so we get 3 calls: planner + executor + reviewer
-      expect(mockStreamTextCalls).toHaveLength(3);
+      // A required gate failure stops after planning and execution; review and
+      // completion must not run on an unverified revision.
+      expect(mockStreamTextCalls).toHaveLength(2);
+    });
+
+    it("blocks before review when strict static gate fails", async () => {
+      const output = createMockOutput();
+      const config = {
+        ...createTestConfig(),
+        qualityGates: [{ name: "static check", commands: ["bash -lc 'exit 1'"] }],
+        review: { enabled: true, strict: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+      };
+
+      const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "static", "title": "Run static check", "persona": "backend_developer", "description": "Implement the change." }
+  ]
+}
+\`\`\``;
+
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? planText : "Implemented static check.";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text,
+            toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
+          });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "export const impl = true;");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      await runOrchestration(config as any, "Run strict static check", true, false, output);
+
+      expect(output.errors).toContain("[required_command_failed] static check failed");
+      expect(output.logs.join(" ")).toContain("Strict mode failed");
+      expect(mockStreamTextCalls).toHaveLength(2);
     });
 
     it("passes API keys through for routed provider aliases", async () => {

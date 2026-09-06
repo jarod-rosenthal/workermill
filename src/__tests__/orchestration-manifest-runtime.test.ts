@@ -34,10 +34,11 @@ vi.mock("../orchestrator/planning.js", async (original) => ({
   }),
 }));
 vi.mock("../orchestrator/execution.js", () => ({
-  executeStories: vi.fn(async (args: { completedStoryIds: string[]; onStoryAttempt?: (event: object) => void }) => {
+  executeStories: vi.fn(async (args: { completedStoryIds: string[]; costTracker: { recordCall: (call: object) => boolean }; onStoryAttempt?: (event: object) => void }) => {
     if (!args.completedStoryIds.includes("one")) {
       args.onStoryAttempt?.({ attemptId: "worker-1", storyId: "one", role: "worker", provider: "worker-provider", model: "worker-model", status: "started", at: "2026-01-01T00:00:00.000Z" });
       args.onStoryAttempt?.({ attemptId: "worker-1", storyId: "one", role: "worker", provider: "worker-provider", model: "worker-model", status: state.workerStatus, at: "2026-01-01T00:00:01.000Z" });
+      args.costTracker.recordCall({ callId: "worker-1", persona: "Worker", provider: "test", model: "test", usage: { inputTokens: 11, outputTokens: 13 } });
       if (state.workerStatus === "completed") args.completedStoryIds.push("one");
     }
     return { failedStories: state.workerStatus === "failed" ? new Set(["one"]) : new Set(), skippedStories: new Set(), retryable: true, context: {}, earlyExit: false };
@@ -50,8 +51,11 @@ vi.mock("../orchestrator/gates.js", () => ({
   runQualityGates: vi.fn(async () => ({ gateResultsSection: "gates", earlyExit: state.gateFail, cancelled: false, gateResults: [{ id: "required", name: "required check", source: "required_command", required: true, status: state.gateFail ? "failed" : "passed", passed: !state.gateFail }] })),
 }));
 vi.mock("../orchestrator/review.js", () => ({
-  runReviewLoop: vi.fn(async (args: { onReviewRound?: (event: object) => void }) => {
-    args.onReviewRound?.({ attemptId: "review-1", round: 1, attempt: 1, role: "tech_lead", provider: "review-provider", model: "review-model", status: "completed", at: "2026-01-01T00:00:02.000Z", inputTokens: 5, outputTokens: 7, outcome: { kind: "approved", approved: true, decision: "approved", score: 10 } });
+  runReviewLoop: vi.fn(async (args: { costTracker: { recordCall: (call: object) => boolean }; onReviewRound?: (event: object) => void }) => {
+    // Model adapters record every started call, including a failed retry.
+    args.costTracker.recordCall({ callId: "review-1", persona: "Reviewer", provider: "test", model: "test", usage: { inputTokens: 17, outputTokens: 19 }, usageComplete: false });
+    args.costTracker.recordCall({ callId: "review-2", persona: "Reviewer", provider: "test", model: "test", usage: { inputTokens: 23, outputTokens: 29 } });
+    args.onReviewRound?.({ attemptId: "review-2", round: 1, attempt: 2, role: "tech_lead", provider: "review-provider", model: "review-model", status: "completed", at: "2026-01-01T00:00:02.000Z", inputTokens: 23, outputTokens: 29, outcome: { kind: "approved", approved: true, decision: "approved", score: 10 } });
     return { aborted: false, finalReviewText: "approved", outcome: { kind: "approved", approved: true, decision: "approved", score: 10 }, fingerprint };
   }),
 }));
@@ -69,7 +73,7 @@ import { runReviewLoop } from "../orchestrator/review.js";
 
 const story = { id: "one", title: "Implement one", persona: "backend_developer", description: "fixture" };
 function git(dir: string, args: string[]) { return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim(); }
-function output(): OrchestrationOutput { return { log: vi.fn(), coordinatorLog: vi.fn(), error: vi.fn(), status: vi.fn(), statusDone: vi.fn(), confirm: vi.fn(async () => true), toolCall: vi.fn(), updateBranch: vi.fn(), updateCost: vi.fn(), updateUsageSummary: vi.fn() }; }
+function output(): OrchestrationOutput { return { log: vi.fn(), coordinatorLog: vi.fn(), error: vi.fn(), status: vi.fn(), statusDone: vi.fn(), confirm: vi.fn(async () => true), toolCall: vi.fn(), updateBranch: vi.fn(), updateCost: vi.fn(), updateUsageSummary: vi.fn(), updateUsageLedger: vi.fn() }; }
 const config: CliConfig = { providers: { ollama: { model: "test", host: "http://127.0.0.1:1" } }, default: "ollama", review: { enabled: true }, sandbox: false };
 
 describe("orchestration manifest runtime", () => {
@@ -125,7 +129,13 @@ describe("orchestration manifest runtime", () => {
     expect(manifest.reviews).toMatchObject([{ provider: "review-provider", inputTokens: 5, outcome: { decision: "approved" } }]);
     expect(result.usageLedger).toEqual(manifest.usageLedger);
     expect(rendered.updateUsageLedger).toHaveBeenLastCalledWith(manifest.usageLedger);
-    expect(manifest.usageLedger).toMatchObject({ calls: [{ callId: "planner-usage", usage: { inputTokens: 2, outputTokens: 3 } }], totals: { callCount: 1, inputTokens: 2, outputTokens: 3 } });
+    expect(manifest.usageLedger).toMatchObject({ calls: [
+      { callId: "planner-usage", usage: { inputTokens: 2, outputTokens: 3 } },
+      { callId: "worker-1", usage: { inputTokens: 11, outputTokens: 13 } },
+      { callId: "review-1", usageState: "partial", usage: { inputTokens: 17, outputTokens: 19 } },
+      { callId: "review-2", usage: { inputTokens: 23, outputTokens: 29 } },
+    ], totals: { callCount: 4, reportedUsageCalls: 3, partialUsageCalls: 1, inputTokens: 53, outputTokens: 64, estimatedApiCost: 0 } });
+    expect(manifest).toMatchObject({ totalCost: 0, totalInputTokens: 53, totalOutputTokens: 64 });
   });
 
   it("does not call an invalidated completion a success", async () => {

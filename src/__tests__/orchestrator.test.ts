@@ -111,14 +111,6 @@ exec "$WM_STARTUP_REAL_GIT" "$@"
   });
 });
 
-// Mock cost-tracker — must be a real class (used with `new`)
-vi.mock("../cost-tracker.js", () => ({
-  CostTracker: class {
-    addUsage = vi.fn();
-    getTotalCost = vi.fn(() => 0);
-  },
-}));
-
 // Track streamText calls for assertions
 const mockStreamTextCalls: unknown[] = [];
 

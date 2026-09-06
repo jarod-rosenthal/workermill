@@ -5,7 +5,7 @@
  * a previous build was interrupted (crash, terminal close, ESC).
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import chalk from "chalk";
 import { getRetryableRun, clearShipRun, type ShipRun } from "./ship-state.js";
 import { listRunManifests } from "./run-manifest.js";
@@ -36,9 +36,11 @@ export function detectInterruptedBuild(workingDir: string): RecoveryInfo | null 
   // Verify branch exists
   let branchExists = false;
   try {
-    execSync(`git rev-parse --verify "${run.featureBranch}" 2>/dev/null`, {
+    execFileSync("git", ["-c", "core.fsmonitor=false", "show-ref", "--verify", "--quiet", `refs/heads/${run.featureBranch}`], {
       cwd: workingDir,
       stdio: "pipe",
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
     });
     branchExists = true;
   } catch { /* branch gone */ }
@@ -47,12 +49,14 @@ export function detectInterruptedBuild(workingDir: string): RecoveryInfo | null 
   let changedFileCount = 0;
   if (branchExists) {
     try {
-      const diff = execSync(`git diff --stat ${run.mainBranch}..${run.featureBranch} 2>/dev/null`, {
+      const diff = execFileSync("git", ["-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", `refs/heads/${run.mainBranch}..refs/heads/${run.featureBranch}`, "--"], {
         cwd: workingDir,
         encoding: "utf-8",
         stdio: "pipe",
-      }).trim();
-      changedFileCount = diff ? diff.split("\n").length - 1 : 0; // last line is summary
+        timeout: 5_000,
+        maxBuffer: 1024 * 1024,
+      });
+      changedFileCount = diff.split("\0").filter(Boolean).length;
     } catch { /* best effort */ }
   }
 
@@ -78,6 +82,7 @@ export function printRecoveryPrompt(info: RecoveryInfo): void {
   console.log();
   console.log(`  Branch:     ${branchExists ? chalk.green(run.featureBranch) : chalk.red(`${run.featureBranch} (deleted)`)}`);
   console.log(`  Stories:    ${completedCount}/${totalCount} completed, ${remainingCount} remaining`);
+  if (remainingCount === 0) console.log("  Final gates/review/completion may still be pending; /retry resumes final verification.");
   if (changedFileCount > 0) console.log(`  Changes:    ${changedFileCount} files modified`);
   console.log(`  Last active: ${formatRelativeTime(run.updatedAt)}`);
   console.log();

@@ -2,13 +2,13 @@
  * Persists /build run state so /retry can resume after terminal restart.
  *
  * Keyed by feature branch (unique per /build run). Multiple runs per repo.
- * /retry picks the most recent incomplete run for the current working directory.
+ * /retry picks the most recent uncleared run for the current working directory.
  * Stored at ~/.workermill/ship-runs.json.
  */
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getStateRoot } from "./state-root.js";
 import type { Story } from "./orchestrator.js";
 
@@ -57,7 +57,8 @@ export function saveShipRun(run: ShipRun): void {
 }
 
 /**
- * Get the most recent incomplete run for a working directory.
+ * Get the most recent uncleared run for a working directory. Completed stories
+ * can still need final gates/review; only verified completion clears the run.
  * Returns null if no retryable runs exist.
  */
 export function getRetryableRun(workingDir: string): ShipRun | null {
@@ -67,19 +68,19 @@ export function getRetryableRun(workingDir: string): ShipRun | null {
 
   for (const run of Object.values(runs)) {
     if (run.workingDir !== workingDir) continue;
-    // Skip fully completed runs
-    if (run.completedStoryIds.length >= run.stories.length) continue;
-
     // Verify the branch still exists — if deleted, clear the stale state
     if (run.featureBranch) {
       try {
-        execSync(`git rev-parse --verify "${run.featureBranch}"`, {
+        execFileSync("git", ["-c", "core.fsmonitor=false", "show-ref", "--verify", "--quiet", `refs/heads/${run.featureBranch}`], {
           cwd: workingDir,
           stdio: "pipe",
+          timeout: 5_000,
+          maxBuffer: 64 * 1024,
         });
-      } catch {
-        // Branch is gone — clean up stale state
-        clearShipRun(run.featureBranch);
+      } catch (error) {
+        // Only an explicit missing-ref result proves stale state. Preserve the
+        // record on timeouts, Git setup errors, and other inspection failures.
+        if ((error as { status?: number }).status === 1) clearShipRun(run.featureBranch);
         continue;
       }
     }

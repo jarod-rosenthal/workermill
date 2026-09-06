@@ -43,6 +43,8 @@ Cancel whatever is currently running — a `/build` orchestration or a single-ag
 
 A cancelled `/build` leaves its state on disk, so `/retry` can pick it back up.
 
+A saved run can also need `/retry` after every story is implemented: final gates, review, or completion may still be pending. Completed stories are retained rather than implemented again.
+
 ### `/orchestrate <#issue>` *(experimental)*
 
 Decompose a parent GitHub issue into child issues and run `/build` across each one in turn.

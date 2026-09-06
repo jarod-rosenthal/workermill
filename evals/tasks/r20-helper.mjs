@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, relative } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -9,11 +9,11 @@ const OUTPUT_LIMIT = 16_384;
 export async function materialize(root, files) {
   for (const [relativePath, contents] of Object.entries(files)) {
     const normalized = normalize(relativePath);
-    if (isAbsolute(relativePath) || normalized === ".." || normalized.startsWith(`..${"/"}`)) {
+    if (isAbsolute(relativePath) || normalized === ".." || normalized.startsWith(`..${sep}`)) {
       throw new Error(`fixture path escapes workspace: ${relativePath}`);
     }
     const target = join(root, normalized);
-    if (relative(root, target).startsWith(`..${"/"}`) || isAbsolute(relative(root, target))) {
+    if (relative(root, target).startsWith(`..${sep}`) || isAbsolute(relative(root, target))) {
       throw new Error(`fixture path escapes workspace: ${relativePath}`);
     }
     await mkdir(dirname(target), { recursive: true });
@@ -27,24 +27,24 @@ export function runNode(root, expression, timeoutMs = 2000) {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
+    let stdout = Buffer.alloc(0);
+    let stderr = Buffer.alloc(0);
     let outputTruncated = false;
     let timedOut = false;
     const append = (current, chunk) => {
-      const next = current + chunk;
+      const next = Buffer.concat([current, chunk]);
       if (next.length > OUTPUT_LIMIT) outputTruncated = true;
-      return next.slice(0, OUTPUT_LIMIT);
+      return next.subarray(0, OUTPUT_LIMIT);
     };
-    child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk.toString()); });
-    child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk.toString()); });
+    child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
+    child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
     const finish = (result) => {
       clearTimeout(timer);
-      resolve({ ...result, stdout, stderr, outputTruncated, timedOut,
+      resolve({ ...result, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), outputTruncated, timedOut,
         passed: result.code === 0 && !result.signal && !timedOut });
     };
     child.once("error", (error) => finish({ code: null, signal: null, error: String(error) }));
@@ -77,4 +77,9 @@ export async function validateVariants({ fixture, variants, testExpression }) {
 
 export function semanticExpression(moduleUrl, source) {
   return `import * as app from ${JSON.stringify(moduleUrl)};\n${source}`;
+}
+
+export function printValidation(result) {
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.baselineFails || !result.referencePasses || !result.incompleteFails) process.exitCode = 1;
 }

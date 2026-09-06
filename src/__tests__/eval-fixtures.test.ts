@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { materialize, runNode } from "../../evals/tasks/r20-helper.mjs";
 import { fixture, validateFixture } from "../../evals/tasks/r20-bugfix-batch-config.mjs";
 import { fixture as pagination, validateFixture as validatePagination } from "../../evals/tasks/r20-bugfix-pagination.mjs";
 import { fixture as deepConfig, validateFixture as validateDeepConfig } from "../../evals/tasks/r20-bugfix-deep-config.mjs";
@@ -22,6 +27,22 @@ describe("R20a offline fixture", () => {
 });
 
 describe("R20b offline bug-fix fixtures", () => {
+  it("rejects workspace traversal before writing the escaped file", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "wm-eval-path-"));
+    try {
+      await expect(materialize(path.join(root, "workspace"), { "../escape": "bad" })).rejects.toThrow("escapes workspace");
+      await expect(fs.stat(path.join(root, "escape"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a failing CLI exit status when a fixture does not qualify", async () => {
+    const helper = pathToFileURL(path.resolve("evals/tasks/r20-helper.mjs")).href;
+    const result = await runNode(process.cwd(), `import { printValidation } from ${JSON.stringify(helper)}; printValidation({baselineFails:true,referencePasses:false,incompleteFails:true});`);
+    expect(result.code).toBe(1);
+  });
+
   it("has five distinct bug-fix tasks with semantic incomplete failures", async () => {
     const fixtures = [fixture, pagination, deepConfig, queueRecovery, retryBackoff];
     expect(new Set(fixtures.map((item) => item.taskId)).size).toBe(5);

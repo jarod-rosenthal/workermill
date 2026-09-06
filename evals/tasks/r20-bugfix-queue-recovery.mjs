@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { runNode, validateVariants } from "./r20-helper.mjs";
+import { runNode, validateVariants, printValidation } from "./r20-helper.mjs";
 
 const base = {
   "package.json": '{"type":"module"}\n',
@@ -15,7 +15,11 @@ export function resume(state, job) { return enqueue(recover(state), job); }
 };
 const reference = { ...base, "src/queue.mjs": `export function recover(state) {
   const known = new Set(state.done.map(({ id }) => id));
-  return { ...state, pending: [...state.pending, ...state.running.filter(({ id }) => !known.has(id))], running: [] };
+  const pending = [];
+  for (const job of [...state.pending, ...state.running]) {
+    if (!known.has(job.id)) { known.add(job.id); pending.push(job); }
+  }
+  return { ...state, pending, running: [] };
 }
 export function enqueue(state, job) {
   if (state.done.some(({ id }) => id === job.id) || state.pending.some(({ id }) => id === job.id)) return state;
@@ -36,8 +40,11 @@ async function accepts(root, mainUrl, timeoutMs) {
 const state = { pending: [], running: [{id:"a"},{id:"done"}], done: [{id:"done"}] };
 const once = resume(state, {id:"a"}); const twice = resume(once, {id:"a"});
 if (JSON.stringify(once.pending) !== JSON.stringify([{id:"a"}])) process.exit(3);
-if (JSON.stringify(twice.pending) !== JSON.stringify([{id:"a"}])) process.exit(3);`;
+if (JSON.stringify(twice.pending) !== JSON.stringify([{id:"a"}])) process.exit(3);
+if (once.running.length || state.running.length !== 2) process.exit(3);
+const overlap = resume({pending:[{id:"a"}],running:[{id:"a"},{id:"a"}],done:[]}, {id:"a"});
+if (JSON.stringify(overlap.pending) !== JSON.stringify([{id:"a"}])) process.exit(3);`;
   return runNode(root, expression, timeoutMs);
 }
 export async function validateFixture() { return validateVariants({ fixture, variants: { baseline: base, reference, incomplete }, testExpression: accepts }); }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) console.log(JSON.stringify(await validateFixture(), null, 2));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) printValidation(await validateFixture());

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { runNode, validateVariants } from "./r20-helper.mjs";
+import { runNode, validateVariants, printValidation } from "./r20-helper.mjs";
 
 const base = {
   "package.json": '{"type":"module"}\n',
@@ -13,9 +13,9 @@ export function buildConfig(overrides) { return mergeConfig({ server: { host: "l
 `,
 };
 const reference = { ...base, "src/config.mjs": `export function mergeConfig(defaults, overrides) {
-  const merge = (left, right) => Object.fromEntries(new Set([...Object.keys(left), ...Object.keys(right)]).values().map((key) => {
+  const merge = (left, right) => Object.fromEntries([...new Set([...Object.keys(left), ...Object.keys(right)])].map((key) => {
     const a = left[key], b = right[key];
-    return [key, a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) ? merge(a, b) : (key in right ? b : a)];
+    return [key, a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) ? merge(a, b) : (Object.hasOwn(right, key) ? b : a)];
   }));
   return merge(defaults, overrides);
 }
@@ -31,9 +31,13 @@ export const fixture = {
 };
 async function accepts(root, mainUrl, timeoutMs) {
   const expression = `import { buildConfig } from ${JSON.stringify(mainUrl)};
-const result = buildConfig({ server: { port: 8080 }, tags: ["canary"] });
-if (JSON.stringify(result) !== JSON.stringify({server:{host:"localhost",port:8080},tags:["canary"]})) process.exit(3);`;
+const input = { server: { port: 8080 }, tags: ["canary"] };
+const before = JSON.stringify(input);
+const result = buildConfig(input);
+if (JSON.stringify(input) !== before) process.exit(3);
+if (JSON.stringify(result) !== JSON.stringify({server:{host:"localhost",port:8080},tags:["canary"]})) process.exit(3);
+if (JSON.stringify(buildConfig({})) !== JSON.stringify({server:{host:"localhost",port:80},tags:["stable"]})) process.exit(3);`;
   return runNode(root, expression, timeoutMs);
 }
 export async function validateFixture() { return validateVariants({ fixture, variants: { baseline: base, reference, incomplete }, testExpression: accepts }); }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) console.log(JSON.stringify(await validateFixture(), null, 2));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) printValidation(await validateFixture());

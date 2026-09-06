@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { runNode, validateVariants } from "./r20-helper.mjs";
+import { runNode, validateVariants, printValidation } from "./r20-helper.mjs";
 
 const base = {
   "package.json": '{"type":"module"}\n',
@@ -37,4 +37,4 @@ if (JSON.stringify(pageReport(values, 3, 2).items) !== JSON.stringify(["e"])) pr
   return runNode(root, expression, timeoutMs);
 }
 export async function validateFixture() { return validateVariants({ fixture, variants: { baseline: base, reference, incomplete }, testExpression: accepts }); }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) console.log(JSON.stringify(await validateFixture(), null, 2));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) printValidation(await validateFixture());

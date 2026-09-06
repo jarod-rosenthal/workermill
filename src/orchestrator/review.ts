@@ -243,27 +243,39 @@ export function parseRequiredReviewOutcome(text: string): {
   decision: "approved" | "revision_needed" | "rejected";
   score: number;
 } {
-  const decisionMatch = text.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-  if (!decisionMatch) {
-    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const decisionMarkers = [...text.matchAll(/REVIEW_DECISION:\s*([^\s]+)/gi)].map((match) => match[1].toLowerCase());
+  if (decisionMarkers.length === 0) {
     throw new Error(
       `Tech Lead output missing required marker: REVIEW_DECISION. ` +
       `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
     );
   }
+  if (decisionMarkers.some((marker) => marker !== "approved" && marker !== "revision_needed" && marker !== "rejected")) {
+    throw new Error(`Tech Lead output has an invalid REVIEW_DECISION marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  if (new Set(decisionMarkers).size !== 1) {
+    throw new Error(`Tech Lead output has contradictory REVIEW_DECISION markers. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
 
-  const cqsMatches = [...text.matchAll(/CODE_QUALITY_SCORE:\s*(\d+)/gi)];
-  if (cqsMatches.length === 0) {
-    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const scoreMarkers = [...text.matchAll(/CODE_QUALITY_SCORE:\s*([^\s]+)/gi)].map((match) => match[1]);
+  if (scoreMarkers.length === 0) {
     throw new Error(
       `Tech Lead output missing required marker: CODE_QUALITY_SCORE. ` +
       `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
     );
   }
-
-  const rawScore = parseInt(cqsMatches[cqsMatches.length - 1][1], 10);
-  const score = Math.max(1, Math.min(10, rawScore));
-  const decision = decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+  if (scoreMarkers.some((marker) => !/^\d+$/.test(marker))) {
+    throw new Error(`Tech Lead output has an invalid CODE_QUALITY_SCORE marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  if (new Set(scoreMarkers).size !== 1) {
+    throw new Error(`Tech Lead output has contradictory CODE_QUALITY_SCORE markers. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  const score = Number.parseInt(scoreMarkers[0], 10);
+  if (score < 1 || score > 10) {
+    throw new Error(`Tech Lead output has an out-of-range CODE_QUALITY_SCORE marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  const decision = decisionMarkers[0] as "approved" | "revision_needed" | "rejected";
   return { decision, score };
 }
 
@@ -295,8 +307,8 @@ export function validateTechLeadReviewOutput(
   feedback: string;
 } {
   const parsed = parseRequiredReviewOutcome(text);
-  const approved = parsed.score >= approvalThreshold;
-  const decision = approved ? "approved" : parsed.decision;
+  const approved = parsed.decision === "approved" && parsed.score >= approvalThreshold;
+  const decision = parsed.decision;
   const feedback = extractReviewFeedback(text, parsed.decision);
   return { decision, score: parsed.score, approved, feedback };
 }
@@ -306,6 +318,10 @@ function isMissingRequiredReviewMarkerError(err: unknown): boolean {
     err.message.includes("Tech Lead output missing required marker: REVIEW_DECISION")
     || err.message.includes("Tech Lead output missing required marker: CODE_QUALITY_SCORE")
   );
+}
+
+function isInvalidReviewOutputError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith("Tech Lead output ");
 }
 
 function isEmptyReviewOutputError(err: unknown): boolean {
@@ -711,18 +727,15 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   output.statusDone();
 
   // Parse results -- same logic as orchestrator
-  const parsedReview = parseRequiredReviewOutcome(reviewText);
-  const score = parsedReview.score;
   const threshold = config.review?.approvalThreshold ?? 9;
-  const approved = score >= threshold;
-  const decision = approved ? "approved" : parsedReview.decision;
+  const interpretedReview = validateTechLeadReviewOutput(reviewText, threshold);
+  const { score, approved, decision, feedback } = interpretedReview;
 
   // Display structured result
   output.log("tech_lead", "\u2500".repeat(60));
   output.log("tech_lead", `::code_quality_score::${score}/10`);
   output.log("tech_lead", `::review_decision::${decision}`);
   output.log("tech_lead", "\u2500".repeat(60));
-  const feedback = extractReviewFeedback(reviewText, parsedReview.decision);
   if (shouldPrintFeedbackFallback(feedback, reviewerVisibleText)) {
     output.log("tech_lead", "Fix context:");
     for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
@@ -747,6 +760,40 @@ export interface ReviewLoopResult {
   finalReviewText: string;
   /** True when the loop was interrupted by pause/cancel and the caller should return early. */
   aborted: boolean;
+  /** Typed result for completion policy; callers must not infer approval from review prose. */
+  outcome: ReviewOutcome;
+}
+
+export type ReviewOutcomeKind =
+  | "approved"
+  | "disabled"
+  | "revision_needed"
+  | "rejected"
+  | "revision_exhausted"
+  | "revision_declined"
+  | "parse_failed"
+  | "provider_failed"
+  | "timed_out"
+  | "cancelled"
+  | "unavailable";
+
+export interface ReviewOutcome {
+  kind: ReviewOutcomeKind;
+  approved: boolean;
+  decision?: "approved" | "revision_needed" | "rejected";
+  score?: number;
+  feedback?: string;
+  error?: string;
+}
+
+function reviewOutcomeFromError(error: unknown, timedOut = false, cancelled = false): ReviewOutcome {
+  const message = error instanceof Error ? error.message : String(error);
+  if (cancelled || /cancelled/i.test(message)) return { kind: "cancelled", approved: false, error: message };
+  if (timedOut || /timed out|timeout/i.test(message)) return { kind: "timed_out", approved: false, error: message };
+  if (isMissingRequiredReviewMarkerError(error) || isInvalidReviewOutputError(error) || isEmptyReviewOutputError(error)) {
+    return { kind: "parse_failed", approved: false, error: message };
+  }
+  return { kind: "provider_failed", approved: false, error: message };
 }
 
 
@@ -794,6 +841,9 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
   const reviewEnabled = config.review?.enabled !== false; // default: true
   const maxRevisions = config.review?.maxRevisions ?? 3;
   let autoRevise = config.review?.autoRevise ?? false;
+  let outcome: ReviewOutcome = reviewEnabled
+    ? { kind: "unavailable", approved: false, error: "Tech Lead reviewer is unavailable." }
+    : { kind: "disabled", approved: false };
 
   // Run inline review with revision loop
   let finalReviewText = ""; // Captures the approved review for use in PR body
@@ -802,7 +852,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     if (abortSignal?.aborted) {
       output.coordinatorLog("Build cancelled.");
       logRetryHint();
-      return { finalReviewText: "", aborted: true };
+      return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
     }
     const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
@@ -830,10 +880,10 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
       if (abortSignal?.aborted) {
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
-        return { finalReviewText: "", aborted: true };
+        return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
       }
       if (await waitWhilePaused()) {
-        return { finalReviewText: "", aborted: true };
+        return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false, error: "Review paused or cancelled." } };
       }
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
@@ -842,6 +892,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
+      let lastReviewFailure: ReviewOutcome | undefined;
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
         const mustFixSection = isRevision && openMustFixItems.length > 0
@@ -1098,6 +1149,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             break;
           } catch (err) {
             lastReviewError = err;
+            lastReviewFailure = reviewOutcomeFromError(err, timedAbort.didTimeout(), abortSignal?.aborted === true);
             const transient = isTransientError(err);
             const rl = isRateLimitError(err);
             const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
@@ -1129,13 +1181,10 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         output.statusDone();
 
         // Extract review decision — 3-tier system matching WorkerMill worker
-        const parsedReview = parseRequiredReviewOutcome(reviewText);
-        const decision = parsedReview.decision;
-        const score = parsedReview.score;
-
-        // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 9;
-        const approved = score >= threshold;
+        const interpretedReview = validateTechLeadReviewOutput(reviewText, threshold);
+        const { decision, score, approved, feedback } = interpretedReview;
+        outcome = { kind: approved ? "approved" : decision, approved, decision, score, feedback };
         const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
         if (!approved) {
           const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
@@ -1161,7 +1210,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         }
         logger.info(`Review round ${reviewRound} result`, { decision, score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
-        const feedback = extractReviewFeedback(reviewText, decision);
         if (approved) {
           openMustFixItems = [];
         } else {
@@ -1221,10 +1269,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const revisionsLeft = maxRevisions - reviewRound;
         if (revisionsLeft <= 0) {
           emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions - 1} revision attempt(s).`);
+          outcome = { ...outcome, kind: "revision_exhausted", approved: false };
           if (config.review?.strict) {
             output.coordinatorLog(`[strict] Max revisions reached without approval — build failed.`);
             output.error("Strict mode requires review approval. The build cannot proceed without it.");
-            return { finalReviewText: reviewText, aborted: true };
+            return { finalReviewText: reviewText, aborted: true, outcome };
           }
           output.coordinatorLog(`Max revisions (${maxRevisions - 1}) reached, proceeding to commit.`);
           break;
@@ -1273,6 +1322,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         if (!shouldRevise) {
           emitFailureCode(output, "review_blocker_unresolved", "Tech Lead review still has blocking issues and revision was declined.");
+          outcome = { ...outcome, kind: "revision_declined", approved: false };
           break;
         }
 
@@ -1302,7 +1352,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         for (let i = 0; i < sorted.length; i++) {
           if (await waitWhilePaused()) {
-            return { finalReviewText: "", aborted: true };
+            return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false, error: "Review paused or cancelled." } };
           }
           const story = sorted[i];
 
@@ -1349,7 +1399,7 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           output.status(`${story.persona}: revising...`);
 
-          if (abortSignal?.aborted) return { finalReviewText: "", aborted: true };
+          if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx, sApiKey);
 
           // Revision prompt follows WorkerMill platform pattern (prompt-builder.ts):
@@ -1367,7 +1417,7 @@ Working directory: ${workingDir}`;
 
           const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
           try {
-            if (abortSignal?.aborted) return { finalReviewText: "", aborted: true };
+            if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
             const storyTools = createReviewTools({
               persona: storyPersona,
               role: story.persona,
@@ -1453,7 +1503,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             for await (const _chunk of revStream.textStream) { /* drive */ }
             const revUsage = await revStream.totalUsage;
             if (revisionTimedAbort.signal.aborted) {
-              return { finalReviewText: "", aborted: true };
+              return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
             }
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
@@ -1477,7 +1527,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             if (isBalanceOrQuotaError(err)) {
               const shouldStop = await pauseForBalanceIssue(`Revision story ${i + 1}`);
               if (shouldStop) {
-                return { finalReviewText: "", aborted: true };
+                return { finalReviewText: "", aborted: true, outcome: { kind: "provider_failed", approved: false, error: "Revision provider balance or quota error." } };
               }
               continue;
             }
@@ -1509,7 +1559,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         if (isBalanceOrQuotaError(err)) {
           const shouldStop = await pauseForBalanceIssue("Tech Lead review");
           if (shouldStop) {
-            return { finalReviewText: "", aborted: true };
+            return { finalReviewText: "", aborted: true, outcome: { kind: "provider_failed", approved: false, error: "Tech Lead reviewer balance or quota error." } };
           }
           continue;
         }
@@ -1522,10 +1572,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
           reviewRound,
         });
         output.log("system", `Review skipped: ${errMsg}`);
+        outcome = lastReviewFailure ?? reviewOutcomeFromError(err, false, abortSignal?.aborted === true);
         break;
       }
     } // end review loop
   }
 
-  return { finalReviewText, aborted: false };
+  return { finalReviewText, aborted: false, outcome };
 }

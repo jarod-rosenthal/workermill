@@ -47,6 +47,7 @@ type StreamResult = { textStream: AsyncIterable<string>; text: Promise<string>; 
 
 const APPROVED = "REVIEW_DECISION: approved\nCODE_QUALITY_SCORE: 9\nFEEDBACK: Good.";
 const REVISION_NEEDED = "Needs a fix.\nREVIEW_DECISION: revision_needed\nCODE_QUALITY_SCORE: 7\nFEEDBACK: Fix it.\nBLOCKING_EVIDENCE: test\nACTIONABLE_FIX: fix it.";
+const REJECTED_HIGH_SCORE = "REVIEW_DECISION: rejected\nCODE_QUALITY_SCORE: 10\nFEEDBACK: The approach is unsafe.";
 
 function config(): CliConfig {
   return {
@@ -206,6 +207,71 @@ describe("review runtime policy", () => {
     })) as typeof streamText);
     await expect(runStandaloneReview(config(), output([]), "branch", controller.signal)).resolves.toBeNull();
     expect(streamText).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns typed disabled and unavailable reviewer outcomes without invoking a model", async () => {
+    const base = {
+      output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    };
+    await expect(runReviewLoop({ ...base, config: { ...config(), review: { ...config().review!, enabled: false } } })).resolves.toMatchObject({
+      aborted: false, outcome: { kind: "disabled", approved: false },
+    });
+    vi.mocked(loadPersona).mockReturnValue(null);
+    await expect(runReviewLoop({ ...base, config: config() })).resolves.toMatchObject({
+      aborted: false, outcome: { kind: "unavailable", approved: false },
+    });
+    expect(streamText).not.toHaveBeenCalled();
+  });
+
+  it("does not promote a rejected high score and reports malformed reviewer output", async () => {
+    vi.mocked(streamText).mockImplementation((() => result(REJECTED_HIGH_SCORE)) as typeof streamText);
+    const rejected = await runReviewLoop({
+      config: { ...config(), review: { ...config().review!, maxRevisions: 1 } }, output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    });
+    expect(rejected.outcome).toMatchObject({ kind: "revision_exhausted", approved: false, decision: "rejected", score: 10 });
+
+    vi.mocked(streamText).mockImplementation((() => result("REVIEW_DECISION: approved\nCODE_QUALITY_SCORE: 9\nREVIEW_DECISION: rejected\nFEEDBACK: invalid")) as typeof streamText);
+    const malformed = await runReviewLoop({
+      config: config(), output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    });
+    expect(malformed.outcome).toMatchObject({ kind: "parse_failed", approved: false });
+  });
+
+  it("returns approved, revision-exhausted, and cancelled outcomes from real review parsing", async () => {
+    const base = {
+      output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    };
+    vi.mocked(streamText).mockImplementation((() => result(APPROVED)) as typeof streamText);
+    await expect(runReviewLoop({ ...base, config: config(), abortSignal: undefined })).resolves.toMatchObject({
+      outcome: { kind: "approved", approved: true, decision: "approved", score: 9 },
+    });
+
+    vi.mocked(streamText).mockImplementation((() => result(REVISION_NEEDED)) as typeof streamText);
+    await expect(runReviewLoop({ ...base, config: { ...config(), review: { ...config().review!, maxRevisions: 1 } }, abortSignal: undefined })).resolves.toMatchObject({
+      outcome: { kind: "revision_exhausted", approved: false, decision: "revision_needed" },
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(runReviewLoop({ ...base, config: config(), abortSignal: controller.signal })).resolves.toMatchObject({
+      aborted: true, outcome: { kind: "cancelled", approved: false },
+    });
   });
 
   it.each([false, true])("revision writes obey current deny rules (denied=%s)", async (denied) => {

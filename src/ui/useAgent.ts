@@ -38,7 +38,7 @@ import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } 
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
 import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
-import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
+import { createBrowserRunResources, type BrowserRunResources } from "../browser.js";
 import fs from "fs";
 import path from "path";
 import { notifyIfEnabled } from "../notify.js";
@@ -563,7 +563,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * 3. The original execute runs.
    * 4. Status is updated to "done" (or "denied").
    */
-  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, mcpTools: Record<string, AnyToolDef>): Record<string, AnyToolDef> => {
+  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, mcpTools: Record<string, AnyToolDef>, browser: BrowserRunResources): Record<string, AnyToolDef> => {
     // Factory tools are rebuilt for every run context. In particular, bash and
     // child tools must receive this turn's signal and run ID, not a closure
     // created during hook initialization.
@@ -587,18 +587,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     allRawTools.browser_open = {
       description: "Open a headless Chrome browser for navigating websites, taking screenshots, and verifying UI.",
       inputSchema: z.object({}),
-      execute: async () => browserOpen(),
+      execute: async () => browser.open(),
     };
     allRawTools.browser_navigate = {
       description: "Navigate the browser to a URL. Returns the page title.",
       inputSchema: z.object({ url: z.string().describe("URL to navigate to") }),
-      execute: async ({ url }: { url: string }) => browserNavigate(url),
+      execute: async ({ url }: { url: string }) => browser.navigate(url),
     };
     allRawTools.browser_screenshot = {
       description: "Take a screenshot of the current browser page. Returns the image for visual inspection.",
       inputSchema: z.object({}),
       execute: async () => {
-        const { base64, description } = await browserScreenshot();
+        const { base64, description } = await browser.screenshot();
         if (base64) {
           return {
             content: [
@@ -613,27 +613,27 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     allRawTools.browser_click = {
       description: "Click an element on the page by CSS selector.",
       inputSchema: z.object({ selector: z.string().describe("CSS selector (e.g., 'button.submit', '#login')") }),
-      execute: async ({ selector }: { selector: string }) => browserClick(selector),
+      execute: async ({ selector }: { selector: string }) => browser.click(selector),
     };
     allRawTools.browser_fill = {
       description: "Fill a form field by CSS selector with a value.",
       inputSchema: z.object({ selector: z.string().describe("CSS selector for the input field"), value: z.string().describe("Value to fill") }),
-      execute: async ({ selector, value }: { selector: string; value: string }) => browserFill(selector, value),
+      execute: async ({ selector, value }: { selector: string; value: string }) => browser.fill(selector, value),
     };
     allRawTools.browser_evaluate = {
       description: "Execute JavaScript in the browser and return the result.",
       inputSchema: z.object({ expression: z.string().describe("JavaScript expression to evaluate") }),
-      execute: async ({ expression }: { expression: string }) => browserEvaluate(expression),
+      execute: async ({ expression }: { expression: string }) => browser.evaluate(expression),
     };
     allRawTools.browser_console = {
       description: "Get console messages (log, error, warn) from the browser.",
       inputSchema: z.object({}),
-      execute: async () => browserConsole(),
+      execute: async () => browser.console(),
     };
     allRawTools.browser_close = {
       description: "Close the headless Chrome browser.",
       inputSchema: z.object({}),
-      execute: async () => browserClose(),
+      execute: async () => browser.close(),
     };
 
     // Partition tools: core tools get full schemas, MCP tools are deferred
@@ -807,11 +807,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * mode which restricts to read-only tools.
    * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, mcpResources: MCPRunResources): Promise<Record<string, AnyToolDef>> => {
+  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, mcpResources: MCPRunResources, browser: BrowserRunResources): Promise<Record<string, AnyToolDef>> => {
     // Lazy-start only resources owned by this turn; another chat/headless run
     // must never supply, start, or close this tool map.
     await mcpResources.ensureStarted();
-    const all = buildPermissionedTools(context, model, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>);
+    const all = buildPermissionedTools(context, model, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>, browser);
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
@@ -845,6 +845,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         let turnStarted = false;
         let liveViewCompleted = false;
         let mcpResources: MCPRunResources | undefined;
+        const browserResources = createBrowserRunResources({ runId, workspace: workingDirRef.current, signal: controller.signal });
         setStatus("thinking");
         setStatusDetail("");
         try {
@@ -918,7 +919,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         try {
           const executionContext = createExecutionContext(runId, controller.signal);
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
-          const activeTools = (await getActiveTools(executionContext, turnModel, mcpResources)) as ToolSet;
+          const activeTools = (await getActiveTools(executionContext, turnModel, mcpResources, browserResources)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
           // text (memories, disk files), which invalidates Ollama's KV cache
           // and forces a full prompt reprocessing (~30s for 30B models).
@@ -1370,6 +1371,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             Promise.resolve().then(() => cleanupScopedBackgroundProcesses(runId)),
             Promise.resolve().then(() => mcpResources?.close()),
             Promise.resolve().then(() => shutdownLSPRun(runId)),
+            Promise.resolve().then(() => browserResources.close()),
           ]);
           pendingToolsByRunRef.current.delete(runId);
           const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");

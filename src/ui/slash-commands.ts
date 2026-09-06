@@ -748,6 +748,8 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       shutdownLSP();
       cleanupStaleWorktrees(ctx.workingDir);
       clearCheckpoints();
+      // Explicit /browser state is session-owned; model-turn resources close
+      // in useAgent's awaited per-run cleanup.
       void import("../browser.js").then(m => m.browserClose());
       printSessionGoodbye(ctx);
       ctx.exit?.();

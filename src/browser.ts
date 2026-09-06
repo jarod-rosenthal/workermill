@@ -1,394 +1,208 @@
-/**
- * Lightweight browser automation via Chrome DevTools Protocol (CDP).
- * Zero external dependencies — uses Node's built-in fetch and WebSocket (Node 22+)
- * or falls back to raw HTTP + ws package.
- *
- * Spawns headless Chrome, connects via CDP websocket, exposes tools for
- * navigate, screenshot, click, fill, evaluate, and console reading.
- */
-
-import { spawn, execSync, type ChildProcess } from "child_process";
+/** Run-owned Chrome/CDP resources. Chrome is a browser helper, not OS isolation. */
+import { spawn, type ChildProcess } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { mkdtemp, readFile, rm } from "fs/promises";
+import { tmpdir } from "os";
+import path from "path";
+import crypto from "crypto";
 import * as logger from "./logger.js";
 
-// ---------------------------------------------------------------------------
-// Chrome binary detection
-// ---------------------------------------------------------------------------
-
+const STARTUP_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const TERMINATION_GRACE_MS = 1_500;
+const MAX_CDP_MESSAGE_BYTES = 6 * 1024 * 1024;
+const MAX_CONSOLE_MESSAGES = 100;
+const MAX_CONSOLE_BYTES = 32 * 1024;
+const MAX_STDERR_BYTES = 16 * 1024;
+const MAX_TEXT_RESULT_CHARS = 16_000;
 const CHROME_PATHS: Record<string, string[]> = {
-  linux: [
-    "google-chrome",
-    "google-chrome-stable",
-    "chromium-browser",
-    "chromium",
-  ],
-  darwin: [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  ],
-  win32: [
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  ],
+  linux: ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"],
+  darwin: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
+  win32: ["C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"],
 };
 
+export interface BrowserRunResources {
+  open(): Promise<string>; navigate(url: string): Promise<string>;
+  screenshot(): Promise<{ base64: string; description: string }>;
+  click(selector: string): Promise<string>; fill(selector: string, value: string): Promise<string>;
+  evaluate(expression: string): Promise<string>; console(): Promise<string>;
+  close(): Promise<string>; isOpen(): boolean;
+}
+/** Bounded test seams; production callers only provide run ownership. */
+export interface BrowserRunOptions {
+  runId: string; workspace: string; signal: AbortSignal;
+  chromePath?: string | null; startupTimeoutMs?: number; requestTimeoutMs?: number;
+  terminationGraceMs?: number; profileRoot?: string; spawnProcess?: typeof spawn; fetchImpl?: typeof fetch;
+}
+interface CDPMessage { id?: number; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { message?: string }; }
+interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout; onAbort(): void; }
+
+function bounded(value: string, maximum: number): string { return value.length <= maximum ? value : `${value.slice(0, maximum)}… [truncated]`; }
+function abortError(signal: AbortSignal): Error { return signal.reason instanceof Error ? signal.reason : new Error("Browser operation cancelled"); }
+function isWsl(): boolean { try { return readFileSync("/proc/sys/kernel/osrelease", "utf8").toLowerCase().includes("microsoft"); } catch { return false; } }
 function findChrome(): string | null {
-  const platform = process.platform as string;
-
-  // WSL: try Windows Chrome via /mnt/c
-  if (platform === "linux") {
-    try {
-      const wslCheck = execSync("uname -r 2>/dev/null", { encoding: "utf-8" });
-      if (wslCheck.toLowerCase().includes("microsoft")) {
-        const wslPaths = [
-          "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
-          "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-        ];
-        for (const p of wslPaths) {
-          try {
-            execSync(`test -f "${p}"`, { stdio: "pipe" });
-            return p;
-          } catch { /* not found */ }
-        }
-      }
-    } catch { /* not WSL */ }
+  // Never use Windows Chrome from WSL: its descendants are not a Unix group.
+  if (process.platform === "linux" && isWsl()) return null;
+  for (const candidate of CHROME_PATHS[process.platform] ?? []) {
+    if (candidate.includes("/") || candidate.includes("\\")) { if (existsSync(candidate)) return candidate; continue; }
+    for (const directory of (process.env.PATH ?? "").split(path.delimiter)) if (existsSync(path.join(directory, candidate))) return path.join(directory, candidate);
   }
-
-  const candidates = CHROME_PATHS[platform] || CHROME_PATHS.linux;
-  for (const candidate of candidates) {
-    try {
-      if (candidate.startsWith("/")) {
-        execSync(`test -f "${candidate}"`, { stdio: "pipe" });
-        return candidate;
-      } else {
-        execSync(`which "${candidate}" 2>/dev/null`, { stdio: "pipe", encoding: "utf-8" });
-        return candidate;
-      }
-    } catch { /* not found */ }
-  }
-
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// CDP client (raw JSON-RPC over WebSocket)
-// ---------------------------------------------------------------------------
-
-interface CDPMessage {
-  id?: number;
-  method?: string;
-  params?: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  error?: { message: string };
+function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, milliseconds);
+    const onAbort = (): void => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); reject(abortError(signal)); };
+    function done(): void { signal.removeEventListener("abort", onAbort); resolve(); }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+async function fetchWithDeadline(fetchImpl: typeof fetch, url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Browser HTTP request timed out")), timeoutMs);
+  const onAbort = (): void => controller.abort(abortError(signal));
+  signal.addEventListener("abort", onAbort, { once: true });
+  try { return await fetchImpl(url, { signal: controller.signal }); }
+  finally { clearTimeout(timer); signal.removeEventListener("abort", onAbort); }
 }
 
 class CDPClient {
-  private ws: WebSocket | null = null;
-  private nextId = 1;
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-  private consoleMessages: Array<{ type: string; text: string }> = [];
-  private eventHandlers = new Map<string, ((params: Record<string, unknown>) => void)[]>();
-
+  private ws: WebSocket | null = null; private nextId = 1; private closed = false;
+  private readonly pending = new Map<number, Pending>();
+  private readonly messages: Array<{ type: string; text: string }> = []; private messageBytes = 0;
+  constructor(private readonly signal: AbortSignal, private readonly timeoutMs: number) {}
   async connect(wsUrl: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = (e) => reject(new Error(`WebSocket error: ${e}`));
-
-      this.ws.onmessage = (event) => {
-        try {
-          const msg: CDPMessage = JSON.parse(String(event.data));
-
-          // Response to a command
-          if (msg.id !== undefined && this.pending.has(msg.id)) {
-            const { resolve: res, reject: rej } = this.pending.get(msg.id)!;
-            this.pending.delete(msg.id);
-            if (msg.error) rej(new Error(msg.error.message));
-            else res(msg.result || {});
-          }
-
-          // Event
-          if (msg.method) {
-            // Capture console messages
-            if (msg.method === "Runtime.consoleAPICalled" && msg.params) {
-              const args = (msg.params.args as Array<{ value?: string; description?: string }>) || [];
-              const text = args.map(a => a.value || a.description || "").join(" ");
-              this.consoleMessages.push({ type: String(msg.params.type || "log"), text });
-            }
-
-            // Fire event handlers
-            const handlers = this.eventHandlers.get(msg.method);
-            if (handlers) {
-              for (const handler of handlers) handler(msg.params || {});
-            }
-          }
-        } catch (err) {
-          logger.debug("Malformed CDP WebSocket message", { error: err instanceof Error ? err.message : String(err) });
-        }
-      };
+    if (this.signal.aborted) throw abortError(this.signal);
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl); this.ws = ws; let settled = false;
+      const finish = (error?: Error): void => { if (settled) return; settled = true; clearTimeout(timer); this.signal.removeEventListener("abort", onAbort); error ? reject(error) : resolve(); };
+      const timer = setTimeout(() => { try { ws.close(); } catch { /* best effort */ } finish(new Error("CDP connection timed out")); }, this.timeoutMs);
+      const onAbort = (): void => { try { ws.close(); } catch { /* best effort */ } finish(abortError(this.signal)); };
+      this.signal.addEventListener("abort", onAbort, { once: true });
+      ws.onopen = () => finish(); ws.onerror = () => finish(new Error("CDP WebSocket connection failed"));
+      ws.onclose = () => { if (!settled) finish(new Error("CDP WebSocket closed during connection")); this.rejectPending(new Error("CDP connection closed")); };
+      ws.onmessage = (event) => this.onMessage(String(event.data));
     });
   }
-
-  async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error("CDP not connected");
-    }
-
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id);
-          reject(new Error(`CDP command timed out: ${method}`));
-        }
-      }, 30000);
-
-      this.pending.set(id, {
-        resolve: (v: unknown) => { clearTimeout(timer); resolve(v); },
-        reject: (e: Error) => { clearTimeout(timer); reject(e); },
-      });
-      this.ws!.send(JSON.stringify({ id, method, params: params || {} }));
-    });
-  }
-
-  getConsoleMessages(): Array<{ type: string; text: string }> {
-    const msgs = [...this.consoleMessages];
-    this.consoleMessages = [];
-    return msgs;
-  }
-
-  close(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    this.pending.clear();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Browser manager
-// ---------------------------------------------------------------------------
-
-let chromeProcess: ChildProcess | null = null;
-let cdpClient: CDPClient | null = null;
-let debugPort = 9222;
-
-/** Get the host to connect to CDP — Windows host IP for WSL, localhost otherwise. */
-function getCDPHost(): string {
-  try {
-    const uname = execSync("uname -r 2>/dev/null", { encoding: "utf-8" });
-    if (uname.toLowerCase().includes("microsoft")) {
-      // WSL — Chrome runs on Windows side, connect via gateway IP
-      const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
-      if (gateway) return gateway;
-    }
-  } catch { /* not WSL */ }
-  return "127.0.0.1";
-}
-
-export async function browserOpen(): Promise<string> {
-  if (chromeProcess && cdpClient) {
-    return "Browser already open.";
-  }
-
-  const chromePath = findChrome();
-  if (!chromePath) {
-    return "Chrome/Chromium not found. Install Google Chrome to use browser tools.";
-  }
-
-  // Find a free port
-  debugPort = 9222 + Math.floor(Math.random() * 100);
-
-  const args = [
-    "--headless=new",
-    `--remote-debugging-port=${debugPort}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-background-networking",
-    "--window-size=1280,720",
-    "about:blank",
-  ];
-
-  logger.info("Launching Chrome", { path: chromePath, port: debugPort });
-
-  chromeProcess = spawn(chromePath, args, {
-    stdio: "pipe",
-    detached: true,
-  });
-
-  chromeProcess.on("error", (err) => {
-    logger.error(`Chrome launch failed: ${err.message}`);
-    chromeProcess = null;
-  });
-
-  chromeProcess.on("exit", () => {
-    chromeProcess = null;
-    cdpClient?.close();
-    cdpClient = null;
-  });
-
-  // Wait for Chrome to start and expose CDP
-  const cdpHost = getCDPHost();
-  let wsUrl: string | null = null;
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 250));
+  private onMessage(raw: string): void {
+    if (raw.length > MAX_CDP_MESSAGE_BYTES) { this.close(new Error("CDP response exceeded size limit")); return; }
     try {
-      const res = await globalThis.fetch(`http://${cdpHost}:${debugPort}/json/version`);
-      if (res.ok) {
-        const data = (await res.json()) as { webSocketDebuggerUrl: string };
-        // Replace 127.0.0.1 in the WS URL with the actual CDP host
-        // (Chrome reports its own localhost, but WSL needs the gateway IP)
-        wsUrl = data.webSocketDebuggerUrl.replace("127.0.0.1", cdpHost);
-        break;
+      const message = JSON.parse(raw) as CDPMessage;
+      if (message.id !== undefined) { const pending = this.pending.get(message.id); if (pending) { this.pending.delete(message.id); clearTimeout(pending.timer); this.signal.removeEventListener("abort", pending.onAbort); message.error ? pending.reject(new Error(message.error.message ?? "CDP command failed")) : pending.resolve(message.result ?? {}); } }
+      if (message.method === "Runtime.consoleAPICalled" && message.params) {
+        const args = (message.params.args as Array<{ value?: unknown; description?: string }> | undefined) ?? [];
+        const text = bounded(args.map((arg) => String(arg.value ?? arg.description ?? "")).join(" "), 2_048); const bytes = Buffer.byteLength(text);
+        if (this.messages.length < MAX_CONSOLE_MESSAGES && this.messageBytes + bytes <= MAX_CONSOLE_BYTES) { this.messages.push({ type: String(message.params.type ?? "log"), text }); this.messageBytes += bytes; }
       }
-    } catch { /* not ready yet */ }
+    } catch (error) { logger.debug("Malformed CDP WebSocket message", { error: error instanceof Error ? error.message : String(error) }); }
   }
-
-  if (!wsUrl) {
-    chromeProcess?.kill();
-    chromeProcess = null;
-    return "Failed to connect to Chrome — timed out waiting for CDP.";
-  }
-
-  // Connect CDP
-  cdpClient = new CDPClient();
-  await cdpClient.connect(wsUrl);
-
-  // Enable domains
-  await cdpClient.send("Page.enable");
-  await cdpClient.send("Runtime.enable");
-  await cdpClient.send("Network.enable");
-
-  logger.info("Chrome connected via CDP", { wsUrl });
-  return `Browser open (Chrome headless on port ${debugPort}).`;
-}
-
-export async function browserNavigate(url: string): Promise<string> {
-  if (!cdpClient) return "Browser not open. Use browser_open first.";
-
-  try {
-    await cdpClient.send("Page.navigate", { url });
-    // Wait for load
-    await cdpClient.send("Page.loadEventFired").catch(() => {
-      // loadEventFired is an event, not a command — wait manually
+  send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    if (this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("CDP not connected"));
+    if (this.signal.aborted) return Promise.reject(abortError(this.signal));
+    const id = this.nextId++;
+    const ws = this.ws;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); this.signal.removeEventListener("abort", onAbort); reject(new Error(`CDP command timed out: ${method}`)); }, this.timeoutMs);
+      const onAbort = (): void => { const pending = this.pending.get(id); if (!pending) return; this.pending.delete(id); clearTimeout(timer); reject(abortError(this.signal)); };
+      this.pending.set(id, { resolve, reject, timer, onAbort }); this.signal.addEventListener("abort", onAbort, { once: true });
+      try { ws.send(JSON.stringify({ id, method, params })); } catch (error) { this.pending.delete(id); clearTimeout(timer); this.signal.removeEventListener("abort", onAbort); reject(error instanceof Error ? error : new Error(String(error))); }
     });
-    await new Promise(r => setTimeout(r, 1000)); // Brief settle time
-    const result = await cdpClient.send("Runtime.evaluate", {
-      expression: "document.title",
-    }) as { result?: { value?: string } };
-    const title = result?.result?.value || "(no title)";
-    return `Navigated to ${url} — "${title}"`;
-  } catch (err) {
-    return `Navigation failed: ${err instanceof Error ? err.message : String(err)}`;
   }
+  takeConsole(): Array<{ type: string; text: string }> { const output = this.messages.splice(0); this.messageBytes = 0; return output; }
+  close(reason = new Error("CDP connection closed")): void { if (this.closed) return; this.closed = true; this.rejectPending(reason); try { this.ws?.close(); } catch { /* best effort */ } this.ws = null; }
+  private rejectPending(reason: Error): void { for (const [, pending] of this.pending) { clearTimeout(pending.timer); this.signal.removeEventListener("abort", pending.onAbort); pending.reject(reason); } this.pending.clear(); }
 }
 
-export async function browserScreenshot(): Promise<{ base64: string; description: string }> {
-  if (!cdpClient) return { base64: "", description: "Browser not open. Use browser_open first." };
-
-  try {
-    const result = await cdpClient.send("Page.captureScreenshot", {
-      format: "png",
-      quality: 80,
-    }) as { data?: string };
-
-    const base64 = result?.data || "";
-    return {
-      base64,
-      description: `Screenshot captured (${Math.round(base64.length * 0.75 / 1024)}KB).`,
-    };
-  } catch (err) {
-    return { base64: "", description: `Screenshot failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
-export async function browserClick(selector: string): Promise<string> {
-  if (!cdpClient) return "Browser not open. Use browser_open first.";
-
-  try {
-    const result = await cdpClient.send("Runtime.evaluate", {
-      expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return 'Element not found: ${selector}';
-        el.click();
-        return 'Clicked: ${selector}';
-      })()`,
-    }) as { result?: { value?: string } };
-    return result?.result?.value || "Click executed.";
-  } catch (err) {
-    return `Click failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
-export async function browserFill(selector: string, value: string): Promise<string> {
-  if (!cdpClient) return "Browser not open. Use browser_open first.";
-
-  try {
-    const result = await cdpClient.send("Runtime.evaluate", {
-      expression: `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return 'Element not found: ${selector}';
-        el.value = ${JSON.stringify(value)};
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return 'Filled: ${selector}';
-      })()`,
-    }) as { result?: { value?: string } };
-    return result?.result?.value || "Fill executed.";
-  } catch (err) {
-    return `Fill failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
-export async function browserEvaluate(expression: string): Promise<string> {
-  if (!cdpClient) return "Browser not open. Use browser_open first.";
-
-  try {
-    const result = await cdpClient.send("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-    }) as { result?: { value?: unknown; description?: string }; exceptionDetails?: { text?: string } };
-
-    if (result?.exceptionDetails) {
-      return `Error: ${result.exceptionDetails.text || "evaluation error"}`;
-    }
-
-    const val = result?.result?.value;
-    if (val === undefined) return result?.result?.description || "(undefined)";
-    return typeof val === "string" ? val : JSON.stringify(val);
-  } catch (err) {
-    return `Evaluate failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
-export async function browserConsole(): Promise<string> {
-  if (!cdpClient) return "Browser not open. Use browser_open first.";
-
-  const msgs = cdpClient.getConsoleMessages();
-  if (msgs.length === 0) return "(no console messages)";
-  return msgs.map(m => `[${m.type}] ${m.text}`).join("\n");
-}
-
-export async function browserClose(): Promise<string> {
-  if (cdpClient) {
-    cdpClient.close();
-    cdpClient = null;
-  }
-  if (chromeProcess) {
+async function waitForEndpoint(profile: string, signal: AbortSignal, startupTimeoutMs: number, fetchImpl: typeof fetch, requestTimeoutMs: number): Promise<string> {
+  const deadline = Date.now() + startupTimeoutMs; const portFile = path.join(profile, "DevToolsActivePort");
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw abortError(signal);
     try {
-      process.kill(-chromeProcess.pid!, "SIGTERM");
-    } catch {
-      // Process group kill failed (e.g., already exited) — try direct kill
-      chromeProcess.kill();
-    }
-    chromeProcess = null;
+      const [port] = (await readFile(portFile, "utf8")).trim().split(/\r?\n/);
+      if (port && /^\d+$/.test(port)) {
+        const response = await fetchWithDeadline(fetchImpl, `http://127.0.0.1:${port}/json/list`, signal, Math.min(requestTimeoutMs, 1_000));
+        const pages = response.ok ? await response.json() as Array<{ type?: string; webSocketDebuggerUrl?: string }> : [];
+        const page = pages.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
+        if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl.replace(/localhost|127\.0\.0\.1/, "127.0.0.1");
+      }
+    } catch { /* Chrome has not finished its private endpoint handshake. */ }
+    await waitFor(Math.min(100, Math.max(1, deadline - Date.now())), signal);
   }
-  return "Browser closed.";
+  throw new Error("Timed out waiting for Chrome's private DevTools endpoint");
 }
 
-export function isBrowserOpen(): boolean {
-  return chromeProcess !== null && cdpClient !== null;
+export function createBrowserRunResources(options: BrowserRunOptions): BrowserRunResources {
+  const startupTimeoutMs = Math.max(100, Math.min(options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS, 30_000));
+  const requestTimeoutMs = Math.max(100, Math.min(options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS, 30_000));
+  const terminationGraceMs = Math.max(0, Math.min(options.terminationGraceMs ?? TERMINATION_GRACE_MS, 10_000));
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch; const spawnProcess = options.spawnProcess ?? spawn;
+  let child: ChildProcess | null = null; let cdp: CDPClient | null = null; let profile: string | null = null; let stderr = "";
+  let opening: Promise<string> | null = null; let closing: Promise<string> | null = null; let exited: Promise<void> | null = null;
+  const notOpen = (): string => "Browser not open. Use browser_open first.";
+  const close = async (): Promise<string> => {
+    if (closing) return closing;
+    closing = (async () => {
+      cdp?.close(new Error("Browser closed")); cdp = null; const owned = child; const ownedExit = exited;
+      if (owned?.pid && process.platform !== "win32") {
+        try { process.kill(-owned.pid, "SIGTERM"); } catch { try { owned.kill("SIGTERM"); } catch { /* parent may already have exited */ } }
+      } else { try { owned?.kill("SIGTERM"); } catch { /* best effort */ } }
+      if (ownedExit) {
+        let ended = false; void ownedExit.then(() => { ended = true; });
+        await Promise.race([ownedExit, waitFor(terminationGraceMs, new AbortController().signal)]);
+        if (!ended) { if (owned?.pid && process.platform !== "win32") { try { process.kill(-owned.pid, "SIGKILL"); } catch { try { owned.kill("SIGKILL"); } catch { /* best effort */ } } } else { try { owned?.kill("SIGKILL"); } catch { /* best effort */ } } await Promise.race([ownedExit, waitFor(terminationGraceMs, new AbortController().signal)]); }
+      }
+      child = null; exited = null;
+      if (profile) { const ownedProfile = profile; profile = null; await rm(ownedProfile, { recursive: true, force: true }); }
+      return "Browser closed.";
+    })();
+    try { return await closing; } finally { closing = null; }
+  };
+  const open = async (): Promise<string> => {
+    if (child && cdp) return "Browser already open."; if (opening) return opening;
+    opening = (async () => {
+      const chromePath = options.chromePath === undefined ? findChrome() : options.chromePath;
+      if (!chromePath) return process.platform === "linux" && isWsl() ? "Browser automation requires Linux Chrome/Chromium under WSL; Windows Chrome cannot be safely managed as a Unix process group." : "Chrome/Chromium not found. Install Google Chrome to use browser tools.";
+      if (process.platform === "win32" || (process.platform === "linux" && /\\.exe$/i.test(chromePath))) return "Browser automation requires a qualified native lifecycle on this platform. Use Linux Chrome/Chromium; Windows Chrome via WSL is unsupported.";
+      try {
+        profile = await mkdtemp(path.join(options.profileRoot ?? tmpdir(), "workermill-browser-"));
+        const args = ["--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--window-size=1280,720", "about:blank"];
+        child = spawnProcess(chromePath, args, { stdio: ["ignore", "ignore", "pipe"], detached: true });
+        const launched = child;
+        exited = new Promise((resolve) => launched.once("exit", () => { cdp?.close(new Error("Chrome process exited")); resolve(); }));
+        launched.once("error", () => cdp?.close(new Error("Chrome launch failed")));
+        launched.stderr?.on("data", (chunk: Buffer | string) => { stderr = bounded(stderr + String(chunk), MAX_STDERR_BYTES); });
+        const endpoint = await waitForEndpoint(profile, options.signal, startupTimeoutMs, fetchImpl, requestTimeoutMs);
+        const client = new CDPClient(options.signal, requestTimeoutMs); cdp = client; await client.connect(endpoint); await client.send("Page.enable"); await client.send("Runtime.enable"); await client.send("Network.enable");
+        logger.info("Chrome connected via private CDP endpoint", { runId: options.runId }); return "Browser open (private headless Chrome session).";
+      } catch (error) { const message = error instanceof Error ? error.message : String(error); await close(); return options.signal.aborted ? "Browser startup cancelled." : `Failed to start Chrome: ${bounded(message || stderr, 500)}`; }
+    })();
+    try { return await opening; } finally { opening = null; }
+  };
+  const operation = async (name: string, work: () => Promise<string>): Promise<string> => { if (!cdp) return notOpen(); try { return await work(); } catch (error) { return `${name} failed: ${bounded(error instanceof Error ? error.message : String(error), 500)}`; } };
+  const resultValue = (result: unknown): string => { const response = result as { result?: { value?: unknown; description?: string }; exceptionDetails?: { text?: string } }; if (response.exceptionDetails) return `Error: ${response.exceptionDetails.text ?? "evaluation error"}`; if (response.result?.value === undefined) return response.result?.description ?? "(undefined)"; return bounded(typeof response.result.value === "string" ? response.result.value : JSON.stringify(response.result.value), MAX_TEXT_RESULT_CHARS); };
+  return {
+    open,
+    navigate: (url) => operation("Navigation", async () => { await cdp!.send("Page.navigate", { url }); return `Navigated to ${url} — "${resultValue(await cdp!.send("Runtime.evaluate", { expression: "document.title", returnByValue: true }))}"`; }),
+    screenshot: async () => { if (!cdp) return { base64: "", description: notOpen() }; try { const response = await cdp.send("Page.captureScreenshot", { format: "png" }) as { data?: string }; const base64 = bounded(response.data ?? "", MAX_CDP_MESSAGE_BYTES); return { base64, description: `Screenshot captured (${Math.round(base64.length * 0.75 / 1024)}KB).` }; } catch (error) { return { base64: "", description: `Screenshot failed: ${bounded(error instanceof Error ? error.message : String(error), 500)}` }; } },
+    click: (selector) => operation("Click", async () => resultValue(await cdp!.send("Runtime.evaluate", { expression: `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return 'Element not found: ${selector}'; el.click(); return 'Clicked: ${selector}'; })()`, returnByValue: true }))),
+    fill: (selector, value) => operation("Fill", async () => resultValue(await cdp!.send("Runtime.evaluate", { expression: `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return 'Element not found: ${selector}'; el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'Filled: ${selector}'; })()`, returnByValue: true }))),
+    evaluate: (expression) => operation("Evaluate", async () => resultValue(await cdp!.send("Runtime.evaluate", { expression, returnByValue: true }))),
+    console: async () => { if (!cdp) return notOpen(); const messages = cdp.takeConsole(); return messages.length ? messages.map((message) => `[${message.type}] ${message.text}`).join("\n") : "(no console messages)"; }, close, isOpen: () => child !== null && cdp !== null,
+  };
 }
+
+// Explicit /browser controls own a separate session resource. Model-turn
+// resources are closures above, so a model cannot close this browser.
+let sessionBrowser: BrowserRunResources | null = null; let sessionController: AbortController | null = null;
+function explicitBrowser(): BrowserRunResources { if (!sessionBrowser) { sessionController = new AbortController(); sessionBrowser = createBrowserRunResources({ runId: `session-${crypto.randomUUID()}`, workspace: process.cwd(), signal: sessionController.signal }); } return sessionBrowser; }
+export async function browserOpen(): Promise<string> { return explicitBrowser().open(); }
+export async function browserNavigate(url: string): Promise<string> { return explicitBrowser().navigate(url); }
+export async function browserScreenshot(): Promise<{ base64: string; description: string }> { return explicitBrowser().screenshot(); }
+export async function browserClick(selector: string): Promise<string> { return explicitBrowser().click(selector); }
+export async function browserFill(selector: string, value: string): Promise<string> { return explicitBrowser().fill(selector, value); }
+export async function browserEvaluate(expression: string): Promise<string> { return explicitBrowser().evaluate(expression); }
+export async function browserConsole(): Promise<string> { return explicitBrowser().console(); }
+export async function browserClose(): Promise<string> { sessionController?.abort(new Error("Browser session closed")); const owner = sessionBrowser; sessionBrowser = null; sessionController = null; return owner ? owner.close() : "Browser closed."; }
+export async function closeAllBrowserResources(): Promise<void> { await browserClose(); }
+export function isBrowserOpen(): boolean { return sessionBrowser?.isOpen() ?? false; }

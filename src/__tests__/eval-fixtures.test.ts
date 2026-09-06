@@ -15,6 +15,10 @@ import { fixture as webhookRecovery, validateFixture as validateWebhookRecovery 
 import { fixture as tagFilter, validateFixture as validateTagFilter } from "../../evals/tasks/r20-feature-tag-filter-v1.mjs";
 import { fixture as expiringCache, validateFixture as validateExpiringCache } from "../../evals/tasks/r20-feature-expiring-cache-v1.mjs";
 import { fixture as dailySummary, validateFixture as validateDailySummary } from "../../evals/tasks/r20-feature-daily-summary-v1.mjs";
+import { fixture as recipientIndex, validateFixture as validateRecipientIndex } from "../../evals/tasks/r20-refactor-recipient-index-v1.mjs";
+import { fixture as retryPolicy, validateFixture as validateRetryPolicy } from "../../evals/tasks/r20-refactor-retry-policy-v1.mjs";
+import { fixture as reportProjection, validateFixture as validateReportProjection } from "../../evals/tasks/r20-refactor-report-projection-v1.mjs";
+import { fixture as cursorCodec, validateFixture as validateCursorCodec } from "../../evals/tasks/r20-refactor-cursor-codec-v1.mjs";
 
 describe("R20a offline fixture", () => {
   it("distinguishes baseline, reference, and incomplete solutions", async () => {
@@ -83,6 +87,37 @@ describe("R20c offline feature fixtures", () => {
     }
     const results = await Promise.all([
       validateReleaseNotes(), validateWebhookRecovery(), validateTagFilter(), validateExpiringCache(), validateDailySummary(),
+    ]);
+    for (const result of results) {
+      expect(result.baselineFails).toBe(true);
+      expect(result.referencePasses).toBe(true);
+      expect(result.incompleteFails).toBe(true);
+      expect(result.outcomes.baseline.code).toBe(3);
+      expect(result.outcomes.incomplete.code).toBe(3);
+    }
+  });
+});
+
+describe("R20d offline refactor fixtures", () => {
+  it("has four distinct API-boundary refactors with semantic incomplete failures", async () => {
+    const fixtures = [recipientIndex, retryPolicy, reportProjection, cursorCodec];
+    expect(new Set(fixtures.map((item) => item.taskId)).size).toBe(4);
+    expect(fixtures.every((item) => item.category === "refactor" && item.workspace.network === false)).toBe(true);
+    expect(fixtures.every((item) => item.workspace.toolchain.includes("22.12"))).toBe(true);
+    expect(retryPolicy.workspace.writableFiles).toEqual(["src/main.mjs", "src/retry-policy.mjs"]);
+
+    for (const item of fixtures) {
+      const material = Object.entries(item.workspace.files).sort(([a], [b]) => a.localeCompare(b))
+        .map(([filePath, contents]) => `${filePath}\0${contents}`).join("\0");
+      const independentlyComputed = `sha256:${createHash("sha256").update(material).digest("hex")}`;
+      expect(item.initialRevision).toBe(independentlyComputed);
+    }
+
+    const results = await Promise.all([
+      validateRecipientIndex(),
+      validateRetryPolicy(),
+      validateReportProjection(),
+      validateCursorCodec(),
     ]);
     for (const result of results) {
       expect(result.baselineFails).toBe(true);

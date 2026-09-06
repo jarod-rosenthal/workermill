@@ -1,14 +1,20 @@
 # Offline evaluation fixtures
 
 This directory contains small, deterministic tickets for future reliability
-qualification. R20 currently contains five bug-fix fixtures and five feature
-fixtures. The remaining planned inventory is four refactors, three maintenance
-tasks, and three security/validation repairs.
+qualification. R20 currently contains five bug-fix fixtures, five feature
+fixtures, and four refactor fixtures. The remaining planned inventory is three
+maintenance tasks and three security/validation repairs.
 
 Current feature inventory: structured release notes, interrupted webhook-outbox
 recovery, case-insensitive task-tag filtering, an injected-clock expiring cache,
 and daily event summaries. The cache fixture deliberately requires a two-file
 change; the webhook fixture exercises recovery after interrupted work.
+
+Current refactor inventory: recipient-index extraction, delivery retry-policy
+extraction, run-report projection extraction, and pagination cursor-codec
+extraction. These tickets require observable reusable public APIs while keeping
+the legacy wrapper behavior intact. The retry-policy fixture also covers
+recovery after a failed delivery.
 
 ## Fixture protocol
 

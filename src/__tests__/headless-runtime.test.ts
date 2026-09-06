@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 const mcpWrite = vi.fn(async () => "mcp write");
 
@@ -22,7 +25,9 @@ vi.mock("ai", async (importOriginal) => {
 });
 
 import { streamText } from "ai";
-import { stopAllMCPServers } from "../mcp-client.js";
+import { startAllMCPServers, stopAllMCPServers } from "../mcp-client.js";
+import { createModel } from "../engine/model-factory.js";
+import { clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import { runCommand } from "../run-command.js";
 import type { CliConfig } from "../config.js";
 
@@ -53,15 +58,22 @@ function successfulStream(
 }
 
 describe("headless runtime governance", () => {
-  const workspace = process.cwd();
+  let workspace: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    workspace = await mkdtemp(path.join(os.tmpdir(), "workermill-headless-runtime-"));
     mcpWrite.mockClear();
     vi.mocked(stopAllMCPServers).mockClear();
+    vi.mocked(startAllMCPServers).mockReset();
+    vi.mocked(startAllMCPServers).mockResolvedValue();
+    vi.mocked(createModel).mockClear();
+    clearCheckpoints();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.mocked(streamText).mockReset();
+    clearCheckpoints();
+    await rm(workspace, { recursive: true, force: true });
   });
 
   it("denies a built-in write before its sentinel can be changed", async () => {
@@ -73,7 +85,8 @@ describe("headless runtime governance", () => {
     const result = await runCommand({ prompt: "write", singlePrompt: true }, config({ deny: ["write_file"] }), workspace);
 
     expect(result.reason).toBe("denied");
-    expect(await import("node:fs/promises").then((fs) => fs.stat(sentinel).then(() => true, () => false))).toBe(false);
+    expect(getChangedFiles()).toEqual([]);
+    expect(await stat(path.join(workspace, sentinel)).then(() => true, () => false)).toBe(false);
   });
 
   it("returns permission_required for ask rules without waiting for stdin", async () => {
@@ -87,15 +100,44 @@ describe("headless runtime governance", () => {
     expect(result.exitCode).toBe(3);
   });
 
+  it("does not checkpoint or write when the authorized pre-hook blocks", async () => {
+    vi.mocked(streamText).mockImplementation(successfulStream(async (tools) => {
+      try { await tools.write_file.execute({ path: "headless-pre-hook-sentinel", content: "blocked" }); } catch { /* expected */ }
+    }) as never);
+
+    const result = await runCommand(
+      { prompt: "write", singlePrompt: true },
+      { ...config({ allow: ["write_file"] }), hooks: { pre: [{ command: "false", tools: ["write_file"] }] } },
+      workspace,
+    );
+
+    expect(result.reason).toBe("provider_error");
+    expect(getChangedFiles()).toEqual([]);
+    expect(await stat(path.join(workspace, "headless-pre-hook-sentinel")).then(() => true, () => false)).toBe(false);
+  });
+
   it("allows configured writes but does not let full disk grant permission", async () => {
     const allowed = "headless-allowed-sentinel";
     vi.mocked(streamText).mockImplementation(successfulStream(async (tools) => {
       await tools.write_file.execute({ path: allowed, content: "allowed" });
     }) as never);
-    const allowedResult = await runCommand({ prompt: "write", singlePrompt: true, sandboxed: false }, config({ allow: ["write_file"] }), workspace);
+    const allowedResult = await runCommand(
+      { prompt: "write", singlePrompt: true, sandboxed: false },
+      {
+        ...config({ allow: ["write_file"] }),
+        hooks: {
+          pre: [{ command: "printf pre > .headless-hook-order", tools: ["write_file"] }],
+          post: [{ command: "printf post >> .headless-hook-order", tools: ["write_file"] }],
+        },
+      },
+      workspace,
+    );
     expect(allowedResult.status).toBe("ok");
-    expect(await import("node:fs/promises").then((fs) => fs.readFile(allowed, "utf8"))).toBe("allowed");
-    await import("node:fs/promises").then((fs) => fs.rm(allowed));
+    expect(await readFile(path.join(workspace, allowed), "utf8")).toBe("allowed");
+    expect(await readFile(path.join(workspace, ".headless-hook-order"), "utf8")).toBe("prepost");
+    expect(getChangedFiles()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: path.join(workspace, allowed), tool: "write_file" }),
+    ]));
 
     vi.mocked(streamText).mockImplementation(successfulStream(async (tools) => {
       try { await tools.write_file.execute({ path: "headless-full-disk-sentinel", content: "blocked" }); } catch { /* expected */ }
@@ -121,6 +163,27 @@ describe("headless runtime governance", () => {
     expect(stepLimit.exitCode).toBe(5);
   });
 
+  it("does not mistake a one-step final answer for an exhausted cap", async () => {
+    vi.mocked(streamText).mockImplementation((options) => {
+      // SDK gap: exercise the production callback on the dynamic tool stream.
+      const onStepFinish = (options as unknown as {
+        onStepFinish?: (event: { toolCalls?: unknown[]; usage: unknown }) => void;
+      }).onStepFinish;
+      onStepFinish?.({ toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } });
+      return {
+        textStream: (async function* () { yield "done"; })(),
+        text: Promise.resolve("done"),
+        totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }),
+        finishReason: Promise.resolve("stop"),
+        steps: Promise.resolve([]),
+      } as never;
+    });
+
+    const result = await runCommand({ prompt: "answer", singlePrompt: true, maxSteps: 1 }, config({}), workspace);
+
+    expect(result.status).toBe("ok");
+  });
+
   it("cleans up a started MCP runtime when model setup fails before streaming", async () => {
     vi.mocked(streamText).mockImplementation(() => {
       throw new Error("provider setup failed");
@@ -134,6 +197,45 @@ describe("headless runtime governance", () => {
 
     expect(result.reason).toBe("provider_error");
     expect(stopAllMCPServers).toHaveBeenCalledOnce();
+  });
+
+  it("reports cleanup failures as a typed non-success result", async () => {
+    vi.mocked(streamText).mockImplementation(successfulStream(async () => {}) as never);
+    vi.mocked(stopAllMCPServers).mockImplementationOnce(() => {
+      throw new Error("MCP stop failed");
+    });
+
+    const result = await runCommand(
+      { prompt: "cleanup", singlePrompt: true },
+      { ...config({}), mcp: { test: { command: "unused" } } },
+      workspace,
+    );
+
+    expect(result.reason).toBe("cleanup_error");
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("MCP stop failed");
+  });
+
+  it("preserves known step usage when a provider stream fails", async () => {
+    vi.mocked(streamText).mockImplementation((options) => {
+      // SDK gap: this test invokes the runtime callback through the dynamic stream options.
+      const callback = (options as unknown as {
+        onStepFinish?: (event: { text?: string; toolCalls?: unknown[]; usage: unknown }) => void;
+      }).onStepFinish;
+      callback?.({ toolCalls: [], usage: { inputTokens: 11, outputTokens: 4 } });
+      return {
+        textStream: (async function* () { throw new Error("stream failed"); })(),
+        text: Promise.resolve(""),
+        totalUsage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }),
+        finishReason: Promise.resolve("error"),
+        steps: Promise.resolve([]),
+      } as never;
+    });
+
+    const result = await runCommand({ prompt: "fail", singlePrompt: true }, config({}), workspace);
+
+    expect(result.reason).toBe("provider_error");
+    expect(result.tokens).toEqual({ input: 11, output: 4 });
   });
 
   it("returns cancellation when SIGINT interrupts a live model stream", async () => {
@@ -154,5 +256,37 @@ describe("headless runtime governance", () => {
 
     expect(result.reason).toBe("cancelled");
     expect(result.exitCode).toBe(130);
+  });
+
+  it("does not start MCP or create a model for an already-aborted run", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runCommand(
+      { prompt: "cancel", singlePrompt: true, signal: controller.signal },
+      { ...config({}), mcp: { test: { command: "unused" } } },
+      workspace,
+    );
+
+    expect(result.reason).toBe("cancelled");
+    expect(startAllMCPServers).not.toHaveBeenCalled();
+    expect(createModel).not.toHaveBeenCalled();
+  });
+
+  it("cleans up a partially started MCP runtime and removes SIGINT listeners on setup failure", async () => {
+    vi.mocked(startAllMCPServers).mockRejectedValueOnce(new Error("partial MCP startup"));
+    const listenersBefore = process.listenerCount("SIGINT");
+    const partialStart = await runCommand(
+      { prompt: "mcp", singlePrompt: true },
+      { ...config({}), mcp: { test: { command: "unused" } } },
+      workspace,
+    );
+    expect(partialStart.reason).toBe("provider_error");
+    expect(stopAllMCPServers).toHaveBeenCalledOnce();
+    expect(process.listenerCount("SIGINT")).toBe(listenersBefore);
+
+    const invalidScope = await runCommand({ prompt: "scope", singlePrompt: true }, config({}), "\0");
+    expect(invalidScope.reason).toBe("provider_error");
+    expect(process.listenerCount("SIGINT")).toBe(listenersBefore);
   });
 });

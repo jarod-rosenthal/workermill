@@ -92,6 +92,10 @@ function addSharedOptions(cmd: Command): Command {
     .option("--no-live-view", "Disable live browser diff view");
 }
 
+function parseHeadlessMaxSteps(value: string): number {
+  return Number(value);
+}
+
 /** Load config, apply CLI overrides, run setup if needed. */
 async function loadCliConfig(options: Record<string, unknown>, nonInteractive = false) {
   let config;
@@ -155,7 +159,7 @@ function renderHeadlessResult(result: RunResult, json: boolean): void {
 
 async function executeHeadless(prompt: string | undefined, options: Record<string, unknown>, singlePrompt: boolean): Promise<void> {
   const json = options.json === true;
-  if (!prompt) return renderHeadlessResult(startupFailure("invalid_options", "prompt is required"), json);
+  if (!prompt?.trim()) return renderHeadlessResult(startupFailure("invalid_options", "prompt is required"), json);
   let config;
   try {
     ({ config } = await loadCliConfig(options, true));
@@ -164,16 +168,22 @@ async function executeHeadless(prompt: string | undefined, options: Record<strin
   }
   let sandboxed;
   try {
-    sandboxed = resolveSandboxMode(config.sandbox, options.fullDisk === true).effective;
+    const resolution = resolveSandboxMode(config.sandbox, options.fullDisk === true);
+    sandboxed = resolution.effective;
+    if (resolution.warning) process.stderr.write("[wm] " + resolution.warning + "\n");
   } catch (error) {
     return renderHeadlessResult(startupFailure("os_sandbox_unavailable", error instanceof Error ? error.message : String(error)), json);
   }
-  const { runCommand } = await import("./run-command.js");
-  const result = await runCommand({
-    prompt, json, session: options.session as string | undefined, continue: options.continue === true,
-    model: options.model as string | undefined, maxSteps: options.maxSteps as number | undefined, singlePrompt, sandboxed,
-  }, config, process.cwd());
-  renderHeadlessResult(result, json);
+  try {
+    const { runCommand } = await import("./run-command.js");
+    const result = await runCommand({
+      prompt, json, session: options.session as string | undefined, continue: options.continue === true,
+      model: options.model as string | undefined, maxSteps: options.maxSteps as number | undefined, singlePrompt, sandboxed,
+    }, config, process.cwd());
+    renderHeadlessResult(result, json);
+  } catch (error) {
+    renderHeadlessResult(startupFailure("provider_error", error instanceof Error ? error.message : String(error)), json);
+  }
 }
 
 const program = new Command()
@@ -189,7 +199,7 @@ program
   .option("--session <id>", "Continue a specific session")
   .option("--continue", "Continue the most recent session")
   .option("--model <provider/model>", "Override model")
-  .option("--max-steps <n>", "Cap tool/reasoning steps", parseInt)
+  .option("--max-steps <n>", "Cap tool/reasoning steps", parseHeadlessMaxSteps)
   .option("--full-disk", "Allow tools to access files outside working directory")
   .action(async (prompt, options) => {
     await executeHeadless(prompt?.join(" "), options, false);
@@ -202,7 +212,7 @@ const defaultCmd = program
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
   .action(async (options) => {
-    if (options.prompt) {
+    if (options.prompt !== undefined) {
       await executeHeadless(options.prompt as string, options, true);
       return;
     }

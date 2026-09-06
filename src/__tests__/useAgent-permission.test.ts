@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createPathScope } from "../engine/path-policy.js";
 import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
 import { decideToolPermission, type PermissionState } from "../engine/tool-policy.js";
+import { durablePermissionRules } from "../ui/agent/utils.js";
 
 function state(overrides: Partial<PermissionState> = {}): PermissionState {
   return {
@@ -60,9 +61,16 @@ describe("interactive permission adapter", () => {
   });
 
   it("keeps a command-family always choice narrow", () => {
-    const narrow = state({ rules: { allow: ["bash(npm run:*)"] } });
+    const narrow = state({ rules: { allow: durablePermissionRules("bash", { command: "npm run build" }) } });
     expect(decideToolPermission("bash", { command: "npm run test" }, narrow)).toMatchObject({ kind: "allow" });
     expect(decideToolPermission("bash", { command: "git status" }, narrow)).toMatchObject({ kind: "ask" });
+  });
+
+  it.each(["verify", "bash_background"])("keeps %s approval scoped to its command family", (toolName) => {
+    const narrow = state({ rules: { allow: durablePermissionRules(toolName, { command: "npm run build && npm test" }) } });
+    expect(decideToolPermission(toolName, { command: "npm run test" }, narrow)).toMatchObject({ kind: "allow" });
+    expect(decideToolPermission(toolName, { command: "git status" }, narrow)).toMatchObject({ kind: "ask" });
+    expect(decideToolPermission("bash", { command: "npm run build" }, narrow)).toMatchObject({ kind: "ask" });
   });
 
   it("executes hooks and the raw tool once through the shared adapter", async () => {

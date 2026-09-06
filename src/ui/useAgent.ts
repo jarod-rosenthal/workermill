@@ -40,7 +40,6 @@ import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.j
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import fs from "fs";
 import path from "path";
-import { splitCompoundCommand, toolInputToRule } from "../safety.js";
 import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
 import { isLocalProvider } from "../provider-capabilities.js";
@@ -72,6 +71,7 @@ import {
   shouldBlockUnverifiedImageAnswer,
   trackAbortCost,
   parsePatchTargets,
+  durablePermissionRules,
   type PermissionMode,
 } from "./agent/utils.js";
 import type { UseAgentOptions, UseAgentReturn, TurnModelOverride } from "./agent/types.js";
@@ -136,6 +136,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const sessionAllowRulesRef = useRef<string[]>([]);
   const deniedToolsRef = useRef(new Set<string>());
   const pendingPermissionResolveRef = useRef<(() => void) | null>(null);
+  const permissionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
@@ -399,9 +400,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   }, []);
 
   const persistAlwaysChoice = useCallback(async (toolName: string, input: Record<string, unknown>): Promise<void> => {
-    const rules = toolName === "bash" && typeof input.command === "string"
-      ? splitCompoundCommand(input.command).map((command) => toolInputToRule(toolName, { command })).filter((rule): rule is string => Boolean(rule))
-      : [toolInputToRule(toolName, input)].filter((rule): rule is string => Boolean(rule));
+    const rules = durablePermissionRules(toolName, input);
     for (const rule of rules) {
       if (!sessionAllowRulesRef.current.includes(rule)) sessionAllowRulesRef.current.push(rule);
     }
@@ -419,52 +418,68 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     }
   }, []);
 
-  const promptForPermission = useCallback((
+  const promptForPermission = useCallback(async (
     toolName: string,
     input: Record<string, unknown>,
     reason: string,
     context: ToolExecutionContext,
-  ): Promise<boolean> => new Promise((resolve) => {
-    let settled = false;
-    const finish = (allowed: boolean): void => {
-      if (settled) return;
-      settled = true;
-      context.signal.removeEventListener("abort", onAbort);
-      if (pendingPermissionResolveRef.current === cancelPending) pendingPermissionResolveRef.current = null;
-      setPermissionRequest(null);
-      resolve(allowed);
-    };
-    const cancelPending = (): void => finish(false);
-    const onAbort = (): void => finish(false);
-    pendingPermissionResolveRef.current = cancelPending;
-    context.signal.addEventListener("abort", onAbort, { once: true });
-    setPermissionRequest({
-      toolName,
-      toolInput: input,
-      isDangerous: reason.startsWith("dangerous command:") || reason.startsWith("sensitive file:"),
-      dangerLabel: reason,
-      resolve: (allowed, mode) => {
-        void (async () => {
-          if (allowed && mode === "trust") {
-            trustAllRef.current = true;
-            permModeRef.current = "bypassPermissions";
-            setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
-          }
-          if (allowed && mode === "always") await persistAlwaysChoice(toolName, input);
-          finish(allowed);
-        })();
-      },
-    });
-  }), [persistAlwaysChoice]);
+  ): Promise<boolean> => {
+    const prior = permissionQueueRef.current;
+    let release!: () => void;
+    permissionQueueRef.current = new Promise<void>((resolve) => { release = resolve; });
+    await prior;
+    try {
+      if (context.signal.aborted) return false;
+      return await new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (allowed: boolean): void => {
+          if (settled) return;
+          settled = true;
+          context.signal.removeEventListener("abort", onAbort);
+          if (pendingPermissionResolveRef.current === cancelPending) pendingPermissionResolveRef.current = null;
+          setPermissionRequest(null);
+          resolve(allowed);
+        };
+        const cancelPending = (): void => finish(false);
+        const onAbort = (): void => finish(false);
+        pendingPermissionResolveRef.current = cancelPending;
+        context.signal.addEventListener("abort", onAbort, { once: true });
+        setPermissionRequest({
+          toolName,
+          toolInput: input,
+          isDangerous: reason.startsWith("dangerous command:") || reason.startsWith("sensitive file:"),
+          dangerLabel: reason,
+          resolve: (allowed, mode) => {
+            if (settled || context.signal.aborted) return;
+            void (async () => {
+              if (allowed && mode === "trust") {
+                trustAllRef.current = true;
+                permModeRef.current = "bypassPermissions";
+                setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
+              }
+              if (allowed && mode === "always") await persistAlwaysChoice(toolName, input);
+              finish(allowed);
+            })();
+          },
+        });
+      });
+    } finally {
+      release();
+    }
+  }, [persistAlwaysChoice]);
 
   const createExecutionContext = useCallback((runId: string, signal: AbortSignal): ToolExecutionContext => {
-    const scope = createPathScope(workingDirRef.current);
+    const capabilities = resolveConfig().sandboxCapabilities;
+    const scope = createPathScope(workingDirRef.current, capabilities?.extraPathGrants ?? []);
     const context: ToolExecutionContext = {
       runId,
       workspace: scope.workspace,
       scope,
       effectiveSandbox: options.sandboxed === "os" ? "os" : options.sandboxed ? "path" : "none",
       signal,
+      allowedNetworkDomains: capabilities?.allowedNetworkDomains,
+      allowLocalBinding: capabilities?.allowLocalBinding,
+      allowDockerSocket: capabilities?.allowDockerSocket,
       getPermissionState: () => permissionState(context),
       prompt: promptForPermission,
       preHook: (name, input, executingContext) => {
@@ -530,6 +545,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       runId: context.runId,
       signal: context.signal,
       scope: context.scope,
+      sandboxCapabilities: {
+        allowedNetworkDomains: context.allowedNetworkDomains,
+        allowLocalBinding: context.allowLocalBinding,
+        allowDockerSocket: context.allowDockerSocket,
+      },
     }) as Record<string, AnyToolDef>;
 
     // Merge MCP tools (dynamically resolved each call so tools from
@@ -821,7 +841,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         recentToolSignaturesRef.current = [];
 
         const controller = new AbortController();
-        const executionContext = createExecutionContext(crypto.randomUUID(), controller.signal);
+        const runId = crypto.randomUUID();
         abortRef.current = controller;
         if (liveViewServerRef.current) {
           liveViewServerRef.current.setAbortController(controller);
@@ -838,6 +858,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         let partialInputTokens = 0;
         let partialOutputTokens = 0;
         try {
+          const executionContext = createExecutionContext(runId, controller.signal);
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
           const activeTools = (await getActiveTools(executionContext, turnModel)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the

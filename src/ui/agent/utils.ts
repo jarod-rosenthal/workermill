@@ -5,6 +5,20 @@
 import path from "path";
 import * as logger from "../../logger.js";
 import type { ToolCallInfo } from "../types.js";
+import { splitCompoundCommand, toolInputToRule } from "../../safety.js";
+
+/** Persist command-family approval without widening it to every shell command. */
+export function durablePermissionRules(toolName: string, input: Record<string, unknown>): string[] {
+  if (["bash", "verify", "bash_background"].includes(toolName)) {
+    if (typeof input.command !== "string") return [];
+    return splitCompoundCommand(input.command).flatMap((command) => {
+      const rule = toolInputToRule("bash", { command });
+      return rule ? [toolName + rule.slice("bash".length)] : [];
+    });
+  }
+  const rule = toolInputToRule(toolName, input);
+  return rule ? [rule] : [];
+}
 
 // ---------------------------------------------------------------------------
 // Debug / trace

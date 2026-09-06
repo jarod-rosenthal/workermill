@@ -52,10 +52,10 @@ LM Studio is auto-detected at `http://localhost:1234`. Make sure the local serve
 
 ### Tool call asks for permission on every use
 
-You're in the default permission mode, which prompts before each tool. Options:
+The default permission mode allows ordinary read tools and asks before other actions. Options:
 
 - Press `Shift+Tab` to cycle to `acceptEdits` — auto-approves file edits but still prompts for dangerous commands
-- At any prompt, choose "Yes, don't ask again" to save a permanent allow rule
+- Choose "Yes, don't ask again" to save an allow rule; shell commands use a command-family rule, not blanket shell access. If saving fails, the rule remains session-only
 - View and edit rules with `/permissions`
 
 ### "Permission denied" for a tool you expected to work
@@ -68,8 +68,9 @@ Context window is probably full. Run `/compact` to compress history, or `/clear`
 
 ### Cost shows `<$0.01` or `$0.00`
 
-- `<$0.01` means the cost is real but below one cent — this is normal for cheap models like Grok Code Fast or Claude Haiku
-- `$0.00` means either no usage yet or a local model (Ollama / LM Studio, which are free)
+- These displays summarize estimated cost from recorded usage and pricing, not your provider's invoice.
+- A zero display is not proof that no billable work occurred. Check the recorded token usage and selected provider/model; missing usage or incomplete pricing can make the estimate incomplete.
+- Local execution can have no per-token API charge while still using paid hardware, electricity, or hosting.
 
 ### `/build` plan is "0 stories"
 

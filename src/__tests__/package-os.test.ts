@@ -23,6 +23,7 @@ let server: Server;
 let baseUrl = "";
 let requests = 0;
 let holdResponse = false;
+let closedModelRequests = 0;
 
 function command(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
   return spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 30_000 });
@@ -89,7 +90,7 @@ beforeAll(async () => {
   // mount the shared cache read-only, so copy the already-populated cache to a
   // disposable location and use that for both packing and offline install.
   const npmCache = path.join(artifactRoot, "npm-cache");
-  cpSync(path.join(os.homedir(), ".npm", "_cacache"), path.join(npmCache, "_cacache"), { recursive: true });
+  cpSync(path.join(process.env.npm_config_cache ?? path.join(os.homedir(), ".npm"), "_cacache"), path.join(npmCache, "_cacache"), { recursive: true });
   const packed = command("npm", ["pack", "--json", "--pack-destination", artifactRoot, "--cache", npmCache], source);
   if (packed.status !== 0) throw new Error(`npm pack failed: ${packed.stderr || packed.stdout}`);
   // npm's JSON output is suppressed by a few test runners; the tarball name
@@ -122,10 +123,11 @@ beforeAll(async () => {
   expect(existsSync(path.join(installRoot, "node_modules", "ink"))).toBe(true);
 
   server = createServer((request, response) => {
-    requests += 1;
     if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
       response.writeHead(404); response.end(); return;
     }
+    requests += 1;
+    response.on("close", () => { closedModelRequests += 1; });
     if (!holdResponse) jsonResponse(response);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -210,14 +212,22 @@ describe("installed package and supported OS runtime", () => {
     terminal.onData((data) => { output += data; });
     const exited = new Promise<number>((resolve) => terminal.onExit(({ exitCode }) => resolve(exitCode)));
     try {
-      await waitUntil(() => output.includes("WorkerMill"), `PTY did not render its startup heartbeat: ${output.slice(-1500)}`);
-      terminal.write("wait for cancellation\r");
+      await waitUntil(() => output.includes("\u001b[?2004h"), `PTY did not render its startup heartbeat: ${output.slice(-1500)}`);
+      terminal.write("wait for cancellation");
+      await waitUntil(() => output.includes("wait for cancellation"), "PTY did not accept prompt input");
+      terminal.write("\r");
       await waitUntil(() => requests > requestCountBefore, "PTY prompt did not reach offline fixture");
+      const closedBefore = closedModelRequests;
       terminal.write("\u001b");
-      terminal.write("/status\r");
+      await waitUntil(() => closedModelRequests > closedBefore, "PTY cancellation did not close the active model request");
+      terminal.write("/status");
+      await waitUntil(() => output.includes("/status"), "PTY did not accept status input after cancellation");
+      terminal.write("\r");
       await waitUntil(() => output.includes("Session Status"), `PTY did not become idle after cancellation: ${output.slice(-1500)}`);
       terminal.write("\u0003");
       expect(await exited).toBe(0);
+    } catch (error) {
+      throw new Error(String(error) + "\nPTY output:\n" + output.slice(-6000));
     } finally {
       holdResponse = false;
       terminal.kill();

@@ -43,13 +43,14 @@ function parentContext(workspace: string, controller = new AbortController(), ov
 }
 
 /** Mock the SDK transport only; calls go through actual registered SDK tool definitions. */
-function installStream(calls: readonly Call[], text = "done", before?: (options: StreamOptions) => void): void {
-  sdk.streamText.mockImplementation((options: StreamOptions) => ({
+function installStream(calls: readonly Call[], text = "done", before?: (options: StreamOptions) => void, outputs?: unknown[]): void {
+  sdk.streamText.mockImplementationOnce((options: StreamOptions) => ({
     textStream: (async function* () {
       before?.(options);
       for (const call of calls) {
         options.onStepFinish?.({ toolCalls: [{ toolName: call.name }], usage: { inputTokens: 1, outputTokens: 1 }, text: "" });
-        await options.tools[call.name]?.execute?.(call.input);
+        const output = await options.tools[call.name]!.execute!(call.input);
+        outputs?.push(output);
       }
       yield text;
     })(),
@@ -57,6 +58,16 @@ function installStream(calls: readonly Call[], text = "done", before?: (options:
     totalUsage: Promise.resolve({ inputTokens: 2, outputTokens: 3 }),
     finishReason: Promise.resolve("stop"),
   }));
+}
+
+async function waitForFile(file: () => string | undefined, timeout = 1_500): Promise<string> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const value = file();
+    if (value && fs.existsSync(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("child command did not create its start marker");
 }
 
 function executor(workspace: string, context: ToolExecutionContext) {
@@ -108,13 +119,14 @@ describe("sub-agent runtime boundaries", () => {
     }
 
     const sentinel = path.join(workspace, "parent-output.diff");
+    const outputs: unknown[] = [];
     installStream([
       { name: "write_file", input: { path: "child.txt", content: "child\n" } },
       { name: "git", input: { action: "add", args: "child.txt" } },
       { name: "git", input: { action: "commit", args: "child commit" } },
       { name: "bash", input: { command: `printf blocked > ${sentinel}` } },
       { name: "git", input: { action: "diff", args: `--output=${sentinel}` } },
-    ]);
+    ], "done", undefined, outputs);
     const result = await run({ prompt: "commit through registered tools", isolated: true });
     expect(result.success).toBe(true);
     const child = worktreeFrom(result);
@@ -122,41 +134,66 @@ describe("sub-agent runtime boundaries", () => {
     expect(execFileSync("git", ["log", "-1", "--format=%s"], { cwd: child, encoding: "utf8" }).trim()).toBe("child commit");
     expect(fs.readFileSync(path.join(child, "child.txt"), "utf8")).toBe("child\n");
     expect(fs.existsSync(sentinel)).toBe(false);
+    expect(String(outputs[3])).toContain("Error:");
+    expect(String(outputs[4])).toContain("Error:");
   }, 20_000);
 
-  it("denies absolute-parent and symlink escapes through child registered tools", async () => {
+  it("denies an absolute parent path through child registered tools", async () => {
     const workspace = makeRepo();
     const sentinel = path.join(workspace, "parent-sentinel");
-    const link = path.join(workspace, "escape-link");
     fs.writeFileSync(sentinel, "safe\n");
-    fs.symlinkSync(sentinel, link);
-    installStream([
-      { name: "write_file", input: { path: sentinel, content: "absolute escape" } },
-      { name: "write_file", input: { path: "escape-link", content: "symlink escape" } },
-    ]);
+    const outputs: unknown[] = [];
+    installStream([{ name: "write_file", input: { path: sentinel, content: "absolute escape" } }], "done", undefined, outputs);
     const result = await executor(workspace, parentContext(workspace))({ prompt: "attempt escape", isolated: true });
-    expect(result.success).toBe(false);
+    expect(String(outputs[0])).toContain("Error:");
+    expect(result.success).toBe(true);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("safe\n");
   });
 
-  it("cancels a real child process quickly without cancelling an independent child", async () => {
+  it("denies a committed symlink escape through child registered tools", async () => {
+    const workspace = makeRepo();
+    const sentinel = path.join(workspace, "parent-sentinel");
+    fs.writeFileSync(sentinel, "safe\n");
+    fs.symlinkSync(sentinel, path.join(workspace, "escape-link"));
+    execFileSync("git", ["add", "parent-sentinel", "escape-link"], { cwd: workspace });
+    execFileSync("git", ["commit", "-qm", "add escape fixture"], { cwd: workspace });
+    const outputs: unknown[] = [];
+    installStream([{ name: "write_file", input: { path: "escape-link", content: "symlink escape" } }], "done", undefined, outputs);
+    const result = await executor(workspace, parentContext(workspace))({ prompt: "attempt symlink escape", isolated: true });
+    expect(String(outputs[0])).toContain("Error:");
+    expect(result.success).toBe(true);
+    expect(fs.readFileSync(sentinel, "utf8")).toBe("safe\n");
+  });
+
+  it("cancels a marker-proven child process without cancelling a concurrently active child", async () => {
     const workspace = makeRepo();
     const firstController = new AbortController();
-    let began!: () => void;
-    const beganProcess = new Promise<void>((resolve) => { began = resolve; });
-    installStream([{ name: "bash", input: { command: "sleep 30", timeout: 30_000 } }], "", () => began());
-    const first = executor(workspace, parentContext(workspace, firstController))({ prompt: "long process", isolated: true });
-    await beganProcess;
+    let firstWorkspace: string | undefined;
+    let secondWorkspace: string | undefined;
+    const firstParent = parentContext(workspace, firstController, { preHook: (name, _input, child) => { if (name === "bash") firstWorkspace = child.workspace; } });
+    const secondParent = parentContext(workspace, new AbortController(), { preHook: (name, _input, child) => { if (name === "bash") secondWorkspace = child.workspace; } });
+    sdk.streamText.mockImplementationOnce((options: StreamOptions) => ({
+      textStream: (async function* () { await options.tools.bash!.execute!({ command: "printf started > first-started; sleep 30", timeout: 30_000 }); yield ""; })(),
+      text: Promise.resolve(""), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
+    sdk.streamText.mockImplementationOnce((options: StreamOptions) => ({
+      textStream: (async function* () { await options.tools.bash!.execute!({ command: "printf started > second-started; sleep 1; printf done > second-done", timeout: 5_000 }); yield "independent complete"; })(),
+      text: Promise.resolve("independent complete"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
+    const first = executor(workspace, firstParent)({ prompt: "long process", isolated: true });
+    await waitForFile(() => firstWorkspace && path.join(firstWorkspace, "first-started"));
+    const second = executor(workspace, secondParent)({ prompt: "independent", isolated: true });
+    await waitForFile(() => secondWorkspace && path.join(secondWorkspace, "second-started"));
     const started = Date.now();
     firstController.abort();
     const cancelled = await first;
     expect(Date.now() - started).toBeLessThan(2_000);
     expect(cancelled.success).toBe(false);
 
-    installStream([], "independent complete");
-    const second = await executor(workspace, parentContext(workspace))({ prompt: "independent", isolated: true });
-    expect(second.success).toBe(true);
-    expect(second.content).toContain("independent complete");
+    const independent = await second;
+    expect(independent.success).toBe(true);
+    expect(independent.content).toContain("independent complete");
+    expect(fs.existsSync(path.join(secondWorkspace!, "second-done"))).toBe(true);
   }, 8_000);
 
   it("passes the actual child scope to inherited hooks, checkpoints, and events", async () => {
@@ -181,7 +218,12 @@ describe("sub-agent runtime boundaries", () => {
     const denied = parentContext(workspace, new AbortController(), {
       getPermissionState: () => ({ mode: "bypassPermissions", trustAll: true, sessionAllow: new Set(), rules: { deny: ["write_file"] }, readOnlyRole: false, workspace }),
     });
-    installStream([{ name: "write_file", input: { path: "denied.txt", content: "no" } }], "model swallowed a denial");
+    sdk.streamText.mockImplementationOnce((options: StreamOptions) => ({
+      textStream: (async function* () {
+        await expect(options.tools.write_file!.execute!({ path: "denied.txt", content: "no" })).rejects.toThrow();
+        yield "model swallowed a denial";
+      })(), text: Promise.resolve("model swallowed a denial"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
     await expect(executor(workspace, denied)({ prompt: "deny", isolated: true })).resolves.toMatchObject({ success: false });
 
     installStream([{ name: "read_file", input: { path: "base.txt" } }], "");
@@ -193,13 +235,16 @@ describe("sub-agent runtime boundaries", () => {
 
   it("registry-created sub_agent cancels its child command before returning a model failure", async () => {
     const workspace = makeRepo();
-    const sentinel = path.join(workspace, "late-parent-sentinel");
-    const parent = parentContext(workspace);
+    let childWorkspace: string | undefined;
+    let settled = false;
+    let running: Promise<void> | undefined;
+    const parent = parentContext(workspace, new AbortController(), { preHook: (name, _input, child) => { if (name === "bash") childWorkspace = child.workspace; } });
     sdk.streamText.mockImplementation((options: StreamOptions) => ({
       textStream: (async function* () {
         // Deliberately do not await: cleanup must find the real registered bash
         // process by its child run identity before the model failure is returned.
-        void Promise.resolve(options.tools.bash?.execute?.({ command: `sleep 1; printf late > ${sentinel}`, timeout: 5_000 })).catch(() => {});
+        running = Promise.resolve(options.tools.bash?.execute?.({ command: "printf started > registry-started; sleep 1; printf late > registry-late", timeout: 5_000 })).catch(() => {}).finally(() => { settled = true; });
+        await waitForFile(() => childWorkspace && path.join(childWorkspace, "registry-started"));
         throw new Error("model transport failed");
       })(),
       // The consumed textStream is the transport failure; keep the SDK's
@@ -213,7 +258,8 @@ describe("sub-agent runtime boundaries", () => {
     const output = await definitions.sub_agent!.execute!({ prompt: "launch then fail", isolated: true, maxTurns: 2 });
     expect(Date.now() - started).toBeLessThan(2_000);
     expect(String(output)).toContain("Error: Sub-agent failed");
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
-    expect(fs.existsSync(sentinel)).toBe(false);
+    expect(settled).toBe(true);
+    await running;
+    expect(fs.existsSync(path.join(childWorkspace!, "registry-late"))).toBe(false);
   }, 5_000);
 });

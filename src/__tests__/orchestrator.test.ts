@@ -57,6 +57,12 @@ vi.mock("../mcp-client.js", () => ({
   hasMCPRegistered: vi.fn(() => false),
 }));
 
+// Observe the real completion boundary without replacing its behavior.
+vi.mock("../orchestrator/completion.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../orchestrator/completion.js")>();
+  return { ...actual, runCompletion: vi.fn(actual.runCompletion) };
+});
+
 // Mock cost-tracker — must be a real class (used with `new`)
 vi.mock("../cost-tracker.js", () => ({
   CostTracker: class {
@@ -198,6 +204,7 @@ import {
 } from "../orchestrator.ts";
 import { stopAllMCPServers } from "../mcp-client.js";
 import { getStateRoot } from "../state-root.js";
+import { runCompletion } from "../orchestrator/completion.js";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
@@ -684,6 +691,7 @@ describe("orchestrator", () => {
 
       expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
       expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
+      expect(runCompletion).not.toHaveBeenCalled();
       // A required gate failure stops after planning and execution; review and
       // completion must not run on an unverified revision.
       expect(mockStreamTextCalls).toHaveLength(2);
@@ -739,6 +747,7 @@ describe("orchestrator", () => {
 
       expect(output.errors).toContain("[required_command_failed] static check failed");
       expect(output.logs.join(" ")).toContain("Strict mode failed");
+      expect(runCompletion).not.toHaveBeenCalled();
       expect(mockStreamTextCalls).toHaveLength(2);
       expect(output.logs.join(" ")).not.toContain("No remote configured");
       expect(output.logs.join(" ")).not.toContain("Branch:");
@@ -784,6 +793,7 @@ describe("orchestrator", () => {
       await runOrchestration(config as any, "Run advisory static check", true, false, output);
 
       expect(output.errors).not.toContain("[required_command_failed] advisory check failed");
+      expect(runCompletion).toHaveBeenCalledOnce();
       expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(3);
       expect(output.logs.join(" ")).toContain("No remote configured");
       expect(output.updateCost).toHaveBeenCalled();

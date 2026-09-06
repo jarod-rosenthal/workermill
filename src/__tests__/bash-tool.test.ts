@@ -82,4 +82,11 @@ describe("bash tool docker sandbox handling", () => {
     expect(scopedResult.success).toBe(true);
     expect(scopedResult.stdout).toBe("scoped");
   });
+
+  it("surfaces bounded-output truncation to the bash caller", async () => {
+    const result = await execute({ command: "yes x | head -c 11000000", timeout: 5_000 });
+
+    expect(result.success).toBe(true);
+    expect(result.stdout).toContain("[output truncated: command output exceeded 10 MiB]");
+  });
 });

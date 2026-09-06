@@ -189,6 +189,8 @@ function isDangerous(command: string): string | null {
 }
 
 const OUTSIDE_PATHS = ["/tmp", "/var", "/etc", "/opt", "/usr", "/sys", "/proc", "/dev", "/boot", "/root"];
+const BASH_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+const OUTPUT_TRUNCATION_MARKER = "[output truncated: command output exceeded 10 MiB]";
 
 function referencesOutsidePath(command: string, cwd?: string): string | null {
   if (/^\s*(?:cat|head|tail|less|more|wc|file|stat|which|type|echo)\s/.test(command)) return null;
@@ -278,7 +280,7 @@ export async function execute({
     cwd: effectiveCwd,
     signal: signal ?? new AbortController().signal,
     timeoutMs: timeout,
-    maxOutputBytes: 10 * 1024 * 1024,
+    maxOutputBytes: BASH_MAX_OUTPUT_BYTES,
     terminationGraceMs: 250,
   });
   if (useSandbox) SandboxManager.cleanupAfterCommand();
@@ -287,11 +289,14 @@ export async function execute({
   // is returned without surrounding whitespace.
   const stdout = result.stdout.trim();
   const stderr = result.stderr.trim();
+  const visibleStdout = result.outputTruncated
+    ? `${stdout}${stdout ? "\n" : ""}${OUTPUT_TRUNCATION_MARKER}`
+    : stdout;
 
   if (result.reason === "spawn_failed") {
     return {
       success: false, exitCode: null,
-      stdout, stderr,
+      stdout: visibleStdout, stderr,
       error: `Failed to execute command: ${stderr}`,
       duration,
     };
@@ -300,7 +305,7 @@ export async function execute({
   if (result.reason === "timed_out") {
     return {
       success: false, exitCode: result.exitCode,
-      stdout, stderr,
+      stdout: visibleStdout, stderr,
       error: `Command timed out after ${timeout}ms`,
       duration,
     };
@@ -309,14 +314,14 @@ export async function execute({
   if (result.reason === "cancelled") {
     return {
       success: false, exitCode: result.exitCode,
-      stdout, stderr,
+      stdout: visibleStdout, stderr,
       error: "Command cancelled",
       duration,
     };
   }
 
   if (result.exitCode === 0) {
-    return { success: true, exitCode: 0, stdout, stderr, duration };
+    return { success: true, exitCode: 0, stdout: visibleStdout, stderr, duration };
   }
 
   let finalStderr = useSandbox
@@ -328,7 +333,7 @@ export async function execute({
     sandboxWarningAppended = true;
   }
   return {
-    success: false, exitCode: result.exitCode, stdout, stderr: finalStderr,
+    success: false, exitCode: result.exitCode, stdout: visibleStdout, stderr: finalStderr,
     error: result.exitCode === null ? "Command terminated by signal" : `Command exited with code ${result.exitCode}`,
     duration,
   };

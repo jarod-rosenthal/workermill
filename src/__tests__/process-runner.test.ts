@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { cancelRunProcesses, runProcess } from "../engine/process-runner.js";
 
@@ -43,6 +46,33 @@ describe("process runner", () => {
 
     expect(result.reason).toBe("timed_out");
     expect(result.exitCode).not.toBe(0);
+  });
+
+  it("cleans a background descendant when the shell exits before inherited pipes close", async () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "wm-r02-descendant-"));
+    const pidFile = path.join(fixture, "child.pid");
+    try {
+      const result = await runProcess(request({
+        command: `sleep 30 & printf '%s' "$!" > ${pidFile}; printf parent`,
+        timeoutMs: 2_000,
+        terminationGraceMs: 100,
+      }));
+      const childPid = Number(fs.readFileSync(pidFile, "utf8"));
+
+      expect(result.reason).toBe("cancelled");
+      expect(result.stdout).toContain("parent");
+      expect(Number.isInteger(childPid)).toBe(true);
+      let childRunning = true;
+      try {
+        const stat = fs.readFileSync(`/proc/${childPid}/stat`, "utf8");
+        childRunning = !/\)\s+Z\s/.test(stat);
+      } catch {
+        childRunning = false;
+      }
+      expect(childRunning).toBe(false);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it("reports spawn failures distinctly", async () => {

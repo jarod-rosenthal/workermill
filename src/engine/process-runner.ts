@@ -30,8 +30,10 @@ interface ActiveProcess {
   outputBytes: number;
   outputTruncated: boolean;
   exitCode: number | null;
+  parentExited: boolean;
   parentClosed: boolean;
   settled: boolean;
+  spawnError?: string;
   terminationReason: "cancelled" | "timed_out" | null;
   terminationTimer?: NodeJS.Timeout;
   timeoutTimer?: NodeJS.Timeout;
@@ -122,12 +124,21 @@ function finish(process: ActiveProcess): void {
   process.request.signal.removeEventListener("abort", process.abortListener);
   removeActive(process);
   process.resolve({
-    reason: process.terminationReason ?? "exited",
+    reason: process.spawnError ? "spawn_failed" : process.terminationReason ?? "exited",
     exitCode: process.exitCode,
     stdout: Buffer.concat(process.stdout).toString("utf8"),
     stderr: Buffer.concat(process.stderr).toString("utf8"),
     outputTruncated: process.outputTruncated,
   });
+}
+
+function checkAfterParentExit(process: ActiveProcess): void {
+  if (!process.parentExited || process.settled) return;
+  if (groupExists(process.pid)) {
+    // The shell can exit while a background descendant still owns stdout or
+    // stderr. Start cleanup now; waiting for `close` would wait on that pipe.
+    requestTermination(process, "cancelled");
+  }
 }
 
 function pollForGroupExit(process: ActiveProcess): void {
@@ -196,6 +207,15 @@ export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
       outputTruncated: false,
     });
   }
+  if (process.platform === "win32") {
+    return Promise.resolve({
+      reason: "spawn_failed",
+      exitCode: null,
+      stdout: "",
+      stderr: "Process-group cleanup is unavailable on native Windows; run WorkerMill under WSL.",
+      outputTruncated: false,
+    });
+  }
 
   return new Promise((resolve) => {
     let child: ChildProcess;
@@ -237,6 +257,7 @@ export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
       outputBytes: 0,
       outputTruncated: false,
       exitCode: null,
+      parentExited: false,
       parentClosed: false,
       settled: false,
       terminationReason: null,
@@ -250,14 +271,17 @@ export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
     child.once("error", (error) => {
       if (!processState.parentClosed) {
         processState.parentClosed = true;
-        processState.stderr.push(Buffer.from(error.message));
+        processState.spawnError = error.message;
+        appendOutput(processState, "stderr", Buffer.from(error.message));
         processState.exitCode = null;
-        processState.terminationReason = null;
-        finish(processState);
+        if (groupExists(processState.pid)) requestTermination(processState, "cancelled");
+        else finish(processState);
       }
     });
     child.once("exit", (code) => {
       processState.exitCode = typeof code === "number" ? code : null;
+      processState.parentExited = true;
+      setImmediate(() => checkAfterParentExit(processState));
     });
     child.once("close", () => {
       processState.parentClosed = true;

@@ -428,6 +428,7 @@ With `--json`, stdout is exactly one result object. Successful results have `sta
 | `step_limit` | 5 |
 | `os_sandbox_unavailable` | 6 |
 | `provider_error` | 1 |
+| `hook_blocked` | 1 |
 | `cleanup_error` | 1 |
 | `cancelled` | 130 |
 

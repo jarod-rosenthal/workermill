@@ -24,11 +24,17 @@ vi.mock("ai", async (importOriginal) => {
   return { ...actual, streamText: vi.fn() };
 });
 
+vi.mock("../engine/tools/bash-background.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../engine/tools/bash-background.js")>();
+  return { ...actual, cleanupScopedBackgroundProcesses: vi.fn(actual.cleanupScopedBackgroundProcesses) };
+});
+
 import { streamText } from "ai";
 import { startAllMCPServers, stopAllMCPServers } from "../mcp-client.js";
 import { createModel } from "../engine/model-factory.js";
 import { clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import { runCommand } from "../run-command.js";
+import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
 import type { CliConfig } from "../config.js";
 
 const config = (permissions: CliConfig["permissions"]): CliConfig => ({
@@ -111,7 +117,7 @@ describe("headless runtime governance", () => {
       workspace,
     );
 
-    expect(result.reason).toBe("provider_error");
+    expect(result.reason).toBe("hook_blocked");
     expect(getChangedFiles()).toEqual([]);
     expect(await stat(path.join(workspace, "headless-pre-hook-sentinel")).then(() => true, () => false)).toBe(false);
   });
@@ -214,6 +220,24 @@ describe("headless runtime governance", () => {
     expect(result.reason).toBe("cleanup_error");
     expect(result.status).toBe("failed");
     expect(result.error).toContain("MCP stop failed");
+  });
+
+  it("still cleans up MCP after background cleanup fails", async () => {
+    vi.mocked(streamText).mockImplementation(successfulStream(async () => {}) as never);
+    vi.mocked(cleanupScopedBackgroundProcesses).mockRejectedValueOnce(new Error("background stop failed"));
+    vi.mocked(stopAllMCPServers).mockImplementationOnce(() => { throw new Error("MCP stop failed too"); });
+
+    const result = await runCommand(
+      { prompt: "cleanup", singlePrompt: true },
+      { ...config({}), mcp: { test: { command: "unused" } } },
+      workspace,
+    );
+
+    expect(stopAllMCPServers).toHaveBeenCalledOnce();
+    expect(result.reason).toBe("cleanup_error");
+    expect(result.error).toContain("background stop failed");
+    expect(result.error).toContain("MCP stop failed too");
+    expect(result.tokens).toEqual({ input: 3, output: 2 });
   });
 
   it("preserves known step usage when a provider stream fails", async () => {

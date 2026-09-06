@@ -30,6 +30,7 @@ export type RunFailureReason =
   | "denied"
   | "cancelled"
   | "provider_error"
+  | "hook_blocked"
   | "step_limit"
   | "os_sandbox_unavailable"
   | "cleanup_error";
@@ -60,7 +61,7 @@ export interface RunOptions {
 }
 const EXIT_CODES: Record<RunFailureReason, number> = {
   invalid_options: 2, permission_required: 3, denied: 4, step_limit: 5,
-  os_sandbox_unavailable: 6, provider_error: 1, cleanup_error: 1, cancelled: 130,
+  os_sandbox_unavailable: 6, provider_error: 1, hook_blocked: 1, cleanup_error: 1, cancelled: 130,
 };
 function failure(
   start: number,
@@ -274,9 +275,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     if (!options.singlePrompt) shouldSaveSession = true;
     return { status: "ok", exitCode: 0, sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(), durationMs: Date.now() - start };
   } catch (error) {
-    const reason = terminalToolError?.code === "hook_blocked"
-      ? "provider_error"
-      : terminalToolError?.code ?? reasonFor(error, controller.signal);
+    const reason = terminalToolError?.code ?? reasonFor(error, controller.signal);
     return failure(start, reason, error instanceof Error ? error.message : String(error), {
       sessionId: options.singlePrompt ? null : session?.id ?? null, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
     });
@@ -284,21 +283,22 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     process.removeListener("SIGINT", abortFromSigint);
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort();
-    await cancelAndWaitForRunProcesses(runId);
+    const cleanupErrors: string[] = [];
+    try {
+      await cancelAndWaitForRunProcesses(runId);
+    } catch (error) {
+      cleanupErrors.push("Process cleanup failed: " + String(error));
+    }
     try {
       await cleanupScopedBackgroundProcesses(runId);
     } catch (error) {
-      return failure(start, "cleanup_error", "Headless background cleanup failed: " + String(error), {
-        model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
-      });
+      cleanupErrors.push("Background cleanup failed: " + String(error));
     }
     if (mcpStarted) {
       try {
         stopAllMCPServers();
       } catch (error) {
-        return failure(start, "cleanup_error", "Headless MCP cleanup failed: " + String(error), {
-          model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
-        });
+        cleanupErrors.push("MCP cleanup failed: " + String(error));
       }
     }
     if (lspUsed) {
@@ -306,10 +306,14 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
         const { shutdown } = await import("./engine/tools/lsp.js");
         shutdown();
       } catch (error) {
-        return failure(start, "cleanup_error", "Headless LSP cleanup failed: " + String(error), {
-          model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
-        });
+        cleanupErrors.push("LSP cleanup failed: " + String(error));
       }
+    }
+    if (cleanupErrors.length) {
+      return failure(start, "cleanup_error", cleanupErrors.join("; "), {
+        sessionId: options.singlePrompt ? null : session?.id ?? null,
+        model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
+      });
     }
     if (shouldSaveSession && session) {
       try {

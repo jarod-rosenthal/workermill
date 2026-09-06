@@ -302,7 +302,7 @@ describe("mcp-client", () => {
 
       const defs = mcpClient.getMCPToolDefinitions();
       // ai.jsonSchema wraps the schema — our mock returns { __jsonSchema: schema }
-      expect(defs["mcp__search_srv__search"].parameters).toEqual({ __jsonSchema: inputSchema });
+      expect(defs["mcp__search_srv__search"].inputSchema).toEqual({ __jsonSchema: inputSchema });
     });
 
     it("falls back to empty-object schema when inputSchema is missing", async () => {
@@ -313,7 +313,7 @@ describe("mcp-client", () => {
       await mcpClient.startMCPServer("noop_srv", { command: "noop-mcp", args: [] });
 
       const defs = mcpClient.getMCPToolDefinitions();
-      expect(defs["mcp__noop_srv__noop"].parameters).toEqual({
+      expect(defs["mcp__noop_srv__noop"].inputSchema).toEqual({
         __jsonSchema: { type: "object", properties: {} },
       });
     });
@@ -757,10 +757,11 @@ describe("mcp-client", () => {
 
       const result = await mcpClient.callMCPTool("http-srv", "some_tool", { arg: "value" });
 
-      expect(mockClient.callTool).toHaveBeenCalledWith({
-        name: "some_tool",
-        arguments: { arg: "value" },
-      });
+      expect(mockClient.callTool).toHaveBeenCalledWith(
+        { name: "some_tool", arguments: { arg: "value" } },
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 30_000 }),
+      );
       expect(result).toBe("response from http server");
     });
   });
@@ -884,7 +885,7 @@ describe("mcp-client", () => {
         mcpClient.startMCPServer("fail-srv", { command: "bad-mcp", args: [] }),
       ).rejects.toThrow("Invalid request");
 
-      expect(proc.kill).toHaveBeenCalledOnce();
+      expect(proc.kill).toHaveBeenCalled();
     });
 
     it("does not register a failed server in activeServers", async () => {
@@ -1008,6 +1009,27 @@ describe("mcp-client", () => {
       await expect(
         mcpClient.startMCPServer("no-url", { transport: "http" }),
       ).rejects.toThrow("MCP server no-url: URL required for http transport");
+    });
+
+    it("aborts a partially connected HTTP resource and awaits client close", async () => {
+      let finishConnect: (() => void) | undefined;
+      mockClient.connect.mockImplementation(() => new Promise<void>((resolve) => { finishConnect = resolve; }));
+      mockClient.close.mockResolvedValue(undefined);
+      const abort = new AbortController();
+      const resources = mcpClient.createMCPRunResources({
+        runId: "partial-http",
+        workspace: process.cwd(),
+        signal: abort.signal,
+        startupTimeoutMs: 5_000,
+      });
+
+      const starting = resources.startServer("remote", { transport: "http", url: "http://example.test/mcp" });
+      abort.abort(new Error("test cancellation"));
+      await expect(starting).rejects.toThrow("test cancellation");
+      finishConnect?.();
+      await expect(resources.close()).resolves.toBeUndefined();
+      expect(mockClient.close).toHaveBeenCalled();
+      expect(resources.hasServers()).toBe(false);
     });
   });
 

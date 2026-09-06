@@ -148,7 +148,7 @@ Controls the `/build` review pipeline.
 |---|---|---|
 | `enabled` | `true` | Run tech lead review after workers finish. Set to `false` to skip review entirely. |
 | `maxRevisions` | `3` | Max review → revise cycles before giving up |
-| `approvalThreshold` | `9` | Review score (1-10) at or above which the code is approved |
+| `approvalThreshold` | `9` | Minimum review score (1-10); an explicit approved decision is also required |
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
 | `strict` | `false` | Zero tolerance: gate failures block, review approval is required, out-of-scope edits are rejected, and an unapproved plan aborts the run |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |

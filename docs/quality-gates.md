@@ -125,6 +125,11 @@ Stories execute → Gates run → Blocking failure? Stop and preserve local work
 
 Blocking failures stop before review and publication. Otherwise, the reviewer receives the gate summary, including any advisory failures. Review can request revisions, but the existence of an earlier passing gate alone does not prove that later revisions passed it.
 
+Review approval requires both `REVIEW_DECISION: approved` and a score meeting
+`review.approvalThreshold`. A high score does not override a rejected or
+revision-needed decision. Missing, contradictory, or invalid markers are a
+failed review parse, not approval; disabled review is reported separately.
+
 ---
 
 ## Definition-of-Done Contracts

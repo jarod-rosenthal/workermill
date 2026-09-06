@@ -70,6 +70,7 @@ async function writeConfig(root: string): Promise<NodeJS.ProcessEnv> {
   await writeFile(path.join(state, "cli.json"), JSON.stringify({
     providers: { lmstudio: { model: "fixture-model", host: `${baseUrl}/v1` } },
     default: "lmstudio",
+    disableModelAutoUpdate: true,
     sandbox: false,
   }));
   return { ...process.env, WM_STATE_ROOT: state, NO_COLOR: "1" };

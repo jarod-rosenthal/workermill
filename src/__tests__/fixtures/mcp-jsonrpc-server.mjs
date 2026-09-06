@@ -16,11 +16,28 @@ input.on("line", (line) => {
   const request = JSON.parse(line);
   if (mode === "hang-initialize" && request.method === "initialize") return;
   if (request.method === "initialize") return reply(request.id, { capabilities: {}, serverInfo: { name: "fixture" } });
-  if (request.method === "tools/list") return reply(request.id, { tools: [{ name: "ping", inputSchema: { type: "object" } }] });
+  if (request.method === "tools/list") {
+    if (mode === "schema") return reply(request.id, { tools: [{ name: "do:something!", description: "Schema fixture", inputSchema: { type: "string", properties: "invalid" } }] });
+    if (mode === "github-issues") {
+      return reply(request.id, {
+        tools: [{
+          name: "list_issues",
+          inputSchema: { type: "object", properties: { owner: { type: "string" }, repo: { type: "string" } } },
+        }],
+      });
+    }
+    return reply(request.id, { tools: [{ name: "ping", inputSchema: { type: "object" } }] });
+  }
   if (request.method === "tools/call") {
     if (mode === "hang-call") return;
     if (mode === "oversized-response") {
       return reply(request.id, { content: [{ type: "text", text: "x".repeat(8_192) }] });
+    }
+    if (mode === "rich-content") {
+      return reply(request.id, { content: [{ type: "text", text: "line one" }, { type: "image", data: "image" }, { type: "text", text: "line two" }] });
+    }
+    if (mode === "github-issues") {
+      return reply(request.id, { content: [{ type: "text", text: JSON.stringify(request.params.arguments) }] });
     }
     if (mode === "orphan-after-start") {
       const child = spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(${JSON.stringify(marker + ".started")}, String(process.pid)); process.send("ready"); setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "late"), 500); setInterval(() => {}, 1_000);`], {

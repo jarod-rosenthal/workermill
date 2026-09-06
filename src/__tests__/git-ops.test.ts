@@ -15,9 +15,7 @@ import {
   isGitRepo,
   getCurrentBranch,
   createFeatureBranch,
-  getDiffForReview,
   returnToOriginalBranch,
-  getHeadHash,
 } from "../git-ops.js";
 
 function createTempGitRepo(): string {
@@ -116,28 +114,6 @@ describe("git-ops", () => {
     });
   });
 
-  describe("getDiffForReview()", () => {
-    it("returns stat and diff", () => {
-      const mainBranch = getCurrentBranch(repoDir)!;
-      createFeatureBranch(repoDir, "feature work");
-
-      fs.writeFileSync(path.join(repoDir, "new-file.ts"), "export const x = 1;\n");
-      execSync("git add new-file.ts", { cwd: repoDir, stdio: "pipe" });
-      execSync('git commit --no-verify -m "add new file"', { cwd: repoDir, stdio: "pipe" });
-
-      const { stat, diff } = getDiffForReview(repoDir, mainBranch);
-      expect(stat).toContain("new-file.ts");
-      expect(diff).toContain("export const x = 1");
-    });
-
-    it("returns empty for no changes", () => {
-      const mainBranch = getCurrentBranch(repoDir)!;
-      const { stat, diff } = getDiffForReview(repoDir, mainBranch);
-      expect(stat).toBe("");
-      expect(diff).toBe("");
-    });
-  });
-
   describe("returnToOriginalBranch()", () => {
     it("switches back to the original branch", () => {
       const original = getCurrentBranch(repoDir)!;
@@ -150,10 +126,4 @@ describe("git-ops", () => {
     });
   });
 
-  describe("getHeadHash()", () => {
-    it("returns a hex string", () => {
-      const hash = getHeadHash(repoDir);
-      expect(hash).toMatch(/^[0-9a-f]{40}$/);
-    });
-  });
 });

@@ -7,8 +7,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { runProcess } from "./engine/process-runner.js";
+import { canonicalizePath } from "./engine/path-policy.js";
 
-interface MCPTool { name: string; description?: string; inputSchema: Record<string, unknown>; }
+interface MCPTool { name: string; description?: string; inputSchema?: unknown; }
 interface PendingRequest { reject: (error: Error) => void; cleanup: () => void; resolve: (result: unknown) => void; }
 interface MCPServer {
   name: string; transport: "stdio" | "http" | "sse"; process?: ChildProcess; client?: Client; tools: MCPTool[]; nextId: number;
@@ -58,7 +59,6 @@ interface Collection {
   pendingConfig?: Record<string, MCPServerConfig>; lazyStartPromise?: Promise<void>;
 }
 
-const activeServers = new Map<string, MCPServer>();
 type GitHubRepoContext = { owner: string; repo: string };
 const gitHubRepoContexts = new Map<string, GitHubRepoContext | null>();
 const runCollections = new Set<Collection>();
@@ -77,7 +77,7 @@ function makeCollection(options: MCPRunResourcesOptions): Collection {
   const parentAbortListener = () => controller.abort(options.signal.reason);
   if (options.signal.aborted) parentAbortListener(); else options.signal.addEventListener("abort", parentAbortListener, { once: true });
   return {
-    servers: new Map(), starting: new Map(), startingServers: new Map(), ownedServers: new Set(), workspace: options.workspace, signal: controller.signal, controller,
+    servers: new Map(), starting: new Map(), startingServers: new Map(), ownedServers: new Set(), workspace: canonicalizePath(options.workspace), signal: controller.signal, controller,
     parentSignal: options.signal, parentAbortListener,
     startupTimeoutMs, requestTimeoutMs, maxResponseBytes, maxStderrBytes, terminationGraceMs, closed: false,
   };
@@ -298,10 +298,21 @@ async function callTool(collection: Collection, serverName: string, toolName: st
   return textResult(await sendRequest(server, collection, "tools/call", { name: toolName, arguments: args }, signal, collection.requestTimeoutMs) as { content?: Array<{ type: string; text?: string }> });
 }
 function getTools(collection: Collection): Array<{ serverName: string; tool: MCPTool }> { return Array.from(collection.servers, ([serverName, server]) => server.tools.map((tool) => ({ serverName, tool }))).flat(); }
+function sanitizedInputSchema(inputSchema: unknown): Record<string, unknown> {
+  const source = inputSchema && typeof inputSchema === "object" && !Array.isArray(inputSchema)
+    ? inputSchema as Record<string, unknown>
+    : {};
+  const properties = source.properties;
+  return {
+    ...source,
+    type: "object",
+    properties: properties && typeof properties === "object" && !Array.isArray(properties) ? properties : {},
+  };
+}
 function getToolDefinitions(collection: Collection, invoke: (server: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>): Record<string, AnyToolDef> {
   const defs: Record<string, AnyToolDef> = {};
   for (const [serverName, server] of collection.servers) for (const mcpTool of server.tools) {
-    const schema = Object.keys(mcpTool.inputSchema ?? {}).length ? { ...mcpTool.inputSchema, type: "object" as const } : { type: "object" as const, properties: {} };
+    const schema = sanitizedInputSchema(mcpTool.inputSchema);
     const key = `mcp__${serverName.replace(/[^a-zA-Z0-9_]/g, "_")}__${mcpTool.name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     defs[key] = { description: `[MCP: ${serverName}] ${mcpTool.description ?? mcpTool.name}`, inputSchema: jsonSchema(schema), execute: (input: Record<string, unknown>, options?: { abortSignal?: AbortSignal }) => invoke(serverName, mcpTool.name, hydrateGitHubIssueToolArgs(collection.workspace, serverName, mcpTool.name, input), options?.abortSignal) };
   }
@@ -356,13 +367,22 @@ export function createMCPRunResources(options: MCPRunResourcesOptions): MCPRunRe
 
 /**
  * Process-global status remains for the UI and system prompt. MCP execution
- * is run-owned; these APIs deliberately do not expose another run's tools.
+ * is run-owned; these APIs expose metadata only for the current canonical
+ * workspace and never provide another run's invokers.
  */
-export function hasMCPRegistered(): boolean { return activeServers.size > 0; }
-export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> {
-  return Array.from(activeServers, ([serverName, server]) => server.tools.map((tool) => ({ serverName, tool }))).flat();
+function currentWorkspaceCollections(): Collection[] {
+  let workspace: string;
+  try { workspace = canonicalizePath(process.cwd()); }
+  catch { return []; }
+  return [...runCollections].filter((collection) => !collection.closed && collection.workspace === workspace);
 }
-export function hasMCPServers(): boolean { return activeServers.size > 0; }
+export function hasMCPRegistered(): boolean {
+  return currentWorkspaceCollections().some((collection) => collection.servers.size > 0 || Object.keys(collection.pendingConfig ?? {}).length > 0);
+}
+export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> {
+  return currentWorkspaceCollections().flatMap((collection) => getTools(collection));
+}
+export function hasMCPServers(): boolean { return currentWorkspaceCollections().some((collection) => collection.servers.size > 0); }
 
 /** Async discovery for active runs: probes remain responsive to cancellation. */
 export async function autoDetectMCPServersForRun(
@@ -406,6 +426,7 @@ export function stopAllMCPServers(): void {
     await Promise.allSettled([...collection.starting.values()]);
     runCollections.delete(collection);
   })();
-  activeServers.clear();
 }
-export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> { return Array.from(activeServers.values()).map((server) => ({ name: server.name, transport: server.transport, toolCount: server.tools.length })); }
+export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> {
+  return currentWorkspaceCollections().flatMap((collection) => Array.from(collection.servers.values()).map((server) => ({ name: server.name, transport: server.transport, toolCount: server.tools.length })));
+}

@@ -110,6 +110,7 @@ vi.mock("../logger.js", () => ({
 vi.mock("../browser.js", () => ({
   browserOpen: vi.fn().mockResolvedValue("Browser opened"),
   browserClose: vi.fn().mockResolvedValue("Browser closed"),
+  closeAllBrowserResources: vi.fn().mockResolvedValue(undefined),
   isBrowserOpen: vi.fn(() => false),
 }));
 

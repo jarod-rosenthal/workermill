@@ -1371,7 +1371,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             Promise.resolve().then(() => cleanupScopedBackgroundProcesses(runId)),
             Promise.resolve().then(() => mcpResources?.close()),
             Promise.resolve().then(() => shutdownLSPRun(runId)),
-            Promise.resolve().then(() => browserResources.close()),
+            Promise.resolve().then(() => browserResources.dispose()),
           ]);
           pendingToolsByRunRef.current.delete(runId);
           const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");

@@ -748,9 +748,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       shutdownLSP();
       cleanupStaleWorktrees(ctx.workingDir);
       clearCheckpoints();
-      // Explicit /browser state is session-owned; model-turn resources close
-      // in useAgent's awaited per-run cleanup.
-      void import("../browser.js").then(m => m.browserClose());
+      // CLI exit is the sole broad cleanup boundary. Interactive turns close
+      // only their own resource in useAgent's awaited finally block.
+      void import("../browser.js").then(m => m.closeAllBrowserResources());
       printSessionGoodbye(ctx);
       ctx.exit?.();
       // Force process exit — Ink's exit() only stops rendering but

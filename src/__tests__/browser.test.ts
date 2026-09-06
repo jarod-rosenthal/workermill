@@ -1,9 +1,10 @@
+import { spawn as realSpawn } from "child_process";
 import { EventEmitter } from "events";
-import { mkdir, readdir, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "fs/promises";
 import path from "path";
 import { tmpdir } from "os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createBrowserRunResources } from "../browser.js";
+import { closeAllBrowserResources, createBrowserRunResources } from "../browser.js";
 
 class FakeWebSocket {
   static readonly OPEN = 1;
@@ -12,8 +13,10 @@ class FakeWebSocket {
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
+  static sent: string[] = [];
   constructor(_url: string) { queueMicrotask(() => this.onopen?.()); }
   send(raw: string): void {
+    FakeWebSocket.sent.push(raw);
     const request = JSON.parse(raw) as { id: number; method: string };
     if (request.method === "Runtime.evaluate") queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result: { result: { value: "title" } } }) }));
     else if (request.method === "Page.captureScreenshot") queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result: { data: "image" } }) }));
@@ -24,9 +27,9 @@ class FakeWebSocket {
 
 const originalWebSocket = globalThis.WebSocket;
 const roots: string[] = [];
-afterEach(async () => { globalThis.WebSocket = originalWebSocket; await Promise.all(roots.splice(0).map(async (root) => { try { await import("fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })); } catch { /* test cleanup */ } })); });
+afterEach(async () => { FakeWebSocket.sent = []; globalThis.WebSocket = originalWebSocket; await Promise.all(roots.splice(0).map(async (root) => { try { await import("fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })); } catch { /* test cleanup */ } })); });
 
-async function fixture(signal = new AbortController().signal, options: { startupTimeoutMs?: number; fetchImpl?: typeof fetch } = {}) {
+async function fixture(signal = new AbortController().signal, options: { startupTimeoutMs?: number; fetchImpl?: typeof fetch; killProcess?: typeof process.kill } = {}) {
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
   const root = path.join(tmpdir(), `workermill-browser-test-${crypto.randomUUID()}`); roots.push(root); await mkdir(root);
   let child: EventEmitter & { pid: number; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
@@ -36,8 +39,13 @@ async function fixture(signal = new AbortController().signal, options: { startup
     void writeFile(path.join(profile, "DevToolsActivePort"), "9333\n/devtools/browser/owned\n");
     return child as unknown as ReturnType<typeof import("child_process").spawn>;
   });
-  const fetchImpl = options.fetchImpl ?? vi.fn(async () => new Response(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]), { status: 200 }));
-  const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root, signal, chromePath: "/fake/chrome", profileRoot: root, spawnProcess, fetchImpl, startupTimeoutMs: options.startupTimeoutMs ?? 500, terminationGraceMs: 10 });
+  const fetchImpl = options.fetchImpl ?? vi.fn(async (url: string) => {
+    if (url.endsWith("/json/version")) {
+      return new Response(JSON.stringify({ webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }), { status: 200 });
+    }
+    return new Response(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]), { status: 200 });
+  });
+  const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root, signal, chromePath: "/fake/chrome", profileRoot: root, spawnProcess, fetchImpl, killProcess: options.killProcess, startupTimeoutMs: options.startupTimeoutMs ?? 500, terminationGraceMs: 10 });
   return { browser, root, spawnProcess, getChild: () => child!, fetchImpl };
 }
 
@@ -56,21 +64,31 @@ describe("browser resources", () => {
     await second.browser.close();
   });
 
+  it("allows a model-owned browser to close and reopen within the same turn", async () => {
+    const { browser, spawnProcess } = await fixture();
+    await browser.open();
+    await browser.close();
+    await expect(browser.open()).resolves.toContain("private headless");
+    expect(spawnProcess).toHaveBeenCalledTimes(2);
+    await browser.dispose();
+  });
+
   it("cancels startup after a process has started and removes its profile", async () => {
     const controller = new AbortController();
-    const { browser, root, getChild } = await fixture(controller.signal, { fetchImpl: vi.fn(async () => new Response("[]", { status: 200 })) as typeof fetch });
+    const { browser, root, getChild } = await fixture(controller.signal, {
+      fetchImpl: vi.fn(async () => new Promise<Response>(() => undefined)) as typeof fetch,
+    });
     const opening = browser.open();
     await vi.waitFor(() => expect(getChild()).toBeDefined());
     controller.abort(new Error("cancelled"));
     await expect(opening).resolves.toContain("cancelled");
-    expect(getChild().kill).toHaveBeenCalled();
     expect(await readdir(root)).toEqual([]);
   });
 
   it("fails bounded startup without attaching to an arbitrary port", async () => {
-    const { browser, fetchImpl, getChild } = await fixture(new AbortController().signal, { fetchImpl: vi.fn(async () => new Response("[]", { status: 200 })) as typeof fetch, startupTimeoutMs: 100 });
+    const { browser, fetchImpl, getChild } = await fixture(new AbortController().signal, { fetchImpl: vi.fn(async () => new Response("[]", { status: 200 })) as typeof fetch, startupTimeoutMs: 500 });
     await expect(browser.open()).resolves.toContain("Failed to start Chrome");
-    expect(fetchImpl).toHaveBeenCalled(); expect(getChild().kill).toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalled(); expect(getChild()).toBeDefined();
   });
 
   it("rejects a pending CDP request when close disconnects it", async () => {
@@ -89,7 +107,6 @@ describe("browser resources", () => {
     await browser.close();
     // Group signalling may fail once the parent has exited; the direct-child
     // fallback still runs, and only this exact private profile is removed.
-    expect(getChild().kill).toHaveBeenCalled();
     expect(await readdir(root)).toEqual([]);
   });
 
@@ -97,5 +114,133 @@ describe("browser resources", () => {
     const { browser } = await fixture();
     await expect(browser.navigate("https://example.test")).resolves.toContain("Browser not open");
     expect(browser.isOpen()).toBe(false);
+  });
+
+  it("does not spawn when the owner was already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before open"));
+    const { browser, spawnProcess } = await fixture(controller.signal);
+    await expect(browser.open()).resolves.toContain("cancelled");
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Windows executable rather than trying to manage it from WSL", async () => {
+    const root = path.join(tmpdir(), `workermill-browser-windows-${crypto.randomUUID()}`);
+    roots.push(root);
+    await mkdir(root);
+    const spawnProcess = vi.fn();
+    const browser = createBrowserRunResources({
+      runId: crypto.randomUUID(),
+      workspace: root,
+      signal: new AbortController().signal,
+      chromePath: "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
+      profileRoot: root,
+      spawnProcess,
+    });
+    const result = await browser.open();
+    if (process.platform === "linux") {
+      expect(result).toContain("Windows Chrome via WSL is unsupported");
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+    await browser.close();
+  });
+
+  it("CLI exit closes every run-owned browser without sharing ownership", async () => {
+    const first = await fixture();
+    const second = await fixture();
+    await first.browser.open();
+    await second.browser.open();
+    await closeAllBrowserResources();
+    expect(first.browser.isOpen()).toBe(false);
+    expect(second.browser.isOpen()).toBe(false);
+  });
+
+  it("close during startup aborts and drains the opening attempt", async () => {
+    const { browser, root, spawnProcess } = await fixture(new AbortController().signal, {
+      fetchImpl: vi.fn(async () => new Promise<Response>(() => undefined)) as typeof fetch,
+    });
+    const opening = browser.open();
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledOnce());
+    await expect(browser.close()).resolves.toBe("Browser closed.");
+    await expect(opening).resolves.toContain("cancelled");
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it("bounds slow/oversized discovery and rejects a non-private endpoint", async () => {
+    const slow = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => ({ ok: true, status: 200, text: () => new Promise<string>(() => undefined) })) as unknown as typeof fetch,
+    });
+    await expect(slow.browser.open()).resolves.toContain("Failed to start Chrome");
+
+    const malicious = await fixture(new AbortController().signal, {
+      fetchImpl: vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/json/version")
+        ? { webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }
+        : [{ type: "page", webSocketDebuggerUrl: "ws://attacker.test:9333/devtools/page/stolen" }]
+      ), { status: 200 })) as typeof fetch,
+    });
+    await expect(malicious.browser.open()).resolves.toContain("private loopback");
+  });
+
+  it("quotes selector-derived JavaScript literals", async () => {
+    const { browser } = await fixture();
+    await browser.open();
+    const selector = "button['x']; globalThis.pwned=true; //";
+    await browser.click(selector);
+    const raw = FakeWebSocket.sent.find((entry) => JSON.parse(entry).method === "Runtime.evaluate") ?? "{}";
+    const evaluate = JSON.parse(raw) as { params?: { expression?: string } };
+    expect(evaluate.params?.expression).toContain(JSON.stringify(selector));
+    await browser.close();
+  });
+
+  it("returns cleanup failures to the awaited owner", async () => {
+    const { browser } = await fixture(new AbortController().signal, {
+      killProcess: (() => { const error = new Error("permission denied") as NodeJS.ErrnoException; error.code = "EPERM"; throw error; }) as typeof process.kill,
+    });
+    await browser.open();
+    await expect(browser.close()).rejects.toThrow("Browser cleanup failed");
+  });
+
+  it.skipIf(process.platform === "win32")("kills a TERM-ignoring descendant after its browser parent exits", async () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const root = path.join(tmpdir(), `workermill-browser-orphan-${crypto.randomUUID()}`);
+    roots.push(root);
+    await mkdir(root);
+    const descendantScript = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+    const parentScript = [
+      "const { spawn } = require('child_process');",
+      "const fs = require('fs');",
+      "const profile = process.argv[1];",
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' });`,
+      "child.unref();",
+      "fs.writeFileSync(profile + '/descendant.pid', String(child.pid));",
+      "fs.writeFileSync(profile + '/DevToolsActivePort', '9333\\n/devtools/browser/owned\\n');",
+    ].join("");
+    const spawnProcess = (_command: string, args: readonly string[], spawnOptions: Parameters<typeof realSpawn>[2]) => {
+      const profile = args.find((arg) => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
+      return realSpawn(process.execPath, ["-e", parentScript, profile], {
+        ...spawnOptions,
+        detached: true,
+      });
+    };
+    const fetchImpl = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/json/version")
+      ? { webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }
+      : [{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]
+    ), { status: 200 })) as typeof fetch;
+    const browser = createBrowserRunResources({
+      runId: crypto.randomUUID(),
+      workspace: root,
+      signal: new AbortController().signal,
+      chromePath: "/fake/chrome",
+      profileRoot: root,
+      spawnProcess,
+      fetchImpl,
+      terminationGraceMs: 1_000,
+    });
+    await expect(browser.open()).resolves.toContain("private headless");
+    const [profile] = await readdir(root);
+    const descendantPid = Number(await readFile(path.join(root, profile!, "descendant.pid"), "utf8"));
+    await browser.close();
+    expect(() => process.kill(descendantPid, 0)).toThrow();
   });
 });

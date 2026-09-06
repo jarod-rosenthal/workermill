@@ -1,8 +1,8 @@
 # Spec Check, Plan Critic & Quality Gates
 
-Quality gates run shell commands after all stories complete but **before the tech lead reviewer sees the code**. Static gates and required story commands block completion when they fail. Planner-generated verification remains reviewer context outside strict mode.
+Quality gates run shell commands against the prepared candidate before review, and run again if reviewer revisions change it. Static gates and required story commands block completion when they fail. Planner-generated verification remains reviewer context outside strict mode.
 
-The gap they fill: experts verify their code compiles and tests pass, but they don't assert "does executing this thing produce the right output?" Gates catch acceptance criteria gaps at the observable behavior level before review.
+Use gates to check observable acceptance criteria independently of a worker's explanation. Passing tests and model review provide evidence about the checks performed; neither proves the absence of defects.
 
 ---
 
@@ -71,7 +71,7 @@ A score below `criticThreshold` (default 8) sends the plan back for a targeted r
 /settings review.criticThreshold 8
 ```
 
-**Route it to a stronger model.** The critic reads a plan rather than a codebase, so it's cheap to run on a good model even when workers run locally:
+**Route it separately if useful.** The critic reads the plan and adds model calls; actual cost depends on the selected model, usage, and refinements:
 
 ```json
 {
@@ -108,27 +108,30 @@ No configuration is required for dynamic gates — the planner handles it. To di
 
 ## How It Works
 
-### Without quality gates
+The final verification sequence is:
 
 ```
-Stories execute → Tech lead reviews → Revision if needed → Publication prompt
+Prepare candidate → Run gates → Review/revise → Recheck changed state → Publication prompt
 ```
 
-Without configured acceptance checks, the review has no corresponding automated pass/fail evidence.
+Candidate preparation commits remaining changes on the feature branch before collecting final evidence. Blocking gate failures stop immediately, preserving local work. Otherwise, the reviewer receives the gate summary, including advisory failures. Without configured acceptance checks, review has no corresponding automated pass/fail evidence.
 
-### With quality gates enabled
-
-```
-Stories execute → Gates run → Blocking failure? Stop and preserve local work
-                           → Otherwise: tech lead review → Publication prompt
-```
-
-Blocking failures stop before review and publication. Otherwise, the reviewer receives the gate summary, including any advisory failures. Review can request revisions, but the existence of an earlier passing gate alone does not prove that later revisions passed it.
+If a gate changes non-ignored source, WorkerMill prepares that new candidate and runs gates once more. A second source change blocks completion rather than repeating indefinitely. Reviewer revisions invalidate earlier gate evidence: gates run again, and must pass the applicable policy without changing the reviewed state. Unchanged state does not trigger redundant gate execution.
 
 Review approval requires both `REVIEW_DECISION: approved` and a score meeting
 `review.approvalThreshold`. A high score does not override a rejected or
 revision-needed decision. Missing, contradictory, or invalid markers are a
 failed review parse, not approval; disabled review is reported separately.
+
+With `review.strict: true` and review enabled, publication requires valid approval. Outside strict mode, review can remain advisory, but a failed or unavailable review is never reported as approval. Setting `review.enabled: false` skips approval, not required gates or final-state checks.
+
+### Stale evidence and recovery
+
+Evidence includes HEAD, index entries, and current tracked/untracked non-ignored file content, modes, symlink targets, and deletions. Merely keeping the same commit does not preserve an approval. WorkerMill rechecks evidence after publication confirmations and verifies that the expected feature branch still points at the candidate before pushing or creating a PR.
+
+If source changes during a prompt, publication stops. Inspect your changes, fix the cause, and use `/retry`; a saved run can need final verification even when every story is implemented. A source-changing `ship_complete` hook invalidates the final local result and preserves retry state. That hook runs after the publication phase: it cannot undo a push, PR, or external action already completed.
+
+Fingerprinting does not run Git filters or external diff programs. It excludes ignored files and currently fails closed for unsupported repository states, including submodules, unmerged index entries, files over 16 MiB, or more than 64 MiB of file content. An unverified state is not permission to publish. These checks detect observed changes; they are not an atomic filesystem lock against concurrent external writers.
 
 ---
 
@@ -212,7 +215,7 @@ When `verifyEnabled: true`, the planner generates `verificationCommands` per sto
 
 For project-wide output assertions that should run on every `/build`. Only useful for things that don't change per-feature.
 
-**Do not use static gates for:** `typecheck`, `npm test`, `go build`, `pytest` — the expert already runs these during story execution.
+Static gates can include `typecheck`, `npm test`, `go build`, or `pytest` when you require those checks against the final candidate. A worker's earlier test run is not a substitute for final-state verification. Keep the suite bounded and avoid watch-mode commands.
 
 **Use static gates for:** invariants about the built artifact that should always hold:
 

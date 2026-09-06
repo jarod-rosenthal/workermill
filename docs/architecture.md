@@ -54,7 +54,8 @@ The orchestrator is decomposed into focused modules under `src/orchestrator/`:
 | `execution.ts` | Story execution loop, tool setup, contract validation, retry/revision |
 | `review.ts` | Tech lead review, revision passes, must-fix tracking, standalone review |
 | `gates.ts` | Quality gates, LSP diagnostics |
-| `completion.ts` | Push, PR creation, ticket transitions, cleanup |
+| `candidate.ts` | Scoped candidate preparation before final verification |
+| `completion.ts` | Evidence rechecks, push, PR creation, ticket transitions |
 
 `orchestrator.ts` is the coordinator — setup, sequencing, and public API re-exports.
 

@@ -6,6 +6,7 @@
  */
 
 import { htmlToReadableText } from "./html.js";
+import { boundedFetch } from "../http-request.js";
 
 export const description =
   "Search the web for documentation, error messages, library usage, or any information. Returns search results with titles, URLs, and snippets. Use this when you need up-to-date information that might not be in your training data.";
@@ -23,19 +24,19 @@ export interface WebSearchResult {
 export async function execute(input: {
   query: string;
   maxResults?: number;
-}): Promise<WebSearchResult> {
+}, signal?: AbortSignal): Promise<WebSearchResult> {
   const { query, maxResults = 8 } = input;
 
   try {
     const encoded = encodeURIComponent(query);
-    const response = await globalThis.fetch(
+    const response = await boundedFetch(
       `https://html.duckduckgo.com/html/?q=${encoded}`,
       {
         headers: {
           "User-Agent": "WorkerMill/1.0 (AI Coding Agent)",
         },
-        signal: AbortSignal.timeout(15000),
-      }
+      },
+      { signal, timeoutMs: 15_000, maxResponseBytes: 1024 * 1024 },
     );
 
     if (!response.ok) {

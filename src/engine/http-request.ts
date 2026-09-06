@@ -8,7 +8,7 @@ export interface HttpRequestOptions {
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {
-    const aborted = () => reject(signal.reason);
+    const aborted = () => { signal.removeEventListener("abort", aborted); reject(signal.reason); };
     signal.addEventListener("abort", aborted, { once: true });
     promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
   });
@@ -35,7 +35,9 @@ export async function withHttpResponse<T>(
     }, () => {});
     response = await abortable(request, controller.signal);
     controller.signal.throwIfAborted();
-    const result = await abortable(consume(response, controller.signal), controller.signal);
+    // Consumers bind body reads/writes to this signal. Await their settlement,
+    // not just an abort race that could return while a file is still being written.
+    const result = await consume(response, controller.signal);
     controller.signal.throwIfAborted();
     return result;
   } finally {

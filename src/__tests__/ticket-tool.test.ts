@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../config.js", () => ({
   loadConfig: vi.fn(() => ({ ticketSystem: "github" })),
@@ -8,6 +8,7 @@ const listTickets = vi.fn();
 const isSystemAvailable = vi.fn();
 
 vi.mock("../ticket-ops.js", () => ({
+  ticketEnvironment: () => ({ GITHUB_TOKEN: "dummy-test-token", GITHUB_REPO: "fixture/repo" }),
   TicketOps: class {
     static listTickets = listTickets;
     static isSystemAvailable = isSystemAvailable;
@@ -43,6 +44,8 @@ describe("ticket tool", () => {
     isSystemAvailable.mockReturnValue(true);
   });
 
+  afterEach(() => vi.unstubAllEnvs());
+
   it("formats tracker list output consistently", async () => {
     listTickets.mockResolvedValue([
       { key: "TEAM-42", title: "Unify memory backend", status: "Backlog", labels: ["memory"] },
@@ -55,7 +58,8 @@ describe("ticket tool", () => {
       success: true,
       content: "- TEAM-42 [Backlog] Unify memory backend — labels: memory\n- TEAM-43 [In Progress] Improve runs UI",
     });
-    expect(listTickets).toHaveBeenCalledWith("github", "memory", 10);
+    expect(listTickets.mock.calls[0]?.slice(0, 3)).toEqual(["github", "memory", 10]);
+    expect(listTickets.mock.calls[0]?.[3].strict).toBe(true);
   });
 
   it("fails cleanly when system credentials are unavailable for list", async () => {

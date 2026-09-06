@@ -1,8 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { pipeline } from "stream/promises";
 import { Readable, Transform } from "stream";
+import { withHttpResponse } from "../http-request.js";
+
+export const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
 export const name = "download_file";
 
@@ -49,9 +52,13 @@ class HashTransform extends Transform {
   private hash = createHash("sha256");
   private totalBytes = 0;
 
-  _transform(chunk: Buffer, encoding: string, callback: (error?: Error | null, data?: any) => void) {
-    this.hash.update(chunk);
+  _transform(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null, data?: Buffer) => void) {
     this.totalBytes += chunk.length;
+    if (this.totalBytes > MAX_DOWNLOAD_BYTES) {
+      callback(new Error(`Download exceeds ${MAX_DOWNLOAD_BYTES} bytes`));
+      return;
+    }
+    this.hash.update(chunk);
     callback(null, chunk);
   }
 
@@ -68,8 +75,9 @@ export async function execute({
   url,
   destination,
   overwrite = false,
-}: DownloadFileParams): Promise<DownloadFileResult> {
+}: DownloadFileParams, signal?: AbortSignal): Promise<DownloadFileResult> {
   try {
+    signal?.throwIfAborted();
     // Validate URL
     let parsedUrl: URL;
     try {
@@ -104,55 +112,33 @@ export async function execute({
       }
     }
 
-    // Fetch the URL
-    const response = await globalThis.fetch(url, {
-      headers: {
-        "User-Agent": "WorkerMill/1.0",
-      },
-    });
-
-    if (!response.ok) {
-      return {
-        success: false,
-        status_code: response.status,
-        error: `HTTP ${response.status}: ${response.statusText}`,
-      };
-    }
-
-    // Get content type
-    const contentType = response.headers.get("content-type") || "";
-
-    // Create write stream and hash transform
-    const hashTransform = new HashTransform();
-    const writeStream = fs.createWriteStream(absolutePath);
-
-    // Stream the response body through hash and to file
-    if (!response.body) {
-      return { success: false, error: "No response body" };
-    }
-
-    try {
-      await pipeline(Readable.fromWeb(response.body as any), hashTransform, writeStream);
-    } catch (streamError) {
-      // Clean up partial file on error
-      writeStream.destroy();
-      if (fs.existsSync(absolutePath)) {
-        fs.unlinkSync(absolutePath);
-      }
-      throw streamError;
-    }
-
-    const sha256 = hashTransform.getDigest();
-    const totalBytes = hashTransform.getTotalBytes();
-
-    return {
-      success: true,
-      destination: absolutePath,
-      size_bytes: totalBytes,
-      content_type: contentType,
-      sha256,
-      status_code: response.status,
-    };
+    return await withHttpResponse(url, { headers: { "User-Agent": "WorkerMill/1.0" } },
+      { signal, timeoutMs: 120_000 }, async (response, requestSignal) => {
+        if (!response.ok) return { success: false, status_code: response.status, error: `HTTP ${response.status}: ${response.statusText}` };
+        if (!response.body) return { success: false, error: "No response body" };
+        const declaredSize = Number(response.headers.get("content-length"));
+        if (declaredSize > MAX_DOWNLOAD_BYTES) throw new Error(`Download exceeds ${MAX_DOWNLOAD_BYTES} bytes`);
+        requestSignal.throwIfAborted();
+        // Keep existing content intact until the entire download is verified.
+        const temporary = path.join(dirPath, `.workermill-download-${randomUUID()}.tmp`);
+        const hashTransform = new HashTransform();
+        const writeStream = fs.createWriteStream(temporary, { flags: "wx", mode: 0o600 });
+        try {
+          // Node's web-stream type differs from the DOM fetch body type.
+          const source = Readable.fromWeb(response.body as import("stream/web").ReadableStream<Uint8Array>);
+          await pipeline(source, hashTransform, writeStream, { signal: requestSignal });
+          requestSignal.throwIfAborted();
+          if (overwrite) fs.renameSync(temporary, absolutePath);
+          else fs.linkSync(temporary, absolutePath); // Atomic no-clobber if another writer won.
+          return {
+            success: true, destination: absolutePath, size_bytes: hashTransform.getTotalBytes(),
+            content_type: response.headers.get("content-type") || "", sha256: hashTransform.getDigest(), status_code: response.status,
+          };
+        } finally {
+          // pipeline has settled before removing only this operation's temp file.
+          try { fs.unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        }
+      });
   } catch (err) {
     return {
       success: false,

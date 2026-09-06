@@ -14,6 +14,17 @@ import { boundedFetch, type HttpRequestOptions } from "./engine/http-request.js"
 export interface TicketRequestOptions extends HttpRequestOptions {
   /** Model-directed operations must not turn failed remote writes into success. */
   strict?: boolean;
+  /** Snapshot of credentials/repository context; never persisted or logged. */
+  environment?: NodeJS.ProcessEnv;
+}
+
+/** Do not carry unrelated shell credentials into ticket calls or diagnostics. */
+export function ticketEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "PARENT_JIRA_KEY", "LINEAR_API_KEY", "API_BASE_URL", "TASK_ID", "ORG_API_KEY"]) {
+    if (source[key] !== undefined) result[key] = source[key];
+  }
+  return result;
 }
 
 type TicketSystem = "jira" | "linear" | "github" | "internal";
@@ -44,8 +55,10 @@ export class TicketOps {
   private ticketKey: string;
   private ticketSystem: TicketSystem;
   private hasCredentials: boolean;
+  private readonly environment: NodeJS.ProcessEnv;
 
   constructor(ticketKey?: string, ticketSystem?: string, private readonly requestOptions: TicketRequestOptions = {}) {
+    this.environment = ticketEnvironment(requestOptions.environment);
     this.ticketKey = ticketKey || "";
     this.ticketSystem = (ticketSystem as TicketSystem) || "jira";
 
@@ -54,28 +67,28 @@ export class TicketOps {
       case "internal":
         // Internal board comments route through the WorkerMill API — no external creds needed
         this.hasCredentials = !!(
-          process.env.API_BASE_URL &&
-          process.env.TASK_ID &&
-          process.env.ORG_API_KEY &&
+          this.environment.API_BASE_URL &&
+          this.environment.TASK_ID &&
+          this.environment.ORG_API_KEY &&
           this.ticketKey
         );
         break;
       case "linear":
-        this.hasCredentials = !!(process.env.LINEAR_API_KEY && this.ticketKey);
+        this.hasCredentials = !!(this.environment.LINEAR_API_KEY && this.ticketKey);
         break;
       case "github":
         this.hasCredentials = !!(
-          process.env.GITHUB_TOKEN &&
-          process.env.GITHUB_REPO &&
+          this.environment.GITHUB_TOKEN &&
+          this.environment.GITHUB_REPO &&
           this.ticketKey
         );
         break;
       case "jira":
       default:
         this.hasCredentials = !!(
-          process.env.JIRA_BASE_URL &&
-          process.env.JIRA_EMAIL &&
-          process.env.JIRA_API_TOKEN &&
+          this.environment.JIRA_BASE_URL &&
+          this.environment.JIRA_EMAIL &&
+          this.environment.JIRA_API_TOKEN &&
           this.ticketKey
         );
         break;
@@ -91,14 +104,16 @@ export class TicketOps {
    * use parent Jira key instead.
    */
   private getEffectiveTicketKey(): string {
-    return process.env.PARENT_JIRA_KEY || this.ticketKey;
+    return this.environment.PARENT_JIRA_KEY || this.ticketKey;
   }
 
   /**
    * Transition the ticket to a new status.
    */
   async transitionTo(statusName: string): Promise<void> {
+    this.requestOptions.signal?.throwIfAborted();
     if (!this.hasCredentials) {
+      if (this.requestOptions.strict) throw new Error("Ticket credentials are unavailable");
       logger.debug("[TicketOps] Skipping transition - credentials not available");
       return;
     }
@@ -121,6 +136,8 @@ export class TicketOps {
       }
       logger.info(`[TicketOps] Transitioned to "${statusName}" (${this.ticketSystem})`);
     } catch (error) {
+      this.requestOptions.signal?.throwIfAborted();
+      if (this.requestOptions.strict) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       logger.warn(`[TicketOps] Transition failed: ${msg}`);
       // Continue - don't crash Epic
@@ -131,7 +148,9 @@ export class TicketOps {
    * Post a comment to the ticket.
    */
   async postComment(comment: string): Promise<void> {
+    this.requestOptions.signal?.throwIfAborted();
     if (!this.hasCredentials) {
+      if (this.requestOptions.strict) throw new Error("Ticket credentials are unavailable");
       logger.debug("[TicketOps] Skipping comment - credentials not available");
       return;
     }
@@ -155,6 +174,8 @@ export class TicketOps {
       }
       logger.info(`[TicketOps] Posted comment (${this.ticketSystem})`);
     } catch (error) {
+      this.requestOptions.signal?.throwIfAborted();
+      if (this.requestOptions.strict) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       logger.warn(`[TicketOps] Comment failed: ${msg}`);
       // Continue - don't crash Epic
@@ -171,24 +192,24 @@ export class TicketOps {
   /**
    * Check if credentials exist for a ticket system without requiring a specific ticket key.
    */
-  static isSystemAvailable(ticketSystem: TicketSystem): boolean {
+  static isSystemAvailable(ticketSystem: TicketSystem, environment: NodeJS.ProcessEnv = process.env): boolean {
     switch (ticketSystem) {
       case "internal":
         return !!(
-          process.env.API_BASE_URL &&
-          process.env.TASK_ID &&
-          process.env.ORG_API_KEY
+          environment.API_BASE_URL &&
+          environment.TASK_ID &&
+          environment.ORG_API_KEY
         );
       case "linear":
-        return !!process.env.LINEAR_API_KEY;
+        return !!environment.LINEAR_API_KEY;
       case "github":
-        return !!(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO);
+        return !!(environment.GITHUB_TOKEN && environment.GITHUB_REPO);
       case "jira":
       default:
         return !!(
-          process.env.JIRA_BASE_URL &&
-          process.env.JIRA_EMAIL &&
-          process.env.JIRA_API_TOKEN
+          environment.JIRA_BASE_URL &&
+          environment.JIRA_EMAIL &&
+          environment.JIRA_API_TOKEN
         );
     }
   }
@@ -200,14 +221,16 @@ export class TicketOps {
     ticketSystem: TicketSystem,
     query?: string,
     limit = 10,
+    options: TicketRequestOptions = {},
   ): Promise<TicketSummary[]> {
+    options.signal?.throwIfAborted();
     switch (ticketSystem) {
       case "github":
-        return await this.listGithubIssues(query, limit);
+        return await this.listGithubIssues(query, limit, options);
       case "jira":
-        return await this.listJiraIssues(query, limit);
+        return await this.listJiraIssues(query, limit, options);
       case "linear":
-        return await this.listLinearIssues(query, limit);
+        return await this.listLinearIssues(query, limit, options);
       default:
         throw new Error(`list is not supported for ticket system: ${ticketSystem}`);
     }
@@ -218,6 +241,7 @@ export class TicketOps {
    * Returns null if credentials are missing or the fetch fails.
    */
   async fetchTicket(): Promise<{ title: string; body: string; labels?: string[] } | null> {
+    this.requestOptions.signal?.throwIfAborted();
     if (!this.hasCredentials) return null;
     try {
       switch (this.ticketSystem) {
@@ -227,6 +251,8 @@ export class TicketOps {
         default: return null;
       }
     } catch (error) {
+      this.requestOptions.signal?.throwIfAborted();
+      if (this.requestOptions.strict) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       logger.warn(`[TicketOps] Failed to fetch ticket: ${msg}`);
       return null;
@@ -234,9 +260,9 @@ export class TicketOps {
   }
 
   private async fetchGithubIssue(): Promise<{ title: string; body: string; labels?: string[] }> {
-    const repo = process.env.GITHUB_REPO!;
+    const repo = this.environment.GITHUB_REPO!;
     const issueNumber = extractGithubIssueNumber(this.ticketKey);
-    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, { headers: this.githubHeaders() });
+    const res = await this.request(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, { headers: this.githubHeaders() });
     if (res.status === 401) throw new Error(`GitHub authentication failed — ensure GITHUB_TOKEN is set or run \`gh auth login\``);
     if (res.status === 403) throw new Error(`GitHub permission denied — your token may not have access to ${repo}`);
     if (res.status === 404) throw new Error(`GitHub issue ${repo}#${issueNumber} not found — verify the issue exists`);
@@ -246,10 +272,10 @@ export class TicketOps {
   }
 
   private async fetchJiraIssue(): Promise<{ title: string; body: string; labels?: string[] }> {
-    const base = process.env.JIRA_BASE_URL!;
+    const base = this.environment.JIRA_BASE_URL!;
     const key = this.getEffectiveTicketKey();
     const headers = { ...this.jiraAuth(), "Content-Type": "application/json" };
-    const res = await fetch(`${base}/rest/api/3/issue/${key}?fields=summary,description,labels`, { headers });
+    const res = await this.request(`${base}/rest/api/3/issue/${key}?fields=summary,description,labels`, { headers });
     if (res.status === 401) throw new Error(`Jira authentication failed — check your email and API token in /setup`);
     if (res.status === 403) throw new Error(`Jira permission denied — your API token may not have access to ${key}`);
     if (res.status === 404) throw new Error(`Jira issue ${key} not found — verify the key is correct and the project exists`);
@@ -274,10 +300,10 @@ export class TicketOps {
   }
 
   private async fetchLinearIssue(): Promise<{ title: string; body: string; labels?: string[] }> {
-    const apiKey = process.env.LINEAR_API_KEY!;
+    const apiKey = this.environment.LINEAR_API_KEY!;
     const headers = { Authorization: apiKey, "Content-Type": "application/json" };
     const identifier = this.getEffectiveTicketKey();
-    const res = await fetch("https://api.linear.app/graphql", {
+    const res = await this.request("https://api.linear.app/graphql", {
       method: "POST", headers,
       body: JSON.stringify({
         query: `query GetIssue($identifier: String!) { issue(id: $identifier) { title description labels { nodes { name } } } }`,
@@ -292,31 +318,33 @@ export class TicketOps {
     return { title: issue.title, body: issue.description || "", labels: issue.labels?.nodes?.map((l) => l.name) };
   }
 
-  private static githubHeaders() {
+  private static githubHeaders(environment: NodeJS.ProcessEnv = process.env) {
     return {
-      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      Authorization: `Bearer ${environment.GITHUB_TOKEN}`,
       "Content-Type": "application/json",
       Accept: "application/vnd.github+json",
       "User-Agent": "WorkerMill-AI-Worker",
     };
   }
 
-  private static jiraAuth(): { Authorization: string } {
-    const email = process.env.JIRA_EMAIL!;
-    const token = process.env.JIRA_API_TOKEN!;
+  private static jiraAuth(environment: NodeJS.ProcessEnv = process.env): { Authorization: string } {
+    const email = environment.JIRA_EMAIL!;
+    const token = environment.JIRA_API_TOKEN!;
     return {
       Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`,
     };
   }
 
-  private static async listGithubIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
-    const repo = process.env.GITHUB_REPO!;
+  private static async listGithubIssues(query?: string, limit = 10, options: TicketRequestOptions = {}): Promise<TicketSummary[]> {
+    const environment = options.environment ?? process.env;
+    const request = (url: string, init: RequestInit) => boundedFetch(url, init, options);
+    const repo = environment.GITHUB_REPO!;
     const trimmed = query?.trim();
     let res: Response;
     if (trimmed) {
       const q = encodeURIComponent(`repo:${repo} is:issue ${trimmed}`);
-      res = await fetch(`https://api.github.com/search/issues?q=${q}&per_page=${limit}`, {
-        headers: this.githubHeaders(),
+      res = await request(`https://api.github.com/search/issues?q=${q}&per_page=${limit}`, {
+        headers: this.githubHeaders(environment),
       });
       if (res.status === 401) throw new Error("GitHub authentication failed while listing issues");
       if (!res.ok) throw new Error(`GitHub issue search failed — ${res.status} ${res.statusText}`);
@@ -331,9 +359,9 @@ export class TicketOps {
       }));
     }
 
-    res = await fetch(
+    res = await request(
       `https://api.github.com/repos/${repo}/issues?state=all&sort=updated&direction=desc&per_page=${limit}`,
-      { headers: this.githubHeaders() },
+      { headers: this.githubHeaders(environment) },
     );
     if (res.status === 401) throw new Error("GitHub authentication failed while listing issues");
     if (!res.ok) throw new Error(`GitHub issue list failed — ${res.status} ${res.statusText}`);
@@ -354,17 +382,19 @@ export class TicketOps {
       }));
   }
 
-  private static async listJiraIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
-    const base = process.env.JIRA_BASE_URL!;
+  private static async listJiraIssues(query?: string, limit = 10, options: TicketRequestOptions = {}): Promise<TicketSummary[]> {
+    const environment = options.environment ?? process.env;
+    const request = (url: string, init: RequestInit) => boundedFetch(url, init, options);
+    const base = environment.JIRA_BASE_URL!;
     const headers = {
-      ...this.jiraAuth(),
+      ...this.jiraAuth(environment),
       "Content-Type": "application/json",
       Accept: "application/json",
     };
     const trimmed = query?.trim();
     const escaped = trimmed?.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const jql = escaped ? `text ~ "${escaped}" ORDER BY updated DESC` : "ORDER BY updated DESC";
-    const res = await fetch(`${base}/rest/api/3/search`, {
+    const res = await request(`${base}/rest/api/3/search`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -393,9 +423,11 @@ export class TicketOps {
     }));
   }
 
-  private static async listLinearIssues(query?: string, limit = 10): Promise<TicketSummary[]> {
+  private static async listLinearIssues(query?: string, limit = 10, options: TicketRequestOptions = {}): Promise<TicketSummary[]> {
+    const environment = options.environment ?? process.env;
+    const request = (url: string, init: RequestInit) => boundedFetch(url, init, options);
     const headers = {
-      Authorization: process.env.LINEAR_API_KEY!,
+      Authorization: environment.LINEAR_API_KEY!,
       "Content-Type": "application/json",
     };
     const trimmed = query?.trim();
@@ -429,7 +461,7 @@ export class TicketOps {
             }
           }
         }`;
-    const res = await fetch("https://api.linear.app/graphql", {
+    const res = await request("https://api.linear.app/graphql", {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -464,11 +496,13 @@ export class TicketOps {
   static async validateCredentials(
     system: "github" | "jira" | "linear",
     config: { baseUrl?: string; email?: string; apiToken?: string; apiKey?: string; githubToken?: string; githubRepo?: string },
+    options: TicketRequestOptions = {},
   ): Promise<string | null> {
+    const request = (url: string, init: RequestInit) => boundedFetch(url, init, options);
     try {
       switch (system) {
         case "github": {
-          const res = await fetch(`https://api.github.com/repos/${config.githubRepo}`, {
+          const res = await request(`https://api.github.com/repos/${config.githubRepo}`, {
             headers: { Authorization: `Bearer ${config.githubToken}`, Accept: "application/vnd.github+json", "User-Agent": "WorkerMill-CLI" },
           });
           if (!res.ok) return `GitHub API returned ${res.status}: ${res.statusText}`;
@@ -476,14 +510,14 @@ export class TicketOps {
         }
         case "jira": {
           const auth = Buffer.from(`${config.email}:${config.apiToken}`).toString("base64");
-          const res = await fetch(`${config.baseUrl}/rest/api/3/myself`, {
+          const res = await request(`${config.baseUrl}/rest/api/3/myself`, {
             headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
           });
           if (!res.ok) return `Jira API returned ${res.status}: ${res.statusText}`;
           return null;
         }
         case "linear": {
-          const res = await fetch("https://api.linear.app/graphql", {
+          const res = await request("https://api.linear.app/graphql", {
             method: "POST",
             headers: { Authorization: config.apiKey!, "Content-Type": "application/json" },
             body: JSON.stringify({ query: "{ viewer { id name } }" }),
@@ -507,16 +541,16 @@ export class TicketOps {
   // --- Jira ---
 
   private jiraAuth(): { Authorization: string } {
-    return TicketOps.jiraAuth();
+    return TicketOps.jiraAuth(this.environment);
   }
 
   private async transitionJira(statusName: string): Promise<void> {
-    const base = process.env.JIRA_BASE_URL!;
+    const base = this.environment.JIRA_BASE_URL!;
     const key = this.getEffectiveTicketKey();
     const headers = { ...this.jiraAuth(), "Content-Type": "application/json" };
 
     // Get available transitions
-    const res = await fetch(
+    const res = await this.request(
       `${base}/rest/api/3/issue/${key}/transitions`,
       { headers },
     );
@@ -534,6 +568,7 @@ export class TicketOps {
     );
 
     if (!target) {
+      if (this.requestOptions.strict) throw new Error(`Jira transition "${statusName}" is unavailable`);
       // Escalated/Review Requested may not exist in simpler workflows — not an error
       const soft = ["escalated", "review requested"];
       if (soft.includes(statusName.toLowerCase())) {
@@ -548,7 +583,7 @@ export class TicketOps {
       return;
     }
 
-    const transitionRes = await fetch(
+    const transitionRes = await this.request(
       `${base}/rest/api/3/issue/${key}/transitions`,
       { method: "POST", headers, body: JSON.stringify({ transition: { id: target.id } }) },
     );
@@ -581,9 +616,9 @@ export class TicketOps {
   }
 
   private async commentJira(ticketKey: string, comment: string): Promise<void> {
-    const base = process.env.JIRA_BASE_URL!;
+    const base = this.environment.JIRA_BASE_URL!;
     const headers = { ...this.jiraAuth(), "Content-Type": "application/json" };
-    const res = await fetch(
+    const res = await this.request(
       `${base}/rest/api/3/issue/${ticketKey}/comment`,
       { method: "POST", headers, body: JSON.stringify({ body: this.textToJiraAdf(comment) }) },
     );
@@ -594,11 +629,11 @@ export class TicketOps {
   // --- GitHub ---
 
   private githubHeaders() {
-    return TicketOps.githubHeaders();
+    return TicketOps.githubHeaders(this.environment);
   }
 
   private async transitionGithub(statusName: string): Promise<void> {
-    const repo = process.env.GITHUB_REPO!;
+    const repo = this.environment.GITHUB_REPO!;
     const issueNumber = extractGithubIssueNumber(this.getEffectiveTicketKey());
     const stateMap: Record<string, string> = {
       done: "closed",
@@ -610,10 +645,11 @@ export class TicketOps {
     };
     const targetState = stateMap[statusName.toLowerCase()] || statusName.toLowerCase();
     if (!["open", "closed"].includes(targetState)) {
+      if (this.requestOptions.strict) throw new Error(`Invalid GitHub state: ${targetState}`);
       logger.warn(`[TicketOps] Invalid GitHub state: ${targetState}`);
       return;
     }
-    const res = await fetch(
+    const res = await this.request(
       `https://api.github.com/repos/${repo}/issues/${issueNumber}`,
       { method: "PATCH", headers: this.githubHeaders(), body: JSON.stringify({ state: targetState }) },
     );
@@ -621,9 +657,9 @@ export class TicketOps {
   }
 
   private async commentGithub(ticketKey: string, comment: string): Promise<void> {
-    const repo = process.env.GITHUB_REPO!;
+    const repo = this.environment.GITHUB_REPO!;
     const issueNumber = extractGithubIssueNumber(ticketKey);
-    const res = await fetch(
+    const res = await this.request(
       `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`,
       { method: "POST", headers: this.githubHeaders(), body: JSON.stringify({ body: comment }) },
     );
@@ -633,7 +669,7 @@ export class TicketOps {
   // --- Linear ---
 
   private async transitionLinear(statusName: string): Promise<void> {
-    const apiKey = process.env.LINEAR_API_KEY!;
+    const apiKey = this.environment.LINEAR_API_KEY!;
     const headers = {
       Authorization: apiKey,
       "Content-Type": "application/json",
@@ -642,7 +678,7 @@ export class TicketOps {
     const identifier = this.getEffectiveTicketKey();
 
     // Resolve issue UUID, current state, and team states in one query
-    const queryRes = await fetch(
+    const queryRes = await this.request(
       "https://api.linear.app/graphql",
       {
         method: "POST",
@@ -672,6 +708,7 @@ export class TicketOps {
     );
 
     if (!targetState) {
+      if (this.requestOptions.strict) throw new Error(`Linear status "${statusName}" is unavailable`);
       // Soft failure — status may not exist in this team (e.g. "Escalated")
       logger.warn(`[TicketOps] Linear status "${statusName}" not found. Available: ${teamStates.map((s) => s.name).join(", ")}`);
       return;
@@ -679,7 +716,7 @@ export class TicketOps {
 
     if (targetState.id === issue.state?.id) return; // Already in target state
 
-    const updateRes = await fetch(
+    const updateRes = await this.request(
       "https://api.linear.app/graphql",
       {
         method: "POST",
@@ -694,20 +731,21 @@ export class TicketOps {
     );
     if (!updateRes.ok) throw new Error(`Linear transition to "${statusName}" failed for ${identifier} — ${updateRes.status}`);
     const updateData = parseLinearResponse<{ issueUpdate?: { success: boolean } }>(await updateRes.json());
-    if (updateData?.issueUpdate && !updateData.issueUpdate.success) {
+    if (!updateData?.issueUpdate?.success) {
+      if (this.requestOptions.strict) throw new Error("Linear issue update was not confirmed");
       logger.warn(`[TicketOps] Linear issueUpdate returned success: false for ${identifier}`);
     }
   }
 
   private async commentLinear(issueIdentifier: string, comment: string): Promise<void> {
-    const apiKey = process.env.LINEAR_API_KEY!;
+    const apiKey = this.environment.LINEAR_API_KEY!;
     const headers = {
       Authorization: apiKey,
       "Content-Type": "application/json",
     };
 
     // Resolve issue UUID from identifier
-    const issueRes = await fetch(
+    const issueRes = await this.request(
       "https://api.linear.app/graphql",
       {
         method: "POST",
@@ -727,7 +765,7 @@ export class TicketOps {
     }
 
     // Create comment
-    const commentRes = await fetch(
+    const commentRes = await this.request(
       "https://api.linear.app/graphql",
       {
         method: "POST",
@@ -740,7 +778,8 @@ export class TicketOps {
     );
     if (!commentRes.ok) throw new Error(`Linear comment creation failed for ${issueIdentifier} — ${commentRes.status}`);
     const commentData = parseLinearResponse<{ commentCreate?: { success: boolean } }>(await commentRes.json());
-    if (commentData?.commentCreate && !commentData.commentCreate.success) {
+    if (!commentData?.commentCreate?.success) {
+      if (this.requestOptions.strict) throw new Error("Linear comment creation was not confirmed");
       logger.warn(`[TicketOps] Linear comment creation returned success: false for ${issueIdentifier}`);
     }
   }
@@ -748,10 +787,10 @@ export class TicketOps {
   // --- Internal (WorkerMill API) ---
 
   private async transitionInternal(statusName: string): Promise<void> {
-    const apiBaseUrl = process.env.API_BASE_URL;
-    const taskId = process.env.TASK_ID;
-    const apiKey = process.env.ORG_API_KEY;
-    const res = await fetch(
+    const apiBaseUrl = this.environment.API_BASE_URL;
+    const taskId = this.environment.TASK_ID;
+    const apiKey = this.environment.ORG_API_KEY;
+    const res = await this.request(
       `${apiBaseUrl}/api/tasks/${taskId}/ticket-transition`,
       { method: "POST", headers: { "x-api-key": apiKey!, "Content-Type": "application/json" }, body: JSON.stringify({ status: statusName }) },
     );
@@ -759,10 +798,10 @@ export class TicketOps {
   }
 
   private async commentInternal(comment: string): Promise<void> {
-    const apiBaseUrl = process.env.API_BASE_URL;
-    const taskId = process.env.TASK_ID;
-    const apiKey = process.env.ORG_API_KEY;
-    const res = await fetch(
+    const apiBaseUrl = this.environment.API_BASE_URL;
+    const taskId = this.environment.TASK_ID;
+    const apiKey = this.environment.ORG_API_KEY;
+    const res = await this.request(
       `${apiBaseUrl}/api/tasks/${taskId}/ticket-comment`,
       { method: "POST", headers: { "x-api-key": apiKey!, "Content-Type": "application/json" }, body: JSON.stringify({ comment }) },
     );

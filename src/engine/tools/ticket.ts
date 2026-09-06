@@ -4,7 +4,16 @@
  * Supports GitHub Issues, Jira, and Linear through the existing TicketOps class.
  * Agents can fetch tickets, list/search issues, post comments, and transition
  * status without shelling out to tracker-specific CLIs.
- */
+*/
+
+import { randomUUID } from "node:crypto";
+import { runProcess } from "../process-runner.js";
+
+export interface TicketToolContext {
+  signal?: AbortSignal;
+  runId?: string;
+  workspace?: string;
+}
 
 export const description =
   "Interact with issue trackers (GitHub Issues, Jira, Linear). " +
@@ -31,9 +40,10 @@ export async function execute(input: {
   comment?: string;
   status?: string;
   query?: string;
-}): Promise<{ success: boolean; content?: string; error?: string }> {
+}, context: TicketToolContext = {}): Promise<{ success: boolean; content?: string; error?: string }> {
   try {
-    const { TicketOps } = await import("../../ticket-ops.js");
+    context.signal?.throwIfAborted();
+    const { TicketOps, ticketEnvironment } = await import("../../ticket-ops.js");
     const { loadConfig } = await import("../../config.js");
 
     const config = loadConfig();
@@ -43,35 +53,42 @@ export async function execute(input: {
     }
     const ticketSystem = rawTicketSystem as "github" | "jira" | "linear";
 
+    const environment = ticketEnvironment();
+    const requestOptions = { signal: context.signal, environment, strict: true };
+    const runId = context.runId ?? `ticket-${randomUUID()}`;
+    const probe = async (command: string): Promise<string> => {
+      const result = await runProcess({
+        command, runId, cwd: context.workspace ?? process.cwd(),
+        signal: context.signal ?? new AbortController().signal,
+        timeoutMs: 5_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+      });
+      context.signal?.throwIfAborted();
+      return result.reason === "exited" && result.exitCode === 0 && !result.outputTruncated ? result.stdout.trim() : "";
+    };
+
     // Ensure credentials are available
     if (ticketSystem === "jira" && config?.jira) {
-      process.env.JIRA_BASE_URL = config.jira.baseUrl;
-      process.env.JIRA_EMAIL = config.jira.email;
-      process.env.JIRA_API_TOKEN = config.jira.apiToken;
+      environment.JIRA_BASE_URL = config.jira.baseUrl;
+      environment.JIRA_EMAIL = config.jira.email;
+      environment.JIRA_API_TOKEN = config.jira.apiToken;
     } else if (ticketSystem === "linear" && config?.linear) {
-      process.env.LINEAR_API_KEY = config.linear.apiKey;
+      environment.LINEAR_API_KEY = config.linear.apiKey;
     }
     if (ticketSystem === "github") {
-      if (!process.env.GITHUB_TOKEN) {
-        try {
-          const { execSync } = await import("child_process");
-          process.env.GITHUB_TOKEN = execSync("gh auth token 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
-        } catch { /* gh not available */ }
+      if (!environment.GITHUB_TOKEN) {
+        environment.GITHUB_TOKEN = await probe("gh auth token");
       }
-      if (!process.env.GITHUB_REPO) {
-        try {
-          const { execSync } = await import("child_process");
-          const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
-          const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-          if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
-        } catch { /* not a git repo */ }
+      if (!environment.GITHUB_REPO) {
+        const remote = await probe("git -c core.fsmonitor=false remote get-url origin");
+        const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+        if (match) environment.GITHUB_REPO = match[1];
       }
     }
 
     switch (input.action) {
       case "fetch": {
         if (!input.ticketKey) return { success: false, error: "ticketKey is required for fetch" };
-        const ops = new TicketOps(input.ticketKey, ticketSystem);
+        const ops = new TicketOps(input.ticketKey, ticketSystem, requestOptions);
         if (!ops.isAvailable()) {
           return { success: false, error: `Cannot connect to ${ticketSystem} — credentials not found. Run /setup to configure.` };
         }
@@ -86,7 +103,7 @@ export async function execute(input: {
       case "comment": {
         if (!input.ticketKey) return { success: false, error: "ticketKey is required for comment" };
         if (!input.comment) return { success: false, error: "comment is required" };
-        const ops = new TicketOps(input.ticketKey, ticketSystem);
+        const ops = new TicketOps(input.ticketKey, ticketSystem, requestOptions);
         if (!ops.isAvailable()) {
           return { success: false, error: `Cannot connect to ${ticketSystem} — credentials not found.` };
         }
@@ -97,7 +114,7 @@ export async function execute(input: {
       case "transition": {
         if (!input.ticketKey) return { success: false, error: "ticketKey is required for transition" };
         if (!input.status) return { success: false, error: "status is required (e.g. 'done', 'in_progress')" };
-        const ops = new TicketOps(input.ticketKey, ticketSystem);
+        const ops = new TicketOps(input.ticketKey, ticketSystem, requestOptions);
         if (!ops.isAvailable()) {
           return { success: false, error: `Cannot connect to ${ticketSystem} — credentials not found.` };
         }
@@ -106,10 +123,10 @@ export async function execute(input: {
       }
 
       case "list": {
-        if (!TicketOps.isSystemAvailable(ticketSystem)) {
+        if (!TicketOps.isSystemAvailable(ticketSystem, environment)) {
           return { success: false, error: `Cannot connect to ${ticketSystem} — credentials not found.` };
         }
-        const tickets = await TicketOps.listTickets(ticketSystem, input.query, 10);
+        const tickets = await TicketOps.listTickets(ticketSystem, input.query, 10, requestOptions);
         return { success: true, content: formatTicketList(tickets, ticketSystem) };
       }
 

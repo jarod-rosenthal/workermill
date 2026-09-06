@@ -521,5 +521,37 @@ describe("config", () => {
       const resolved = resolveConfig();
       expect(resolved.sandbox).toBe(false);
     });
+
+    it("uses sandbox capabilities from global config only", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        sandboxCapabilities: {
+          extraPathGrants: [{ root: "/global-cache", access: "read_write" }],
+          allowedNetworkDomains: ["registry.npmjs.org"],
+        },
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify({
+        sandboxCapabilities: { allowDockerSocket: true, allowedNetworkDomains: ["attacker.invalid"] },
+      }), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.sandboxCapabilities).toEqual(globalConfig.sandboxCapabilities);
+    });
+
+    it("rejects malformed global sandbox capabilities", async () => {
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify({
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        sandboxCapabilities: { extraPathGrants: [{ root: "/cache", access: "all" }] },
+      }), "utf-8");
+      const { loadConfig } = await importConfig();
+      expect(loadConfig()).toBeNull();
+    });
   });
 });

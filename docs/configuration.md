@@ -512,7 +512,7 @@ File and bash tool sandboxing.
 |---|---|
 | `true` (default) | Restrict file and bash tools to the working directory |
 | `false` | No restriction — tools can read and write anywhere |
-| `"os"` | OS-level sandboxing via `@anthropic-ai/sandbox-runtime` (where supported) |
+| `"os"` | OS-level sandboxing via `@anthropic-ai/sandbox-runtime`; fails before a command starts when unavailable |
 
 ### Setting from the CLI
 
@@ -520,6 +520,43 @@ File and bash tool sandboxing.
 /settings sandbox true
 /settings sandbox false
 ```
+
+An explicit `"os"` setting never silently falls back to path mode. `/build`
+may automatically try to upgrade its default path mode to OS mode; if that
+optional upgrade is unavailable, the run log visibly says it continued with
+path-only restrictions. Path mode is not containment for shell redirection,
+interpreters, or arbitrary subprocesses.
+
+## `sandboxCapabilities`
+
+Optional OS-sandbox exceptions belong only in your global user configuration
+(`~/.workermill/cli.json`). Project `.workermill/config.json` values for this
+field are ignored, so a repository cannot expand its own host privileges.
+
+```json
+"sandboxCapabilities": {
+  "extraPathGrants": [
+    { "root": "/absolute/path/to/package-cache", "access": "read_write" }
+  ],
+  "allowedNetworkDomains": ["registry.npmjs.org", "github.com"],
+  "allowLocalBinding": false,
+  "allowDockerSocket": false
+}
+```
+
+Writes are restricted to the workspace, explicitly granted `read_write`
+paths, and one private per-command temporary directory. There are no implicit
+`.npm`, `.local`, home-cache, or blanket `/tmp` write grants; add a specific
+cache path when a command needs one. The runtime allows host reads by default,
+but WorkerMill denies its state root and `~/.ssh`; OS mode therefore does not
+claim to confine every read to the workspace.
+
+Network access defaults to the existing package-registry and GitHub domain
+allowlist, local binding is off, and Docker access is off. Setting
+`allowDockerSocket: true` is a host-access capability: Docker can control the
+host. It is supported only on macOS, where the runtime can restrict the socket
+path. Linux cannot enforce a path-specific Unix-socket allowlist, so WorkerMill
+rejects this capability there instead of enabling all Unix sockets.
 
 ## `bell`
 

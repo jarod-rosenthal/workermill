@@ -8,7 +8,12 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
 }));
 
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
-import { getOSSandboxDependencyStatus, resolveSandboxMode } from "../sandbox-mode.js";
+import {
+  getOSSandboxDependencyStatus,
+  OSSandboxUnavailableError,
+  resolveAutomaticSandboxUpgrade,
+  resolveSandboxMode,
+} from "../sandbox-mode.js";
 
 describe("sandbox-mode", () => {
   beforeEach(() => {
@@ -29,21 +34,27 @@ describe("sandbox-mode", () => {
     expect(result.warning).toBeUndefined();
   });
 
-  it("falls back to path sandbox when os sandbox is unsupported", () => {
+  it("fails closed when an explicit os sandbox is unsupported", () => {
     vi.mocked(SandboxManager.isSupportedPlatform).mockReturnValue(false);
-    const result = resolveSandboxMode("os", false);
-    expect(result.effective).toBe(true);
-    expect(result.warning).toContain("unsupported");
+    expect(() => resolveSandboxMode("os", false)).toThrow(OSSandboxUnavailableError);
   });
 
-  it("falls back to path sandbox when os sandbox deps are missing", () => {
+  it("fails closed when explicit os sandbox dependencies are missing", () => {
     vi.mocked(SandboxManager.checkDependencies).mockReturnValue({
       errors: ["socat not installed"],
       warnings: [],
     });
-    const result = resolveSandboxMode("os", false);
+    expect(() => resolveSandboxMode("os", false)).toThrow("socat not installed");
+  });
+
+  it("makes the automatic upgrade fallback explicit and visible", () => {
+    vi.mocked(SandboxManager.checkDependencies).mockReturnValue({
+      errors: ["socat not installed"],
+      warnings: [],
+    });
+    const result = resolveAutomaticSandboxUpgrade();
     expect(result.effective).toBe(true);
-    expect(result.warning).toContain("dependencies are missing");
+    expect(result.warning).toContain("automatic upgrade unavailable");
   });
 
   it("returns warnings while keeping os sandbox when deps are available", () => {
@@ -63,4 +74,3 @@ describe("sandbox-mode", () => {
     expect(status.errors.length).toBeGreaterThan(0);
   });
 });
-

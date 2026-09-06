@@ -12,7 +12,7 @@ import {
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
-import { resolveSandboxMode } from "./sandbox-mode.js";
+import { resolveAutomaticSandboxUpgrade } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
 
@@ -74,16 +74,18 @@ export async function runOrchestration(
     });
   }
 
-  // Upgrade path sandbox to OS sandbox for /build — workers run autonomous code
-  // from AI models, so process-level isolation is the right default. Falls back
-  // silently to path sandbox if the platform doesn't support it.
+  // The default path mode may be automatically upgraded for /build. Unlike an
+  // explicit `sandbox: "os"` setting, this specific automatic policy can fall
+  // back, and the user must see the effective mode in the run output.
   if (sandboxed === true) {
-    const resolution = resolveSandboxMode("os");
+    const resolution = resolveAutomaticSandboxUpgrade();
     sandboxed = resolution.effective;
     if (resolution.warning) {
       logger.info("OS sandbox fallback in /build", { warning: resolution.warning });
+      output.log("system", resolution.warning);
     } else if (sandboxed === "os") {
       logger.info("OS sandbox enabled for /build");
+      output.log("system", "OS sandbox enabled for /build.");
     }
   }
 

@@ -85,6 +85,14 @@ describe("runtime governance contracts", () => {
     model.assertComplete();
   });
 
+  it("distinguishes reported zero usage from missing usage", async () => {
+    const model = install([{ text: "done", usage: { inputTokens: 0, outputTokens: 0 } }]);
+    const result = await runCommand({ prompt: "zero", singlePrompt: true }, config({}), workspace);
+    expect(result).toMatchObject({ status: "ok", usageComplete: true });
+    expect(result.usageLedger?.calls[0]).toMatchObject({ usageState: "reported", usage: { inputTokens: 0, outputTokens: 0 } });
+    model.assertComplete();
+  });
+
   it.each([
     [null, "missing", 0],
     [{ inputTokens: 8 }, "partial", 8],

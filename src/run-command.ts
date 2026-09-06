@@ -17,7 +17,7 @@ import type { SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
-import { addUsage, usageFromSdk } from "./engine/model-usage.js";
+import { addUsage, settleUsage, usageFromSdk } from "./engine/model-usage.js";
 import type { LedgerSnapshot } from "./cost-tracker.js";
 import type { TokenUsage } from "./providers/types.js";
 import type { CliConfig } from "./config.js";
@@ -308,18 +308,9 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failedTool) throw failedTool.reason;
     text = await stream.text;
-    const totalUsage = usageFromSdk(await stream.totalUsage);
-    if (totalUsage) {
-      // Failed transports sometimes expose an all-zero placeholder total after
-      // reporting useful completed-step usage. Keep that observed subtotal.
-      const retainsStepSubtotal = usage !== undefined
-        && totalUsage.inputTokens === 0
-        && totalUsage.outputTokens === 0
-        && totalUsage.cacheCreationTokens === undefined
-        && totalUsage.cacheReadTokens === undefined;
-      hasFinalUsage = !retainsStepSubtotal && totalUsage.inputTokens !== undefined && totalUsage.outputTokens !== undefined;
-      if (!retainsStepSubtotal) usage = totalUsage;
-    }
+    const settled = settleUsage(usage, usageFromSdk(await stream.totalUsage));
+    usage = settled.usage;
+    hasFinalUsage = settled.usageComplete;
     if (terminalToolError) throw terminalToolError;
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     const finishReason = await stream.finishReason;

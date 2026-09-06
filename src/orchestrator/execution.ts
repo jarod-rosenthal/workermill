@@ -3,13 +3,15 @@ import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
-import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "../safety.js";
 import { checkpoint } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { estimateContextTokens } from "../compaction.js";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import type { AIProvider } from "../engine/types.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { decideToolPermission, type PermissionState } from "../engine/tool-policy.js";
+import { executeToolCall, ToolExecutionError, type ToolExecutionContext } from "../engine/tool-executor.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { formatPromptProjectContext } from "../project-context.js";
@@ -416,89 +418,43 @@ export async function checkToolPermission(
   trustAll: boolean | (() => boolean),
   sessionAllow: Set<string>,
   output: OrchestrationOutput,
-  permissionRules?: { allow?: string[]; deny?: string[] },
+  permissionRules?: { allow?: string[]; ask?: string[]; deny?: string[] },
+  workspace = process.cwd(),
 ): Promise<boolean> {
-  // Dangerous commands ALWAYS prompt — even in trust/bypass mode.
-  // Trust mode skips normal permission prompts but not safety gates.
-  if (toolName === "bash") {
-    const cmd = String(toolInput.command || "");
-    const danger = isDangerous(cmd);
-    if (danger) {
-      logger.info("Dangerous prompt shown (orchestrator)", { tool: toolName, danger });
-      output.error(`DANGEROUS: ${danger}`);
-      output.error(`Command: ${cmd}`);
-      const result = await output.confirm("This is a dangerous operation. Are you sure?");
-      const allowed = typeof result === "object" ? result.allowed : result;
-      logger.info("Dangerous prompt resolved (orchestrator)", { tool: toolName, allowed, result: JSON.stringify(result) });
-      return allowed;
-    }
-  }
-
-  // Bypass mode — skips normal prompts but NOT dangerous command gates above
-  const isTrustedEarly = typeof trustAll === "function" ? trustAll() : trustAll;
-  const isBypass = isTrustedEarly || sessionAllow.has("*");
-
-  // Dangerous file path check for write operations
-  if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
-    const filePath = extractToolFilePath(toolName, toolInput);
-    const fileDanger = isDangerousFile(filePath);
-    if (fileDanger && !isBypass) {
-      output.error(`SENSITIVE FILE: ${fileDanger}`);
-      output.error(`Path: ${filePath}`);
-      const result = await output.confirm("This file may be sensitive. Are you sure?");
-      return typeof result === "object" ? result.allowed : result;
-    }
-  }
-
-  // Granular permission rules — deny > ask > allow.
-  const ruleResult = checkPermissionRules(toolName, toolInput, permissionRules);
-  if (ruleResult === "deny") return false;
-  // "ask" falls through to prompt below
-  if (ruleResult === "allow") return true;
-
-  if (ruleResult !== "ask") {
-    // Normal mode checks (skip if "ask" rule forced a prompt)
-    const isTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
-    if (isTrusted) return true;
-    if (READ_TOOLS.has(toolName)) return true;
-    if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
-  }
-
-  // Prompt user — Yes / Yes don't ask again / Deny
-  const display = formatToolCallDisplay(toolName, toolInput);
-  const result = await output.confirm(`Allow ${toolName}? ${display}`);
-
-  if (typeof result === "object") {
-    if (result.mode === "trust" && result.allowed) {
-      // "Trust all" — add wildcard to session allow so all future tools auto-approve
-      sessionAllow.add("*");
-    } else if (result.mode === "always" && result.allowed) {
-      // "Yes, don't ask again" — save to project-level settings.local.json
-      // (matches Claude Code behavior and single-agent path in useAgent.ts)
-      try {
-        const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
-        const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
-        const lSettings = loadLocalSettings() || {};
-        lSettings.allow = lSettings.allow || [];
-        const rules = toolName === "bash" && toolInput.command
-          ? splitCompoundCommand(String(toolInput.command)).map((cmd) => toolInputToRule(toolName, { command: cmd }))
-          : [toolInputToRule(toolName, toolInput)];
-        for (const rule of rules) {
-          if (rule && !lSettings.allow.includes(rule)) {
-            lSettings.allow.push(rule);
-          }
-        }
-        saveLocalSettings(lSettings);
-      } catch {
-        // Fall back to session-only
-      }
+  const state: PermissionState = {
+    mode: "default",
+    trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
+    sessionAllow,
+    rules: permissionRules ?? {},
+    readOnlyRole: false,
+    workspace,
+  };
+  const decision = decideToolPermission(toolName, toolInput, state);
+  if (decision.kind === "deny") return false;
+  if (decision.kind === "allow") return true;
+  const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, toolInput)}${decision.reason ? ` (${decision.reason})` : ""}`);
+  if (typeof result === "object" && result.allowed) {
+    if (result.mode === "trust") sessionAllow.add("*");
+    if (result.mode === "always") {
       sessionAllow.add(toolName);
+      await persistAlwaysPermission(toolName, toolInput);
     }
-    return result.allowed;
   }
+  return typeof result === "object" ? result.allowed : result;
+}
 
-  // Simple boolean — allow once, no persistence
-  return result;
+async function persistAlwaysPermission(toolName: string, input: Record<string, unknown>): Promise<void> {
+  try {
+    const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
+    const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+    const settings = loadLocalSettings() || {};
+    settings.allow = settings.allow || [];
+    const rules = toolName === "bash" && input.command
+      ? splitCompoundCommand(String(input.command)).map((command) => toolInputToRule(toolName, { command }))
+      : [toolInputToRule(toolName, input)];
+    for (const rule of rules) if (rule && !settings.allow.includes(rule)) settings.allow.push(rule);
+    saveLocalSettings(settings);
+  } catch { /* retain session approval when persistent settings are unavailable */ }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -842,10 +798,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
     const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
-    // Build tools filtered by persona's allowed tools
-    const allTools = createToolDefinitions(workingDir, model, sandboxed);
     const storyHealth: { testResults?: string; buildErrors?: string; servicesRunning?: string[] } = {};
-    const personaTools: Record<string, AnyToolDef> = {};
     // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
     // Reset per revision so a tool loop on revision 0 doesn't permanently abort retries
     const LOOP_WINDOW = 6;
@@ -853,154 +806,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     let recentToolSignatures: string[] = [];
     let loopAbort = new AbortController();
     const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
-    for (const toolName of persona.tools) {
-      const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
-      if (toolDef) {
-        personaTools[toolName] = {
-          ...toolDef,
-          execute: async (input: Record<string, unknown>) => {
-            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
-            if (!allowed) {
-              runLifecycleHooks("permission_denied", config.hooks, workingDir, {
-                WORKERMILL_TOOL: toolName,
-                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-                WORKERMILL_STORY_ID: story.id,
-                WORKERMILL_STORY_PERSONA: story.persona,
-              });
-              return "Tool execution denied by user.";
-            }
-
-            // Track for loop detection
-            const sig = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
-            recentToolSignatures.push(sig);
-            if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
-            if (recentToolSignatures.length >= LOOP_WINDOW) {
-              const counts: Record<string, number> = {};
-              for (const s of recentToolSignatures) counts[s] = (counts[s] || 0) + 1;
-              const maxCount = Math.max(...Object.values(counts));
-              if (maxCount >= LOOP_THRESHOLD) {
-                logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
-                output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
-                loopAbort.abort();
-                return "ABORTED: Tool call loop detected. Stop and report what you've accomplished so far.";
-              }
-            }
-
-            output.toolCall(story.persona, toolName, input);
-            for (const target of extractCheckpointTargets(toolName, input, workingDir)) {
-              checkpoint(target.path, target.tool);
-            }
-            const hookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
-            if (hookResult.blocked) {
-              return `Tool blocked by pre-hook: ${hookResult.reason}`;
-            }
-            const result = await toolDef.execute(input);
-            runHooks("post", toolName, config.hooks, workingDir);
-
-            // Log tool result to cli.log — full output, no truncation
-            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            const isError = typeof result === "string" && result.startsWith("Error:");
-            if (isError) {
-              logger.error("Tool error", { persona: story.persona, tool: toolName, result: resultStr });
-              runLifecycleHooks("tool_error", config.hooks, workingDir, {
-                WORKERMILL_TOOL: toolName,
-                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-                WORKERMILL_TOOL_ERROR: resultStr.substring(0, 10000),
-                WORKERMILL_STORY_ID: story.id,
-                WORKERMILL_STORY_PERSONA: story.persona,
-              });
-            } else {
-              logger.debug("Tool result", { tool: toolName, result: resultStr });
-            }
-
-            // Track docker compose services for auto-cleanup
-            if (toolName === "bash") {
-              const cmd = (input as { command?: string }).command || "";
-              if (/docker[\s-]compose\s+up/i.test(cmd)) {
-                const resolvedCwd = (input as { cwd?: string }).cwd || workingDir;
-                startedDockerCompose.add(resolvedCwd);
-              }
-            }
-
-            // Parse structured bash output for story health context
-            if (toolName === "bash" && typeof result === "string") {
-              // Test results: jest/vitest/pytest/go test/playwright
-              const testMatch = result.match(/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i);
-              if (testMatch) {
-                storyHealth.testResults = result.split("\n").filter(l =>
-                  /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(l)
-                ).slice(-5).join("\n");
-              }
-
-              // Build errors: tsc, eslint, go build
-              const errorLines = result.split("\n").filter(l =>
-                /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(l)
-              );
-              if (errorLines.length > 0) {
-                storyHealth.buildErrors = errorLines.join("\n");
-              }
-
-              // Docker services
-              const bashCmd = (input as { command?: string }).command || "";
-              if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(bashCmd)) {
-                const serviceLines = result.split("\n").filter(l => /Up|running|healthy/i.test(l));
-                if (serviceLines.length > 0) {
-                  storyHealth.servicesRunning = serviceLines.map(l => l.trim());
-                }
-              }
-            }
-
-            output.status("");
-            return result;
-          },
-        };
-      }
-    }
-
-    // Merge MCP tools into persona tools — same pattern as useAgent.ts
-    const mcpTools = getMCPToolDefinitions();
-    for (const [key, def] of Object.entries(mcpTools)) {
-      personaTools[key] = def;
-    }
-
-    // Deferred tool loading — cap MCP tools to prevent context overflow on local models.
-    // If MCP tools exceed 20, keep only the first 20 and log the rest as deferred.
-    const mcpNames = Object.keys(personaTools).filter(n => n.startsWith("mcp__"));
-    if (mcpNames.length > 20) {
-      const deferred = mcpNames.slice(20);
-      for (const name of deferred) {
-        delete personaTools[name];
-      }
-      logger.info("Deferred excess MCP tools in orchestrator", { total: mcpNames.length, deferred: deferred.length, kept: 20 });
-      output.log("system", `${deferred.length} MCP tools deferred to fit context (${mcpNames.length} total, 20 kept)`);
-    }
-
-    // Add skill tool — lets story workers invoke custom skills mid-execution
-    personaTools["skill"] = {
-      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
-      inputSchema: z.object({
-        name: z.string().describe("The skill name to invoke"),
-        args: z.string().optional().describe("Optional arguments"),
-      }),
-      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
-        const { loadCustomCommands } = await import("../custom-commands.js");
-        const skills = loadCustomCommands();
-        const match = skills.find(
-          (s: { name: string }) => s.name.toLowerCase() === skillName.toLowerCase(),
-        );
-        if (!match) return `Skill "${skillName}" not found.`;
-        return args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt;
-      },
-    };
-
-    // Apply concurrency control — safe tools (read_file, list_dir, etc.) run in parallel
-    for (const [name, td] of Object.entries(personaTools)) {
-      if (td && typeof td.execute === "function") {
-        const original = td.execute;
-        (personaTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
-      }
-    }
-
     let revisionFeedback = "";
     let storyRateLimitRetries = 0;
     let contextOverflowRetries = 0;
@@ -1040,6 +845,132 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     // Reset loop detection for each revision attempt
     recentToolSignatures = [];
     loopAbort = new AbortController();
+    const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, loopAbort.signal]) : loopAbort.signal;
+    const scope = createPathScope(workingDir);
+    const executionContext: ToolExecutionContext = {
+      runId: params.runId ?? `story-${story.id}-${revision}`,
+      workspace: scope.workspace,
+      scope,
+      effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
+      signal: combinedSignal,
+      getPermissionState: () => ({
+        mode: "default",
+        trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
+        sessionAllow,
+        rules: config.permissions ?? {},
+        readOnlyRole: false,
+        workspace: scope.workspace,
+      }),
+      prompt: async (toolName, input, reason, executingContext) => {
+        const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, input)} (${reason})`);
+        if (typeof result === "object" && result.allowed) {
+          if (result.mode === "trust") sessionAllow.add("*");
+          if (result.mode === "always") {
+            sessionAllow.add(toolName);
+            await persistAlwaysPermission(toolName, input);
+          }
+        }
+        // Keep the callback's supplied context authoritative for child contexts.
+        return Boolean(typeof result === "object" ? result.allowed : result) && !executingContext.signal.aborted;
+      },
+      preHook: (toolName, input, executingContext) => {
+        const signature = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
+        recentToolSignatures.push(signature);
+        if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
+        if (recentToolSignatures.length >= LOOP_WINDOW) {
+          const counts: Record<string, number> = {};
+          for (const recent of recentToolSignatures) counts[recent] = (counts[recent] || 0) + 1;
+          const maxCount = Math.max(...Object.values(counts));
+          if (maxCount >= LOOP_THRESHOLD) {
+            logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
+            output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
+            loopAbort.abort();
+            return { blocked: true, reason: "tool call loop detected" };
+          }
+        }
+        output.toolCall(story.persona, toolName, input);
+        const hookResult = runPreHooksWithBlocking(toolName, config.hooks, executingContext.workspace, {
+          input: JSON.stringify(input).substring(0, 10000),
+        });
+        return hookResult.blocked ? { blocked: true, reason: hookResult.reason } : undefined;
+      },
+      checkpoint: (toolName, input, executingContext) => {
+        for (const target of extractCheckpointTargets(toolName, input, executingContext.workspace)) checkpoint(target.path, target.tool);
+      },
+      postHook: (toolName, _input, _result, _error, executingContext) => {
+        runHooks("post", toolName, config.hooks, executingContext.workspace);
+      },
+      event: (event, executingContext) => {
+        if (event.phase !== "complete") return;
+        const result = event.output;
+        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+        const isError = event.error || (typeof result === "string" && result.startsWith("Error:"));
+        if (isError) {
+          logger.error("Tool error", { persona: story.persona, tool: event.toolName, result: resultStr });
+          runLifecycleHooks("tool_error", config.hooks, executingContext.workspace, {
+            WORKERMILL_TOOL: event.toolName,
+            WORKERMILL_TOOL_INPUT: JSON.stringify(event.input).substring(0, 10000),
+            WORKERMILL_TOOL_ERROR: (event.error instanceof Error ? event.error.message : resultStr).substring(0, 10000),
+            WORKERMILL_STORY_ID: story.id,
+            WORKERMILL_STORY_PERSONA: story.persona,
+          });
+        } else {
+          logger.debug("Tool result", { tool: event.toolName, result: resultStr });
+        }
+        if (event.toolName === "bash") {
+          const command = String(event.input.command || "");
+          if (/docker[\s-]compose\s+up/i.test(command)) startedDockerCompose.add(String(event.input.cwd || executingContext.workspace));
+          if (typeof result === "string") {
+            if (/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i.test(result)) {
+              storyHealth.testResults = result.split("\n").filter((line) => /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(line)).slice(-5).join("\n");
+            }
+            const errors = result.split("\n").filter((line) => /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(line));
+            if (errors.length > 0) storyHealth.buildErrors = errors.join("\n");
+            if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(command)) {
+              const services = result.split("\n").filter((line) => /Up|running|healthy/i.test(line));
+              if (services.length > 0) storyHealth.servicesRunning = services.map((line) => line.trim());
+            }
+          }
+        }
+        output.status("");
+      },
+    };
+
+    const allTools = createToolDefinitions(workingDir, model, sandboxed, { executionContext });
+    const personaTools: Record<string, AnyToolDef> = {};
+    for (const toolName of persona.tools) {
+      const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
+      if (toolDef) personaTools[toolName] = toolDef;
+    }
+    Object.assign(personaTools, getMCPToolDefinitions());
+    const mcpNames = Object.keys(personaTools).filter((name) => name.startsWith("mcp__"));
+    if (mcpNames.length > 20) {
+      for (const name of mcpNames.slice(20)) delete personaTools[name];
+      logger.info("Deferred excess MCP tools in orchestrator", { total: mcpNames.length, deferred: mcpNames.slice(20).length, kept: 20 });
+      output.log("system", `${mcpNames.length - 20} MCP tools deferred to fit context (${mcpNames.length} total, 20 kept)`);
+    }
+    personaTools.skill = {
+      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
+      inputSchema: z.object({ name: z.string(), args: z.string().optional() }),
+      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
+        const { loadCustomCommands } = await import("../custom-commands.js");
+        const match = loadCustomCommands().find((skill: { name: string }) => skill.name.toLowerCase() === skillName.toLowerCase());
+        return match ? (args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt) : `Skill "${skillName}" not found.`;
+      },
+    };
+    for (const [toolName, toolDef] of Object.entries(personaTools)) {
+      if (!toolDef || typeof toolDef.execute !== "function") continue;
+      const original = toolDef.execute;
+      const execute = async (input: Record<string, unknown>): Promise<unknown> => {
+        try {
+          return await executeToolCall(toolName, input, () => original(input), executionContext);
+        } catch (error) {
+          if (error instanceof ToolExecutionError) return `Tool execution denied: ${error.message}`;
+          throw error;
+        }
+      };
+      personaTools[toolName] = { ...toolDef, execute: withConcurrencyControl(toolName, execute as never) };
+    }
 
     // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts
     const contextParts: string[] = [];
@@ -1099,11 +1030,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     }
 
     try {
-      // Combine user abort with loop detection abort
-      const combinedAbort = new AbortController();
-      if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
-      loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
-
       // Text repetition detection
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
@@ -1123,7 +1049,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       const storyStartMs = Date.now();
       const stream = streamText({
         model,
-        abortSignal: combinedAbort.signal,
+        abortSignal: combinedSignal,
         system: systemPrompt,
         prompt: fittedPrompt.prompt,
         tools: personaTools as ToolSet,
@@ -1189,7 +1115,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
                 if (textRepeatCount >= TEXT_ABORT_THRESHOLD) {
                   logger.error("Text output loop — aborting after repeated output", { persona: story.persona });
                   output.error("Text output stuck in loop — aborting story");
-                  combinedAbort.abort();
+                  loopAbort.abort();
                 }
                 return;
               }
@@ -1217,7 +1143,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       }
 
       // Check abort immediately after stream ends — user may have pressed ESC
-      if (abortSignal?.aborted) {
+      if (combinedSignal.aborted) {
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
         return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };

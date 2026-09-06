@@ -264,6 +264,7 @@ import { runCompletion } from "../orchestrator/completion.js";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
+import * as logger from "../logger.js";
 
 // ---- Helpers ----
 
@@ -888,7 +889,12 @@ describe("orchestrator", () => {
       expect(output.errors).not.toContain("[required_command_failed] advisory check failed");
       expect(runCompletion).toHaveBeenCalledOnce();
       expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(3);
-      expect(output.logs.join(" ")).toContain("No remote configured");
+      const completionDebugMessages = vi.mocked(logger.debug).mock.calls
+        .map(([message]) => String(message));
+      expect(
+        output.logs.join(" "),
+        `completion diagnostics: ${JSON.stringify({ errors: output.errors, debug: completionDebugMessages })}`,
+      ).toContain("No remote configured");
       expect(output.updateCost).toHaveBeenCalled();
     });
 
@@ -2436,7 +2442,7 @@ describe("classifyError categories (via story execution errors)", () => {
 
   it("logs rate_limit error message when story throws 429", async () => {
     // Use fake timers so rateLimitSleep resolves instantly
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = makePlanWithOneStory();
     let callCount = 0;
@@ -2446,10 +2452,10 @@ describe("classifyError categories (via story execution errors)", () => {
       if (typeof opts.onStepFinish === "function") {
         (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
           text: "done",
-          toolCalls: callCount === 2 ? [FAKE_TOOL_CALL] : [],
+          toolCalls: callCount >= 2 ? [FAKE_TOOL_CALL] : [],
         });
       }
-      if (callCount === 2) {
+      if (callCount >= 2) {
         const cwd = process.cwd();
         fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
         fs.writeFileSync(path.join(cwd, "src", "impl-review-retry.ts"), "// impl");
@@ -2461,18 +2467,24 @@ describe("classifyError categories (via story execution errors)", () => {
           totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
         };
       }
-      throw new Error("rate limit exceeded — 429 Too Many Requests");
+      if (callCount === 2) {
+        throw new Error("rate limit exceeded — 429 Too Many Requests: retry after 1");
+      }
+      return {
+        textStream: (async function* () { yield "Recovered after retry."; })(),
+        text: Promise.resolve("Recovered after retry."),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
     });
 
     const config = createTestConfig();
     const output = createMockOutput();
 
-    // Run orchestration and advance timers whenever it sleeps
+    // Let async startup finish and schedule the retry before advancing its
+    // backoff. Advancing first would miss a timer registered after Git I/O.
     const promise = runOrchestration(config, "Build feature", true, false, output);
-    // Flush all pending timers (rate limit retries)
-    for (let i = 0; i < 10; i++) {
-      await vi.advanceTimersByTimeAsync(60_000);
-    }
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/Rate limited/i));
+    await vi.advanceTimersByTimeAsync(5_000);
     await promise;
 
     vi.useRealTimers();
@@ -2482,7 +2494,7 @@ describe("classifyError categories (via story execution errors)", () => {
   });
 
   it("retries the planner when it is rate limited", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = makePlanWithOneStory();
     let callCount = 0;
@@ -2524,6 +2536,7 @@ describe("classifyError categories (via story execution errors)", () => {
     const output = createMockOutput();
 
     const promise = runOrchestration(config as any, "Build feature", true, false, output);
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/Planner rate limited/i));
     await vi.advanceTimersByTimeAsync(5_000);
     await promise;
     vi.useRealTimers();

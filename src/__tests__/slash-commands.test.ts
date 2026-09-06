@@ -734,6 +734,7 @@ describe("handleSlashCommand", () => {
       expect(msg.startsWith("\n**Settings**")).toBe(true);
       // Primary settings present
       expect(msg).toContain("Review enabled");
+      expect(msg).toContain("Require different reviewer model");
       expect(msg).toContain("QA participation");
       expect(msg).toContain("Live code view");
       expect(msg).toContain("Issue tracker");
@@ -1699,6 +1700,16 @@ describe("handleSlashCommand", () => {
       expect(saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           review: expect.objectContaining({ enabled: true }),
+        }),
+      );
+    });
+
+    it("updates review.requireDifferentModel and persists the opt-in", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings Review.RequireDifferentModel true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ requireDifferentModel: true }),
         }),
       );
     });

@@ -46,6 +46,8 @@ export interface ReviewConfig {
   criticThreshold?: number;
   /** Strict mode — zero tolerance for gate failures, require review approval, block out-of-scope edits (default: false) */
   strict?: boolean;
+  /** Require the reviewer binding to be known-different from every worker binding (default: false) */
+  requireDifferentModel?: boolean;
 }
 
 export interface ProgramConfig {
@@ -383,6 +385,7 @@ export const ReviewConfigSchema = z.object({
   critic: z.boolean().optional(),
   criticThreshold: z.number().optional(),
   strict: z.boolean().optional(),
+  requireDifferentModel: z.boolean().optional(),
 });
 
 export const ProgramConfigSchema = z.object({

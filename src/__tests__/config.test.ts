@@ -390,7 +390,7 @@ describe("config", () => {
         default: "ollama",
         routing: { planner: "ollama" },
         qa: { participation: "default" },
-        review: { enabled: true, maxRevisions: 3 },
+        review: { enabled: true, maxRevisions: 3, requireDifferentModel: true },
       };
       fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
 
@@ -422,6 +422,7 @@ describe("config", () => {
       // Review is merged
       expect(resolved.review?.enabled).toBe(true);
       expect(resolved.review?.maxRevisions).toBe(5);
+      expect(resolved.review?.requireDifferentModel).toBe(true);
     });
 
     it("merges hooks arrays (global + project)", async () => {

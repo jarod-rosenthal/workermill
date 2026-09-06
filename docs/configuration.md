@@ -139,7 +139,8 @@ Controls the `/build` review pipeline.
   "specCheck": false,
   "critic": false,
   "criticThreshold": 8,
-  "verifyEnabled": true
+  "verifyEnabled": true,
+  "requireDifferentModel": false
 }
 ```
 
@@ -154,6 +155,7 @@ Controls the `/build` review pipeline.
 | `critic` | `false` | Between planning and execution: scores the plan and refines it before any worker starts. See below. |
 | `criticThreshold` | `8` | Plan score (1-10) the critic must reach to approve. Only used when `critic` is `true`. |
 | `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
+| `requireDifferentModel` | `false` | Opt in to blocking review preflight when the reviewer does not resolve to a known-different endpoint/model binding from every worker binding. Unknown identity does not satisfy this requirement. |
 
 ### The planner critic
 
@@ -180,7 +182,10 @@ The critic runs on whatever provider `routing.critic` points at, falling back to
 /settings review.specCheck true
 /settings review.critic true
 /settings review.criticThreshold 8
+/settings review.requireDifferentModel true
 ```
+
+When enabled, a run must provide a reviewer binding that is known-different from every worker binding before model work begins. The setting does not reroute workers or reviewers and never silently selects another model. Bindings are compared using resolved provider aliases plus a normalized endpoint and model identifier; credentials and query strings are not reported. Different identifiers are only an identity check, not proof that the models were independently trained. R15 will consume this preflight once orchestration records the actual worker and reviewer bindings; this release exposes the setting and comparison API but does not yet wire it into `/build`.
 
 `verifyEnabled` is the one field with no `/settings` key — set it directly in `.workermill/config.json`:
 

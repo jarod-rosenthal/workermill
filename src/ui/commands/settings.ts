@@ -36,6 +36,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       `| Setting | Value | Command |\n` +
       `|---|---|---|\n` +
       `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
+      `| Require different reviewer model | ${config.review?.requireDifferentModel ?? false} | \`/settings review.requireDifferentModel <true/false>\` |\n` +
       `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
       `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
       `| QA participation | ${qaParticipation} | \`/settings qa.participation <default/always>\` |\n` +
@@ -66,6 +67,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         `| Ollama host | \`${ollamaHost}\` | \`/settings ollama.host <url>\` |\n` +
         `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
         `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
+        `| Require different reviewer model | ${config.review?.requireDifferentModel ?? false} | \`/settings review.requireDifferentModel <true/false>\` |\n` +
         `| Strict mode | ${config.review?.strict ?? false} | \`/settings review.strict <true/false>\` |\n` +
         `| Spec check | ${config.review?.specCheck ?? false} | \`/settings review.specCheck <true/false>\` |\n` +
         `| Plan critic | ${config.review?.critic ?? false} | \`/settings review.critic <true/false>\` |\n` +
@@ -129,6 +131,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       "ollama.host": "ollama.host",
       "ollama.context": "ollama.context",
       "review.enabled": "review.enabled",
+      "review.requiredifferentmodel": "review.requireDifferentModel",
       "review.maxrevisions": "review.maxRevisions",
       "review.threshold": "review.threshold",
       "review.autorevise": "review.autoRevise",
@@ -188,6 +191,10 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
       }
       case "review.enabled": {
         config.review = { ...config.review, enabled: boolVal(value) };
+        break;
+      }
+      case "review.requireDifferentModel": {
+        config.review = { ...config.review, requireDifferentModel: boolVal(value) };
         break;
       }
       case "review.maxRevisions": {
@@ -419,7 +426,7 @@ export function handleSettingsCommand(arg: string, ctx: SlashCommandContext): vo
         break;
     }
 
-    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.strict", "review.specCheck", "review.critic", "review.criticThreshold", "editor", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
+    if (settingApplied && ["ollama.host", "ollama.context", "review.enabled", "review.requireDifferentModel", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.strict", "review.specCheck", "review.critic", "review.criticThreshold", "editor", "qa.participation", "program.maxIssues", "program.maxAutoRetries", "program.gateMode", "sandbox", "liveView", "ui.inlineEditPreview", "bell", "experimental", "route", "key", "tickets", "jira.url", "jira.email", "jira.token", "linear.key", ].includes(key)) {
       saveConfig(config);
       ctx.addSystemMessage(`**Updated** \`${key}\` \u2192 \`${value}\` (saved to ~/.workermill/cli.json)`);
       if (key === "route") {

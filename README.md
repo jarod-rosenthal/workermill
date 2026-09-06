@@ -2,13 +2,13 @@
 
 # WorkerMill
 
-### Free local models write the code. Smart models plan and review. You pay pennies instead of dollars.
+### Plan, build, and review code with a configurable team of local and cloud models.
 
 <br>
 
-Most AI coding tools run every token through an expensive cloud model. WorkerMill flips that. A team of specialist AI personas — each routable to a different provider — handles the heavy lifting on local models or affordable cloud APIs. You only burn premium tokens on planning and review. Same quality, fraction of the cost.
+WorkerMill routes specialist AI personas to the providers you choose. Use local models for execution, cloud models for planning and review, or one provider for every role. Routing gives you control over the tradeoff; cost and accepted-code quality depend on the models, task, retries, and your hardware. Comparative savings and quality parity have not been established by a controlled evaluation.
 
-Point it at a ticket. Get a pull request — planned, built by experts, and independently reviewed.
+Start from a ticket or specification, inspect the plan and code changes, and use the review and verification stages before deciding whether to publish a pull request. A separate reviewer role does not necessarily use a different underlying model.
 
 <br>
 
@@ -89,7 +89,7 @@ Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the wo
          Cost: ~$2.50 (planner + reviewer only — workers ran locally for free)
 ```
 
-The reviewer caught a real N+1 database query. The workers fixed it. The re-review passed. No human intervention. That's the difference between one model approving its own work and a team with independent review.
+The example illustrates the review-and-revision workflow. Review quality depends on the selected models and verification coverage; a separate review invocation is not proof of independent model judgment.
 
 Works with **GitHub Issues** (`/build #42`), **Jira** (`/build PROJ-123`), **Linear** (`/build TEAM-42`), spec files (`/build spec.md`), or just a description (`/build add dark mode`).
 
@@ -156,7 +156,7 @@ Unlike single-model tools, WorkerMill never lets the same model review its own c
 2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk — refining it until it passes or 3 rounds are spent. Bad plans get caught before a single line of code is written.
 3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run on local models, affordable cloud APIs, or any provider you choose.
 4. **Quality gates** run after each story — your tests, linter, LSP diagnostics. Failures get injected into the reviewer's context.
-5. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
+5. **A reviewer** reads the actual diffs against the original spec and can request revisions with specific feedback. Its model follows your routing configuration and may be the same as a worker's. Revisions are bounded by the configured limit, and a review score is not proof of correctness.
 
 ```json
 {

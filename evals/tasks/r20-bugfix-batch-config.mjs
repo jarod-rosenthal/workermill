@@ -55,8 +55,11 @@ const referenceFiles = {
 const incompleteFiles = {
   ...baselineFiles,
   "src/config.mjs": baselineFiles["src/config.mjs"].replace(
+    'const key = line.slice(0, separator).trim();',
+    'const rawKey = line.slice(0, separator);\n    const key = rawKey.trim();',
+  ).replace(
     'const value = line.slice(separator + 1).trim();',
-    'const rawKey = line.slice(0, separator);\n    const key = rawKey.trim();\n    const value = line.slice(separator + 1).trim();\n    if (Object.hasOwn(result, rawKey)) throw new Error("duplicate config key: " + key);',
+    'const value = line.slice(separator + 1).trim();\n    if (Object.hasOwn(result, rawKey)) throw new Error("duplicate config key: " + key);',
   ),
 };
 

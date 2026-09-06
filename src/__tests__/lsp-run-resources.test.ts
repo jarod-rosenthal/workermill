@@ -79,6 +79,13 @@ afterEach(async () => {
 });
 
 describe("run-owned LSP resources", () => {
+  it("decodes UTF-8 protocol bytes split across stdout chunks", async () => {
+    const directory = await workspace("wm-lsp-unicode-");
+    const run = resources("unicode", directory, new AbortController().signal, "unicode-chunks");
+    const response = await run.execute({ action: "symbols", file: join(directory, "sample.ts") });
+    expect(response).toMatchObject({ success: true, content: expect.stringContaining("工具") });
+  });
+
   it("acquires registry resources lazily and never gives a child a supplied parent resource", async () => {
     const parentDirectory = await workspace("wm-lsp-registry-parent-");
     const childDirectory = await workspace("wm-lsp-registry-child-");

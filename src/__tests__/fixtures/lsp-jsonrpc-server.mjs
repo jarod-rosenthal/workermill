@@ -21,6 +21,13 @@ let buffer = Buffer.alloc(0);
 
 function send(message) {
   const body = JSON.stringify(message);
+  if (mode === "unicode-chunks" && body.includes("工具")) {
+    const wire = Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    const split = wire.indexOf(Buffer.from("工具")) + 1;
+    process.stdout.write(wire.subarray(0, split));
+    setTimeout(() => process.stdout.write(wire.subarray(split)), 20);
+    return;
+  }
   process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
 }
 
@@ -53,7 +60,7 @@ function handle(message) {
     return;
   }
   if (message.method === "textDocument/documentSymbol") {
-    send({ jsonrpc: "2.0", id: message.id, result: [{ name: "fixtureSymbol", kind: 12, range: { start: { line: 0 } } }] });
+    send({ jsonrpc: "2.0", id: message.id, result: [{ name: mode === "unicode-chunks" ? "工具" : "fixtureSymbol", kind: 12, range: { start: { line: 0 } } }] });
     return;
   }
   if (message.method === "textDocument/diagnostic") {

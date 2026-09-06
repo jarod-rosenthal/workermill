@@ -106,7 +106,7 @@ interface ServerState {
   process: ChildProcess;
   language: string;
   requestId: number;
-  responseBuffer: string;
+  responseBuffer: Buffer;
   pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
   openFiles: Map<string, number>; // uri -> version
   publishedDiagnostics: Map<string, DiagnosticItem[]>; // uri -> diagnostics from push notifications
@@ -335,9 +335,9 @@ function sendNotification(s: ServerState, method: string, params: unknown): void
 
 function handleData(s: ServerState, data: Buffer): void {
   if (s.closed) return;
-  s.responseBuffer += data.toString();
-  if (Buffer.byteLength(s.responseBuffer) > s.maxResponseBytes) {
-    s.responseBuffer = "";
+  s.responseBuffer = Buffer.concat([s.responseBuffer, data]);
+  if (s.responseBuffer.length > s.maxResponseBytes) {
+    s.responseBuffer = Buffer.alloc(0);
     rejectPending(s, new Error(`LSP response buffer exceeded ${s.maxResponseBytes} bytes`));
     return;
   }
@@ -346,7 +346,7 @@ function handleData(s: ServerState, data: Buffer): void {
     const headerEnd = s.responseBuffer.indexOf("\r\n\r\n");
     if (headerEnd === -1) break;
 
-    const header = s.responseBuffer.slice(0, headerEnd);
+    const header = s.responseBuffer.subarray(0, headerEnd).toString("ascii");
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) {
       s.responseBuffer = s.responseBuffer.slice(headerEnd + 4);
@@ -354,10 +354,16 @@ function handleData(s: ServerState, data: Buffer): void {
     }
 
     const contentLength = parseInt(match[1], 10);
+    if (!Number.isSafeInteger(contentLength) || contentLength > s.maxResponseBytes) {
+      s.responseBuffer = Buffer.alloc(0);
+      rejectPending(s, new Error(`LSP response buffer exceeded ${s.maxResponseBytes} bytes`));
+      return;
+    }
     const bodyStart = headerEnd + 4;
     if (s.responseBuffer.length < bodyStart + contentLength) break;
 
-    const body = s.responseBuffer.slice(bodyStart, bodyStart + contentLength);
+    // LSP Content-Length counts UTF-8 bytes, not JavaScript characters.
+    const body = s.responseBuffer.subarray(bodyStart, bodyStart + contentLength).toString("utf8");
     s.responseBuffer = s.responseBuffer.slice(bodyStart + contentLength);
 
     try {
@@ -543,7 +549,7 @@ async function ensureServer(collection: ResourceCollection): Promise<ServerState
       }),
       language: detected.language,
       requestId: 1,
-      responseBuffer: "",
+      responseBuffer: Buffer.alloc(0),
       pendingRequests: new Map(),
       openFiles: new Map(),
       publishedDiagnostics: new Map(),

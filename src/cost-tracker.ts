@@ -39,7 +39,7 @@ export interface CallSnapshot {
   persona: string;
   provider: string;
   model: string;
-  /** Omit when the provider did not report usage, including failed calls. */
+  /** SDK totals, including cached input. Omit when usage was not reported. */
   usage?: Partial<TokenUsage>;
   /** Set false when these otherwise complete subtotals exclude later SDK steps. */
   usageComplete?: boolean;
@@ -48,7 +48,7 @@ export interface CallSnapshot {
 export interface LedgerCall extends CallSnapshot {
   usageState: "reported" | "partial" | "missing";
   pricingState: ApiPricingState;
-  /** Present only when both reported usage and an API estimate are known. */
+  /** Estimate for observed tokens only; usageState separately reports gaps. */
   estimatedApiCost?: number;
 }
 
@@ -129,7 +129,12 @@ function calculateKnownCost(usage: TokenUsage, rates: {
   cacheWriteRate?: number;
   cacheReadRate?: number;
 }): number {
-  return (usage.inputTokens / 1000) * rates.inputRate
+  // SDK inputTokens already includes cache reads/writes. Charge each token
+  // once; when no cache rate is registered retain the ordinary input rate.
+  const cacheWrites = rates.cacheWriteRate === undefined ? 0 : usage.cacheCreationTokens ?? 0;
+  const cacheReads = rates.cacheReadRate === undefined ? 0 : usage.cacheReadTokens ?? 0;
+  const ordinaryInput = Math.max(0, usage.inputTokens - cacheWrites - cacheReads);
+  return (ordinaryInput / 1000) * rates.inputRate
     + (usage.outputTokens / 1000) * rates.outputRate
     + ((usage.cacheCreationTokens ?? 0) / 1000) * (rates.cacheWriteRate ?? 0)
     + ((usage.cacheReadTokens ?? 0) / 1000) * (rates.cacheReadRate ?? 0);
@@ -167,19 +172,18 @@ export class CostTracker {
     const usageState = usage === undefined
       ? "missing"
       : hasCompleteUsage(usage) && snapshot.usageComplete !== false ? "reported" : "partial";
-    const completeUsage = usage && hasCompleteUsage(usage) ? usage : undefined;
     const resolvedProvider = resolveBaseProvider(snapshot.provider);
     const resolvedModel = normalizeOpenAIModel(snapshot.model);
     const local = isLocalProvider(resolvedProvider);
     const engine = hasProvider(resolvedProvider) ? getPricingEngine(resolvedProvider) : undefined;
     const modelInfo = engine?.getModelInfo(resolvedModel);
     const pricingState: ApiPricingState = local ? "local" : modelInfo ? "known" : "unknown";
-    const estimatedApiCost = usageState !== "reported"
+    const estimatedApiCost = !usage || (usage.inputTokens === undefined && usage.outputTokens === undefined)
       ? undefined
       : pricingState === "local"
         ? 0
         : pricingState === "known"
-          ? calculateKnownCost(completeUsage!, modelInfo!)
+          ? calculateKnownCost({ ...usage, inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 }, modelInfo!)
           : undefined;
     const call: LedgerCall = {
       callId: snapshot.callId,
@@ -339,7 +343,7 @@ export class CostTracker {
     const ledger = this.getLedgerSnapshot().totals;
     if (ledger.unknownPricingCalls || ledger.partialUsageCalls || ledger.missingUsageCalls) {
       lines.push(
-        `  Note: subtotal excludes ${ledger.unknownPricingCalls} call(s) with unknown pricing and ${ledger.partialUsageCalls + ledger.missingUsageCalls} call(s) with incomplete or missing usage.`,
+        `  Note: subtotal excludes ${ledger.unknownPricingCalls} call(s) with unknown pricing; ${ledger.partialUsageCalls + ledger.missingUsageCalls} call(s) have incomplete or missing usage. Only observed tokens are included.`,
       );
     }
 

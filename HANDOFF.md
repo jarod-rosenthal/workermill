@@ -1,10 +1,10 @@
 # WorkerMill recovery handoff
 
-Updated UTC: 2026-09-06T20:47:53.420127+00:00. User authorized completion of remaining reliability work as far as possible. Latest implementation: `e85a32e7` on `reliability/core`, R15 and R23 accepted. **1,655 passed, zero failed, one existing skip; typecheck passed.** Build passed before final timestamp correction; next batch boundary rebuilds.
+Current implementation base: `5c8b6b81` on `reliability/core`. User authorized completion of remaining reliability work as far as possible. R15/R23 complete; R16a/R18a complete. Latest combined qualification at `8ab95df8`: **1,665 passed, zero failed, one existing skip; typecheck/build passed.**
 
-Active batch: R16a and R18a only. R16a worker `/root/r16a_fixture` owns test fixture/helper tests in `/home/user/github/workermill-r16a-cont`, branch `reliability/r16a-cont`, base `e85a32e7`. R18a worker `/root/r18a_ledger` owns `cost-tracker.ts`, provider types and cost tests in `/home/user/github/workermill-r18a-cont`, branch `reliability/r18a-cont`, same base. Coordinator owns core integration/checkpoint docs and read-only R18b/c/R17 call-site preparation. Neither worker owns adapters yet.
+Active batch: R16b worker `/root/r16b_governance` owns real-SDK adapter tests in `/home/user/github/workermill-r16b-cont` (branch `reliability/r16b-cont`, base `5c8b6b81`). R18b1 worker `/root/r18b1_subcalls` owns child/compaction usage-event wiring/tests in `/home/user/github/workermill-r18b1-cont` (same base). Coordinator owns core docs and a narrow cost-tracker cache arithmetic correction/tests; all write scopes are disjoint.
 
-Acceptance: real SDK scripted tool/result/abort fixture and additive ledger identity/unknown-pricing contract; focused/full/typecheck worker evidence, then combined core qualification before successor dispatch. Broader R16/R18 parents remain incomplete. No live paid evaluation, publication, push, release, or worktree cleanup.
+R18b is split sequentially into b1 child/compaction events, b2 headless, b3 chat. R18c follows for orchestration/session-manifest wiring. Workers submit focused/typechecked candidates; coordinator full combined qualification is required before accepting/advancing. Earlier worker full tool waits stalled and were interrupted without results; do not repeat those waits silently. No live paid evaluation, publication, push, release, or worktree cleanup.
 
 
 ## Historical audit state (before the repair below)
@@ -161,3 +161,7 @@ Both worker full-test tool calls stopped returning output for over five minutes 
 ## R16a/R18a accepted and successor batch
 
 Implementation8ab95df8 (R16a e9184308, R18a8ab95df8). Full suite1665passed0failed1skip108files31.34s; typecheck/buildexit0. Original worker full waits aborted; this combined run qualifies both candidates. Next R16b owns real-SDK governance tests only. R18b split before implementation into b1 child/compaction usage events, b2 headless, b3 chat, preserving sequential runtime ownership and150-350line target. Coordinator owns integration; no parallel adapter writers. All suffixes require combined qualification before advancing.
+
+Current coordinator-only correction during R16b/R18b1: clarify ledger inputTokens are SDK total input including cache tokens; subtract cache-priced dimensions before applying ordinary input rate. Existing cache test double-charged those dimensions. Own only cost-tracker.ts and cost-tracker.test.ts; worker files disjoint. Provider rate values unchanged.
+
+Coordinator R18 accounting correction also includes observed partial-call cost in known subtotal while preserving partial/missing flags, rather than dropping known failed-attempt usage. Focused initial correction hit floating-point exact equality (.0012 vs .0012000000000000001); assertion now uses tight numeric tolerance. No rate/default changes.

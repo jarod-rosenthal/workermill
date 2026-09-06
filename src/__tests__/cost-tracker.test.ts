@@ -163,15 +163,15 @@ describe("CostTracker", () => {
         ["missing", "known", undefined],
         ["reported", "unknown", undefined],
         ["reported", "unknown", undefined],
-        ["partial", "known", undefined],
+        ["partial", "known", expect.closeTo(0.0012, 10)],
       ]);
     expect(ledger.totals).toMatchObject({
-      missingUsageCalls: 1, partialUsageCalls: 1, unknownPricingCalls: 2, estimatedApiCost: 0,
+      missingUsageCalls: 1, partialUsageCalls: 1, unknownPricingCalls: 2, estimatedApiCost: expect.closeTo(0.0012, 10),
     });
     expect(ledger.calls[3].usageComplete).toBe(false);
     expect(tracker.getTotalTokens()).toBe(4100);
     expect(tracker.getUsageSummary().byRole.worker.inputTokens).toBe(3000);
-    expect(tracker.getTotalCost()).toBe(0);
+    expect(tracker.getTotalCost()).toBeCloseTo(0.0012);
     expect(tracker.getSummary()).toContain("subtotal excludes 2 call(s) with unknown pricing");
   });
 
@@ -191,7 +191,7 @@ describe("CostTracker", () => {
     });
   });
 
-  it("uses registered cache rates when complete usage is known", () => {
+  it("charges cached input once within SDK input totals", () => {
     tracker.recordCall({
       callId: "cached-api-call",
       persona: "worker",
@@ -199,7 +199,8 @@ describe("CostTracker", () => {
       model: "gpt-5.4",
       usage: { inputTokens: 1000, outputTokens: 500, cacheCreationTokens: 200, cacheReadTokens: 300 },
     });
-    expect(tracker.getLedgerSnapshot().calls[0].estimatedApiCost).toBeCloseTo(0.00275);
+    expect(tracker.getLedgerSnapshot().calls[0].estimatedApiCost).toBeCloseTo(0.00225);
+    expect(tracker.getUsageSummary().total.inputTokens).toBe(1000);
   });
 
   it("treats LM Studio as local even when it has no pricing registry entry", () => {

@@ -145,17 +145,20 @@ describe("isolated sub-agents", () => {
 
   it("drains a late captured model-tool rejection after normal stream completion", async () => {
     const workingDir = repo();
-    const started = deferred<void>();
+    const rawStarted = deferred<void>();
+    const streamFinished = deferred<void>();
     const toolFailure = deferred<string>();
     sdk.streamText.mockImplementation((options: { tools: Record<string, ChildTool> }) => ({
-      textStream: (async function* () { void options.tools.read_file.execute?.({ path: "base.txt" }); await started.promise; yield "done"; })(),
+      textStream: (async function* () { void options.tools.read_file.execute?.({ path: "base.txt" })?.catch(() => {}); yield "done"; streamFinished.resolve(); })(),
       text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
     }));
-    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: () => toolFailure.promise } }, {
-      executionContext: context(workingDir), createTools: () => ({ read_file: { execute: () => toolFailure.promise } }),
+    const rawRead = () => { rawStarted.resolve(); return toolFailure.promise; };
+    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: rawRead } }, {
+      executionContext: context(workingDir), createTools: () => ({ read_file: { execute: rawRead } }),
     });
     const running = executor({ prompt: "read", isolated: false });
-    started.resolve();
+    await rawStarted.promise;
+    await streamFinished.promise;
     toolFailure.reject(new Error("late tool failure"));
     const result = await running;
     expect(result.success).toBe(false);
@@ -164,28 +167,43 @@ describe("isolated sub-agents", () => {
 
   it("keeps a successful in-flight read tool alive until it settles, then closes its model signal", async () => {
     const workingDir = repo();
-    const started = deferred<void>();
+    const rawStarted = deferred<void>();
+    const streamFinished = deferred<void>();
     const release = deferred<string>();
     let childSignal: AbortSignal | undefined;
+    let capturedTool: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
+    let rawCalls = 0;
     sdk.streamText.mockImplementation((options: { tools: Record<string, ChildTool> }) => ({
-      textStream: (async function* () { void options.tools.read_file.execute?.({ path: "base.txt" }); await started.promise; yield "done"; })(),
+      textStream: (async function* () {
+        capturedTool = options.tools.read_file.execute;
+        void capturedTool?.({ path: "base.txt" }).catch(() => {});
+        yield "done";
+        streamFinished.resolve();
+      })(),
       text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
     }));
-    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: () => release.promise } }, {
+    const rawRead = () => { rawCalls++; rawStarted.resolve(); return release.promise; };
+    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: rawRead } }, {
       executionContext: context(workingDir),
       createTools: (_dir, _scope, childContext) => {
         childSignal = childContext.signal;
-        return { read_file: { execute: () => release.promise } };
+        return { read_file: { execute: rawRead } };
       },
     });
     const running = executor({ prompt: "read", isolated: false });
-    started.resolve();
+    let settled = false;
+    void running.finally(() => { settled = true; });
+    await rawStarted.promise;
+    await streamFinished.promise;
     await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
     expect(childSignal?.aborted).toBe(false);
     release.resolve("contents");
     const result = await running;
     expect(result.success).toBe(true);
     expect(childSignal?.aborted).toBe(true);
+    await expect(capturedTool?.({ path: "base.txt" })).rejects.toThrow(/cancel/i);
+    expect(rawCalls).toBe(1);
   });
 
   it("rejects a child explicit-file escape and preserves the failed worktree", async () => {

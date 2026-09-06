@@ -59,11 +59,11 @@ Requires `/settings experimental true` — without it the command reports that i
 /orchestrate #120
 ```
 
-Bounded by the `program` config block — `program.maxIssues` (default 25) aborts a run whose decomposition explodes, `program.maxAutoRetries` (default 1) controls per-issue retries, and `program.gateMode` decides whether epic-milestone gates are advisory or required. See the [Configuration reference](configuration.md#program).
+Bounded by the `program` config block — `program.maxIssues` (default 25) aborts a run whose decomposition explodes, `program.maxAutoRetries` (default 1) controls per-issue retries, and `program.gateMode` decides whether epic-milestone gates are advisory or required. Parent cancellation reaches decomposition, issue requests, and scoped gates; issue HTTP has a 60-second bound, but cancellation cannot undo an accepted remote mutation. The final program summary labels its usage as the last build only; `/cost` session totals include all recorded builds. Decomposition itself is outside a build-run ledger. See the [Configuration reference](configuration.md#program).
 
 ### `/as <persona> <task>`
 
-Run a single expert with their system prompt, full tool access, and no planning or review loop.
+Run a single expert with its persona tools and no planning or review loop. Permission rules and the current mode still apply.
 
 ```
 /as backend_developer add pagination to /api/tasks
@@ -144,7 +144,7 @@ Reset conversation history completely. Does not affect persistent memories (`/me
 
 ### `/cost`
 
-Show a per-role, per-provider breakdown of the current session's token usage and estimated cost.
+Show the current model plus cumulative session token usage and estimated cost. Unknown pricing is excluded and incomplete provider usage is labelled; local API cost excludes hardware cost. Use `wm stats` for stored cross-session aggregation.
 
 ### `/status`
 

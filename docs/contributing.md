@@ -98,7 +98,10 @@ workermill/
 │   ├── schedule.ts            # /schedule cron tasks
 │   ├── engine/                # AI model factory, tools, types
 │   │   ├── model-factory.ts   # Provider → LanguageModel construction
+│   │   ├── model-usage.ts     # Normalize and settle observed SDK usage
+│   │   ├── run-resources.ts   # Attempt-owned cleanup for tools and services
 │   │   ├── process-runner.ts  # Async subprocess lifetime and run-scoped cancellation
+│   │   ├── scoped-process.ts  # OS/path process boundary and capabilities
 │   │   ├── path-policy.ts     # Canonical explicit-file scope and grants
 │   │   ├── tool-policy.ts     # Shared permission decision table
 │   │   ├── tool-executor.ts   # Permission/hook/checkpoint execution ordering

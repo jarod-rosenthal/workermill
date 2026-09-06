@@ -16,7 +16,7 @@ If you're just getting started, read the [project README](../README.md) first �
 
 ## Guides
 
-- **[Quality Gates & Spec Check](quality-gates.md)** — output assertions that run after workers finish and before the reviewer sees the diff. Includes spec check (pre-planning ambiguity detection). Both are off by default.
+- **[Quality Gates & Spec Check](quality-gates.md)** — configured static gates are required by default; planner verification is advisory outside strict mode. Spec check and planner critic are opt-in.
 - **[Recipes](recipes.md)** — concrete workflows combining features: mixed-provider teams, local-only setups, quality gates, custom personas, scheduled tasks.
 - **[Troubleshooting](troubleshooting.md)** — common issues, diagnostics, and fixes.
 
@@ -29,3 +29,4 @@ If you're just getting started, read the [project README](../README.md) first �
 
 - **[Current handoff](../HANDOFF.md)** — saved branch state, known failed checks, and the next bounded task.
 - **[September 6 retrospective](recovery/2026-09-06-retrospective.md)** — incident evidence, completed and remaining work, and continuity safeguards.
+- **[Qualification record](recovery/r24-qualification.md)** — regression-test map and the limits of the current release-candidate evidence.

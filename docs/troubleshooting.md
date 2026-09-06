@@ -2,6 +2,10 @@
 
 ## Setup
 
+### Supported runtime and OS modes
+
+WorkerMill requires Node.js 22.12 or newer. The configured CI matrix covers Linux and macOS on Node 22.12.0 and 22.22.2; local qualification is Linux/Node 22.22.2. Native Windows shell execution is unsupported; use WSL with its Linux runtime. OS sandbox mode requires supported host capabilities and fails closed when explicitly requested. See the [qualification record](recovery/r24-qualification.md) for completed checks and limits.
+
 ### `wm doctor` — start here
 
 Run this first for any setup issue. It checks Node.js version, Git, the config file, provider credentials, and local model availability.
@@ -134,7 +138,7 @@ Shows message count, token usage, current model, cost, permission mode, and work
 
 ### `/cost` — detailed cost breakdown
 
-Per-role, per-provider breakdown of input/output tokens and estimated cost.
+Current-model session token usage and estimated cost. Use `wm stats` for stored cross-session aggregation.
 
 ## Getting Help
 

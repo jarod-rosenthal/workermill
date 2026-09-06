@@ -150,12 +150,12 @@ Ask it to fix a bug, explain a function, or refactor a module. It reads your cod
 
 ## How It Works
 
-Unlike single-model tools, WorkerMill never lets the same model review its own code.
+WorkerMill can route planning, execution, and review separately. Routing remains your choice: a reviewer can use the same provider and model as a worker unless you enable `review.requireDifferentModel`.
 
 1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
-2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk — refining it until it passes or 3 rounds are spent. Bad plans get caught before a single line of code is written.
+2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk. Outside strict mode this is advisory; strict mode can stop an unapproved plan.
 3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run on local models, affordable cloud APIs, or any provider you choose.
-4. **Quality gates** run after each story — your tests, linter, LSP diagnostics. Failures get injected into the reviewer's context.
+4. **Quality gates** run on the prepared candidate. Required static gates block; planner-generated verification is reviewer context outside strict mode.
 5. **A reviewer** reads the actual diffs against the original spec and can request revisions with specific feedback. Its model follows your routing configuration and may be the same as a worker's. Revisions are bounded by the configured limit, and a review score is not proof of correctness.
 
 ```json
@@ -173,7 +173,7 @@ Unlike single-model tools, WorkerMill never lets the same model review its own c
 }
 ```
 
-Use expensive models for judgment. Free local models for volume.
+Choose models for the task and your operating constraints. Local inference can avoid a hosted API charge, but hardware and electricity still cost resources.
 
 ---
 
@@ -182,10 +182,10 @@ Use expensive models for judgment. Free local models for volume.
 | Feature | Description |
 |---------|-------------|
 | **Multi-Expert Orchestration** | `/build` decomposes tasks into stories and assigns specialist personas — backend, frontend, devops, security, QA |
-| **Independent Code Review** | Reviewer runs on a separate model. Never approves its own code. Rejects with specific feedback and code examples |
+| **Code Review** | Reviewer evaluates the candidate and can request revisions. It follows routing; `review.requireDifferentModel` is optional and checks configured identity, not independent training. |
 | **11 Built-in Personas** | architect, backend, frontend, mobile, devops, security, QA, data/ML, tech writer, planner, tech lead |
-| **Definition of Done** | Planner emits required files, tests, and commands per story — orchestrator enforces them before review |
-| **Quality Gates** | Tests, linter, and LSP diagnostics run after each story — failures block review |
+| **Definition of Done** | Required story commands block completion; required-file/test checks provide final-story evidence. |
+| **Quality Gates** | Configured static gates are required by default; planner verification and explicit advisory gates are non-blocking outside strict mode. |
 | **LSP Integration** | Language server diagnostics, go-to-definition, find-references, hover info, workspace symbols — semantic code intelligence |
 | **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
 | **Model Routing** | Choose a provider per role, including local models with no hosted API charge |
@@ -200,8 +200,8 @@ Use expensive models for judgment. Free local models for volume.
 | **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
 | **Run Manifests** | Inspect saved build records with `wm runs`; a completed story count alone does not establish passing final verification |
-| **Retry Rollback** | Failed story retries start from a clean workspace snapshot, not half-broken state |
-| **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |
+| **Retry Recovery** | Failed runs preserve state and edits for inspection and `/retry`; WorkerMill does not reset the checkout to HEAD automatically. |
+| **Sub-Agents** | Spawn child workers in git worktrees for parallel research or implementation; a worktree is not a security sandbox. |
 | **Permission System** | Granular allow/ask/deny rules; session trust cannot override explicit deny/ask or safety checks |
 
 ---

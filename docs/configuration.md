@@ -154,7 +154,7 @@ Controls the `/build` review pipeline.
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
 | `critic` | `false` | Between planning and execution: scores the plan and refines it before any worker starts. See below. |
 | `criticThreshold` | `8` | Plan score (1-10) the critic must reach to approve. Only used when `critic` is `true`. |
-| `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
+| `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story. Results are reviewer context and advisory outside strict mode; strict mode promotes failures to blocking. If the planner cannot generate meaningful commands, nothing runs. Set to `false` to disable. |
 | `requireDifferentModel` | `false` | Opt in to blocking review preflight when the reviewer does not resolve to a known-different endpoint/model binding from every worker binding. Unknown identity does not satisfy this requirement. |
 
 ### The planner critic
@@ -185,7 +185,7 @@ The critic runs on whatever provider `routing.critic` points at, falling back to
 /settings review.requireDifferentModel true
 ```
 
-When enabled, a run must provide a reviewer binding that is known-different from every worker binding before model work begins. The setting does not reroute workers or reviewers and never silently selects another model. Bindings are compared using resolved provider aliases plus a normalized endpoint and model identifier; credentials and query strings are not reported. Different identifiers are only an identity check, not proof that the models were independently trained. R15 will consume this preflight once orchestration records the actual worker and reviewer bindings; this release exposes the setting and comparison API but does not yet wire it into `/build`.
+When enabled, a run must provide a reviewer binding that is known-different from every worker binding before model work begins. The setting does not reroute workers or reviewers and never silently selects another model. Bindings are compared using resolved provider aliases plus a normalized endpoint and model identifier; credentials and query strings are not reported. Different identifiers are only an identity check, not proof that the models were independently trained.
 
 `verifyEnabled` is the one field with no `/settings` key — set it directly in `.workermill/config.json`:
 
@@ -298,7 +298,7 @@ still blocks that failure.
 
 All gates run sequentially to avoid races over shared build output. A gate fails on the first command that exits non-zero.
 
-**Do not use for:** `npm test`, `tsc`, `pytest`, `go build` — workers already run these. Use quality gates for black-box assertions on the *built artifact*, not the build process itself.
+Use gates for final-state evidence, including a bounded project test or build command where that is the relevant acceptance check. A worker's earlier result is not final-candidate evidence.
 
 See [Quality Gates & Spec Check](quality-gates.md) for examples across Node, Python, Go, and Ruby.
 

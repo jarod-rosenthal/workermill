@@ -38,8 +38,8 @@ Bracketed stages are off by default (`review.specCheck`, `review.critic`).
 - **Planner** reads the codebase and decomposes the task into scoped stories with specific files, acceptance criteria, and definition-of-done contracts (`requiredFiles`, `requiredTests`, `requiredCommands`)
 - **Plan critic** (optional) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk before any worker starts, refining it until it passes or 3 rounds are spent. This adds model calls and can identify planning issues before implementation; it does not guarantee lower total cost.
 - **Workers** execute stories one at a time using their persona's system prompt
-- **Definition-of-done** — after each story, the orchestrator validates that required files and tests exist and required commands pass. Missing artifacts block completion with machine-readable failure codes
-- **Quality gates** — static gates from config plus planner-generated verification commands run before review
+- **Definition-of-done** — required story commands block completion. Required-file and test evidence is checked against the candidate and failures use machine-readable codes.
+- **Quality gates** — static gates are required by default; planner-generated verification remains advisory outside strict mode.
 - **Reviewer** reads the diffs against the original spec and scores the code; a failing score sends work back for revision
 
 #### Orchestrator module structure
@@ -217,7 +217,7 @@ Pre- and post-tool hooks run shell commands or HTTP requests around tool executi
 
 ## Costs & Tokens
 
-`CostTracker` reports recorded model usage and estimated per-role costs via `/cost` and the status bar. Pricing data lives in `src/providers/*/pricing.ts`. These figures are not provider invoices or a complete billing ledger; missing usage and unknown pricing must not be interpreted as free execution.
+`CostTracker` records observed calls for run roles, child calls, compaction, failures, and retries once, then reports estimated per-role costs via `/cost` and the status bar. Unknown pricing is excluded and incomplete usage is labelled. Local API cost can be $0 while hardware and electricity remain unestimated. A run view is per-run; a session view is cumulative and preserves legacy history. Program decomposition occurs outside a build-run ledger. These figures are not provider invoices or application-wide billing totals. See the [qualification record](recovery/r24-qualification.md) for regression evidence and limits.
 
 ## What the CLI Is Not
 

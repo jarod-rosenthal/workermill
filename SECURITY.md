@@ -34,3 +34,5 @@ Provider keys can come from environment variables or configuration. Keys saved i
 Sessions, logs, checkpoints, and run records can contain private task text, source code, command output, or file copies. Review and redact diagnostic attachments before sharing them. Rotating an exposed key is necessary even if its local copy is later deleted.
 
 For untrusted repositories or commands requiring stronger isolation, use a disposable environment with no valuable credentials or unrelated writable data. See [configuration](docs/configuration.md) for the exact supported controls; do not assume every subprocess is sandboxed.
+
+The current regression-test map and qualification limits are in [the release-candidate qualification record](docs/recovery/r24-qualification.md); it is evidence for the documented contracts, not a blanket security certification.

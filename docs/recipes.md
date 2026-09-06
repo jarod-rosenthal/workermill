@@ -27,7 +27,7 @@ A different binding gives you another review pass, not proof of independent judg
 
 ---
 
-## Fully local setup (zero API cost)
+## Fully local setup (no hosted API charge)
 
 **Goal:** Run model inference locally without a hosted API charge. Model downloads need network access, tools may access external services, and hardware/electricity costs remain.
 
@@ -58,8 +58,8 @@ Add gates to the project's `.workermill/config.json` (use commands defined by th
 ```json
 {
   "qualityGates": [
-    { "name": "Typecheck", "command": "npm run typecheck", "required": true },
-    { "name": "Tests", "command": "npm test", "required": true }
+    { "name": "Typecheck", "commands": ["npm run typecheck"], "required": true },
+    { "name": "Tests", "commands": ["npm test"], "required": true }
   ]
 }
 ```
@@ -69,13 +69,13 @@ Or for a Python project:
 ```json
 {
   "qualityGates": [
-    { "name": "Lint", "command": "uv run ruff check .", "required": true },
-    { "name": "Types", "command": "uv run mypy .", "required": true }
+    { "name": "Lint", "commands": ["uv run ruff check ."], "required": true },
+    { "name": "Types", "commands": ["uv run mypy ."], "required": true }
   ]
 }
 ```
 
-These gates run against the prepared candidate and rerun after reviewer revisions change it. A required failure prevents publication and keeps local work available for inspection and `/retry`. Use finite, non-watch commands. Post-write hooks can provide earlier feedback, but they do not substitute for final blocking verification. See [Quality Gates](quality-gates.md#how-it-works) for advisory gates and source-changing checks.
+These gates run against the prepared candidate and rerun after reviewer revisions change it. A required failure prevents publication and keeps local work available for inspection and `/retry`; `required: false` is advisory outside strict mode. Use finite, non-watch commands. Post-write hooks can provide earlier feedback, but they do not substitute for final blocking verification. See [Quality Gates](quality-gates.md#how-it-works) for source-changing checks.
 
 ---
 
@@ -230,7 +230,7 @@ For a native macOS notification instead:
 
 ## Review someone else's PR before merging
 
-**Goal:** Run an independent review of a PR before you approve it.
+**Goal:** Run an additional review pass on a PR before you approve it.
 
 ```
 /review #42

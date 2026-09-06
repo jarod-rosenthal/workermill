@@ -1392,8 +1392,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           pendingToolsByRunRef.current.delete(runId);
           // A child can finish its own model call while this turn is handling
           // an error. Persist only after every owned callback has drained.
-          if (sessionRef.current) saveSession(sessionRef.current);
           const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (sessionRef.current) {
+            try {
+              saveSession(sessionRef.current);
+            } catch (error) {
+              cleanupFailures.push({ status: "rejected", reason: error });
+            }
+          }
           if (isCurrentTurn()) {
             // Cancellation leaves completed tool calls inspectable in the
             // transcript, then clears the live area only after all owned work
@@ -1637,6 +1643,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       return { before: Math.round(beforeChars / 4), after: afterTokens };
     } finally {
       controller.abort();
+      // The compaction callback can report a failed or cancelled invocation;
+      // preserve that accounting even when conversation history is unchanged.
+      try {
+        if (sessionRef.current === session) saveSession(session);
+      } catch (error) {
+        logger.error("Failed to save compaction usage", { error: error instanceof Error ? error.message : String(error) });
+      }
       if (abortRef.current === controller) {
         abortRef.current = null;
         setStatus("idle");

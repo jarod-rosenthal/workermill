@@ -147,6 +147,7 @@ describe("mounted chat execution adapter", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       totalTokens: 7,
+      totalCostUsd: 0.125,
       messages: [
         { role: "user" as const, content: "keep this request", timestamp: "2026-01-01T00:00:00.000Z" },
         { role: "assistant" as const, content: "keep this answer", timestamp: "2026-01-01T00:00:01.000Z" },
@@ -160,6 +161,7 @@ describe("mounted chat execution adapter", () => {
       "keep this request", "keep this answer",
     ]));
     expect(agent.session).toBe(restored);
+    await vi.waitFor(() => expect(agent.cost).toBe(0.125));
     script(async () => {});
     agent.submit("continue from the saved answer");
     await vi.waitFor(() => expect(turns).toBe(1));
@@ -169,6 +171,8 @@ describe("mounted chat execution adapter", () => {
       { role: "assistant", content: "keep this answer" },
       { role: "user", content: "continue from the saved answer" },
     ]));
+    expect(agent.session.totalTokens).toBe(9);
+    expect(agent.session.totalCostUsd).toBe(0.125);
   });
 
   it("changes visible messages and rolls back the production session exchange", async () => {
@@ -219,6 +223,22 @@ describe("mounted chat execution adapter", () => {
     await rejected;
     await vi.waitFor(() => expect(agent.status).toBe("idle"));
     expect(agent.session.messages).toBe(original);
+  });
+
+  it("persists manual compaction usage without replacing its history early", async () => {
+    await mount();
+    agent.session.messages = Array.from({ length: 6 }, (_, index) => ({
+      role: "user" as const, content: `message ${index}`, timestamp: new Date().toISOString(),
+    }));
+    vi.mocked(generateText).mockResolvedValueOnce({
+      text: "summary", usage: { inputTokens: 7, outputTokens: 3 },
+    } as Awaited<ReturnType<typeof generateText>>);
+    await agent.forceCompact();
+    expect(agent.session.usageLedger).toMatchObject({
+      totals: { callCount: 1, reportedUsageCalls: 1, inputTokens: 7, outputTokens: 3 },
+      calls: [expect.objectContaining({ persona: "compaction", provider: "test", model: "test-model" })],
+    });
+    expect(storedSession.saveSession).toHaveBeenCalledWith(agent.session);
   });
 
   it("wraps each turn once and writes through its current context", async () => {
@@ -404,6 +424,30 @@ describe("mounted chat execution adapter", () => {
     expect(agent.session.usageLedger).toMatchObject({
       totals: { callCount: 1, partialUsageCalls: 1, inputTokens: 11, outputTokens: 4 },
     });
+  });
+
+  it("adds child usage once alongside its parent turn", async () => {
+    configured.permissions = { allow: ["sub_agent"] };
+    vi.mocked(streamText)
+      .mockImplementationOnce((options) => {
+        const tools = (options as unknown as { tools: TestTools }).tools;
+        return {
+          textStream: (async function* () { await tools.sub_agent.execute({ prompt: "inspect", maxTurns: 1, isolated: false }); yield "done"; })(),
+          text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 5, outputTokens: 2 }),
+        } as never;
+      })
+      .mockImplementationOnce(() => ({
+        textStream: (async function* () { yield "child"; })(), text: Promise.resolve("child"),
+        totalUsage: Promise.resolve({ inputTokens: 3, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+      }) as never);
+    await mount();
+    agent.submit("delegate");
+    await vi.waitFor(() => expect(streamText).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(agent.status).toBe("idle"));
+    expect(agent.session.usageLedger).toMatchObject({
+      totals: { callCount: 2, inputTokens: 8, outputTokens: 3 },
+    });
+    expect(agent.session.usageLedger?.calls.map((call) => call.persona)).toEqual(expect.arrayContaining(["agent", "child"]));
   });
 
   it("queues simultaneous prompts instead of losing an unresolved request", async () => {

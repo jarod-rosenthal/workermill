@@ -10,6 +10,8 @@ Qualification worktree `/home/user/github/workermill-qualification-cont`, branch
 
 No paid models, publication, pushes, PRs, releases, or cleanup of preserved worktrees. Worker escalation hangs: workers freeze/report sandbox failures; root runs normal escalation. Verify dependency symlinks from root. Checkpoint before dispatch/integration, after failure, and every 15 minutes. Retrospective includes continuation results; continuation JSON inventories saved paths/commits and 50 worktrees at its stated earlier snapshot. Update both at final qualification. Historical snapshots follow.
 
+Final-review finding (2026-09-06 22:41 UTC): `/orchestrate` program-level gates omit the parent signal/scoped runner; program decomposition and generated-issue requests omit cancellation. Root owns a narrow correction in program-bootstrap.ts/useOrchestrator.ts plus runtime tests after the R18c3b candidate freezes. Pass the existing parent signal through these operations, use the shared scoped gate runner, and prevent another issue/gate after abort. This is a discovered lifecycle completion blocker, not a new feature. No external requests will be executed by tests. R22 dispatch waits for combined qualification.
+
 ## Historical audit state (before the repair below)
 
 - Repository: `/home/user/github/workermill`, a single-package TypeScript CLI, npm package `workermill` (commands `wm` / `workermill`). This is not the archived server/frontend project.

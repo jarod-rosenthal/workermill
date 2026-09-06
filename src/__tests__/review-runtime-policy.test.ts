@@ -151,7 +151,7 @@ describe("review runtime policy", () => {
     expect(contexts[0]?.runId).toMatch(/^[0-9a-f-]+-inline-1-1$/);
   });
 
-  it("binds revision tools to their own timeout signal and leaves denied writes untouched", async () => {
+  it.each([false, true])("binds revision tools to their timeout and rejects late writes (stream throws=%s)", async (streamThrows) => {
     process.env.WM_REVIEW_TIMEOUT_MS = "10";
     const sentinel = path.join(workspace, "revision-sentinel.txt");
     fs.writeFileSync(sentinel, "unchanged");
@@ -163,6 +163,7 @@ describe("review runtime policy", () => {
       return result("revision complete", async () => {
         await new Promise<void>((resolve) => options.abortSignal?.addEventListener("abort", () => resolve(), { once: true }));
         try { await options.tools?.write_file?.execute?.({ path: sentinel, content: "mutated" }); } catch (error) { attempts.push(error instanceof Error && "code" in error ? String(error.code) : "unknown"); }
+        if (streamThrows) throw new Error("operation cancelled");
       });
     }) as typeof streamText);
 
@@ -177,6 +178,8 @@ describe("review runtime policy", () => {
     });
 
     expect(review.aborted).toBe(true);
+    expect(review.outcome).toMatchObject({ kind: "timed_out", approved: false });
+    expect(invocation).toBe(2);
     expect(review.outcome).toMatchObject({ kind: "timed_out", approved: false });
     expect(attempts).toEqual(["cancelled"]);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("unchanged");

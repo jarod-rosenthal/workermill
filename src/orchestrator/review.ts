@@ -800,8 +800,9 @@ export function interpretTechLeadReviewOutput(text: string, approvalThreshold = 
 
 function reviewOutcomeFromError(error: unknown, timedOut = false, cancelled = false): ReviewOutcome {
   const message = error instanceof Error ? error.message : String(error);
-  if (cancelled || /cancelled/i.test(message)) return { kind: "cancelled", approved: false, error: message };
+  if (cancelled) return { kind: "cancelled", approved: false, error: message };
   if (timedOut || /timed out|timeout/i.test(message)) return { kind: "timed_out", approved: false, error: message };
+  if (/cancelled/i.test(message)) return { kind: "cancelled", approved: false, error: message };
   if (isMissingRequiredReviewMarkerError(error) || isInvalidReviewOutputError(error) || isEmptyReviewOutputError(error)) {
     return { kind: "parse_failed", approved: false, error: message };
   }
@@ -1543,6 +1544,12 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             output.log(story.persona, `${story.title} — revision complete!`);
           } catch (err) {
             output.statusDone();
+            if (revisionTimedAbort.signal.aborted) {
+              return {
+                finalReviewText: "", aborted: true,
+                outcome: reviewOutcomeFromError(err, revisionTimedAbort.didTimeout(), abortSignal?.aborted === true),
+              };
+            }
             if (isBalanceOrQuotaError(err)) {
               const shouldStop = await pauseForBalanceIssue(`Revision story ${i + 1}`);
               if (shouldStop) {

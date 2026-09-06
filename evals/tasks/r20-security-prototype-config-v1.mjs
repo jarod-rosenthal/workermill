@@ -18,6 +18,12 @@ const reference = {
   ...base,
   "src/config.mjs": `const blocked = new Set(["__proto__", "constructor", "prototype"]);
 
+function isPlainRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function cloneRecord(value) {
   if (Array.isArray(value)) return value.map(cloneRecord);
   if (!value || typeof value !== "object") return value;
@@ -43,7 +49,10 @@ function mergeRecords(left, right) {
 }
 
 export function mergeConfig(defaults, overrides) {
-  try { return mergeRecords(cloneRecord(defaults), cloneRecord(overrides)); }
+  try {
+    if (!isPlainRecord(defaults) || !isPlainRecord(overrides)) return null;
+    return mergeRecords(cloneRecord(defaults), cloneRecord(overrides));
+  }
   catch { return null; }
 }
 `,
@@ -61,7 +70,7 @@ export const fixture = {
   taskId: "r20-security-prototype-config-v1",
   category: "security",
   initialRevision: initialRevision(base),
-  prompt: "Harden configuration merging against prototype-pollution payloads. Reject __proto__, constructor, and prototype keys recursively, accept only plain records, deep-merge legitimate nested records while replacing arrays, and leave caller inputs untouched.",
+  prompt: "Harden configuration merging against prototype-pollution payloads. Require both top-level inputs to be plain records (ordinary or null-prototype objects; reject primitives, arrays, Date, and custom-prototype roots). Recursively reject __proto__, constructor, and prototype keys inside records and arrays, reject Date/custom-prototype nested values, deep-merge legitimate nested records while replacing arrays, and ensure the returned object shares no mutable aliases with either input.",
   workspace: {
     files: base,
     writableFiles: ["src/config.mjs", "src/main.mjs"],
@@ -87,12 +96,23 @@ const before = JSON.stringify(safe);
 const merged = mergeConfig(defaults, safe);
 if (JSON.stringify(merged) !== JSON.stringify({server:{host:"localhost",port:8080},features:{safe:true,beta:true},list:["canary"]})) process.exit(3);
 if (JSON.stringify(safe) !== before || defaults.server.port !== 80) process.exit(3);
+safe.server.port = 7070; safe.features.beta = false; safe.list[0] = "changed";
+if (merged.server.port !== 8080 || merged.features.beta !== true || merged.list[0] !== "canary") process.exit(3);
+merged.server.port = 9090; merged.features.safe = false; merged.list[0] = "output";
+if (defaults.server.port !== 80 || defaults.features.safe !== true || defaults.list[0] !== "stable") process.exit(3);
+if (safe.server.port !== 7070 || safe.features.beta !== false || safe.list[0] !== "changed") process.exit(3);
 for (const key of ["__proto__", "constructor", "prototype"]) {
-  const payload = JSON.parse("{\\"features\\":{" + JSON.stringify(key) + ":{\\"polluted\\":true}}}");
-  if (mergeConfig(defaults, payload) !== null) process.exit(3);
+  const nested = {[key]: {polluted:true}};
+  if (mergeConfig(defaults, {features:nested}) !== null) process.exit(3);
+  if (mergeConfig(defaults, {features:[nested]}) !== null) process.exit(3);
 }
 if (Object.prototype.polluted !== undefined) process.exit(3);
-if (mergeConfig(defaults, Object.create(null)) === null) process.exit(3);`, timeoutMs);
+const nullRoot = Object.create(null); nullRoot.mode = "safe";
+if (mergeConfig(defaults, nullRoot) === null || mergeConfig(nullRoot, nullRoot) === null) process.exit(3);
+const custom = Object.create({kind:"custom"}); custom.value = true;
+for (const candidate of [[], null, 7, new Date(), custom]) if (mergeConfig(defaults, candidate) !== null || mergeConfig(candidate, defaults) !== null) process.exit(3);
+if (mergeConfig(defaults, {features:{when:new Date()}}) !== null) process.exit(3);
+if (mergeConfig(defaults, {features:{custom}}) !== null) process.exit(3);`, timeoutMs);
 }
 
 export async function validateFixture() {

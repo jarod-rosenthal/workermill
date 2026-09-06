@@ -40,7 +40,7 @@ export const fixture = {
   taskId: "r20-security-job-schema-v1",
   category: "security",
   initialRevision: initialRevision(base),
-  prompt: "Replace the permissive job parser with strict validation for untrusted JSON input. Require exactly id, command, and timeoutMs with bounded types and values, reject arrays/inherited fields/unknown keys, and reject NUL-containing commands without mutating input.",
+  prompt: "Replace the permissive job parser with strict validation for untrusted JSON input and return null for every invalid value. Require exactly id, command, and timeoutMs with these bounds: id is a string of length 1..100; command is a string of length 1..2000 with no NUL; timeoutMs is an integer in the inclusive range 100..60000. Reject null/non-object values, arrays, inherited fields, missing or extra keys, wrong types, NaN/Infinity/fractional/out-of-range timeouts, and do not mutate input.",
   workspace: {
     files: base,
     writableFiles: ["src/jobs.mjs", "src/main.mjs"],
@@ -62,14 +62,34 @@ async function accepts(root, mainUrl, timeoutMs) {
   return runNode(root, `import { parseJob } from ${JSON.stringify(mainUrl)};
 const valid = {id:"job-1",command:"echo ok",timeoutMs:1000};
 const before = JSON.stringify(valid);
-if (JSON.stringify(parseJob(valid)) !== JSON.stringify(valid) || JSON.stringify(valid) !== before) process.exit(3);
+const expectValid = (candidate) => {
+  try { if (parseJob(candidate) === null) process.exit(3); } catch { process.exit(3); }
+};
+const expectNull = (candidate) => {
+  try { if (parseJob(candidate) !== null) process.exit(3); } catch { process.exit(3); }
+};
+expectValid(valid);
+expectValid({id:"i",command:"c",timeoutMs:100});
+expectValid({id:"i".repeat(100),command:"c".repeat(2000),timeoutMs:60000});
+if (JSON.stringify(valid) !== before) process.exit(3);
 const inherited = Object.create({command:"echo inherited"}); inherited.id = "job-2"; inherited.timeoutMs = 1000;
+const extra = {...valid, admin:true};
 const polluted = JSON.parse("{\\"id\\":\\"job-3\\",\\"command\\":\\"echo ok\\",\\"timeoutMs\\":1000,\\"admin\\":true}");
+const missingId = {command:"echo",timeoutMs:1000};
+const missingCommand = {id:"job",timeoutMs:1000};
+const missingTimeout = {id:"job",command:"echo"};
 const nul = {id:"job-4",command:"bad\\0command",timeoutMs:1000};
 for (const candidate of [
-  {}, {id:"job",command:"echo",timeoutMs:99}, {id:"job",command:"echo",timeoutMs:60001},
-  [], inherited, polluted, nul,
-]) if (parseJob(candidate) !== null) process.exit(3);`, timeoutMs);
+  null, undefined, 42, "job", true, [], {}, missingId, missingCommand, missingTimeout,
+  inherited, extra, polluted, nul,
+  {id:"",command:"echo",timeoutMs:1000}, {id:"i".repeat(101),command:"echo",timeoutMs:1000},
+  {id:"job",command:"",timeoutMs:1000}, {id:"job",command:"c".repeat(2001),timeoutMs:1000},
+  {id:1,command:"echo",timeoutMs:1000}, {id:"job",command:7,timeoutMs:1000},
+  {id:"job",command:"echo",timeoutMs:"1000"}, {id:"job",command:"echo",timeoutMs:null},
+  {id:"job",command:"echo",timeoutMs:99}, {id:"job",command:"echo",timeoutMs:60001},
+  {id:"job",command:"echo",timeoutMs:100.5}, {id:"job",command:"echo",timeoutMs:NaN},
+  {id:"job",command:"echo",timeoutMs:Infinity}, {id:"job",command:"echo",timeoutMs:-Infinity},
+]) expectNull(candidate);`, timeoutMs);
 }
 
 export async function validateFixture() {

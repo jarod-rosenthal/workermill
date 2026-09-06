@@ -10,7 +10,7 @@ import {
   ensureLmStudioContext,
 } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
-import { createPathScope, resolvePath } from "../engine/path-policy.js";
+import { canonicalizePath, createPathScope, resolvePath } from "../engine/path-policy.js";
 import { executeToolCall, ToolExecutionError, type ToolExecutionContext } from "../engine/tool-executor.js";
 import type { PermissionState } from "../engine/tool-policy.js";
 import { getToolMeta } from "../engine/tools/tool-metadata.js";
@@ -495,12 +495,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         return result.blocked ? { blocked: true, reason: result.reason } : undefined;
       },
       checkpoint: (name, input, executingContext) => {
+        const checkpointPath = (target: string): string => executingContext.effectiveSandbox === "none"
+          ? canonicalizePath(path.resolve(executingContext.workspace, target))
+          : resolvePath(executingContext.scope, target, "read_write");
         if (name === "patch") {
           for (const target of parsePatchTargets(String(input.patch_text || ""), executingContext.workspace)) {
-            checkpoint(resolvePath(executingContext.scope, target.filePath, "read_write"), "patch");
+            checkpoint(checkpointPath(target.filePath), "patch");
           }
         } else if (["write_file", "edit_file", "multi_edit_file"].includes(name) && (input.path || input.file_path)) {
-          checkpoint(resolvePath(executingContext.scope, String(input.path || input.file_path), "read_write"), name);
+          checkpoint(checkpointPath(String(input.path || input.file_path)), name);
         }
       },
       postHook: (name, _input, output, error, executingContext) => {

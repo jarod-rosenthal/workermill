@@ -1,8 +1,9 @@
 import { streamText, stepCountIs } from "ai";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { createModel, buildOllamaOptions } from "./engine/model-factory.js";
 import { createToolDefinitions } from "./engine/tools/index.js";
-import { createPathScope, resolvePath } from "./engine/path-policy.js";
+import { canonicalizePath, createPathScope, resolvePath } from "./engine/path-policy.js";
 import { executeToolCall, ToolExecutionError, type EffectiveSandbox, type ToolExecutionContext } from "./engine/tool-executor.js";
 import { extractToolTargets } from "./engine/tool-policy.js";
 import { cancelAndWaitForRunProcesses } from "./engine/process-runner.js";
@@ -111,7 +112,10 @@ function checkpointAuthorizedTargets(
   const checkpointTools = new Set(["write_file", "edit_file", "multi_edit_file", "patch"]);
   if (!checkpointTools.has(toolName)) return;
   for (const target of extractToolTargets(toolName, input)) {
-    checkpoint(resolvePath(context.scope, target, "read_write"), toolName);
+    const resolved = context.effectiveSandbox === "none"
+      ? canonicalizePath(path.resolve(context.workspace, target))
+      : resolvePath(context.scope, target, "read_write");
+    checkpoint(resolved, toolName);
   }
 }
 function wrapTools(rawTools: Record<string, unknown>, context: ToolExecutionContext, onError: (error: ToolExecutionError) => void): Record<string, unknown> {

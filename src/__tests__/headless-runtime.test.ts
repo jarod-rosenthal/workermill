@@ -152,6 +152,25 @@ describe("headless runtime governance", () => {
     expect(fullDiskResult.reason).toBe("permission_required");
   });
 
+  it("checkpoints authorized full-disk writes outside the workspace", async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), "wm-headless-full-disk-"));
+    const sentinel = path.join(outside, "allowed.txt");
+    try {
+      vi.mocked(streamText).mockImplementation(successfulStream(async (tools) => {
+        await tools.write_file.execute({ path: sentinel, content: "explicitly allowed" });
+      }) as never);
+      const result = await runCommand(
+        { prompt: "write", singlePrompt: true, sandboxed: false },
+        config({ allow: ["write_file"] }), workspace,
+      );
+      expect(result.status).toBe("ok");
+      expect(await readFile(sentinel, "utf8")).toBe("explicitly allowed");
+      expect(getChangedFiles()).toEqual(expect.arrayContaining([expect.objectContaining({ path: sentinel })]));
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("governs unknown MCP tools and reports an exhausted tool-step cap", async () => {
     let mcpCalls = 0;
     mcpWrite.mockImplementation(async () => { mcpCalls++; return "changed"; });

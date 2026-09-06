@@ -143,9 +143,12 @@ export function wrapChildTools(tools: Record<string, ChildTool>, context: ToolEx
     return [[toolName, { ...definition, execute: (input: Record<string, unknown>) => executeToolCall(toolName, input, () => execute(input), context) }]];
   }));
 }
-function childAbortSignal(parent: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(5 * 60 * 1000);
-  return parent ? AbortSignal.any([parent, timeout]) : timeout;
+function childAbortController(parent: AbortSignal | undefined): { controller: AbortController; dispose: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timer = setTimeout(abort, 5 * 60 * 1000);
+  parent?.addEventListener("abort", abort, { once: true });
+  return { controller, dispose: () => { clearTimeout(timer); parent?.removeEventListener("abort", abort); } };
 }
 async function runSubAgent(model: LanguageModel, tools: Record<string, ChildTool>, prompt: string, maxTurns: number, system: string, signal: AbortSignal, onUsage?: SubAgentExecutorOptions["onUsage"]): Promise<SubAgentResult> {
   try {
@@ -171,19 +174,21 @@ async function runSubAgent(model: LanguageModel, tools: Record<string, ChildTool
 export function createSubAgentExecutor(model: LanguageModel, workingDir: string, readOnlyTools: Record<string, ChildTool>, options: SubAgentExecutorOptions) {
   return async function execute({ prompt, maxTurns = 20, isolated = false }: SubAgentParams): Promise<SubAgentResult> {
     const parent = options.executionContext;
-    if (!Number.isFinite(maxTurns) || maxTurns < 1 || maxTurns > 50) return { success: false, content: "", turnsUsed: 0, error: "maxTurns must be a finite number from 1 through 50." };
-    const signal = childAbortSignal(parent?.signal);
+    if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 50) return { success: false, content: "", turnsUsed: 0, error: "maxTurns must be an integer from 1 through 50." };
+    const lifetime = childAbortController(parent?.signal);
+    const signal = lifetime.controller.signal;
     if (!isolated) {
       const scope = parent?.scope ?? createPathScope(workingDir);
       const context = childContext(parent, scope, true, signal);
-      return runSubAgent(model, wrapChildTools(readOnlyTools, context), prompt, maxTurns,
-        "You are a codebase exploration agent. You can read files, search, and list directories. You cannot modify files, run commands, access MCP tools, or spawn sub-agents. Provide specific findings.", signal, options.onUsage);
+      try { return await runSubAgent(model, wrapChildTools(readOnlyTools, context), prompt, maxTurns,
+        "You are a codebase exploration agent. You can read files, search, and list directories. You cannot modify files, run commands, access MCP tools, or spawn sub-agents. Provide specific findings.", signal, options.onUsage); }
+      finally { lifetime.dispose(); }
     }
     // Conservative no-context behavior: isolated writes never receive implicit permission.
-    if (!parent) return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: a parent permission context is required." };
-    if (parent.signal.aborted) return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent run is cancelled." };
+    if (!parent) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: a parent permission context is required." }; }
+    if (parent.signal.aborted) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent run is cancelled." }; }
     const preflight = parent.getPermissionState();
-    if (preflight.mode === "plan" || preflight.readOnlyRole) return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent permission state is read-only." };
+    if (preflight.mode === "plan" || preflight.readOnlyRole) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent permission state is read-only." }; }
 
     let worktree: WorktreeInfo;
     try { git(workingDir, ["rev-parse", "--is-inside-work-tree"]); worktree = createWorktree(workingDir, prompt); }
@@ -198,10 +203,11 @@ export function createSubAgentExecutor(model: LanguageModel, workingDir: string,
 
     const state = inspectWorktree(worktree);
     if (result.success && state.kind === "empty") {
-      try { removeConfirmedEmptyWorktree(workingDir, worktree); return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` }; }
-      catch (error) { return { success: false, content: `${result.content}\n\n${identity} Cleanup failed; preserved for inspection.`, turnsUsed: result.turnsUsed, error: `Failed to clean confirmed-empty worktree: ${error instanceof Error ? error.message : String(error)}` }; }
+      try { removeConfirmedEmptyWorktree(workingDir, worktree); lifetime.dispose(); return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` }; }
+      catch (error) { lifetime.dispose(); return { success: false, content: `${result.content}\n\n${identity} Cleanup failed; preserved for inspection.`, turnsUsed: result.turnsUsed, error: `Failed to clean confirmed-empty worktree: ${error instanceof Error ? error.message : String(error)}` }; }
     }
     const detail = state.kind === "unknown" ? "State could not be confirmed; preserved for inspection." : `Preserved for inspection.\n${state.diffStat}`;
+    lifetime.dispose();
     return result.success ? { ...result, content: `${result.content}\n\n${identity} ${detail}` } : { ...result, error: `${result.error ?? "Sub-agent failed"}\n\n${identity} ${detail}` };
   };
 }

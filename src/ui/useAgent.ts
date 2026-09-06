@@ -21,12 +21,12 @@ import {
   addMessage,
   loadLatestSession,
   forkSession,
-  appendUsageLedger,
+  applySessionUsageLedger,
   type Session,
 } from "../session.js";
 import { loadProjectMeta } from "../project-data.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
-import { CostTracker } from "../cost-tracker.js";
+import { CostTracker, type LedgerSnapshot } from "../cost-tracker.js";
 import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 import type { CallSnapshot } from "../cost-tracker.js";
 import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
@@ -179,30 +179,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     const ledger = costTrackerRef.current.getLedgerSnapshot();
     const call = ledger.calls.find((entry) => entry.callId === snapshot.callId);
     if (!call) return;
-    session.usageLedger = appendUsageLedger(session.usageLedger, { calls: [call], totals: ledger.totals });
-    session.totalTokens += (call.usage?.inputTokens ?? 0) + (call.usage?.outputTokens ?? 0);
-    session.totalCostUsd = (session.totalCostUsd ?? 0) + (call.estimatedApiCost ?? 0);
-    const role = snapshot.persona.includes("planner") ? "planner"
-      : snapshot.persona.includes("review") ? "reviewer" : "worker";
-    const inputTokens = call.usage?.inputTokens ?? 0;
-    const outputTokens = call.usage?.outputTokens ?? 0;
-    const costUsd = call.estimatedApiCost ?? 0;
-    const modelKey = `${call.provider}/${call.model}`;
-    const models = session.costByModel ? [...session.costByModel] : [];
-    const modelEntry = models.find((entry) => entry.key === modelKey);
-    if (modelEntry) {
-      modelEntry.inputTokens += inputTokens; modelEntry.outputTokens += outputTokens; modelEntry.costUsd += costUsd;
-      if (!modelEntry.roles.includes(role)) modelEntry.roles.push(role);
-    } else {
-      models.push({ key: modelKey, provider: call.provider, model: call.model, inputTokens, outputTokens, costUsd, roles: [role] });
-    }
-    session.costByModel = models;
-    const roles = session.costByRole ?? {
-      worker: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, planner: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, reviewer: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
-    };
-    roles[role].inputTokens += inputTokens; roles[role].outputTokens += outputTokens; roles[role].costUsd += costUsd;
-    session.costByRole = roles;
-    setCost(session.totalCostUsd);
+    if (applySessionUsageLedger(session, { calls: [call], totals: ledger.totals })) setCost(session.totalCostUsd ?? 0);
+  }, []);
+
+  const applyExternalUsageLedger = useCallback((ledger: LedgerSnapshot): void => {
+    const session = sessionRef.current;
+    if (!session || !applySessionUsageLedger(session, ledger)) return;
+    setCost(session.totalCostUsd ?? 0);
+    saveSession(session);
   }, []);
 
   // Deferred tool loading — MCP tools start deferred, promoted on tool_search
@@ -1684,6 +1668,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     addSystemMessage,
     addUserMessage,
     setCost,
+    applyExternalUsageLedger,
     allowTool,
     denyTool,
     permissionMode: permMode,

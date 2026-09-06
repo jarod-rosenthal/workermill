@@ -10,6 +10,7 @@
 
 import chalk from "chalk";
 import { listRunManifests, type StoredRunManifest } from "./run-manifest.js";
+import { formatUsageLedgerLimitation } from "./cost-tracker.js";
 
 function formatDate(iso: string): string {
   try {
@@ -66,7 +67,8 @@ export function runsList(options: { json?: boolean }): void {
     const date = run.startedAt ? formatDate(run.startedAt) : "unknown";
     const cost = run.totalCost > 0 ? ` · $${run.totalCost.toFixed(2)}` : "";
     const branch = run.featureBranch ? ` · ${run.featureBranch}` : "";
-    const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : run.phase === "active" ? chalk.cyan(" · active") : "";
+    const evidence = formatUsageLedgerLimitation("usageLedger" in run ? run.usageLedger : undefined);
+    const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : run.phase === "active" ? chalk.cyan(" · active") : evidence ? chalk.yellow(" · estimate incomplete") : "";
 
     console.log(
       `  ${chalk.dim(run.id)}  ${date}  ${outcomeLabel(run.outcome)}  ${completed}/${total} stories${cost}${branch}${limitation}`
@@ -148,6 +150,8 @@ function printRunDetails(run: StoredRunManifest): void {
   if (run.ticketKey) console.log(`  Ticket:     ${run.ticketKey}`);
   console.log(`  Cost:       $${run.totalCost.toFixed(2)}`);
   console.log(`  Tokens:     ${run.totalInputTokens.toLocaleString()} in · ${run.totalOutputTokens.toLocaleString()} out`);
+  const ledgerNote = formatUsageLedgerLimitation("usageLedger" in run ? run.usageLedger : undefined);
+  if (ledgerNote) console.log(chalk.yellow(`  ${ledgerNote}`));
   console.log();
 
   // Stories

@@ -16,7 +16,8 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../engine/model-factory.js", () => ({ createModel: vi.fn(() => ({})), buildOllamaOptions: vi.fn(() => ({})) }));
-vi.mock("../session.js", () => ({
+vi.mock("../session.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../session.js")>(),
   createSession: vi.fn(() => state.session), loadSessionById: vi.fn(() => state.session), loadLatestSession: vi.fn(() => state.session),
   addMessage: vi.fn(), saveSession: vi.fn((session) => { state.saved = structuredClone(session); }),
 }));

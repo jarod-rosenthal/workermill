@@ -165,6 +165,7 @@ export function Root(props: RootProps): React.ReactElement {
     agent.incrementToolCount,
     setGitBranch,
     handleTokPerSec,
+    agent.applyExternalUsageLedger,
   );
 
   // Track the last build task for /retry

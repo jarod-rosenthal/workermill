@@ -15,7 +15,7 @@ import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.
 import { shutdownLSPRun } from "./engine/tools/lsp.js";
 import type { SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
-import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
+import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, applySessionUsageLedger, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
 import { addUsage, settleUsage, usageFromSdk } from "./engine/model-usage.js";
 import type { LedgerSnapshot } from "./cost-tracker.js";
@@ -99,28 +99,6 @@ function maxSteps(value: number | undefined, start: number): number | RunResult 
 }
 function effectiveSandbox(value: SandboxSetting | undefined): EffectiveSandbox {
   return value === "os" ? "os" : value === false ? "none" : "path";
-}
-function appendLedger(previous: LedgerSnapshot | undefined, next: LedgerSnapshot): LedgerSnapshot {
-  if (!previous) return next;
-  const a = previous.totals;
-  const b = next.totals;
-  return {
-    calls: [...previous.calls, ...next.calls],
-    totals: {
-      callCount: a.callCount + b.callCount,
-      reportedUsageCalls: a.reportedUsageCalls + b.reportedUsageCalls,
-      partialUsageCalls: a.partialUsageCalls + b.partialUsageCalls,
-      missingUsageCalls: a.missingUsageCalls + b.missingUsageCalls,
-      knownPricingCalls: a.knownPricingCalls + b.knownPricingCalls,
-      unknownPricingCalls: a.unknownPricingCalls + b.unknownPricingCalls,
-      localApiCalls: a.localApiCalls + b.localApiCalls,
-      inputTokens: a.inputTokens + b.inputTokens,
-      outputTokens: a.outputTokens + b.outputTokens,
-      cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
-      cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
-      estimatedApiCost: a.estimatedApiCost + b.estimatedApiCost,
-    },
-  };
 }
 function reasonFor(error: unknown, signal: AbortSignal): RunFailureReason {
   if (signal.aborted || (error instanceof ToolExecutionError && error.code === "cancelled")) return "cancelled";
@@ -376,9 +354,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     if (shouldSaveSession && session) {
       try {
         addMessage(session, "assistant", text);
-        session.totalTokens += ledger.totals.inputTokens + ledger.totals.outputTokens;
-        session.totalCostUsd = (session.totalCostUsd ?? 0) + ledger.totals.estimatedApiCost;
-        session.usageLedger = appendLedger(session.usageLedger, ledger);
+        applySessionUsageLedger(session, ledger);
         saveSession(session);
       } catch (error) {
         return failure(start, "provider_error", "Unable to save the completed session: " + String(error), {

@@ -72,6 +72,18 @@ export interface LedgerSnapshot {
   totals: LedgerTotals;
 }
 
+/** Human-readable qualification for an estimate, shared by CLI and Ink views. */
+export function formatUsageLedgerLimitation(ledger: LedgerSnapshot | undefined): string {
+  if (!ledger) return "";
+  const { unknownPricingCalls, partialUsageCalls, missingUsageCalls, localApiCalls } = ledger.totals;
+  const parts: string[] = [];
+  if (unknownPricingCalls) parts.push(`${unknownPricingCalls} unknown-priced API call(s) excluded`);
+  const incomplete = partialUsageCalls + missingUsageCalls;
+  if (incomplete) parts.push(`${incomplete} call(s) have incomplete usage`);
+  if (localApiCalls) parts.push(`${localApiCalls} local API call(s) are $0 API cost; hardware is unestimated`);
+  return parts.length ? `Estimate note: ${parts.join("; ")}.` : "";
+}
+
 function createUsageBucket(): UsageBucket {
   return { inputTokens: 0, outputTokens: 0, cost: 0 };
 }
@@ -140,7 +152,8 @@ function calculateKnownCost(usage: TokenUsage, rates: {
     + ((usage.cacheReadTokens ?? 0) / 1000) * (rates.cacheReadRate ?? 0);
 }
 
-function classifyRole(persona: string): UsageRole {
+/** Map all runtime persona spellings into the persisted session role buckets. */
+export function classifyRole(persona: string): UsageRole {
   const normalized = persona.toLowerCase();
   if (normalized.includes("planner")) return "planner";
   if (

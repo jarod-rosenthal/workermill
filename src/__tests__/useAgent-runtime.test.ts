@@ -204,6 +204,16 @@ describe("mounted chat execution adapter", () => {
     expect(agent.isBypassMode()).toBe(true);
   });
 
+  it("persists a cumulative external ledger once when orchestration replays it", async () => {
+    await mount();
+    const ledger = { calls: [{ callId: "review-1", persona: "critic", provider: "test", model: "test-model", usage: { inputTokens: 3, outputTokens: 2 }, usageState: "reported" as const, pricingState: "unknown" as const }], totals: { callCount: 1, reportedUsageCalls: 1, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 0, unknownPricingCalls: 1, localApiCalls: 0, inputTokens: 3, outputTokens: 2, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0 } };
+    agent.applyExternalUsageLedger(ledger);
+    agent.applyExternalUsageLedger(ledger);
+    expect(agent.session).toMatchObject({ totalTokens: 5, totalCostUsd: 0, usageLedger: { totals: { callCount: 1 } } });
+    expect(agent.session.costByRole?.reviewer).toMatchObject({ inputTokens: 3, outputTokens: 2 });
+    expect(storedSession.saveSession).toHaveBeenCalledTimes(1);
+  });
+
   it("owns manual compaction until cancellation settles and preserves history", async () => {
     await mount();
     const original = Array.from({ length: 6 }, (_, index) => ({ role: "user" as const, content: `message ${index}`, timestamp: new Date().toISOString() }));

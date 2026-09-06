@@ -10,6 +10,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { getStateRoot } from "../state-root.js";
+import type { LedgerSnapshot } from "../cost-tracker.js";
 import {
   loadConfig,
   resolveConfig,
@@ -292,6 +293,8 @@ export interface SlashCommandContext {
     name?: string;
     provider: string;
     model: string;
+    usageLedger?: LedgerSnapshot;
+    usageLedgerHistoryIncomplete?: boolean;
   };
   cost: number;
   tokens: number;

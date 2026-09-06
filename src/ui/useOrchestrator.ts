@@ -15,7 +15,7 @@ import { resolveConfig, loadConfig, saveConfig, type CliConfig } from "../config
 import { getRetryableRun } from "../ship-state.js";
 import { notifyIfEnabled } from "../notify.js";
 import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
-import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
+import { createEmptyUsageSummary, formatUsageLedgerLimitation, type LedgerSnapshot, type UsageSummary } from "../cost-tracker.js";
 import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
@@ -326,6 +326,8 @@ export function useOrchestrator(
   setGitBranch?: (branch: string) => void,
   /** Update tokens-per-second for a model in the status bar. */
   setTokPerSec?: (providerModel: string, tokPerSec: number) => void,
+  /** Persist cumulative orchestration observations in the active chat session. */
+  applyExternalUsageLedger?: (ledger: LedgerSnapshot) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -354,6 +356,7 @@ export function useOrchestrator(
   const abortRef = useRef<AbortController | null>(null);
   const retryPlanRef = useRef<RetryPlan | null>(null);
   const usageSummaryRef = useRef<UsageSummary>(createEmptyUsageSummary());
+  const usageLedgerRef = useRef<LedgerSnapshot | undefined>(undefined);
 
   const releasePauseWaiters = useCallback(() => {
     if (pauseWaitersRef.current.length === 0) return;
@@ -389,6 +392,7 @@ export function useOrchestrator(
 
   const resetUsageSummary = useCallback(() => {
     usageSummaryRef.current = createEmptyUsageSummary();
+    usageLedgerRef.current = undefined;
   }, []);
 
   const commitUsageSummary = useCallback((summary: UsageSummary) => {
@@ -669,7 +673,12 @@ export function useOrchestrator(
             },
 
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
 
             updateUsageSummary(summary: UsageSummary): void {
@@ -727,6 +736,8 @@ export function useOrchestrator(
           if (modelBreakdown) {
             addMessage(modelBreakdown);
           }
+          const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+          if (usageNote) addMessage(usageNote);
           notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
           flushLine();
@@ -756,7 +767,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
@@ -964,7 +975,11 @@ export function useOrchestrator(
               setGitBranch?.(branch);
             },
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
             updateUsageSummary(summary: UsageSummary): void {
               commitUsageSummary(summary);
@@ -1139,6 +1154,8 @@ export function useOrchestrator(
           addMessage(`**Program complete.** ${parts.join(" · ")}`);
           const usageSummaryMessage = formatModelBreakdown(usageSummaryRef.current);
           if (usageSummaryMessage) addMessage(usageSummaryMessage);
+          const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+          if (usageNote) addMessage(usageNote);
           notifyIfEnabled(config.bell, "WorkerMill", "Program complete");
         } catch (err: unknown) {
           flushLine();
@@ -1178,7 +1195,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
@@ -1307,7 +1324,11 @@ export function useOrchestrator(
               });
             },
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
             updateUsageSummary(summary: UsageSummary): void {
               commitUsageSummary(summary);
@@ -1411,6 +1432,8 @@ export function useOrchestrator(
             if (usageSummaryMessage) {
               addMessage(usageSummaryMessage);
             }
+            const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+            if (usageNote) addMessage(usageNote);
           }
         } catch (err: unknown) {
           flushLine();
@@ -1432,7 +1455,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
   );
 
   // ------------------------------------------------------------------

@@ -40,6 +40,32 @@ describe("session", () => {
     });
   });
 
+  describe("applySessionUsageLedger()", () => {
+    it("adds each call once and preserves historical totals without inventing a split", async () => {
+      const { createSession, applySessionUsageLedger } = await importSession();
+      const session = createSession("test", "old-model");
+      session.totalTokens = 100;
+      session.totalCostUsd = 1;
+      const call = { callId: "planner-1", persona: "Planner", provider: "test", model: "new-model", usage: { inputTokens: 2, outputTokens: 3 }, usageState: "reported" as const, pricingState: "known" as const, estimatedApiCost: 0.2 };
+      const ledger = { calls: [call, call], totals: { callCount: 2, reportedUsageCalls: 2, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 2, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 4, outputTokens: 6, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0.4 } };
+
+      expect(applySessionUsageLedger(session, ledger)).toBe(true);
+      expect(applySessionUsageLedger(session, ledger)).toBe(false);
+      expect(session).toMatchObject({ totalTokens: 105, totalCostUsd: 1.2, usageLedgerHistoryIncomplete: true });
+      expect(session.usageLedger?.totals.callCount).toBe(1);
+      expect(session.costByModel).toMatchObject([{ model: "new-model", inputTokens: 2, outputTokens: 3, roles: ["planner"] }]);
+      expect(session.costByRole?.planner).toMatchObject({ inputTokens: 2, outputTokens: 3, costUsd: 0.2 });
+    });
+
+    it("classifies tech leads and critics as reviewers", async () => {
+      const { createSession, applySessionUsageLedger } = await importSession();
+      const session = createSession("test", "model");
+      const calls = ["tech_lead", "critic"].map((persona, index) => ({ callId: persona, persona, provider: "test", model: "model", usage: { inputTokens: 1, outputTokens: 1 }, usageState: "reported" as const, pricingState: "known" as const, estimatedApiCost: 0 }));
+      applySessionUsageLedger(session, { calls, totals: { callCount: 2, reportedUsageCalls: 2, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 2, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 2, outputTokens: 2, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0 } });
+      expect(session.costByRole?.reviewer).toMatchObject({ inputTokens: 2, outputTokens: 2 });
+    });
+  });
+
   describe("save + load", () => {
     it("saves and loads session by ID", async () => {
       const { createSession, saveSession, loadSessionById, addMessage } = await importSession();

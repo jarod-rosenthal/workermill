@@ -5,6 +5,7 @@ import { getStateRoot } from "./state-root.js";
 import chalk from "chalk";
 import type { SessionCostByRole } from "./session.js";
 import { Session } from "./session.js";
+import { formatUsageLedgerLimitation } from "./cost-tracker.js";
 
 
 /**
@@ -55,6 +56,8 @@ export interface StatsSummary {
   byModel: StatsByModel[];
   byRole: StatsByRole;
   byProject: StatsByProject[];
+  /** Costs are observed estimates; call-level evidence may qualify the subtotal. */
+  estimateLimitations: string[];
 }
 
 function formatNumber(num: number, decimals: number = 2): string {
@@ -136,6 +139,10 @@ function getProjectDisplayName(cwd?: string): string {
  * Sessions with costByModel have accurate split, others use totalTokens.
  */
 function getSessionTokenBreakdown(session: Session): { inputTokens: number; outputTokens: number } {
+  const modelTokens = session.costByModel?.reduce((total, model) => total + model.inputTokens + model.outputTokens, 0) ?? 0;
+  if (session.usageLedgerHistoryIncomplete || (session.usageLedger && modelTokens < (session.totalTokens || 0))) {
+    return { inputTokens: session.totalTokens || 0, outputTokens: 0 };
+  }
   if (session.costByModel && session.costByModel.length > 0) {
     // Use the accurate breakdown from costByModel
     let inputTokens = 0;
@@ -169,8 +176,12 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCostUsd = 0;
+  const estimateLimitations = new Set<string>();
 
   for (const session of sessions) {
+    const limitation = formatUsageLedgerLimitation(session.usageLedger);
+    if (limitation) estimateLimitations.add(limitation);
+    if (session.usageLedgerHistoryIncomplete) estimateLimitations.add("Some historical session totals have no call-level model or role breakdown.");
     // Count tokens properly using the breakdown function
     const tokenBreakdown = getSessionTokenBreakdown(session);
     totalInputTokens += tokenBreakdown.inputTokens;
@@ -291,6 +302,7 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
     byModel: byModelArray,
     byRole: byRole,
     byProject: byProjectArray,
+    estimateLimitations: [...estimateLimitations],
   };
 }
 
@@ -396,11 +408,12 @@ function renderStats(stats: StatsSummary, days: number | null): string {
   if (stats.sessions.withCostData < stats.sessions.total) {
     lines.push(dim("    (Note: " + (stats.sessions.total - stats.sessions.withCostData) + " session(s) have no cost data)"));
   }
-  lines.push("  Total cost       " + formatCurrency(stats.costUsd));
+  lines.push("  Estimated cost   " + formatCurrency(stats.costUsd));
   lines.push("  Total tokens     " + formatTokensDetailed(stats.tokens.input, stats.tokens.output));
   if (stats.sessions.withCostData > 0) {
     lines.push("  Avg per session  " + formatCurrency(stats.avgCostPerSessionUsd));
   }
+  for (const limitation of stats.estimateLimitations) lines.push(dim("    " + limitation));
   lines.push("");
 
   // By model

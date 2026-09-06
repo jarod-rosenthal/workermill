@@ -13,6 +13,7 @@ import { loadConfig, saveConfig, resolveConfig } from "../../config.js";
 import { getChangedFiles } from "../../checkpoints.js";
 import { findModelInfo } from "../../provider-registry.js";
 import { getApiKeyEnvVar, isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
+import { formatUsageLedgerLimitation } from "../../cost-tracker.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
 
@@ -192,6 +193,7 @@ export function handleCostCommand(_arg: string, ctx: SlashCommandContext): void 
   const costUsd = ctx.cost;
   const totalTokens = ctx.tokens;
   const sessionMessages = ctx.session.messages.length;
+  const ledgerNote = formatUsageLedgerLimitation(ctx.session.usageLedger);
   ctx.addSystemMessage(
     `**Session Cost Estimate**\n\n` +
     `| Metric | Value |\n` +
@@ -200,7 +202,9 @@ export function handleCostCommand(_arg: string, ctx: SlashCommandContext): void 
     `| Est. cost | ~$${costUsd.toFixed(2)} |\n` +
     `| Last input tokens | ${totalTokens.toLocaleString()} |\n` +
     `| Session tokens | ${ctx.session.totalTokens.toLocaleString()} |\n` +
-    `| Messages | ${sessionMessages} |`
+    `| Messages | ${sessionMessages} |` +
+    (ctx.session.usageLedgerHistoryIncomplete ? "\n\nHistorical totals have no call-level breakdown." : "") +
+    (ledgerNote ? `\n\n${ledgerNote}` : "")
   );
 }
 

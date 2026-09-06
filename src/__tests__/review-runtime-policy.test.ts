@@ -199,6 +199,15 @@ describe("review runtime policy", () => {
     expect(createModel).not.toHaveBeenCalled();
   });
 
+  it("does not adopt a late standalone approval after parent cancellation", async () => {
+    const controller = new AbortController();
+    vi.mocked(streamText).mockImplementation((() => result(APPROVED, async () => {
+      controller.abort();
+    })) as typeof streamText);
+    await expect(runStandaloneReview(config(), output([]), "branch", controller.signal)).resolves.toBeNull();
+    expect(streamText).toHaveBeenCalledTimes(1);
+  });
+
   it.each([false, true])("revision writes obey current deny rules (denied=%s)", async (denied) => {
     const sentinel = path.join(workspace, "live-revision.txt");
     fs.writeFileSync(sentinel, "unchanged");

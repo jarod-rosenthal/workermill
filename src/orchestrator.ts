@@ -1,7 +1,5 @@
 import { ensureOllamaContext, ensureLmStudioContext } from "./engine/model-factory.js";
 import { execFileSync, execSync } from "child_process";
-import fs from "fs";
-import path from "path";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
@@ -544,7 +542,6 @@ export async function runOrchestration(
   // feature branch and ship state so `/retry` can continue after the failure,
   // but do not let review or completion publish an unverified change.
   if (gatesResult.earlyExit) {
-    try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
     stopAllMCPServers();
     try {
       const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");

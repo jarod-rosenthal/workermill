@@ -196,6 +196,8 @@ import {
   type OrchestrationOutput,
   type Story,
 } from "../orchestrator.ts";
+import { stopAllMCPServers } from "../mcp-client.js";
+import { getStateRoot } from "../state-root.js";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
@@ -678,13 +680,20 @@ describe("orchestrator", () => {
         };
       });
 
-      await runOrchestration(config as any, "Add wm stats", true, false, output);
+      const result = await runOrchestration(config as any, "Add wm stats", true, false, output);
 
       expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
       expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
       // A required gate failure stops after planning and execution; review and
       // completion must not run on an unverified revision.
       expect(mockStreamTextCalls).toHaveLength(2);
+      expect(output.logs.join(" ")).not.toContain("No remote configured");
+      expect(output.logs.join(" ")).not.toContain("Branch:");
+      expect(stopAllMCPServers).toHaveBeenCalled();
+      expect(result.featureBranch).toBeTruthy();
+      expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
+      const savedRuns = JSON.parse(fs.readFileSync(path.join(getStateRoot(), "ship-runs.json"), "utf-8")) as Record<string, unknown>;
+      expect(savedRuns[result.featureBranch!]).toBeDefined();
     });
 
     it("blocks before review when strict static gate fails", async () => {
@@ -726,11 +735,58 @@ describe("orchestrator", () => {
         };
       });
 
-      await runOrchestration(config as any, "Run strict static check", true, false, output);
+      const result = await runOrchestration(config as any, "Run strict static check", true, false, output);
 
       expect(output.errors).toContain("[required_command_failed] static check failed");
       expect(output.logs.join(" ")).toContain("Strict mode failed");
       expect(mockStreamTextCalls).toHaveLength(2);
+      expect(output.logs.join(" ")).not.toContain("No remote configured");
+      expect(output.logs.join(" ")).not.toContain("Branch:");
+      expect(stopAllMCPServers).toHaveBeenCalled();
+      expect(result.featureBranch).toBeTruthy();
+      expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
+    });
+
+    it("keeps advisory static gate failures flowing through review and completion", async () => {
+      const output = createMockOutput();
+      const config = {
+        ...createTestConfig(),
+        qualityGates: [{ name: "advisory check", commands: ["bash -lc 'exit 1'"] }],
+        review: { enabled: true, strict: false, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+      };
+      const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "advisory", "title": "Run advisory check", "persona": "backend_developer", "description": "Implement the change." }
+  ]
+}
+\`\`\``;
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? planText : "Implemented advisory check.";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text, toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL] });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "export const impl = true;");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      await runOrchestration(config as any, "Run advisory static check", true, false, output);
+
+      expect(output.errors).not.toContain("[required_command_failed] advisory check failed");
+      expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(3);
+      expect(output.logs.join(" ")).toContain("No remote configured");
+      expect(output.updateCost).toHaveBeenCalled();
     });
 
     it("passes API keys through for routed provider aliases", async () => {

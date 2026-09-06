@@ -486,6 +486,22 @@ describe("orchestrator", () => {
       ).resolves.not.toThrow();
     });
 
+    it("rejects unavailable explicit OS isolation before planning or workers", async () => {
+      const { SandboxManager } = await import("@anthropic-ai/sandbox-runtime");
+      const support = vi.spyOn(SandboxManager, "isSupportedPlatform").mockReturnValue(false);
+      const { streamText, generateObject } = await import("ai");
+      vi.mocked(streamText).mockClear();
+      vi.mocked(generateObject).mockClear();
+      try {
+        await expect(runOrchestration(createTestConfig(), "Build endpoint", true, "os", createMockOutput()))
+          .rejects.toMatchObject({ code: "os_sandbox_unavailable" });
+        expect(streamText).not.toHaveBeenCalled();
+        expect(generateObject).not.toHaveBeenCalled();
+      } finally {
+        support.mockRestore();
+      }
+    });
+
     it("does not run the plan critic unless review.critic is enabled", async () => {
       const { generateObject } = await import("ai");
       vi.mocked(generateObject).mockClear();

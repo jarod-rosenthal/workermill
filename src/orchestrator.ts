@@ -12,7 +12,7 @@ import {
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { startAllMCPServers, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
-import { resolveAutomaticSandboxUpgrade } from "./sandbox-mode.js";
+import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
 
@@ -73,6 +73,14 @@ export async function runOrchestration(
       type: typeof abortControllerOrSignal,
     });
   }
+
+  if (abortSignal?.aborted) {
+    output.coordinatorLog("Build cancelled before startup.");
+    return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+  }
+  // Retry plans can skip the planner's preflight, so enforce an explicit OS
+  // request at the orchestration boundary before any provider or ticket work.
+  if (sandboxed === "os") resolveSandboxMode("os");
 
   // The default path mode may be automatically upgraded for /build. Unlike an
   // explicit `sandbox: "os"` setting, this specific automatic policy can fall

@@ -145,6 +145,11 @@ export async function runGateCommand(
       reason: "watch_killed",
     });
   }
+  if (callerSignal?.aborted) {
+    throw new GateCommandError("Command cancelled", {
+      stdout: output.stdout, stderr: output.stderr, code: result.exitCode, reason: "cancelled",
+    });
+  }
   if (result.reason !== "exited") {
     const message = result.reason === "timed_out"
       ? `Command timed out after ${normalized.timeoutMs}ms`

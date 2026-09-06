@@ -91,6 +91,18 @@ describe("runGate", () => {
     }
   });
 
+  it("cancellation overrides a last command's stale successful result", async () => {
+    const controller = new AbortController();
+    const result = await runGate({ name: "last", commands: ["unused"] }, process.cwd(), {
+      signal: controller.signal,
+      runProcess: async () => {
+        controller.abort();
+        return { reason: "exited", exitCode: 0, stdout: "passed", stderr: "", outputTruncated: false };
+      },
+    });
+    expect(result).toMatchObject({ passed: false, status: "cancelled" });
+  });
+
   it("treats a forced watch-mode termination as failure", async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "wm-gate-watch-"));
     try {

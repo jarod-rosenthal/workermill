@@ -8,9 +8,12 @@
 import { streamText, stepCountIs, type ToolSet } from "ai";
 import fs from "fs";
 import path from "path";
+import { randomUUID } from "node:crypto";
 import { execSync } from "child_process";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
@@ -18,11 +21,13 @@ import { formatPromptProjectContext } from "../project-context.js";
 import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
-import { getProviderForPersona, loadConfig, saveConfig } from "../config.js";
+import { getProviderForPersona, loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import { getDiffForReview, getDiffSinceCommit, getHeadHash, captureStoryPriorWork, commitRevisionChanges } from "../git-ops.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
+import { checkpoint } from "../checkpoints.js";
+import { durablePermissionRules } from "../safety.js";
+import { resolveSandboxMode } from "../sandbox-mode.js";
 
 import type {
   OrchestrationOutput,
@@ -50,13 +55,119 @@ import {
   emitReasoningDelta,
 } from "./utils.js";
 
-import { checkToolPermission, emitFailureCode, formatToolCallDisplay } from "./execution.js";
+import { emitFailureCode, extractCheckpointTargets, formatToolCallDisplay } from "./execution.js";
 
 
 // ---------------------------------------------------------------------------
 // Internal type used by runStandaloneReview for tool wrapping
 // ---------------------------------------------------------------------------
 type AnyToolDef = any;
+
+const reviewSessionPermissionRules = new WeakMap<Set<string>, string[]>();
+
+function getReviewSessionPermissionRules(sessionAllow: Set<string>): readonly string[] {
+  return reviewSessionPermissionRules.get(sessionAllow) ?? [];
+}
+
+async function recordReviewAlwaysPermission(
+  sessionAllow: Set<string>,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<void> {
+  const rules = durablePermissionRules(toolName, input);
+  if (rules.length === 0) return;
+  const current = reviewSessionPermissionRules.get(sessionAllow) ?? [];
+  for (const rule of rules) if (!current.includes(rule)) current.push(rule);
+  reviewSessionPermissionRules.set(sessionAllow, current);
+  try {
+    const settings = loadLocalSettings() || {};
+    settings.allow = settings.allow || [];
+    for (const rule of rules) if (!settings.allow.includes(rule)) settings.allow.push(rule);
+    saveLocalSettings(settings);
+  } catch { /* retain the narrowly-scoped session approval when persistence fails */ }
+}
+
+function createReviewTools(args: {
+  persona: { tools: readonly string[] };
+  role: string;
+  model: unknown;
+  config: CliConfig;
+  output: OrchestrationOutput;
+  workingDir: string;
+  sandboxed: boolean | "os";
+  signal: AbortSignal;
+  runId: string;
+  readOnlyRole: boolean;
+  trustAll?: boolean | (() => boolean);
+  sessionAllow?: Set<string>;
+  onToolStatus?: (status: string) => void;
+}): Record<string, AnyToolDef> {
+  const sessionAllow = args.sessionAllow ?? new Set<string>();
+  const scope = createPathScope(args.workingDir, args.config.sandboxCapabilities?.extraPathGrants);
+  const executionContext: ToolExecutionContext = {
+    runId: args.runId,
+    workspace: scope.workspace,
+    scope,
+    effectiveSandbox: args.sandboxed === "os" ? "os" : args.sandboxed ? "path" : "none",
+    signal: args.signal,
+    getPermissionState: () => ({
+      mode: "default",
+      trustAll: args.readOnlyRole ? false : (typeof args.trustAll === "function" ? args.trustAll() : Boolean(args.trustAll)),
+      sessionAllow,
+      rules: {
+        ...args.config.permissions,
+        allow: [...(args.config.permissions?.allow ?? []), ...getReviewSessionPermissionRules(sessionAllow)],
+      },
+      // This must remain true for reviewers even when a persona claims bash,
+      // child-agent, or write-tool access.
+      readOnlyRole: args.readOnlyRole,
+      workspace: scope.workspace,
+    }),
+    allowedNetworkDomains: args.config.sandboxCapabilities?.allowedNetworkDomains,
+    allowLocalBinding: args.config.sandboxCapabilities?.allowLocalBinding,
+    allowDockerSocket: args.config.sandboxCapabilities?.allowDockerSocket,
+    prompt: args.readOnlyRole ? undefined : async (toolName, input, reason, executingContext) => {
+      const result = await args.output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, input)} (${reason})`);
+      if (executingContext.signal.aborted) return false;
+      if (typeof result === "object" && result.allowed) {
+        if (result.mode === "trust") sessionAllow.add("*");
+        if (result.mode === "always") await recordReviewAlwaysPermission(sessionAllow, toolName, input);
+      }
+      return Boolean(typeof result === "object" ? result.allowed : result) && !executingContext.signal.aborted;
+    },
+    preHook: (toolName, input, executingContext) => {
+      args.output.toolCall(args.role, toolName, input);
+      const hookResult = runPreHooksWithBlocking(toolName, args.config.hooks, executingContext.workspace, {
+        input: JSON.stringify(input).substring(0, 10_000),
+      });
+      return hookResult.blocked ? { blocked: true, reason: hookResult.reason } : undefined;
+    },
+    checkpoint: (toolName, input, executingContext) => {
+      for (const target of extractCheckpointTargets(toolName, input, executingContext.workspace)) checkpoint(target.path, target.tool);
+    },
+    postHook: (toolName, _input, _result, _error, executingContext) => {
+      runHooks("post", toolName, args.config.hooks, executingContext.workspace);
+    },
+    event: (event) => {
+      if (event.phase === "complete") args.onToolStatus?.("");
+    },
+  };
+  const allTools = createToolDefinitions(args.workingDir, args.model as never, args.sandboxed, {
+    executionContext,
+    sandboxCapabilities: args.config.sandboxCapabilities,
+  });
+  const selected: Record<string, AnyToolDef> = {};
+  for (const toolName of args.persona.tools) {
+    const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
+    if (!toolDef || typeof toolDef.execute !== "function") continue;
+    const original = toolDef.execute;
+    selected[toolName] = {
+      ...toolDef,
+      execute: (input: Record<string, unknown>) => executeToolCall(toolName, input, () => original(input), executionContext),
+    };
+  }
+  return selected;
+}
 
 
 // ---------------------------------------------------------------------------
@@ -317,6 +428,11 @@ export async function runStandaloneReview(
   target?: string,
   abortSignal?: AbortSignal,
 ): Promise<StandaloneReviewResult | null> {
+  if (abortSignal?.aborted) {
+    output.coordinatorLog("Review cancelled before startup.");
+    output.statusDone();
+    return null;
+  }
   const reviewer = loadPersona("tech_lead");
   if (!reviewer) {
     output.error("Tech Lead persona not found.");
@@ -337,26 +453,12 @@ export async function runStandaloneReview(
   output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
   output.status("Reviewer -- Checking code quality");
 
-  const sandboxed = config.sandbox ?? true;
+  const requestedSandbox = config.sandbox ?? true;
+  // An explicit OS request is resolved before creating a model or starting a
+  // provider stream. It must never silently fall back to path mode here.
+  const sandboxed = requestedSandbox === "os" ? resolveSandboxMode("os").effective : requestedSandbox;
+  const reviewRunId = randomUUID();
   const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
-  const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
-
-  // Build reviewer tools -- emit structured tool calls so standalone /review
-  // updates the status bar tool counters in real time.
-  const reviewerTools: Record<string, AnyToolDef> = {};
-  for (const toolName of reviewer.tools) {
-    const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
-    if (toolDef) {
-      reviewerTools[toolName] = {
-        ...toolDef,
-        execute: async (input: Record<string, unknown>) => {
-          output.toolCall("tech_lead", toolName, input);
-          const result = await toolDef.execute(input);
-          return result;
-        },
-      };
-    }
-  }
 
   // Get the diff based on target
   let codeDiff = "";
@@ -485,11 +587,24 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
     let lastReviewError: unknown;
     for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+      if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
       const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
       let attemptReviewerOutput = "";
       let attemptReviewerFinalText = "";
       let attemptReviewerVisibleText = "";
       try {
+        const reviewerTools = createReviewTools({
+          persona: reviewer,
+          role: "tech_lead",
+          model: reviewModel,
+          config,
+          output,
+          workingDir,
+          sandboxed,
+          signal: timedAbort.signal,
+          runId: `${reviewRunId}-standalone-${attempt}`,
+          readOnlyRole: true,
+        });
         const reviewStream = streamText({
           model: reviewModel,
           abortSignal: timedAbort.signal,
@@ -519,6 +634,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timedAbort,
           "Tech Lead review",
         );
+        if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
         attemptReviewerFinalText = result.finalText;
         const stepText = attemptReviewerOutput.trim();
         const candidateReviewText = attemptReviewerFinalText.length > stepText.length
@@ -539,7 +655,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         lastReviewError = err;
         const transient = isTransientError(err);
         const rl = isRateLimitError(err);
-        const canRetry = attempt < maxReviewAttempts && (
+        const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (
           timedAbort.didTimeout()
           || transient
           || rl
@@ -683,6 +799,11 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
   let finalReviewText = ""; // Captures the approved review for use in PR body
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled.");
+      logRetryHint();
+      return { finalReviewText: "", aborted: true };
+    }
     const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
       "tech_lead"
@@ -694,39 +815,23 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
 
+    // Fail an explicit OS request before the provider is initialized.
+    const effectiveSandbox = sandboxed === "os" ? resolveSandboxMode("os").effective : sandboxed;
+    const reviewRunId = randomUUID();
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
-    const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
-
-    // Read-only tools for reviewer — emit structured tool calls so UI status
-    // counters and activity indicators stay accurate during tech_lead review.
-    const reviewerTools: Record<string, AnyToolDef> = {};
-    for (const toolName of reviewer.tools) {
-      const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
-      if (toolDef) {
-        reviewerTools[toolName] = {
-          ...toolDef,
-          execute: async (input: Record<string, unknown>) => {
-            output.toolCall("tech_lead", toolName, input);
-            const result = await toolDef.execute(input);
-            return result;
-          },
-        };
-      }
-    }
 
     let previousReviewFeedback = "";
     let openMustFixItems: ReviewMustFixItem[] = [];
     let lastBlockerSignature = "";
     let repeatedBlockerCount = 0;
-    // Check if user cancelled before starting review
-    if (abortSignal?.aborted) {
-      output.coordinatorLog("Build cancelled.");
-      logRetryHint();
-      return { finalReviewText: "", aborted: true };
-    }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
     for (let reviewRound = 1; reviewRound <= maxRevisions; reviewRound++) {
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { finalReviewText: "", aborted: true };
+      }
       if (await waitWhilePaused()) {
         return { finalReviewText: "", aborted: true };
       }
@@ -943,8 +1048,21 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
         let lastReviewError: unknown;
         for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+          if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
           const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
           try {
+            const reviewerTools = createReviewTools({
+              persona: reviewer,
+              role: "tech_lead",
+              model: reviewModel,
+              config,
+              output,
+              workingDir,
+              sandboxed: effectiveSandbox,
+              signal: timedAbort.signal,
+              runId: `${reviewRunId}-inline-${reviewRound}-${attempt}`,
+              readOnlyRole: true,
+            });
             const reviewStream = streamText({
               model: reviewModel,
               abortSignal: timedAbort.signal,
@@ -973,6 +1091,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timedAbort,
               "Tech Lead review",
             );
+            if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
             reviewUsage = result.usage;
             lastReviewError = undefined;
@@ -981,7 +1100,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             lastReviewError = err;
             const transient = isTransientError(err);
             const rl = isRateLimitError(err);
-            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
+            const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
             if (!canRetry) throw err;
             const retryReason = timedAbort.didTimeout() ? "timed out" : rl ? `rate limited (waiting ${Math.ceil((rl.retryAfterMs) / 1000)}s)` : "hit a transient provider error";
             output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
@@ -1230,39 +1349,8 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           output.status(`${story.persona}: revising...`);
 
+          if (abortSignal?.aborted) return { finalReviewText: "", aborted: true };
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx, sApiKey);
-          const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
-          const storyTools: Record<string, AnyToolDef> = {};
-          for (const toolName of storyPersona.tools) {
-            const toolDef = storyAllTools[toolName as keyof typeof storyAllTools] as AnyToolDef;
-            if (toolDef) {
-              storyTools[toolName] = {
-                ...toolDef,
-                execute: async (input: Record<string, unknown>) => {
-                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
-                  if (!allowed) return "Tool execution denied by user.";
-                  output.toolCall(story.persona, toolName, input);
-                  const revHookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
-                  if (revHookResult.blocked) {
-                    return `Tool blocked by pre-hook: ${revHookResult.reason}`;
-                  }
-                  output.status(`${story.persona}: working...`);
-                  const result = await toolDef.execute(input);
-                  runHooks("post", toolName, config.hooks, workingDir);
-                  output.status("");
-                  return result;
-                },
-              };
-            }
-          }
-
-          // Apply concurrency control to revision tools — same as story execution
-          for (const [name, td] of Object.entries(storyTools)) {
-            if (td && typeof td.execute === "function") {
-              const original = td.execute;
-              (storyTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
-            }
-          }
 
           // Revision prompt follows WorkerMill platform pattern (prompt-builder.ts):
           // Per-story feedback + what was tried before + efficiency tips + scope enforcement.
@@ -1277,12 +1365,29 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
 Working directory: ${workingDir}`;
 
+          const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
           try {
+            if (abortSignal?.aborted) return { finalReviewText: "", aborted: true };
+            const storyTools = createReviewTools({
+              persona: storyPersona,
+              role: story.persona,
+              model: storyModel,
+              config,
+              output,
+              workingDir,
+              sandboxed: effectiveSandbox,
+              signal: revisionTimedAbort.signal,
+              runId: `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`,
+              readOnlyRole: false,
+              trustAll,
+              sessionAllow,
+              onToolStatus: (status) => output.status(status),
+            });
             const revisionStartMs = Date.now();
             const revisionReasoningLength = { value: 0 };
             const revStream = streamText({
               model: storyModel,
-              abortSignal,
+              abortSignal: revisionTimedAbort.signal,
               system: revisionSystemPrompt,
               prompt: `## ⚠️ REVISION REQUIRED — Tech Lead Feedback
 
@@ -1347,6 +1452,9 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
             const revUsage = await revStream.totalUsage;
+            if (revisionTimedAbort.signal.aborted) {
+              return { finalReviewText: "", aborted: true };
+            }
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
@@ -1385,6 +1493,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
+          } finally {
+            revisionTimedAbort.dispose();
           }
 
           // Commit revision changes — checkpoint on the feature branch

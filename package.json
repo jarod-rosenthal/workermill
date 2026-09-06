@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "test:package-os": "vitest run --config vitest.package-os.config.ts",
     "test:watch": "vitest",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:coverage": "vitest run --coverage"

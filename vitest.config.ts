@@ -7,6 +7,6 @@ export default defineConfig({
     globalSetup: ["./src/__tests__/helpers/global-state.ts"],
     setupFiles: ["./src/__tests__/helpers/setup-state.ts"],
     include: ["src/__tests__/**/*.test.ts"],
-    exclude: ["node_modules/**", "dist/**", "src/__tests__/e2e/**"],
+    exclude: ["node_modules/**", "dist/**", "src/__tests__/e2e/**", "src/__tests__/package-os.test.ts"],
   },
 });

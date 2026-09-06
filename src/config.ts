@@ -33,6 +33,11 @@ export interface QualityGateCommand {
   name: string;
   /** Shell commands to run in sequence — stops at first failure */
   commands: string[];
+  /**
+   * Whether a failed static gate blocks completion (default: true).
+   * Set false only to retain advisory behavior outside strict mode.
+   */
+  required?: boolean;
 }
 
 export interface ReviewConfig {
@@ -398,6 +403,7 @@ export const MCPServerConfigSchema = z.object({
 export const QualityGateCommandSchema = z.object({
   name: z.string(),
   commands: z.array(z.string()),
+  required: z.boolean().optional(),
 });
 
 export const ReviewConfigSchema = z.object({

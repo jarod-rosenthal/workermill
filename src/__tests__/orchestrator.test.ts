@@ -798,7 +798,7 @@ describe("orchestrator", () => {
       const output = createMockOutput();
       const config = {
         ...createTestConfig(),
-        qualityGates: [{ name: "advisory check", commands: ["bash -lc 'exit 1'"] }],
+        qualityGates: [{ name: "advisory check", commands: ["bash -lc 'exit 1'"], required: false }],
         review: { enabled: true, strict: false, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
       };
       const planText = `\`\`\`json

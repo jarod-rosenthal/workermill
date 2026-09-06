@@ -1,6 +1,6 @@
 # Spec Check, Plan Critic & Quality Gates
 
-Quality gates run shell commands after all stories complete but **before the tech lead reviewer sees the code**. When a gate fails, the failure output is included in the reviewer's context so they can flag it as a must-fix — no retry loops, no extra model calls.
+Quality gates run shell commands after all stories complete but **before the tech lead reviewer sees the code**. Static gates and required story commands block completion when they fail. Planner-generated verification remains reviewer context outside strict mode.
 
 The gap they fill: experts verify their code compiles and tests pass, but they don't assert "does executing this thing produce the right output?" Gates catch acceptance criteria gaps at the observable behavior level before review.
 
@@ -251,7 +251,7 @@ curl -sf 'http://localhost:3000/api/search?q=test' | node -e ...
 curl: (7) Failed to connect to localhost port 3000: Connection refused
 ```
 
-These failures are informational — factor them into your review score and flag as must-fix if they represent acceptance criteria gaps.
+Planner-generated verification failures are informational outside strict mode — factor them into your review score and flag as must-fix if they represent acceptance criteria gaps. Static gates and required story commands are blocking by default.
 ```
 
 The reviewer flags it; the expert fixes it in the revision loop.
@@ -292,10 +292,28 @@ Static gates that run on every `/build`.
 qualityGates: Array<{
   name: string;       // Label shown in output and reviewer context
   commands: string[]; // Run sequentially; first failure stops the gate
+  required?: boolean; // Defaults true; false makes this static gate advisory outside strict mode
 }>
 ```
 
-Gates themselves run in parallel. A gate is marked failed on the first command that exits non-zero.
+Configured gates run sequentially to avoid races over shared build output. A gate is marked failed on the first command that exits non-zero.
+
+To migrate a static gate that intentionally used the previous advisory behavior,
+set `required` explicitly:
+
+```json
+{
+  "qualityGates": [
+    {
+      "name": "optional browser smoke check",
+      "commands": ["./scripts/browser-smoke"],
+      "required": false
+    }
+  ]
+}
+```
+
+`required: false` does not opt out of `review.strict`; strict mode blocks every failed gate.
 
 ### `config.review.specCheck`
 

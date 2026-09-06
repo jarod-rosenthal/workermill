@@ -268,6 +268,10 @@ With auto-update off, the CLI uses the model catalog baked into the installed ve
 
 Static shell commands that run on every `/build`, after all stories complete and before the tech lead reviewer sees the diff. Use these for project-wide invariants — things that must always hold regardless of what was built.
 
+Static gates are required by default: a failure blocks completion. To preserve an
+older advisory gate, opt out explicitly with `"required": false`; strict mode
+still blocks that failure.
+
 **Off by default.** Add to `.workermill/config.json` to enable:
 
 ```json
@@ -279,7 +283,8 @@ Static shell commands that run on every `/build`, after all stories complete and
     },
     {
       "name": "config schema valid",
-      "commands": ["node dist/index.js config validate --config config/defaults.json"]
+      "commands": ["node dist/index.js config validate --config config/defaults.json"],
+      "required": false
     }
   ]
 }
@@ -289,8 +294,9 @@ Static shell commands that run on every `/build`, after all stories complete and
 |---|---|
 | `name` | Label shown in the TUI and injected into the reviewer's context |
 | `commands` | Shell commands run sequentially — first non-zero exit marks the gate as failed |
+| `required` | Defaults to `true`. Set to `false` only for an advisory static gate outside strict mode. |
 
-All gates run in parallel. A gate fails on the first command that exits non-zero.
+All gates run sequentially to avoid races over shared build output. A gate fails on the first command that exits non-zero.
 
 **Do not use for:** `npm test`, `tsc`, `pytest`, `go build` — workers already run these. Use quality gates for black-box assertions on the *built artifact*, not the build process itself.
 

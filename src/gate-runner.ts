@@ -35,8 +35,12 @@ export interface GateExecutionOptions {
 export interface GateResult {
   name: string;
   passed: boolean;
+  /** A cancellation is never reported as a passing gate. */
+  status: GateStatus;
   output: string;
 }
+
+export type GateStatus = "passed" | "failed" | "cancelled";
 
 export type GateCommandFailureReason = ProcessResult["reason"] | "watch_killed";
 
@@ -183,7 +187,7 @@ export async function runGate(
   for (const cmd of gate.commands) {
     if (options.signal?.aborted) {
       outputs.push(`$ ${cmd}\nCommand cancelled`);
-      return { name: gate.name, passed: false, output: outputs.join("\n\n").trim() };
+      return { name: gate.name, passed: false, status: "cancelled", output: outputs.join("\n\n").trim() };
     }
     try {
       const { stdout, stderr } = await runGateCommand(cmd, cwd, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options);
@@ -199,8 +203,13 @@ export async function runGate(
           reason: "spawn_failed",
         });
       outputs.push(failureOutput(cmd, typed));
-      return { name: gate.name, passed: false, output: outputs.join("\n\n").trim() };
+      return {
+        name: gate.name,
+        passed: false,
+        status: typed.reason === "cancelled" ? "cancelled" : "failed",
+        output: outputs.join("\n\n").trim(),
+      };
     }
   }
-  return { name: gate.name, passed: true, output: outputs.join("\n\n").trim() };
+  return { name: gate.name, passed: true, status: "passed", output: outputs.join("\n\n").trim() };
 }

@@ -19,6 +19,7 @@ describe("runGate", () => {
       }, cwd);
 
       expect(result.passed).toBe(true);
+      expect(result.status).toBe("passed");
       expect(fs.readFileSync(markerFile, "utf8")).toBe("first");
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
@@ -37,6 +38,7 @@ describe("runGate", () => {
       }, cwd);
 
       expect(result.passed).toBe(false);
+      expect(result.status).toBe("failed");
       expect(result.output).toContain("10 passed");
       expect(fs.existsSync(path.join(cwd, "should-not-run"))).toBe(false);
     } finally {
@@ -57,6 +59,33 @@ describe("runGate", () => {
       });
       controller.abort();
       await expect(running).rejects.toMatchObject({ reason: "cancelled" });
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not start later commands after cancellation", async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "wm-gate-cancel-order-"));
+    try {
+      const controller = new AbortController();
+      const started = path.join(cwd, "started");
+      const result = await runGate({
+        name: "cancelled",
+        commands: [
+          "first command",
+          "touch should-not-run",
+        ],
+      }, cwd, { signal: controller.signal, runProcess: async (request) => {
+        // This deterministic runner models a command that has started and then
+        // cancels the run before the next configured command can launch.
+        fs.writeFileSync(started, "started");
+        controller.abort();
+        return { reason: "cancelled", exitCode: null, stdout: "", stderr: "", outputTruncated: false };
+      } });
+
+      expect(result).toMatchObject({ passed: false, status: "cancelled" });
+      expect(fs.existsSync(started)).toBe(true);
+      expect(fs.existsSync(path.join(cwd, "should-not-run"))).toBe(false);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }

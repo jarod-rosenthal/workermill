@@ -9,6 +9,12 @@
  */
 
 import * as logger from "./logger.js";
+import { boundedFetch, type HttpRequestOptions } from "./engine/http-request.js";
+
+export interface TicketRequestOptions extends HttpRequestOptions {
+  /** Model-directed operations must not turn failed remote writes into success. */
+  strict?: boolean;
+}
 
 type TicketSystem = "jira" | "linear" | "github" | "internal";
 
@@ -39,7 +45,7 @@ export class TicketOps {
   private ticketSystem: TicketSystem;
   private hasCredentials: boolean;
 
-  constructor(ticketKey?: string, ticketSystem?: string) {
+  constructor(ticketKey?: string, ticketSystem?: string, private readonly requestOptions: TicketRequestOptions = {}) {
     this.ticketKey = ticketKey || "";
     this.ticketSystem = (ticketSystem as TicketSystem) || "jira";
 
@@ -74,6 +80,10 @@ export class TicketOps {
         );
         break;
     }
+  }
+
+  private request(url: string, init: RequestInit = {}): Promise<Response> {
+    return boundedFetch(url, init, this.requestOptions);
   }
 
   /**

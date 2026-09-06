@@ -109,14 +109,32 @@ export function createWorktree(workingDir: string, prompt: string): WorktreeInfo
 }
 
 interface WorktreeState { kind: "empty" | "changed" | "unknown"; diffStat: string; }
-function inspectWorktree(worktree: WorktreeInfo): WorktreeState {
+async function inspectWorktree(worktree: WorktreeInfo, context: ToolExecutionContext): Promise<WorktreeState> {
+  // Status/diff can execute configured Git clean filters. They must not run
+  // on the host outside an OS child's boundary, even during finalization.
+  const inspectionSignal = AbortSignal.timeout(5_000);
+  const inspectGit = async (args: readonly string[]): Promise<string> => {
+    const command = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args]
+      .map((arg) => "'" + arg.replace(/'/g, "'\\''") + "'").join(" ");
+    const result = await runScopedProcess({
+      runId: `child-inspection-${crypto.randomUUID()}`, signal: inspectionSignal,
+      cwd: worktree.worktreePath, command,
+      timeoutMs: 5_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+    }, {
+      sandbox: context.effectiveSandbox === "os" ? "os" : true,
+      scope: worktree.scope,
+      capabilities: { allowedNetworkDomains: [], allowLocalBinding: false, allowDockerSocket: false },
+    });
+    if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) throw new Error("Unable to inspect complete child state");
+    return result.stdout.trim();
+  };
   try {
-    const status = git(worktree.worktreePath, ["status", "--porcelain", "--untracked-files=all", "--ignored=matching"]);
-    const head = git(worktree.worktreePath, ["rev-parse", "HEAD"]);
+    const status = await inspectGit(["status", "--porcelain", "--untracked-files=all", "--ignored=matching"]);
+    const head = await inspectGit(["rev-parse", "HEAD"]);
     const diffStat = [
-      git(worktree.worktreePath, ["diff", "--stat", "HEAD"]),
-      git(worktree.worktreePath, ["diff", "--stat", "--cached"]),
-      head === worktree.startHead ? "" : git(worktree.worktreePath, ["diff", "--stat", `${worktree.startHead}..HEAD`]),
+      await inspectGit(["diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD"]),
+      await inspectGit(["diff", "--no-ext-diff", "--no-textconv", "--stat", "--cached"]),
+      head === worktree.startHead ? "" : await inspectGit(["diff", "--no-ext-diff", "--no-textconv", "--stat", `${worktree.startHead}..HEAD`]),
     ].filter(Boolean).join("\n");
     return { kind: !status && head === worktree.startHead ? "empty" : "changed", diffStat: diffStat || (head === worktree.startHead ? "(no diff stat available)" : "(committed changes)") };
   } catch { return { kind: "unknown", diffStat: "(unable to inspect worktree state)" }; }
@@ -321,7 +339,11 @@ export function createSubAgentExecutor(
 
     if (!worktree) return result;
     const identity = `Branch \`${worktree.branchName}\`; worktree \`${worktree.worktreePath}\`.`;
-    const state = inspectWorktree(worktree);
+    // Unsuccessful children are always preserved; do not delay cancellation
+    // by invoking repository-defined filters merely to produce a diff summary.
+    const state: WorktreeState = result.success && context
+      ? await inspectWorktree(worktree, context)
+      : { kind: "unknown", diffStat: "(inspection skipped after failure or cancellation)" };
     if (result.success && state.kind === "empty") {
       try {
         removeConfirmedEmptyWorktree(workingDir, worktree);

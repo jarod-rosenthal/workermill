@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { spawn } from "node:child_process";
+import { validateVariants, runNode } from "./r20-helper.mjs";
 
 const baselineFiles = {
   "package.json": '{"type":"module"}\n',
@@ -79,7 +77,7 @@ export const fixture = {
     writableFiles: ["src/config.mjs"],
     network: false,
     timeoutMs: 2000,
-    toolchain: "Node.js >=20; built-in modules only; ESM",
+    toolchain: "Node.js >=22.12; built-in modules only; ESM",
   },
   // This is a description for a human/model, not the held-out test itself.
   acceptance: "Duplicate keys fail clearly; valid multi-file batch plans retain their existing shape; values may contain '='.",
@@ -91,46 +89,6 @@ export const fixture = {
   referenceFiles,
   incompleteFiles,
 };
-
-async function materialize(root, files) {
-  for (const [path, contents] of Object.entries(files)) {
-    const target = join(root, path);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, contents);
-  }
-}
-
-function runNode(root, expression) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", expression], {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let outputTruncated = false;
-    let timedOut = false;
-    const append = (current, chunk) => {
-      const next = current + chunk;
-      if (next.length > 16_384) outputTruncated = true;
-      return next.slice(0, 16_384);
-    };
-    child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
-    child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, fixture.workspace.timeoutMs);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: null, signal: null, stdout, stderr, outputTruncated, timedOut, error: String(error) });
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve({ code, signal, stdout, stderr, outputTruncated, timedOut });
-    });
-  });
-}
 
 async function accepts(root) {
   const moduleUrl = pathToFileURL(join(root, "src/main.mjs")).href;
@@ -154,25 +112,8 @@ if (!rejected || !whitespaceRejected) process.exit(3);`;
 }
 
 export async function validateFixture() {
-  const root = await mkdtemp(join(tmpdir(), "wm-r20a-"));
-  const outcomes = {};
-  try {
-    for (const [name, files] of Object.entries({ baseline: baselineFiles, reference: referenceFiles, incomplete: incompleteFiles })) {
-      const workspace = join(root, name);
-      await mkdir(workspace);
-      await materialize(workspace, files);
-      outcomes[name] = await accepts(workspace);
-    }
-    return {
-      initialRevision: fixture.initialRevision,
-      baselineFails: !outcomes.baseline.passed,
-      referencePasses: outcomes.reference.passed,
-      incompleteFails: !outcomes.incomplete.passed,
-      outcomes,
-    };
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  return validateVariants({ fixture, variants: { baseline: baselineFiles, reference: referenceFiles, incomplete: incompleteFiles },
+    testExpression: async (root) => accepts(root) });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

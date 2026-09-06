@@ -1,9 +1,9 @@
 # Offline evaluation fixtures
 
 This directory contains small, deterministic tickets for future reliability
-qualification. R20a establishes the protocol and contributes one bug-fix task;
-the later R20 packages add the remaining 19 tasks (5 bug fixes, 5 features, 4
-refactors, 3 maintenance, and 3 security/validation repairs in total).
+qualification. R20 currently contains five bug-fix fixtures (one from R20a and
+four from R20b). The remaining planned inventory is five features, four
+refactors, three maintenance tasks, and three security/validation repairs.
 
 ## Fixture protocol
 
@@ -13,7 +13,7 @@ Each task is an ESM module exporting `fixture` with:
   workspace paths and bytes);
 - a model prompt plus an agent-visible workspace template;
 - an explicit writable-file list, `network: false`, timeout, and pinned
-  toolchain requirement;
+  toolchain requirement (Node.js 22.12+);
 - a human rubric and a short acceptance description; and
 - reference and intentionally incomplete solutions kept outside the generated
   model workspace.
@@ -34,6 +34,8 @@ agent-visible files. Run an individual fixture with:
 
 ```sh
 node evals/tasks/r20-bugfix-batch-config.mjs
+# Other fixtures can be run the same way, for example:
+node evals/tasks/r20-bugfix-pagination.mjs
 ```
 
 There are no model calls, network services, benchmark copies, or quality claims

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { cpSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -26,18 +26,19 @@ let holdResponse = false;
 let closedModelRequests = 0;
 
 function command(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
-  return spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 30_000 });
+  return spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 60_000 });
 }
 
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(path.join(installRoot, "node_modules", ".bin", "wm"), args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const deadline = setTimeout(() => child.kill("SIGKILL"), 10_000);
     let stdout = "";
     let stderr = "";
     child.stdout!.on("data", (data) => { stdout += data; });
     child.stderr!.on("data", (data) => { stderr += data; });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.on("error", error => { clearTimeout(deadline); reject(error); });
+    child.on("close", (code) => { clearTimeout(deadline); resolve({ code, stdout, stderr }); });
   });
 }
 
@@ -86,11 +87,9 @@ function jsonResponse(response: import("node:http").ServerResponse): void {
 beforeAll(async () => {
   const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "wm-pack-artifact-"));
   roots.push(artifactRoot);
-  // npm writes its staging tarball into its cache. Some restricted test hosts
-  // mount the shared cache read-only, so copy the already-populated cache to a
-  // disposable location and use that for both packing and offline install.
-  const npmCache = path.join(artifactRoot, "npm-cache");
-  cpSync(path.join(process.env.npm_config_cache ?? path.join(os.homedir(), ".npm"), "_cacache"), path.join(npmCache, "_cacache"), { recursive: true });
+  // CI's npm ci has already cached the exact locked dependencies. A custom
+  // npm cache can be supplied without copying a developer's entire cache.
+  const npmCache = process.env.npm_config_cache ?? path.join(os.homedir(), ".npm");
   const packed = command("npm", ["pack", "--json", "--pack-destination", artifactRoot, "--cache", npmCache], source);
   if (packed.status !== 0) throw new Error(`npm pack failed: ${packed.stderr || packed.stdout}`);
   // npm's JSON output is suppressed by a few test runners; the tarball name

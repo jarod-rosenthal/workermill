@@ -11,6 +11,7 @@ export default defineConfig({
     environment: "node",
     include: ["src/__tests__/package-os.test.ts"],
     testTimeout: 45_000,
+    hookTimeout: 90_000,
     pool: "forks",
     maxWorkers: 1,
     minWorkers: 1,

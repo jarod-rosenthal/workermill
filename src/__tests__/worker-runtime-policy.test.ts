@@ -38,6 +38,28 @@ const output: OrchestrationOutput = {
 };
 
 describe("worker execution policy runtime", () => {
+  it("records provider failure as failed even though teardown aborts the attempt", async () => {
+    vi.clearAllMocks();
+    createToolDefinitions.mockReturnValue({});
+    streamText.mockImplementation(() => { throw new Error("Invalid API key"); });
+    const attempts: string[] = [];
+    const controller = new AbortController();
+    const result = await executeStories({
+      sorted: [{ id: "failed", title: "Failed", persona: "worker", description: "provider failure" }],
+      completedStoryIds: [], config: { providers: {}, default: "ollama" },
+      output, trustAll: true, sandboxed: false, userTask: "task",
+      context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      sessionAllow: new Set(), workingDir: process.cwd(),
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      featureBranch: null, mainBranch: "main", abortSignal: controller.signal, ticketOps: null,
+      waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+      onStoryAttempt: (event) => { attempts.push(event.status); },
+    });
+    expect(result.failedStories.has("failed")).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
+    expect(attempts).toEqual(["started", "failed"]);
+  });
+
   it("threads the run context into tools and does not complete a cancelled story", async () => {
     const context: SharedContext = { filesCreated: [], filesModified: [], decisions: [], learnings: [] };
     let factoryContext: {
@@ -54,6 +76,7 @@ describe("worker execution policy runtime", () => {
         bash: { execute: async () => { abortController.abort(); return "late success"; } },
       };
     });
+    const attempts: Array<{ status: string; attemptId: string }> = [];
     streamText.mockImplementation((options: { tools: Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }> }) => ({
       textStream: (async function* () { await options.tools.bash.execute({ command: "required-command" }); yield "done"; })(),
       text: Promise.resolve("done"),
@@ -86,6 +109,7 @@ describe("worker execution policy runtime", () => {
       waitWhilePaused: async () => false,
       pauseForBalanceIssue: async () => false,
       logRetryHint: vi.fn(),
+      onStoryAttempt: (event) => { attempts.push(event); },
     });
 
     expect(factoryContext).toMatchObject({ signal: abortController.signal });
@@ -96,6 +120,8 @@ describe("worker execution policy runtime", () => {
     expect(factoryContext?.scope?.extraGrants).toHaveLength(1);
     expect(result.completedStoryIds).toEqual([]);
     expect(result.earlyExit).toBe(true);
+    expect(attempts.map((event) => event.status)).toEqual(["started", "cancelled"]);
+    expect(attempts[0].attemptId).toBe(attempts[1].attemptId);
   });
 
   it("denies before worker hooks or tool mutation and emits one denial event", async () => {

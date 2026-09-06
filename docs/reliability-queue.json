@@ -11,7 +11,7 @@
     "unitTests": {"passed": 1550, "failed": 80, "skipped": 1},
     "handoff": "../HANDOFF.md",
     "retrospective": "recovery/2026-09-06-retrospective.md",
-    "note": "Historical task completion entries below do not qualify this HEAD. R15a is integrated with an incompatible orchestration caller; R15b event seams survive unintegrated at 7aa8e089. Current work is recovery documentation, not resumed implementation."
+    "note": "Historical task completion entries below do not qualify this HEAD. R15a is integrated with an incompatible orchestration caller; R15b event seams survive unintegrated at 7aa8e089. This snapshot is historical; see HANDOFF.md for the resumed repair and current qualification."
   },
   "integrationBranch": "reliability/core",
   "maxImplementationWorkers": 2,

@@ -95,6 +95,8 @@ export interface SharedContext {
 
 /** Result from a completed (or failed) orchestration — used by /retry. */
 export interface OrchestrationResult {
+  /** Persisted evidence identity, including failed and cancelled runs. */
+  runId?: string;
   stories: Story[];
   completedStoryIds: string[];
   featureBranch: string | null;
@@ -106,6 +108,7 @@ export interface OrchestrationResult {
 
 /** Retry plan — skips planning, resumes from first incomplete story. */
 export interface RetryPlan {
+  priorRunId?: string;
   stories: Story[];
   completedStoryIds: string[];
   featureBranch: string;

@@ -721,6 +721,21 @@ export interface ExecuteStoriesParams {
   waitWhilePaused: () => Promise<boolean>;
   pauseForBalanceIssue: (scope: string) => Promise<boolean>;
   logRetryHint: () => void;
+  /** R15 persistence seam; emitted for real worker attempts, never resumed skips. */
+  onStoryAttempt?: (event: StoryAttemptEvent) => void | Promise<void>;
+}
+
+export interface StoryAttemptEvent {
+  attemptId: string;
+  storyId: string;
+  /** Monotonic within one story invocation; includes retry/revision attempts. */
+  attempt: number;
+  revision: number;
+  role: "worker";
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  at: string;
 }
 
 export interface ExecuteStoriesResult {
@@ -755,6 +770,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     pauseForBalanceIssue,
     logRetryHint,
     getMCPToolDefinitions,
+    onStoryAttempt,
   } = params;
 
   const failedStories = new Set<string>();
@@ -841,6 +857,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     let contextOverflowRetries = 0;
     let contextOverflowSlackTokens = 0;
     const retryErrorSignatureCounts = new Map<string, number>();
+    let storyAttemptNumber = 0;
 
     for (let revision = 0; revision <= 2; revision++) {
     // Retrying intentionally retains partial and pre-existing work. A HEAD
@@ -855,7 +872,11 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     // processes, LSP session, and tool calls cannot collide with a retry.
     const attemptRunId = `${params.runId ?? "story"}-worker-${story.id}-${revision}-${randomUUID()}`;
     const attemptResources = createAttemptResources(attemptRunId, () => loopAbort.abort(new Error("Worker attempt finished")));
+    const attemptNumber = ++storyAttemptNumber;
+    const attemptStartedAt = new Date().toISOString();
+    let attemptSucceeded = false;
     try {
+    await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: "started", at: attemptStartedAt });
     const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
     const executionContext: ToolExecutionContext = {
       runId: attemptRunId,
@@ -1394,6 +1415,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       completedStoryIds.push(story.id);
+      // The terminal event remains deferred until resource cleanup completes.
+      attemptSucceeded = true;
 
       runLifecycleHooks("story_complete", config.hooks, workingDir, {
         WORKERMILL_STORY_ID: story.id,
@@ -1444,7 +1467,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       // Persist progress so /retry works across terminal restarts
       if (featureBranch) {
-        saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
+        saveShipRun({ runId: params.runId, workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
       }
 
       const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;
@@ -1553,14 +1576,20 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       break;
     }
     } finally {
+      let cleanupError: unknown;
       try { await attemptResources.close(); }
       catch (error) {
+        cleanupError = error;
         const index = completedStoryIds.indexOf(story.id);
         if (index >= 0) completedStoryIds.splice(index, 1);
         failedStories.add(story.id);
         output.error(error instanceof Error ? error.message : String(error));
-        throw error instanceof ResourceCleanupError ? error : new ResourceCleanupError([error]);
       }
+      // Resource teardown aborts the attempt's local signal even on failure.
+      // Only cancellation of the owning run means the user cancelled it.
+      const terminalStatus = cleanupError ? "failed" : attemptSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
+      await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: terminalStatus, at: new Date().toISOString() });
+      if (cleanupError) throw cleanupError instanceof ResourceCleanupError ? cleanupError : new ResourceCleanupError([cleanupError]);
     }
 
     } // end revision loop

@@ -852,6 +852,37 @@ export interface ReviewLoopParams {
   waitWhilePaused: () => Promise<boolean>;
   pauseForBalanceIssue: (scope: string) => Promise<boolean>;
   logRetryHint: () => void;
+  /** R15 persistence seam for parsed reviewer evidence; feedback is never emitted. */
+  onReviewRound?: (event: ReviewRoundEvent) => void | Promise<void>;
+  /** R15 persistence seam for each revision model attempt. */
+  onRevisionAttempt?: (event: RevisionAttemptEvent) => void | Promise<void>;
+}
+
+export interface ReviewRoundEvent {
+  attemptId: string;
+  round: number;
+  attempt: number;
+  role: "tech_lead";
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  at: string;
+  outcome?: Pick<ReviewOutcome, "kind" | "approved" | "decision" | "score">;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export interface RevisionAttemptEvent {
+  attemptId: string;
+  reviewRound: number;
+  storyId: string;
+  role: string;
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  at: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 
@@ -865,7 +896,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     featureBranch, mainBranch, workingDir,
     costTracker, abortSignal, trustAll, sandboxed, sessionAllow,
     liveViewServer, ticketOps, gateResultsSection,
-    waitWhilePaused, pauseForBalanceIssue, logRetryHint,
+    waitWhilePaused, pauseForBalanceIssue, logRetryHint, onReviewRound, onRevisionAttempt,
   } = params;
 
   // Review config
@@ -1144,11 +1175,15 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const maxReviewAttempts = 2;
         let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
         let lastReviewError: unknown;
+        let successfulReviewAttemptId: string | undefined;
+        let successfulReviewAttemptNumber = 0;
         for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
           if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
           const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
-          const resources = createAttemptResources(`${reviewRunId}-inline-${reviewRound}-${attempt}`, () => timedAbort.abort());
+          const reviewAttemptId = `${reviewRunId}-inline-${reviewRound}-${attempt}`;
+          const resources = createAttemptResources(reviewAttemptId, () => timedAbort.abort());
           try {
+            await onReviewRound?.({ attemptId: reviewAttemptId, round: reviewRound, attempt, role: "tech_lead", provider: revProvider, model: revModel, status: "started", at: new Date().toISOString() });
             const reviewerTools = createReviewTools({
               persona: reviewer,
               role: "tech_lead",
@@ -1158,7 +1193,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               workingDir,
               sandboxed: effectiveSandbox,
               signal: timedAbort.signal,
-              runId: `${reviewRunId}-inline-${reviewRound}-${attempt}`,
+              runId: reviewAttemptId,
               resources,
               readOnlyRole: true,
             });
@@ -1194,6 +1229,8 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
             reviewUsage = result.usage;
+            successfulReviewAttemptId = reviewAttemptId;
+            successfulReviewAttemptNumber = attempt;
             lastReviewError = undefined;
             lastReviewFailure = undefined;
             break;
@@ -1201,6 +1238,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             await resources.close();
             lastReviewError = err;
             lastReviewFailure = reviewOutcomeFromError(err, timedAbort.didTimeout(), abortSignal?.aborted === true);
+            await onReviewRound?.({ attemptId: reviewAttemptId, round: reviewRound, attempt, role: "tech_lead", provider: revProvider, model: revModel, status: lastReviewFailure.kind === "cancelled" ? "cancelled" : "failed", at: new Date().toISOString(), outcome: { kind: lastReviewFailure.kind, approved: lastReviewFailure.approved, decision: lastReviewFailure.decision, score: lastReviewFailure.score } });
             const transient = isTransientError(err);
             const rl = isRateLimitError(err);
             const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
@@ -1244,6 +1282,9 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const score = outcome.score!;
         const feedback = outcome.feedback!;
         const { approved } = outcome;
+        if (successfulReviewAttemptId) {
+          await onReviewRound?.({ attemptId: successfulReviewAttemptId, round: reviewRound, attempt: successfulReviewAttemptNumber, role: "tech_lead", provider: revProvider, model: revModel, status: "completed", at: new Date().toISOString(), outcome: { kind: outcome.kind, approved: outcome.approved, decision: outcome.decision, score: outcome.score }, inputTokens: reviewUsage?.inputTokens, outputTokens: reviewUsage?.outputTokens });
+        }
         const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
         if (!approved) {
           const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
@@ -1477,7 +1518,10 @@ Working directory: ${workingDir}`;
           const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
           const revisionAttemptRunId = `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`;
           const resources = createAttemptResources(revisionAttemptRunId, () => revisionTimedAbort.abort());
+          let revisionSucceeded = false;
+          let revisionUsage: { inputTokens?: number; outputTokens?: number } | undefined;
           try {
+            await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status: "started", at: new Date().toISOString() });
             if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
             const storyTools = createReviewTools({
               persona: storyPersona,
@@ -1565,6 +1609,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             for await (const _chunk of revStream.textStream) { /* drive */ }
             await resources.settleTools();
             const revUsage = await revStream.totalUsage;
+            revisionUsage = revUsage;
             if (revisionTimedAbort.signal.aborted) {
               return {
                 finalReviewText: "",
@@ -1589,6 +1634,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
+            revisionSucceeded = true;
           } catch (err) {
             const attemptWasAborted = revisionTimedAbort.signal.aborted;
             await resources.close();
@@ -1619,7 +1665,13 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
           } finally {
-            try { await resources.close(); } finally { revisionTimedAbort.dispose(); }
+            let cleanupError: unknown;
+            try { await resources.close(); } catch (error) { cleanupError = error; }
+            const status = cleanupError ? "failed" : revisionSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
+            try {
+              await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status, at: new Date().toISOString(), inputTokens: revisionUsage?.inputTokens, outputTokens: revisionUsage?.outputTokens });
+            } finally { revisionTimedAbort.dispose(); }
+            if (cleanupError) throw cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
           }
 
           // Commit revision changes through the bounded candidate process. Git

@@ -15,6 +15,7 @@ import type { Story } from "./orchestrator.js";
 const STATE_FILE = path.join(getStateRoot(), "ship-runs.json");
 
 export interface ShipRun {
+  runId?: string;
   workingDir: string;
   featureBranch: string;
   mainBranch: string; // original branch before /build (e.g. "main", "master", "develop")

@@ -1078,6 +1078,7 @@ export function useOrchestrator(
                   completedStoryIds: [...result.completedStoryIds],
                   featureBranch: result.featureBranch,
                   mainBranch: result.mainBranch,
+                  priorRunId: result.runId,
                 };
                 emitLine(`[${getEmoji("system")} system] Program auto-retry ${retryAttempt}/${maxAutoRetries}: ${issueKey}`);
                 result = await runOrchestration(
@@ -1202,6 +1203,7 @@ export function useOrchestrator(
         completedStoryIds: [...run.completedStoryIds],
         featureBranch: run.featureBranch,
         mainBranch: run.mainBranch,
+        priorRunId: run.runId,
       };
 
       // Reuse start() — pass retryPlan via the task string (parsed in the async body)

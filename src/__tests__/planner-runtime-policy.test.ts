@@ -133,7 +133,7 @@ describe("planner runtime policy", () => {
 
     const result = await planStories(config(), "Plan nothing", workspace, true, output([]), controller.signal);
 
-    expect(result).toMatchObject({ rejected: true, rejectionReason: "Cancelled", stories: [] });
+    expect(result).toMatchObject({ rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled", stories: [] });
     expect(createModel).not.toHaveBeenCalled();
     expect(streamText).not.toHaveBeenCalled();
   });
@@ -152,7 +152,7 @@ describe("planner runtime policy", () => {
 
     const result = await planStories(config(), "Plan then cancel", workspace, true, output([]), controller.signal);
 
-    expect(result).toMatchObject({ rejected: true, rejectionReason: "Cancelled", stories: [] });
+    expect(result).toMatchObject({ rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled", stories: [] });
     expect(result.inputTokens).toBe(1);
     expect(result.outputTokens).toBe(1);
   });

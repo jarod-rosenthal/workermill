@@ -1,5 +1,6 @@
 import { spawn as realSpawn } from "child_process";
 import { EventEmitter } from "events";
+import { writeFileSync } from "fs";
 import { mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
 import path from "path";
 import { tmpdir } from "os";
@@ -36,7 +37,10 @@ async function fixture(signal = new AbortController().signal, options: { startup
   const spawnProcess = vi.fn((_command: string, args: readonly string[]) => {
     const profile = args.find((arg) => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
     child = Object.assign(new EventEmitter(), { pid: 999_999, stderr: new EventEmitter(), kill: vi.fn(() => child.emit("exit", 0)) });
-    void writeFile(path.join(profile, "DevToolsActivePort"), "9333\n/devtools/browser/owned\n");
+    // Publish the fake handshake before discovery starts. An async write can
+    // lose the entire short startup window to the 100 ms discovery retry,
+    // so the response/cancellation fixture would never be exercised.
+    writeFileSync(path.join(profile, "DevToolsActivePort"), "9333\n/devtools/browser/owned\n");
     return child as unknown as ReturnType<typeof import("child_process").spawn>;
   });
   const fetchImpl = options.fetchImpl ?? vi.fn(async (url: string) => {
@@ -196,6 +200,21 @@ describe("browser resources", () => {
       ), { status: 200 })) as typeof fetch,
     });
     await expect(malicious.browser.open()).resolves.toContain("private loopback");
+  });
+
+  it("bounds discovery cleanup when a response cancellation never settles", async () => {
+    const cancelled = vi.fn(() => new Promise<void>(() => undefined));
+    const stalled = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array(256 * 1024 + 1)); },
+        cancel: cancelled,
+      }))) as typeof fetch,
+    });
+    const startedAt = Date.now();
+    await expect(stalled.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(cancelled).toHaveBeenCalled();
+    expect(Date.now() - startedAt).toBeLessThan(300);
   });
 
   it("quotes selector-derived JavaScript literals", async () => {

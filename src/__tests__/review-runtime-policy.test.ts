@@ -137,6 +137,7 @@ describe("review runtime policy", () => {
       try { await options.tools?.write_file?.execute?.({ path: sentinel, content: "mutated" }); } catch (error) { attempts.push(error instanceof Error && "code" in error ? String(error.code) : "unknown"); }
     })) as typeof streamText);
 
+    const events: Array<{ status: string; outcome?: { kind: string }; inputTokens?: number }> = [];
     const review = await runReviewLoop({
       config: { ...config(), review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 9 } },
       output: output(calls), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
@@ -144,6 +145,7 @@ describe("review runtime policy", () => {
       costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+      onReviewRound: (event) => { events.push(event); },
     });
 
     expect(review.aborted).toBe(false);
@@ -153,6 +155,8 @@ describe("review runtime policy", () => {
     const contexts = vi.mocked(createToolDefinitions).mock.calls.map(([, , , options]) => options?.executionContext);
     expect(contexts[0]?.signal).toBe((vi.mocked(streamText).mock.calls[0][0] as StreamOptions).abortSignal);
     expect(contexts[0]?.runId).toMatch(/^[0-9a-f-]+-inline-1-1$/);
+    expect(events.map((event) => event.status)).toEqual(["started", "completed"]);
+    expect(events[1]).toMatchObject({ outcome: { kind: "approved" }, inputTokens: 1 });
   });
 
   it.each([false, true])("binds revision tools to their timeout and rejects late writes (stream throws=%s)", async (streamThrows) => {
@@ -160,6 +164,7 @@ describe("review runtime policy", () => {
     const sentinel = path.join(workspace, "revision-sentinel.txt");
     fs.writeFileSync(sentinel, "unchanged");
     const attempts: string[] = [];
+    const revisionEvents: string[] = [];
     let invocation = 0;
     vi.mocked(streamText).mockImplementation(((options: StreamOptions) => {
       invocation++;
@@ -179,6 +184,7 @@ describe("review runtime policy", () => {
       costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+      onRevisionAttempt: (event) => { revisionEvents.push(event.status); },
     });
 
     expect(review.aborted).toBe(true);
@@ -186,6 +192,7 @@ describe("review runtime policy", () => {
     expect(invocation).toBe(2);
     expect(review.outcome).toMatchObject({ kind: "timed_out", approved: false });
     expect(attempts).toEqual(["cancelled"]);
+    expect(revisionEvents).toEqual(["started", "failed"]);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("unchanged");
     expect(runPreHooksWithBlocking).not.toHaveBeenCalled();
     const contexts = vi.mocked(createToolDefinitions).mock.calls.map(([, , , options]) => options?.executionContext);

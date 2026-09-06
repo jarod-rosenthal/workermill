@@ -495,6 +495,20 @@ export function topologicalSort(stories: Story[]): Story[] {
 /*  planStories                                                               */
 /* -------------------------------------------------------------------------- */
 
+export type PlanFailureReason = "cancelled" | "provider_failed" | "planning_rejected" | "no_output";
+
+export interface PlanResult {
+  stories: Story[];
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** Retained for existing callers; use failureReason for truthful classification. */
+  rejected?: boolean;
+  rejectionReason?: string;
+  failureReason?: PlanFailureReason;
+}
+
 export async function planStories(
   config: CliConfig,
   userTask: string,
@@ -503,7 +517,7 @@ export async function planStories(
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
   _rateLimitRetries = 0,
-): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
+): Promise<PlanResult> {
   const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
   const cancelled = (...usage: Array<{ inputTokens?: number; outputTokens?: number } | undefined>) => ({
     stories: [],
@@ -513,6 +527,7 @@ export async function planStories(
     outputTokens: usage.reduce((total, value) => total + (value?.outputTokens || 0), 0),
     rejected: true,
     rejectionReason: "Cancelled",
+    failureReason: "cancelled" as const,
   });
 
   // Cancellation and an explicitly unavailable OS sandbox are terminal before
@@ -830,7 +845,7 @@ Rules:
     if (abortSignal?.aborted) {
       logger.info("Planner cancelled by user");
       output.coordinatorLog("Build cancelled by user.");
-      return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+      return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled" };
     }
     if (isBalanceOrQuotaError(planErr) && output.requestPause) {
       output.coordinatorLog("Planner paused: provider quota/balance appears exhausted.");
@@ -841,7 +856,7 @@ Rules:
       await output.requestPause();
       if (abortSignal?.aborted) {
         output.coordinatorLog("Build cancelled by user.");
-        return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+        return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled" };
       }
       output.coordinatorLog("Resuming planner after provider/account update...");
       return planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
@@ -866,6 +881,7 @@ Rules:
       outputTokens: 0,
       rejected: true,
       rejectionReason: msg,
+      failureReason: "provider_failed",
     };
   }
   output.status(getPrdDecompositionPhaseLabel("parsing"));
@@ -886,6 +902,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: reason,
+      failureReason: "planning_rejected",
     };
   }
 
@@ -908,6 +925,7 @@ Rules:
         outputTokens: planUsage?.outputTokens || 0,
         rejected: true,
         rejectionReason: reason,
+        failureReason: "planning_rejected",
       };
     }
   }
@@ -978,6 +996,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: "Planner produced no output",
+      failureReason: "no_output",
     };
   }
 
@@ -993,6 +1012,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: "Planner produced no output",
+      failureReason: "no_output",
     };
   }
 

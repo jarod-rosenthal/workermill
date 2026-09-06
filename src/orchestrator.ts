@@ -8,13 +8,14 @@ import { runLifecycleHooks } from "./hooks.js";
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
-import { createAttemptResources } from "./engine/run-resources.js";
+import { createAttemptResources, ResourceCleanupError } from "./engine/run-resources.js";
 import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
-import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
+import { createRunManifest, saveRunManifest, type TerminalReason, type RunManifestStoryAttempt } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
 import { runProcess } from "./engine/process-runner.js";
 import { runScopedProcess } from "./engine/scoped-process.js";
 import { createPathScope } from "./engine/path-policy.js";
+import { preflightReviewIdentity } from "./review-identity.js";
 import { ticketEnvironment } from "./ticket-ops.js";
 
 // ── Re-exports from sub-modules ──
@@ -35,8 +36,8 @@ import {
   isAbortSignalLike, isAbortControllerLike,
 } from "./orchestrator/utils.js";
 import { planStories, topologicalSort, runSpecCheck as _runSpecCheck, runPlanCritic as _runPlanCritic, applyQaParticipation as _applyQaParticipation } from "./orchestrator/planning.js";
-import { executeStories } from "./orchestrator/execution.js";
-import { runReviewLoop as _runReviewLoop } from "./orchestrator/review.js";
+import { executeStories, type StoryAttemptEvent } from "./orchestrator/execution.js";
+import { runReviewLoop as _runReviewLoop, type RevisionAttemptEvent, type ReviewRoundEvent } from "./orchestrator/review.js";
 import { runQualityGates } from "./orchestrator/gates.js";
 import { runCompletion } from "./orchestrator/completion.js";
 import { prepareCandidate } from "./orchestrator/candidate.js";
@@ -105,6 +106,64 @@ export async function runOrchestration(
   }
 
   const workingDir = process.cwd();
+  const costTracker = new CostTracker();
+  const completedStoryIds: string[] = [...(retryPlan?.completedStoryIds ?? [])];
+  let featureBranch: string | null = retryPlan?.featureBranch ?? null;
+  let mainBranch = retryPlan?.mainBranch ?? "main";
+  let sorted: Story[] = retryPlan?.stories ?? [];
+  let failedStories = new Set<string>();
+  let terminalReason: TerminalReason = "provider_failed";
+  manifest.priorRunId = retryPlan?.priorRunId;
+  const attempts = new Map<string, RunManifestStoryAttempt>();
+  const persistProgress = (): void => {
+    manifest.featureBranch = featureBranch;
+    manifest.mainBranch = mainBranch;
+    manifest.plannedStories = sorted.map(({ id, title, persona }) => ({ id, title, persona }));
+    manifest.stories = sorted.map((story) => {
+      const actual = manifest.attempts.filter((attempt) => attempt.storyId === story.id);
+      const last = actual.at(-1);
+      return {
+        id: story.id, title: story.title, persona: story.persona,
+        provider: last?.provider, model: last?.model,
+        status: completedStoryIds.includes(story.id) ? "completed"
+          : failedStories.has(story.id) || last?.status === "failed" || last?.status === "cancelled" ? "failed" : "skipped",
+        retryCount: Math.max(0, actual.length - 1), failureCode: last?.failureCode,
+      };
+    });
+    manifest.totalCost = costTracker.getTotalCost();
+    if (typeof costTracker.getUsageSummary === "function") {
+      const usage = costTracker.getUsageSummary();
+      manifest.totalInputTokens = usage.total.inputTokens;
+      manifest.totalOutputTokens = usage.total.outputTokens;
+    }
+    saveRunManifest(manifest, workingDir);
+  };
+  const onAttempt = (event: StoryAttemptEvent | RevisionAttemptEvent): void => {
+    if (event.status === "started") {
+      const attempt: RunManifestStoryAttempt = {
+        storyId: event.storyId,
+        attempt: manifest.attempts.filter((item) => item.storyId === event.storyId).length + 1,
+        role: event.role, provider: event.provider, model: event.model,
+        status: "started", startedAt: event.at,
+      };
+      attempts.set(event.attemptId, attempt);
+      manifest.attempts.push(attempt);
+    } else {
+      const attempt = attempts.get(event.attemptId);
+      if (!attempt) throw new Error("Run evidence received a terminal attempt without a start");
+      attempt.status = event.status;
+      attempt.completedAt = event.at;
+    }
+    persistProgress();
+  };
+  const onReviewRound = (event: ReviewRoundEvent): void => {
+    if (event.outcome) manifest.reviews.push({
+      round: event.round, provider: event.provider, model: event.model,
+      outcome: event.outcome, score: event.outcome.score, decision: event.outcome.decision,
+      inputTokens: event.inputTokens, outputTokens: event.outputTokens,
+    });
+    persistProgress();
+  };
   let mcpResources: ReturnType<typeof createMCPRunResources> | undefined;
   const resourceController = new AbortController();
   const resourceSignal = AbortSignal.any([abortSignal, resourceController.signal]);
@@ -112,6 +171,7 @@ export async function runOrchestration(
   const cleanupRunResources = async (): Promise<void> => {
     try { await resources.close(); }
     catch (error) {
+      terminalReason = "cleanup_failed";
       output.error(error instanceof Error ? error.message : String(error));
       throw error;
     }
@@ -178,9 +238,10 @@ export async function runOrchestration(
   };
 
   try {
+  persistProgress();
   if (abortSignal.aborted) {
     output.coordinatorLog("Build cancelled before startup.");
-    return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+    return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
   }
   // Retry plans can skip the planner's preflight, so enforce an explicit OS
   // request at the orchestration boundary before any provider or ticket work.
@@ -200,6 +261,9 @@ export async function runOrchestration(
       output.log("system", "OS sandbox enabled for /build.");
     }
   }
+
+  manifest.effectiveSandbox = sandboxed === "os" ? "os" : sandboxed ? "path" : "none";
+  persistProgress();
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
   const ticketEnv = ticketEnvironment();
@@ -237,7 +301,7 @@ export async function runOrchestration(
           linear: "Run `/setup` to add your Linear API key (generate at linear.app/settings/api).",
         };
         output.error(`Cannot connect to ${ticketSystem} — credentials not found.\n${hints[ticketSystem] || "Run `/setup` to configure your issue tracker."}`);
-        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
       const ticket = await ops.fetchTicket();
       if (ticket) {
@@ -250,12 +314,12 @@ export async function runOrchestration(
           linear: `Verify ${ticketKey} exists and your API key has access to this team.`,
         };
         output.error(`Could not fetch ${ticketKey} from ${ticketSystem}.\n${hints[ticketSystem] || ""}`);
-        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.error(`Failed to fetch ${ticketKey}: ${msg}`);
-      return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
   }
 
@@ -307,7 +371,6 @@ export async function runOrchestration(
     await mcpResources.ensureStarted();
   }
 
-  const costTracker = new CostTracker();
   const persistedMemories = loadMemories(workingDir);
   const context: SharedContext = {
     filesCreated: [],
@@ -320,19 +383,14 @@ export async function runOrchestration(
 
   runLifecycleHooks("ship_start", config.hooks, workingDir, { WORKERMILL_TASK: userTask.slice(0, 200) });
 
-  // Track completed story IDs for the result (used by /retry)
-  const completedStoryIds: string[] = [];
-
-  let featureBranch: string | null;
-  let mainBranch: string;
-  let sorted: Story[];
+  terminalReason = "completion_blocked";
 
   if (retryPlan) {
     // ── Retry mode: skip planning, resume on the existing feature branch ──
     featureBranch = retryPlan.featureBranch;
     mainBranch = retryPlan.mainBranch;
     const currentBranch = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "branch", "--show-current"]).catch(() => "");
-    if (abortSignal.aborted) return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+    if (abortSignal.aborted) return { runId: manifest.id, stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
 
     // Checkout the feature branch if we're not already on it
     if (currentBranch !== featureBranch) {
@@ -340,11 +398,11 @@ export async function runOrchestration(
       try {
         if (!await branchExists(featureBranch)) {
           output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
-          return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+          return { runId: manifest.id, stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
         }
       } catch {
         output.error("Could not verify the retry branch. Its saved state is retained.");
-        return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+        return { runId: manifest.id, stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
       }
 
       output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
@@ -352,14 +410,14 @@ export async function runOrchestration(
         await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "switch", "--no-guess", "--", featureBranch]);
       } catch {
         output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
-        return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+        return { runId: manifest.id, stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
       }
     }
     output.updateBranch?.(featureBranch);
     await new Promise(r => setTimeout(r, 0));
 
     sorted = retryPlan.stories;
-    completedStoryIds.push(...retryPlan.completedStoryIds);
+
     const remaining = sorted.filter(s => !retryPlan.completedStoryIds.includes(s.id));
     const actionable = remaining.filter(s => !s.dependsOn?.some(dep => remaining.some(r => r.id === dep)));
     const blocked = remaining.length - actionable.length;
@@ -373,7 +431,7 @@ export async function runOrchestration(
   } else {
     // ── Normal mode: plan on current branch, create feature branch after acceptance ──
     const originalBranch = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "branch", "--show-current"]).catch(() => "");
-    if (abortSignal.aborted) return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+    if (abortSignal.aborted) return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
     mainBranch = originalBranch || "main";
 
     // Warn if starting from a non-trunk branch — new work will stack on top of it
@@ -382,10 +440,10 @@ export async function runOrchestration(
       output.log("system", `You're on \`${originalBranch}\`, not a trunk branch. New work will stack on top of it and the PR will target \`${originalBranch}\` as its base.`);
       output.log("system", `If you want an independent task, cancel, run \`git checkout main\`, then \`/build\` again.`);
       const r = await output.confirm("Continue and stack on this branch?");
-      if (abortSignal.aborted) return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      if (abortSignal.aborted) return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
       const confirmed = typeof r === "object" ? r.allowed : r;
       if (!confirmed) {
-        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
     }
 
@@ -395,6 +453,7 @@ export async function runOrchestration(
     }
 
     // Planner runs on the current branch — no branch created yet
+    terminalReason = "planner_failed";
     const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
 
     // Track planner cost
@@ -404,11 +463,15 @@ export async function runOrchestration(
 
     // Handle planner rejection — still on original branch, nothing to clean up
     if (planResult.rejected) {
+      terminalReason = planResult.failureReason === "planning_rejected" ? "planning_rejected"
+        : planResult.failureReason === "provider_failed" ? "provider_failed"
+        : planResult.failureReason === "cancelled" ? "cancelled" : "planner_failed";
       output.log("system", `The planner determined this task should not proceed: ${planResult.rejectionReason || "unspecified reason"}`);
       output.log("system", "Refine your spec and try again.");
-      return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
     }
 
+    terminalReason = "planning_rejected";
     const qaParticipation = config.qa?.participation ?? "default";
     let plannerStories = _applyQaParticipation(planResult.stories, qaParticipation);
     if (qaParticipation === "always" && plannerStories.length > planResult.stories.length) {
@@ -426,7 +489,7 @@ export async function runOrchestration(
 
       if (critique.cancelled || abortSignal?.aborted) {
         output.coordinatorLog("Build cancelled during plan critique.");
-        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
       }
 
       if (!critique.approved) {
@@ -434,7 +497,7 @@ export async function runOrchestration(
         output.log("critic", `Plan still scores ${critique.score}/10 after ${critique.iterations} rounds (needs ${threshold}).`);
         if (config.review?.strict) {
           output.error("Strict mode — the critic did not approve this plan. Refine the spec and try again.");
-          return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+          return { runId: manifest.id, stories: [], completedStoryIds: [], featureBranch: null, userTask };
         }
         output.log("critic", "Proceeding with the best plan produced — review it carefully before confirming.");
       }
@@ -468,22 +531,26 @@ export async function runOrchestration(
     sorted = topologicalSort(plannerStories);
     logger.info("Topological sort result", { input: plannerStories.length, output: sorted.length, ids: sorted.map(s => s.id) });
 
+    persistProgress();
+
     // Prompt user to proceed (unless --trust mode)
     // Still on original branch — declining costs nothing
     if (!(typeof trustAll === "function" ? trustAll() : trustAll)) {
       let proceed = false;
       try {
         const r = await output.confirm("Execute this plan?");
-        if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        if (abortSignal.aborted) return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         proceed = typeof r === "object" ? r.allowed : r;
       } catch (err) {
         logger.debug("Plan confirmation failed", { error: err instanceof Error ? err.message : String(err) });
       }
       if (!proceed) {
         output.log("system", "Plan cancelled.");
-        return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       }
     }
+
+    terminalReason = "completion_blocked";
 
     // ── Plan accepted — NOW create the feature branch ──
     // Ticket-driven: use ticket key as prefix, title as slug
@@ -522,7 +589,7 @@ export async function runOrchestration(
       output.log("system", `- **Yes** → delete it and start fresh from \`${mainBranch}\``);
       output.log("system", `- **No** → continue on the existing branch`);
       const resetR = await output.confirm(`Reset \`${derivedBranch}\` and start fresh?`);
-      if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+      if (abortSignal.aborted) return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       const reset = typeof resetR === "object" ? resetR.allowed : resetR;
       if (reset) {
         try {
@@ -530,15 +597,15 @@ export async function runOrchestration(
           output.coordinatorLog(`Deleted \`${derivedBranch}\` — starting fresh from \`${mainBranch}\``);
         } catch {
           output.error(`Could not delete \`${derivedBranch}\` — it may be checked out elsewhere.`);
-          return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+          return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         }
       } else {
         const continueR = await output.confirm(`Continue on existing \`${derivedBranch}\`?`);
-        if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        if (abortSignal.aborted) return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         const cont = typeof continueR === "object" ? continueR.allowed : continueR;
         if (!cont) {
           output.log("system", "Cancelled. Run `/build` again after resolving the branch.");
-          return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+          return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         }
         continueExistingBranch = true;
       }
@@ -550,11 +617,11 @@ export async function runOrchestration(
     if (!branchAlreadyAcknowledged && !(typeof trustAll === "function" ? trustAll() : trustAll)) {
       const branchName = derivedBranch ?? "a feature branch";
       const r = await output.confirm(`About to create and check out \`${branchName}\`. Continue?`);
-      if (abortSignal.aborted) return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+      if (abortSignal.aborted) return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       const allowed = typeof r === "object" ? r.allowed : r;
       if (!allowed) {
         output.coordinatorLog("Cancelled.");
-        return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+        return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
       }
     }
 
@@ -575,7 +642,7 @@ export async function runOrchestration(
       await new Promise(r => setTimeout(r, 0));
     } else if (inRepository) {
       output.error("Could not create feature branch. You may have uncommitted changes — commit or stash them first.");
-      return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
     }
     // If not a git repo, featureBranch stays null — commits and state persistence are skipped
   }
@@ -627,12 +694,28 @@ export async function runOrchestration(
     return false;
   }
 
+  if (config.review?.enabled !== false) {
+    const identity = preflightReviewIdentity({
+      config, workers: sorted.map((story) => getProviderForPersona(config, story.persona)),
+      reviewer: getProviderForPersona(config, "tech_lead"),
+      requireDifferentModel: config.review?.requireDifferentModel,
+    });
+    if (identity.warning) output.log("system", identity.warning);
+    if (!identity.allowed) {
+      terminalReason = "permission_blocked";
+      output.error("Reviewer identity requirement is not satisfied; no workers were started. Configure a known-different reviewer binding.");
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask, mainBranch };
+    }
+  }
+  persistProgress();
+
   // Persist the plan so /retry works even if the first story fails
   if (featureBranch) {
-    saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
+    saveShipRun({ runId: manifest.id, workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
   }
 
   // ── Story execution loop ──
+  terminalReason = "provider_failed";
   const execResult = await executeStories({
     sorted,
     completedStoryIds,
@@ -651,18 +734,20 @@ export async function runOrchestration(
     liveViewServer,
     ticketOps,
     runId: manifest.id,
+    onStoryAttempt: onAttempt,
     getMCPToolDefinitions: () => mcpResources?.getToolDefinitions() ?? {},
     waitWhilePaused,
     pauseForBalanceIssue,
     logRetryHint,
   });
 
-  const failedStories = execResult.failedStories;
+  failedStories = execResult.failedStories;
+  persistProgress();
   const skippedStories = execResult.skippedStories;
 
   // If the story loop exited early (user cancel, abort, balance issue), return immediately
   if (execResult.earlyExit) {
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
 
 
@@ -690,18 +775,20 @@ export async function runOrchestration(
   // Worker/MCP/LSP lifetimes are closed before source-changing preparation so
   // neither a late tool result nor a server request can invalidate evidence.
   await cleanupRunResources();
+  terminalReason = "verification_failed";
   const preparation = await prepareCandidate({
     config, workingDir, featureBranch, runId: manifest.id, signal: abortSignal, sandboxed,
   });
   if (!preparation.prepared) {
     output.error(`Candidate preparation failed: ${preparation.reason ?? "unknown error"}`);
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
 
   let gateFingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+  manifest.fingerprint = gateFingerprint;
   if (!gateFingerprint.verified) {
     output.error(`Could not verify candidate state before quality gates: ${gateFingerprint.reason}`);
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
 
   // Gates are permitted to change code, but their result is evidence only for
@@ -712,15 +799,19 @@ export async function runOrchestration(
     gatesResult = await runQualityGates({
       config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id, sandboxed,
     });
+    manifest.gates = gatesResult.gateResults;
+    persistProgress();
     // R12's typed early exit is terminal. Do not run a second pass that can
     // replace the failed evidence with a later success.
     if (gatesResult.earlyExit) {
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      terminalReason = "required_gate_failed";
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     const afterGates = await captureRepositoryFingerprint(workingDir, abortSignal);
+    manifest.fingerprint = afterGates;
     if (!afterGates.verified) {
       output.error(`Could not verify repository state after quality gates: ${afterGates.reason}`);
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     if (afterGates.digest === gateFingerprint.digest && afterGates.head === gateFingerprint.head) {
       gateFingerprint = afterGates;
@@ -729,7 +820,7 @@ export async function runOrchestration(
     gateFingerprint = afterGates;
     if (attempt === gateStabilizationCap) {
       output.error("Quality gates changed the candidate repeatedly; publication is blocked with local work preserved.");
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     // A gate can legitimately write generated source. Commit that exact
     // candidate before the next verification pass; otherwise a later push
@@ -740,12 +831,13 @@ export async function runOrchestration(
     });
     if (!rePreparation.prepared) {
       output.error(`Candidate preparation after quality gates failed: ${rePreparation.reason ?? "unknown error"}`);
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     const preparedFingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+    manifest.fingerprint = preparedFingerprint;
     if (!preparedFingerprint.verified) {
       output.error(`Could not verify prepared candidate after quality gates: ${preparedFingerprint.reason}`);
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     gateFingerprint = preparedFingerprint;
     output.coordinatorLog("Quality gates changed the candidate; re-running final verification once.");
@@ -757,75 +849,71 @@ export async function runOrchestration(
   // feature branch and ship state so `/retry` can continue after the failure,
   // but do not let review or completion publish an unverified change.
   // Run inline review with revision loop
+  terminalReason = "review_rejected";
   const reviewLoopResult = await _runReviewLoop({
     config, output, sorted, context, userTask,
     featureBranch, mainBranch, workingDir,
     costTracker, abortSignal, trustAll, sandboxed, sessionAllow,
     liveViewServer, ticketOps, gateResultsSection,
+    onReviewRound, onRevisionAttempt: onAttempt,
     waitWhilePaused, pauseForBalanceIssue, logRetryHint,
   });
-  if (reviewLoopResult.aborted) {
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
-  }
   const finalReviewText = reviewLoopResult.finalReviewText;
+  const lastReview = manifest.reviews.at(-1);
+  if (!lastReview || lastReview.outcome.kind !== reviewLoopResult.outcome.kind) {
+    const reviewer = getProviderForPersona(config, "tech_lead");
+    manifest.reviews.push({ round: lastReview?.round ?? 1, provider: lastReview?.provider ?? reviewer.provider, model: lastReview?.model ?? reviewer.model, outcome: reviewLoopResult.outcome });
+  }
+  persistProgress();
+  if (reviewLoopResult.aborted) {
+    terminalReason = reviewLoopResult.outcome.kind === "provider_failed" ? "provider_failed" : "review_rejected";
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
+  }
 
   if (config.review?.strict === true && config.review?.enabled !== false && !reviewLoopResult.outcome.approved) {
     output.error(`Strict mode requires a valid review approval (review: ${reviewLoopResult.outcome.kind}).`);
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
   if (config.review?.strict === true && reviewLoopResult.outcome.approved && !reviewLoopResult.fingerprint) {
     output.error("Strict mode cannot publish an approval without verified reviewer-state evidence.");
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
 
   // Review evidence must describe the current tree. Re-run gates only when
   // review/revisions changed it; unchanged candidates avoid redundant gates.
+  terminalReason = "verification_failed";
   const afterReview = await captureRepositoryFingerprint(workingDir, abortSignal);
+  manifest.fingerprint = afterReview;
   const reviewFingerprint = reviewLoopResult.fingerprint ?? (config.review?.enabled === false ? gateFingerprint : undefined);
   const reviewEvidenceStale = !afterReview.verified || (reviewFingerprint !== undefined
     && (afterReview.digest !== reviewFingerprint.digest || afterReview.head !== reviewFingerprint.head));
   if (reviewEvidenceStale) {
     output.error(`Final review evidence is stale${afterReview.verified ? "." : ` (${afterReview.reason})`}; publication is blocked.`);
-    return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
   }
   if (afterReview.digest !== gateFingerprint.digest || afterReview.head !== gateFingerprint.head) {
     const finalGates = await runQualityGates({
       config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id, sandboxed,
     });
-    if (finalGates.earlyExit) return { stories: sorted, completedStoryIds, featureBranch, userTask };
+    manifest.gates = finalGates.gateResults;
+    persistProgress();
+    if (finalGates.earlyExit) {
+      terminalReason = "required_gate_failed";
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
+    }
     const afterFinalGates = await captureRepositoryFingerprint(workingDir, abortSignal);
+    manifest.fingerprint = afterFinalGates;
     if (!afterFinalGates.verified || afterFinalGates.digest !== afterReview.digest || afterFinalGates.head !== afterReview.head) {
       output.error("Final quality gates changed the reviewed candidate; approval is invalid and publication is blocked.");
-      return { stories: sorted, completedStoryIds, featureBranch, userTask };
+      return { runId: manifest.id, stories: sorted, completedStoryIds, featureBranch, userTask };
     }
     gateFingerprint = afterFinalGates;
     gatesResult = finalGates;
     gateResultsSection = finalGates.gateResultsSection;
   }
 
-  // --- Populate and save run manifest ---
-  manifest.featureBranch = featureBranch;
-  manifest.mainBranch = mainBranch;
-  manifest.completedAt = new Date().toISOString();
-  manifest.totalCost = costTracker.getTotalCost();
-  if (typeof costTracker.getUsageSummary === "function") {
-    const usageSummary = costTracker.getUsageSummary();
-    manifest.totalInputTokens = usageSummary.total.inputTokens;
-    manifest.totalOutputTokens = usageSummary.total.outputTokens;
-  }
-  manifest.stories = sorted.map(s => ({
-    id: s.id,
-    title: s.title,
-    persona: s.persona,
-    status: completedStoryIds.includes(s.id) ? "completed" as const
-      : failedStories.has(s.id) ? "failed" as const
-      : "skipped" as const,
-    retryCount: 0,
-  }));
-  const allCompleted = completedStoryIds.length === sorted.length;
-  const anyCompleted = completedStoryIds.length > 0;
-  manifest.outcome = allCompleted ? "success" : anyCompleted ? "partial" : "failed";
-  saveRunManifest(manifest);
+  manifest.fingerprint = gateFingerprint;
+  persistProgress();
 
   // --- Build Report ---
   {
@@ -846,7 +934,8 @@ export async function runOrchestration(
   }
 
   // --- Completion: push, PR, ticket updates, cleanup ---
-  return await runCompletion({
+  terminalReason = "completion_blocked";
+  const completion = await runCompletion({
     runId: manifest.id,
     config, output, sorted, completedStoryIds, featureBranch, mainBranch,
     workingDir, userTask, costTracker, finalReviewText, ticketKey,
@@ -855,9 +944,35 @@ export async function runOrchestration(
     evidence: { fingerprint: gateFingerprint, gateResults: gatesResult!.gateResults, reviewOutcome: reviewLoopResult.outcome },
     abortSignal,
   });
+  if (!completion.completionInvalidated) {
+    terminalReason = sorted.length > 0 && completedStoryIds.length === sorted.length ? "success"
+      : completedStoryIds.length > 0 ? "partial" : "no_progress";
+  }
+  return { ...completion, runId: manifest.id };
+  } catch (error) {
+    if (error instanceof ResourceCleanupError) terminalReason = "cleanup_failed";
+    throw error;
   } finally {
+    // Capture caller cancellation before our own teardown aborts the run.
+    if (abortSignal.aborted && terminalReason !== "cleanup_failed") terminalReason = "cancelled";
     abortController.abort(new Error("Orchestration finished"));
     suppliedAbortSignal?.removeEventListener("abort", forwardAbort);
-    await cleanupRunResources();
+    try {
+      await cleanupRunResources();
+    } finally {
+      manifest.phase = "terminal";
+      manifest.terminalReason = terminalReason;
+      manifest.completedAt = new Date().toISOString();
+      manifest.outcome = terminalReason === "cancelled" ? "cancelled"
+        : terminalReason === "success" ? "success"
+        : terminalReason === "partial" ? "partial" : "failed";
+      for (const attempt of manifest.attempts) {
+        if (attempt.status === "started") {
+          attempt.status = terminalReason === "cancelled" ? "cancelled" : "failed";
+          attempt.completedAt = manifest.completedAt;
+        }
+      }
+      persistProgress();
+    }
   }
 }

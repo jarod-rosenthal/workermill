@@ -1,14 +1,10 @@
 import { ensureOllamaContext, ensureLmStudioContext } from "./engine/model-factory.js";
-import { execFileSync, execSync } from "child_process";
+import path from "path";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona, loadConfig, saveConfig } from "./config.js";
 import { runLifecycleHooks } from "./hooks.js";
-import {
-  isGitRepo, getCurrentBranch, createFeatureBranch,
-  deriveFeatureBranchName, localBranchExists, deleteLocalBranch,
-} from "./git-ops.js";
 import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
@@ -16,6 +12,9 @@ import { createAttemptResources } from "./engine/run-resources.js";
 import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type RunManifest } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
+import { runProcess } from "./engine/process-runner.js";
+import { runScopedProcess } from "./engine/scoped-process.js";
+import { createPathScope } from "./engine/path-policy.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -44,6 +43,31 @@ import { captureRepositoryFingerprint } from "./repository-fingerprint.js";
 
 // Re-export from completion module for backward compatibility
 export { shouldTransitionTicketOnPrOpen } from "./orchestrator/completion.js";
+
+function quoteStartupArgument(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function deriveStartupBranch(label: string, prefix: string | undefined, workingDir: string): string | null {
+  const slug = label
+    .replace(/\.md$/i, "")
+    .replace(/[^a-zA-Z0-9\s-]/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .join("-")
+    .toLowerCase()
+    .replace(/-+/g, "-");
+  return slug ? `${prefix ?? path.basename(workingDir)}/${slug}` : null;
+}
+
+function startupTicketEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "LINEAR_API_KEY", "API_BASE_URL", "TASK_ID", "ORG_API_KEY"]) {
+    if (source[key] !== undefined) environment[key] = source[key];
+  }
+  return environment;
+}
 
 export async function runOrchestration(
   config: CliConfig,
@@ -99,6 +123,48 @@ export async function runOrchestration(
       throw error;
     }
   };
+  const startupProcess = async (
+    executable: "git" | "gh",
+    processArgs: string[],
+    timeoutMs = 10_000,
+    maxOutputBytes = 1024 * 1024,
+  ): Promise<string> => {
+    const result = await runProcess({
+      runId: manifest.id,
+      command: [executable, ...processArgs].map(quoteStartupArgument).join(" "),
+      cwd: workingDir,
+      signal: resourceSignal,
+      timeoutMs,
+      maxOutputBytes,
+      terminationGraceMs: 1_000,
+    });
+    const combined = `${result.stdout}${result.stderr}`.trim();
+    if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
+      throw new Error(combined || `${executable} startup command ${result.reason}`);
+    }
+    return combined;
+  };
+  const startupMutation = async (processArgs: string[]): Promise<string> => {
+    const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+    const result = await runScopedProcess({
+      runId: manifest.id,
+      command: ["git", ...processArgs].map(quoteStartupArgument).join(" "),
+      cwd: scope.workspace,
+      signal: resourceSignal,
+      timeoutMs: 30_000,
+      maxOutputBytes: 1024 * 1024,
+      terminationGraceMs: 1_000,
+    }, {
+      sandbox: sandboxed === "os" ? "os" : false,
+      scope,
+      capabilities: config.sandboxCapabilities,
+    });
+    const combined = `${result.stdout}${result.stderr}`.trim();
+    if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
+      throw new Error(combined || `git startup mutation ${result.reason}`);
+    }
+    return combined;
+  };
 
   try {
   if (abortSignal.aborted) {
@@ -125,35 +191,34 @@ export async function runOrchestration(
   }
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
+  const ticketEnv = startupTicketEnvironment();
+  if (config.jira) {
+    ticketEnv.JIRA_BASE_URL = config.jira.baseUrl;
+    ticketEnv.JIRA_EMAIL = config.jira.email;
+    ticketEnv.JIRA_API_TOKEN = config.jira.apiToken;
+  }
+  if (config.linear) ticketEnv.LINEAR_API_KEY = config.linear.apiKey;
   if (ticketKey) {
     try {
       const { TicketOps } = await import("./ticket-ops.js");
       const ticketSystem = config.ticketSystem || "github";
 
-      // Ensure credentials are available
-      if (ticketSystem === "jira" && config.jira) {
-        process.env.JIRA_BASE_URL = config.jira.baseUrl;
-        process.env.JIRA_EMAIL = config.jira.email;
-        process.env.JIRA_API_TOKEN = config.jira.apiToken;
-      } else if (ticketSystem === "linear" && config.linear) {
-        process.env.LINEAR_API_KEY = config.linear.apiKey;
-      }
       if (ticketSystem === "github") {
-        if (!process.env.GITHUB_TOKEN) {
+        if (!ticketEnv.GITHUB_TOKEN) {
           try {
-            process.env.GITHUB_TOKEN = execSync("gh auth token 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+            ticketEnv.GITHUB_TOKEN = await startupProcess("gh", ["auth", "token"], 5_000, 64 * 1024);
           } catch { /* gh not installed or not logged in */ }
         }
-        if (!process.env.GITHUB_REPO) {
+        if (!ticketEnv.GITHUB_REPO) {
           try {
-            const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+            const remote = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"]);
             const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-            if (match) process.env.GITHUB_REPO = match[1].replace(/\.git$/, "");
+            if (match) ticketEnv.GITHUB_REPO = match[1].replace(/\.git$/, "");
           } catch { /* not a git repo */ }
         }
       }
 
-      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal });
+      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal, environment: ticketEnv });
       if (!ops.isAvailable()) {
         const hints: Record<string, string> = {
           github: "Ensure GITHUB_TOKEN is set or run `gh auth login`. Repo detected from git remote.",
@@ -190,11 +255,11 @@ export async function runOrchestration(
     try {
       const { TicketOps } = await import("./ticket-ops.js");
       const ticketSystem = resolvedTicketSystem;
-      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal });
+      const ops = new TicketOps(ticketKey, ticketSystem, { signal: abortSignal, environment: ticketEnv });
       logger.info("TicketOps availability check", {
         ticketKey, ticketSystem, isAvailable: ops.isAvailable(),
-        hasToken: !!process.env.GITHUB_TOKEN,
-        hasRepo: !!process.env.GITHUB_REPO,
+        hasToken: !!ticketEnv.GITHUB_TOKEN,
+        hasRepo: !!ticketEnv.GITHUB_REPO,
       });
       if (ops.isAvailable()) ticketOps = ops;
     } catch { /* non-critical */ }
@@ -255,13 +320,14 @@ export async function runOrchestration(
     // ── Retry mode: skip planning, resume on the existing feature branch ──
     featureBranch = retryPlan.featureBranch;
     mainBranch = retryPlan.mainBranch;
-    const currentBranch = getCurrentBranch(workingDir);
+    const currentBranch = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "branch", "--show-current"]).catch(() => "");
+    if (abortSignal.aborted) return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
 
     // Checkout the feature branch if we're not already on it
     if (currentBranch !== featureBranch) {
       // Verify branch exists
       try {
-        execFileSync("git", ["rev-parse", "--verify", featureBranch], { cwd: workingDir, stdio: "pipe" });
+        await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "--end-of-options", `refs/heads/${featureBranch}`]);
       } catch {
         output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -269,7 +335,7 @@ export async function runOrchestration(
 
       output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
       try {
-        execFileSync("git", ["checkout", featureBranch], { cwd: workingDir, stdio: "pipe" });
+        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "checkout", featureBranch]);
       } catch {
         output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -292,7 +358,8 @@ export async function runOrchestration(
     });
   } else {
     // ── Normal mode: plan on current branch, create feature branch after acceptance ──
-    const originalBranch = getCurrentBranch(workingDir);
+    const originalBranch = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "branch", "--show-current"]).catch(() => "");
+    if (abortSignal.aborted) return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
     mainBranch = originalBranch || "main";
 
     // Warn if starting from a non-trunk branch — new work will stack on top of it
@@ -421,9 +488,9 @@ export async function runOrchestration(
       branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
     }
     // Warn if the branch already exists from a previous run
-    const derivedBranch = deriveFeatureBranchName(workingDir, branchLabel, branchPrefix);
+    const derivedBranch = deriveStartupBranch(branchLabel, branchPrefix, workingDir);
     let branchAlreadyAcknowledged = false;
-    if (derivedBranch && localBranchExists(workingDir, derivedBranch)) {
+    if (derivedBranch && await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "--end-of-options", `refs/heads/${derivedBranch}`]).then(() => true, () => false)) {
       // User will engage with a branch dialog below — no need for a second prompt afterward
       branchAlreadyAcknowledged = true;
       output.log("system", `Branch \`${derivedBranch}\` already exists from a previous run.`);
@@ -434,7 +501,7 @@ export async function runOrchestration(
       const reset = typeof resetR === "object" ? resetR.allowed : resetR;
       if (reset) {
         try {
-          deleteLocalBranch(workingDir, derivedBranch);
+          await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "branch", "-D", "--", derivedBranch]);
           output.coordinatorLog(`Deleted \`${derivedBranch}\` — starting fresh from \`${mainBranch}\``);
         } catch {
           output.error(`Could not delete \`${derivedBranch}\` — it may be checked out elsewhere.`);
@@ -465,13 +532,21 @@ export async function runOrchestration(
       }
     }
 
-    featureBranch = createFeatureBranch(workingDir, branchLabel, branchPrefix);
+    featureBranch = null;
+    if (derivedBranch) {
+      try {
+        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "checkout", "-b", derivedBranch]);
+        featureBranch = derivedBranch;
+      } catch {
+        featureBranch = null;
+      }
+    }
     if (featureBranch) {
       output.coordinatorLog(`Created and checked out branch: \`${featureBranch}\``);
       output.updateBranch?.(featureBranch);
       // Yield to let Ink render the branch update
       await new Promise(r => setTimeout(r, 0));
-    } else if (isGitRepo(workingDir)) {
+    } else if (await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--is-inside-work-tree"]).then((value) => value === "true", () => false)) {
       output.error("Could not create feature branch. You may have uncommitted changes — commit or stash them first.");
       return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
     }

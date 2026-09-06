@@ -23,6 +23,22 @@ async function errorCode(promise: Promise<unknown>): Promise<string> {
 }
 
 describe("executeToolCall", () => {
+  it("supplies the actual child context to inherited callbacks", async () => {
+    const observed: ToolExecutionContext[] = [];
+    const parent = makeContext({
+      getPermissionState: () => ({ mode: "default", trustAll: false, sessionAllow: new Set(), rules: {}, readOnlyRole: false }),
+      prompt: (_name, _input, _reason, context) => { observed.push(context); return true; },
+      preHook: (_name, _input, context) => { observed.push(context); },
+      checkpoint: (_name, _input, context) => { observed.push(context); },
+      postHook: (_name, _input, _output, _error, context) => { observed.push(context); },
+    });
+    const scope = createPathScope(`${process.cwd()}/child-context-test`);
+    const child = { ...parent, runId: "child", scope, workspace: scope.workspace };
+    await expect(executeToolCall("write_file", { path: "file.txt" }, () => "written", child)).resolves.toBe("written");
+    expect(observed).toHaveLength(4);
+    expect(observed.every((context) => context === child)).toBe(true);
+  });
+
   it("does not invoke callbacks or the tool when denied", async () => {
     const calls: string[] = [];
     const context = makeContext({ getPermissionState: () => ({ mode: "default", trustAll: false, sessionAllow: new Set(), rules: { deny: ["write_file"] }, readOnlyRole: false }) });

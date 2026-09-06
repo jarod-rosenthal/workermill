@@ -23,10 +23,11 @@ export interface ToolExecutionContext {
   readonly allowedNetworkDomains?: readonly string[];
   readonly allowLocalBinding?: boolean;
   readonly allowDockerSocket?: boolean;
-  prompt?: (toolName: string, input: Record<string, unknown>, reason: string) => boolean | Promise<boolean>;
-  preHook?: (toolName: string, input: Record<string, unknown>) => PreHookResult | Promise<PreHookResult>;
-  checkpoint?: (toolName: string, input: Record<string, unknown>) => void | Promise<void>;
-  postHook?: (toolName: string, input: Record<string, unknown>, output: unknown, error?: unknown) => void | Promise<void>;
+  /** Callbacks must use this supplied context, not a captured parent workspace. */
+  prompt?: (toolName: string, input: Record<string, unknown>, reason: string, context: ToolExecutionContext) => boolean | Promise<boolean>;
+  preHook?: (toolName: string, input: Record<string, unknown>, context: ToolExecutionContext) => PreHookResult | Promise<PreHookResult>;
+  checkpoint?: (toolName: string, input: Record<string, unknown>, context: ToolExecutionContext) => void | Promise<void>;
+  postHook?: (toolName: string, input: Record<string, unknown>, output: unknown, error: unknown | undefined, context: ToolExecutionContext) => void | Promise<void>;
   event?: (event: ToolExecutionEvent) => void | Promise<void>;
 }
 
@@ -122,7 +123,7 @@ async function askPermission(
     context.signal.addEventListener("abort", abortHandler, { once: true });
   });
   try {
-    return await Promise.race([Promise.resolve(context.prompt(name, input, decision.reason)), abort]);
+    return await Promise.race([Promise.resolve(context.prompt(name, input, decision.reason, context)), abort]);
   } finally {
     context.signal.removeEventListener("abort", abortHandler);
   }
@@ -163,7 +164,7 @@ export async function executeToolCall<T>(
     if (context.preHook) {
       let preHookResult: PreHookResult;
       try {
-        preHookResult = await context.preHook(name, input);
+        preHookResult = await context.preHook(name, input, context);
       } catch (error) {
         throw new ToolExecutionError("hook_blocked", error instanceof Error ? error.message : "pre-hook failed", { cause: error });
       }
@@ -171,7 +172,7 @@ export async function executeToolCall<T>(
       if (block) throw new ToolExecutionError("hook_blocked", block);
     }
     checkCancelled(context);
-    if (context.checkpoint) await context.checkpoint(name, input);
+    if (context.checkpoint) await context.checkpoint(name, input, context);
     checkCancelled(context);
     started = true;
     output = await execute();
@@ -186,7 +187,7 @@ export async function executeToolCall<T>(
     try {
       if (started) {
         try {
-          if (context.postHook) await context.postHook(name, input, output, executionError);
+          if (context.postHook) await context.postHook(name, input, output, executionError, context);
         } finally {
           if (context.event) await context.event({ phase: "complete", runId: context.runId, toolName: name, input, output, error: executionError });
         }

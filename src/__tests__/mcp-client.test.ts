@@ -1,15 +1,48 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const mcpSdk = vi.hoisted(() => {
+  type ClientInstance = {
+    connect: ReturnType<typeof vi.fn>;
+    listTools: ReturnType<typeof vi.fn>;
+    callTool: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+  };
+  const clients: ClientInstance[] = [];
+  const Client = vi.fn(function MockClient() {
+    const client: ClientInstance = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue({ tools: [{ name: "remote_ping", inputSchema: { type: "object" } }] }),
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "remote pong" }] }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    clients.push(client);
+    return client;
+  });
+  const StreamableHTTPClientTransport = vi.fn(function MockHttpTransport(url: URL, options: unknown) {
+    return { kind: "http", url, options };
+  });
+  const SSEClientTransport = vi.fn(function MockSseTransport(url: URL, options: unknown) {
+    return { kind: "sse", url, options };
+  });
+  return { clients, Client, StreamableHTTPClientTransport, SSEClientTransport };
+});
+
+vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({ Client: mcpSdk.Client }));
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({ StreamableHTTPClientTransport: mcpSdk.StreamableHTTPClientTransport }));
+vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({ SSEClientTransport: mcpSdk.SSEClientTransport }));
+
 import {
   createMCPRunResources,
   getMCPServerInfo,
   getMCPTools,
   hasMCPRegistered,
   hasMCPServers,
+  stopAllMCPServers,
 } from "../mcp-client.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/mcp-jsonrpc-server.mjs", import.meta.url));
@@ -100,6 +133,81 @@ describe("run-owned MCP client behavior", () => {
       await Promise.allSettled([first.close(), second.close()]);
       fs.rmSync(firstWorkspace, { recursive: true, force: true });
       fs.rmSync(secondWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["http", mcpSdk.StreamableHTTPClientTransport],
+    ["sse", mcpSdk.SSEClientTransport],
+  ] as const)("constructs, connects, and calls a run-owned %s transport", async (transport, Transport) => {
+    const workspace = tempDirectory(`wm-mcp-${transport}-`);
+    const resources = createMCPRunResources({ runId: transport, workspace, signal: new AbortController().signal, terminationGraceMs: 50 });
+    const clientsBefore = mcpSdk.clients.length;
+    try {
+      await resources.startServer("remote", {
+        transport,
+        url: `https://mcp.example.test/${transport}`,
+        headers: { authorization: "Bearer test" },
+      });
+
+      expect(Transport).toHaveBeenCalledTimes(1);
+      const [url, options] = Transport.mock.calls.at(-1) ?? [];
+      expect(url).toBeInstanceOf(URL);
+      expect(url.toString()).toBe(`https://mcp.example.test/${transport}`);
+      expect(options).toEqual({ requestInit: { headers: { authorization: "Bearer test" } } });
+
+      const client = mcpSdk.clients[clientsBefore]!;
+      expect(client.connect).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: transport }),
+        expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 15_000 }),
+      );
+      expect(client.listTools).toHaveBeenCalledOnce();
+      await expect(resources.callTool("remote", "remote_ping", { value: 1 })).resolves.toBe("remote pong");
+      expect(client.callTool).toHaveBeenCalledWith(
+        { name: "remote_ping", arguments: { value: 1 } },
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 30_000 }),
+      );
+    } finally {
+      await resources.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unsupported run-owned transport before creating an SDK client", async () => {
+    const workspace = tempDirectory("wm-mcp-unsupported-");
+    const resources = createMCPRunResources({ runId: "unsupported", workspace, signal: new AbortController().signal, terminationGraceMs: 50 });
+    const clientCount = mcpSdk.clients.length;
+    try {
+      await expect(resources.startServer("unsupported", { transport: "websocket" } as never)).rejects.toThrow("Unsupported MCP transport: websocket");
+      expect(mcpSdk.clients).toHaveLength(clientCount);
+    } finally {
+      await resources.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("emergency-stop closes every run-owned remote client and clears workspace status", async () => {
+    const workspace = tempDirectory("wm-mcp-emergency-");
+    const previousDirectory = process.cwd();
+    const http = createMCPRunResources({ runId: "emergency-http", workspace, signal: new AbortController().signal, terminationGraceMs: 50 });
+    const sse = createMCPRunResources({ runId: "emergency-sse", workspace, signal: new AbortController().signal, terminationGraceMs: 50 });
+    const clientsBefore = mcpSdk.clients.length;
+    try {
+      process.chdir(workspace);
+      await http.startServer("http", { transport: "http", url: "https://mcp.example.test/http" });
+      await sse.startServer("sse", { transport: "sse", url: "https://mcp.example.test/sse" });
+      expect(hasMCPServers()).toBe(true);
+
+      stopAllMCPServers();
+
+      for (const client of mcpSdk.clients.slice(clientsBefore)) expect(client.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(hasMCPServers()).toBe(false));
+      expect(getMCPTools()).toEqual([]);
+    } finally {
+      process.chdir(previousDirectory);
+      await Promise.allSettled([http.close(), sse.close()]);
+      fs.rmSync(workspace, { recursive: true, force: true });
     }
   });
 });

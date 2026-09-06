@@ -127,6 +127,17 @@ describe("orchestration manifest runtime", () => {
     state.completion = "invalid";
     const result = await runOrchestration(config, "fixture", true, false, output());
     expect(loadRunManifest(result.runId!, dir)).toMatchObject({ phase: "terminal", terminalReason: "completion_blocked", outcome: "failed" });
+    expect(result).toMatchObject({ outcome: "failed", terminalReason: "completion_blocked" });
+  });
+
+  it("returns and persists partial progress without inventing resumed attempts", async () => {
+    state.workerStatus = "failed";
+    const branch = git(dir, ["branch", "--show-current"]);
+    const result = await runOrchestration(config, "fixture", true, false, output(), undefined, {
+      priorRunId: "run-earlier", stories: [{ ...story, id: "done" }, story], completedStoryIds: ["done"], featureBranch: branch, mainBranch: branch,
+    });
+    expect(result).toMatchObject({ outcome: "partial", terminalReason: "partial" });
+    expect(loadRunManifest(result.runId!, dir)).toMatchObject({ outcome: "partial", terminalReason: "partial", attempts: [{ storyId: "one", status: "failed" }] });
   });
 
   it("keeps the persisted run active while completion is pending", async () => {
@@ -146,6 +157,20 @@ describe("orchestration manifest runtime", () => {
     } finally { release(); }
     const result = await run;
     expect(loadRunManifest(result.runId!, dir)).toMatchObject({ phase: "terminal", outcome: "success" });
+  });
+
+  it("persists a valid terminal record when the wall clock moves backwards", async () => {
+    vi.mocked(runCompletion).mockImplementationOnce(async (args) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+      return { stories: args.sorted, completedStoryIds: args.completedStoryIds, featureBranch: args.featureBranch, userTask: args.userTask };
+    });
+    try {
+      const result = await runOrchestration(config, "fixture", true, false, output());
+      const manifest = loadRunManifest(result.runId!, dir)!;
+      expect(manifest).toMatchObject({ phase: "terminal", outcome: "success" });
+      expect(Date.parse(manifest.completedAt!)).toBeGreaterThanOrEqual(Date.parse(manifest.startedAt));
+    } finally { vi.useRealTimers(); }
   });
 
   it("records required reviewer identity blocking before any worker starts", async () => {

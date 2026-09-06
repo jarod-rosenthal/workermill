@@ -735,6 +735,7 @@ export interface StoryAttemptEvent {
   provider: string;
   model: string;
   status: "started" | "completed" | "failed" | "cancelled";
+  failureCode?: string;
   at: string;
 }
 
@@ -875,6 +876,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     const attemptNumber = ++storyAttemptNumber;
     const attemptStartedAt = new Date().toISOString();
     let attemptSucceeded = false;
+    let blockedToolCode: string | undefined;
     try {
     await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: "started", at: attemptStartedAt });
     const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
@@ -1011,6 +1013,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           return await executeToolCall(toolName, input, () => original(input, { abortSignal: combinedSignal }), executionContext);
         } catch (error) {
           if (error instanceof ToolExecutionError) {
+            if (["denied", "permission_required", "hook_blocked"].includes(error.code)) blockedToolCode = error.code;
             if (error.code === "cancelled") {
               loopAbort.abort();
               return `Tool execution cancelled: ${error.message}`;
@@ -1588,7 +1591,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // Resource teardown aborts the attempt's local signal even on failure.
       // Only cancellation of the owning run means the user cancelled it.
       const terminalStatus = cleanupError ? "failed" : attemptSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
-      await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: terminalStatus, at: new Date().toISOString() });
+      await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: terminalStatus, failureCode: terminalStatus === "failed" ? cleanupError ? "cleanup_failed" : blockedToolCode : undefined, at: new Date().toISOString() });
       if (cleanupError) throw cleanupError instanceof ResourceCleanupError ? cleanupError : new ResourceCleanupError([cleanupError]);
     }
 

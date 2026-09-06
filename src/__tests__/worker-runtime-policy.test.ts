@@ -38,6 +38,34 @@ const output: OrchestrationOutput = {
 };
 
 describe("worker execution policy runtime", () => {
+  it.each(["denied", "hook_blocked"])("preserves %s evidence when a blocked worker cannot finish", async (code) => {
+    vi.clearAllMocks();
+    const mutation = vi.fn();
+    createToolDefinitions.mockReturnValue({ bash: { execute: mutation } });
+    vi.mocked(runPreHooksWithBlocking).mockReturnValue({ blocked: code === "hook_blocked" });
+    streamText.mockImplementation((options: { tools: Record<string, { execute: (input: object) => Promise<unknown> }> }) => ({
+      textStream: (async function* () {
+        await options.tools.bash.execute({ command: "required" });
+        throw new Error("Invalid API key");
+        yield "unreachable";
+      })(),
+      text: Promise.resolve(""), totalUsage: Promise.resolve({}),
+    }));
+    const events: Array<{ status: string; failureCode?: string }> = [];
+    try {
+      await executeStories({
+        sorted: [{ id: "blocked", title: "Blocked", persona: "worker", description: "fixture" }], completedStoryIds: [],
+        config: { providers: {}, default: "ollama", permissions: code === "denied" ? { deny: ["bash"] } : undefined },
+        output, trustAll: true, sandboxed: false, userTask: "task", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+        sessionAllow: new Set(), workingDir: process.cwd(), costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+        featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, ticketOps: null,
+        waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(), onStoryAttempt: (event) => { events.push(event); },
+      });
+      expect(mutation).not.toHaveBeenCalled();
+      expect(events).toMatchObject([{ status: "started" }, { status: "failed", failureCode: code }]);
+    } finally { vi.mocked(runPreHooksWithBlocking).mockReturnValue({ blocked: false }); }
+  });
+
   it("records provider failure as failed even though teardown aborts the attempt", async () => {
     vi.clearAllMocks();
     createToolDefinitions.mockReturnValue({});

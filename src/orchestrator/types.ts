@@ -97,6 +97,9 @@ export interface SharedContext {
 export interface OrchestrationResult {
   /** Persisted evidence identity, including failed and cancelled runs. */
   runId?: string;
+  /** Set by orchestration finalization, after completion and owned cleanup. */
+  outcome?: Exclude<import("../run-manifest.js").RunOutcome, "in_progress">;
+  terminalReason?: import("../run-manifest.js").TerminalReason;
   stories: Story[];
   completedStoryIds: string[];
   featureBranch: string | null;

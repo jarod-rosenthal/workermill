@@ -132,6 +132,7 @@ function printRunDetails(run: StoredRunManifest): void {
   console.log(`  Outcome:    ${outcomeLabel(run.outcome)}`);
   if (run.phase === "legacy") console.log(chalk.yellow("  Evidence:   legacy record; gate/review/fingerprint evidence was not verified"));
   if (run.phase === "active") console.log(chalk.cyan("  Phase:      active (no terminal result recorded yet)"));
+  if (run.phase === "terminal") console.log(`  Reason:     ${run.terminalReason}`);
   console.log(`  Started:    ${run.startedAt ? formatDate(run.startedAt) : "unknown"}`);
   if (run.completedAt) {
     console.log(`  Completed:  ${formatDate(run.completedAt)}`);

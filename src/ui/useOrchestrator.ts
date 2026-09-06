@@ -708,14 +708,8 @@ export function useOrchestrator(
             liveViewServer,
           );
           completion = {
-            success:
-              result.stories.length > 0 &&
-              result.completedStoryIds.length === result.stories.length,
-            error:
-              result.stories.length > 0 &&
-              result.completedStoryIds.length !== result.stories.length
-                ? "build_incomplete"
-                : undefined,
+            success: result.outcome === "success",
+            error: result.outcome === "success" ? undefined : result.terminalReason ?? "build_incomplete",
           };
 
           flushLine();
@@ -1060,9 +1054,7 @@ export function useOrchestrator(
                 issueKey,
               );
 
-              const isComplete = () =>
-                result.stories.length > 0 &&
-                result.completedStoryIds.length === result.stories.length;
+              const isComplete = () => result.outcome === "success";
 
               // Program retry delegates to /build's retry path via RetryPlan.
               let retryAttempt = 0;

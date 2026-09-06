@@ -51,6 +51,14 @@ describe("mounted orchestration lifecycle", () => {
   });
   afterEach(() => { app?.unmount(); app = undefined; pending.splice(0); vi.clearAllMocks(); });
 
+  it.each(["success", "failed", "cancelled", "partial"])("reports finalized %s even when all stories finished", async (outcome) => {
+    const onComplete = vi.fn();
+    runOrchestration.mockResolvedValue({ stories: [{ id: "one" }], completedStoryIds: ["one"], featureBranch: null, userTask: "fixture", outcome, terminalReason: outcome === "failed" ? "required_gate_failed" : outcome });
+    hook.start("fixture", true, false, undefined, { onComplete });
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(onComplete).toHaveBeenCalledWith({ success: outcome === "success", error: outcome === "success" ? undefined : outcome === "failed" ? "required_gate_failed" : outcome });
+  });
+
   it("claims synchronously so same-tick starts dispatch one orchestration", async () => {
     hook.start("first", true, true);
     hook.start("second", true, true);

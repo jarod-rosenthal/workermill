@@ -4,7 +4,7 @@ Updated UTC: 2026-09-06T20:21:04.629168+00:00. User-authorized recovery repair b
 
 **Current qualification: 1,643 passed, zero failed, one pre-existing skipped test across 107 files; typecheck and build passed on Node 22.22.2.** The original 80 failures are resolved. Read the final checkpoint below before acting; historical audit sections preserve the evidence from the broken head.
 
-Coordinator owns final documentation/commit. Both bounded workers have finished. The broader reliability backlog remains incomplete. Next bounded task is R15/R23 acceptance reconciliation and replacement-coverage mapping before downstream R16/R18 dispatch.
+User has directed completion of the remaining work as far as possible. Current batch: R15/R23 acceptance reconciliation at base `8cd7c733`. Coordinator owns R15 runtime/storage/readers and related tests; one bounded worker owns R23 read-only call-site and removed-coverage audit, writing only `docs/recovery/r23-acceptance.md`. Acceptance: evidence-backed closure or explicit bounded defects, then combined qualification before R16/R18. No publication or live paid evaluation.
 
 
 ## Historical audit state (before the repair below)
@@ -133,3 +133,17 @@ R15 and R23 remain **in progress**, even with a green integrated suite. Reconcil
 Then follow the documented dependency order: R16 scripted-model runtime contract coverage; R18 usage/pricing ledger; R17 installed-package/PTY/platform qualification; R22 final reference docs; R24 release-candidate qualification. R19 budgets/R21 comparison harness remain optional first-release work. No paid live evaluation, publication, or cleanup of surviving worktrees was performed.
 
 All implementation workers are finished. No worker-owned edits remain pending outside the changes recorded here. Recovery/browser commits are preserved as rejected implementation evidence; R15b was incorporated with coordinator corrections. The original retrospective and recovery inventory remain unchanged historical evidence. Continue from this checkout and this checkpoint; do not redo the original eleven hours.
+
+## Continuation authorized — 2026-09-06T20:37:47.679962+00:00
+
+Base `8cd7c733`, clean tree. Resume existing backlog under latest user direction. Two implementation workers maximum; smaller-model bounded dispatches per plan. First batch ownership and acceptance are recorded at top.
+
+### R15/R23 integration checkpoint
+
+Base8cd7c733 dirty R15 final-outcome/UI agreement plus permission failure evidence; R23 audit and MCP transport/emergency tests restored. Focused checks30+5 and MCP7 passed; typecheck/build passed. First combined suite exit1:1653passed,1failed,1skip; failure is `manifest completed before it started` in orchestrator planner-prompt test. Writer now clamps wall-clock completion timestamps to corresponding starts; validator unchanged; regression simulates backward wall clock. Next: qualify corrected combined tree before downstream dispatch.
+
+## R15/R23 accepted checkpoint
+
+Base `8cd7c733` plus this commit's bounded diff: R15/R23 accepted. Combined `npm test` exit0, 1655 passed/0 failed/1 pre-existing skip,107files,30.99s; `npm run typecheck` exit0; build passed before final timestamp-only correction and will be repeated at next integration boundary. Evidence: `docs/recovery/r15-acceptance.md`, `r23-acceptance.md`. UI/program completion now uses the finalized persisted outcome; terminal reason visible in run details; partial/retry/blocked/clock tests passed. MCP transport and emergency-stop gaps restored. No active workers.
+
+Next batch: R16a scripted-model fixture (test-harness lock) and R18a ledger/types only (cost lock), in separate worktrees from this committed integration. Coordinator owns integration and checkpoint docs, no overlapping adapter changes. No live calls or pricing/default changes. R16/R18 parents remain in progress until suffix packages integrate.

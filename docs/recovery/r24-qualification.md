@@ -11,6 +11,7 @@ Status: **in progress**. This is the coordinator's local review record, not a pu
 | Foreground process ownership and OS boundary | `engine/process-runner.ts`, `engine/scoped-process.ts`, `sandbox-mode.ts`, gate and shell adapters | `process-runner`, `scoped-process`, `sandbox-mode`, `root-shell-runtime`, `orchestrator-gates-cancellation`, `bash-background` |
 | Child scope, cancellation, preserved work | `engine/tools/sub-agent.ts`, rebuilt tools and inherited context | `sub-agent-runtime`, `sub-agent`, `useAgent-runtime` |
 | Required gates and fresh publication evidence | `orchestrator/gates.ts`, `candidate.ts`, `completion.ts`, repository fingerprint and orchestration finalizer | `orchestrator-gates`, `candidate-runtime`, `final-evidence-runtime`, `repository-fingerprint`, `publication-lifecycle` |
+| Program cancellation | `ui/useOrchestrator.ts`, `program-bootstrap.ts`: parent signal, scoped gates, bounded issue requests | `program-cancellation`, `useOrchestrator-runtime` |
 | Active/terminal records and typed outcomes | `run-manifest.ts`, `orchestrator.ts`, result consumers | `run-manifest`, `orchestration-manifest-runtime`, `useOrchestrator-runtime`, `runs-command` |
 | Usage on failed/retried/child calls | `cost-tracker.ts`, `engine/model-usage.ts`, SDK invocation finalizers | `cost-tracker`, `headless-ledger`, `runtime-contracts`, `planner-runtime-policy`, `worker-runtime-policy`, `review-runtime-policy`, `useAgent-runtime`, `sub-agent` |
 | Installed artifact and responsive cancellation | CI matrix, package lock and `package-os.test.ts` | `npm run test:package-os` packs/installs into a temporary project and exercises help/version, headless JSON, SIGINT, and active-model ESC under a real PTY |
@@ -22,6 +23,8 @@ Test basenames above mean `<name>.test.ts`. The [R16 coverage map](r16-coverage.
 - Strict active/terminal manifest storage had been integrated without its writer/finalizer contract; the recovery repaired all result exits rather than relaxing validation.
 - Obsolete CostTracker doubles masked lifecycle cleanup errors after the per-call API changed. Tests now use the real tracker at those boundaries.
 - Child usage still replaced observed positive step subtotals with an SDK zero placeholder. `4c7cbc05` adopts the shared normalization/settlement helper and tests both partial positive usage and genuinely reported zero.
+- `/orchestrate` program gates and bootstrap requests were outside parent cancellation. `d85284de` threads the signal through ticket lookup, decomposition and issue creation/update, bounds issue HTTP requests, and uses the shared scoped gate runner; mounted cancellation prevents the next advisory gate.
+- Session updates now deduplicate progress/replay observations. Root checks cover mounted forwarding, cumulative historical token preservation, and unknown-price qualifications in stats JSON.
 - The expanded multi-role manifest fixture initially retained an old review token expectation. `0efe4934` aligns it with the actual scripted observation; the full suite passed afterward.
 
 ## Practical limits and remaining qualification

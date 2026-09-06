@@ -59,7 +59,7 @@ No server, no Docker, no account. First run walks you through provider setup —
 
 ### Point at a ticket. Get a pull request.
 
-Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
+Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs configured checks, and invokes the configured reviewer. Passing the completion policy allows you to publish a PR; the reviewer can use the same provider/model as the workers.
 
 ```
 > /build #42
@@ -86,7 +86,7 @@ Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the wo
 
  system  Branch: workermill/add-product-export (4 commits)
          Push and open PR? (y/n)
-         Cost: ~$2.50 (planner + reviewer only — workers ran locally for free)
+         Cost: estimated from recorded provider usage
 ```
 
 The example illustrates the review-and-revision workflow. Review quality depends on the selected models and verification coverage; a separate review invocation is not proof of independent model judgment.
@@ -188,7 +188,7 @@ Use expensive models for judgment. Free local models for volume.
 | **Quality Gates** | Tests, linter, and LSP diagnostics run after each story — failures block review |
 | **LSP Integration** | Language server diagnostics, go-to-definition, find-references, hover info, workspace symbols — semantic code intelligence |
 | **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
-| **Model Routing** | Different provider per role — expensive models for planning/review, free local models for coding |
+| **Model Routing** | Choose a provider per role, including local models with no hosted API charge |
 | **12 Providers** | Anthropic, OpenAI, Google, xAI, Ollama, LM Studio, OpenRouter, Groq, DeepSeek, Mistral, AWS Bedrock, Azure |
 | **Hot-Swap Models** | `/model provider/model [context]` mid-session — e.g. `/model ollama/qwen3-coder:30b 256k` |
 | **MCP Support** | Connect external tools via Model Context Protocol — auto-detects Docker Desktop |
@@ -199,10 +199,10 @@ Use expensive models for judgment. Free local models for volume.
 | **Project Memory** | `/remember` saves user-facing context — corrections, preferences, learnings |
 | **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
-| **Run Manifests** | Every `/build` saves a JSON manifest with full run state — stories, outcomes, cost, review. Inspectable after the fact |
+| **Run Manifests** | Inspect saved build records with `wm runs`; a completed story count alone does not establish passing final verification |
 | **Retry Rollback** | Failed story retries start from a clean workspace snapshot, not half-broken state |
 | **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |
-| **Permission System** | Granular tool allow/deny rules, `/trust` for session-wide approval |
+| **Permission System** | Granular allow/ask/deny rules; session trust cannot override explicit deny/ask or safety checks |
 
 ---
 
@@ -379,7 +379,7 @@ The slash command shorthand and the config value represent the same setting for 
 
 ## Built-in Personas
 
-WorkerMill ships with 11 specialist personas. Each has its own system prompt, tool restrictions, and domain expertise — and each can be routed to a different provider via the `routing` config — run workers on Ollama for free, on affordable cloud models like Groq or DeepSeek, or on any provider you prefer.
+WorkerMill ships with 11 specialist personas. Each has its own system prompt, tool restrictions, and domain focus. Route each persona to a provider using `routing`: local Ollama, a hosted provider, or one shared provider for all roles. Local execution still uses your hardware and electricity.
 
 | Persona | Role |
 |---------|------|

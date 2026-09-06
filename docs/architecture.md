@@ -182,11 +182,13 @@ Planner and reviewer tool contexts are read-only, even if a custom persona lists
 
 Long conversations hit context window limits. Three layers of compaction run automatically:
 
-1. **Micro-compaction** (free) — truncates old tool output when context exceeds ~60%
+1. **Micro-compaction** (no model call) — truncates old tool output at 50% context usage
 2. **LLM summarization** — summarizes older messages when micro-compaction isn't enough
 3. **Hard truncation** — drops oldest messages if summarization fails
 
 Before any compaction, the CLI scans message history for `::learning::` and `::remember::` markers and persists them to the current project's memory directory under `~/.workermill/projects/<project-id>/memories/` so the agent's discoveries aren't lost.
+
+Chat and manual compaction share one active-operation controller. Pass its signal to summarization, reject late results after cancellation, and keep the conversation unchanged on cancellation. A mounted chat session removes its exit listener and aborts its current operation on unmount. These contracts are exercised by `useAgent-runtime.test.ts` and `compaction.test.ts`.
 
 ## Safety
 

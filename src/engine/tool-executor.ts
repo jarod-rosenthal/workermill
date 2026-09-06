@@ -28,7 +28,7 @@ export interface ToolExecutionContext {
   preHook?: (toolName: string, input: Record<string, unknown>, context: ToolExecutionContext) => PreHookResult | Promise<PreHookResult>;
   checkpoint?: (toolName: string, input: Record<string, unknown>, context: ToolExecutionContext) => void | Promise<void>;
   postHook?: (toolName: string, input: Record<string, unknown>, output: unknown, error: unknown | undefined, context: ToolExecutionContext) => void | Promise<void>;
-  event?: (event: ToolExecutionEvent) => void | Promise<void>;
+  event?: (event: ToolExecutionEvent, context: ToolExecutionContext) => void | Promise<void>;
 }
 
 export type PreHookResult =
@@ -189,7 +189,7 @@ export async function executeToolCall<T>(
         try {
           if (context.postHook) await context.postHook(name, input, output, executionError, context);
         } finally {
-          if (context.event) await context.event({ phase: "complete", runId: context.runId, toolName: name, input, output, error: executionError });
+          if (context.event) await context.event({ phase: "complete", runId: context.runId, toolName: name, input, output, error: executionError }, context);
         }
       }
     } finally {

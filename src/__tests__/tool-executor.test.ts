@@ -31,11 +31,12 @@ describe("executeToolCall", () => {
       preHook: (_name, _input, context) => { observed.push(context); },
       checkpoint: (_name, _input, context) => { observed.push(context); },
       postHook: (_name, _input, _output, _error, context) => { observed.push(context); },
+      event: (_event, context) => { observed.push(context); },
     });
     const scope = createPathScope(`${process.cwd()}/child-context-test`);
     const child = { ...parent, runId: "child", scope, workspace: scope.workspace };
     await expect(executeToolCall("write_file", { path: "file.txt" }, () => "written", child)).resolves.toBe("written");
-    expect(observed).toHaveLength(4);
+    expect(observed).toHaveLength(5);
     expect(observed.every((context) => context === child)).toBe(true);
   });
 

@@ -23,6 +23,9 @@ import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state
 import { execGh, getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { runScopedProcess } from "../engine/scoped-process.js";
+import { randomUUID } from "node:crypto";
 import type { ToolCallInfo } from "./types.js";
 
 const PREVIEW_THROTTLE_MS = 120;
@@ -778,6 +781,7 @@ export function useOrchestrator(
     (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => {
       if (abortRef.current) return;
       const controller = new AbortController();
+      const programRunId = `program-${randomUUID()}`;
       abortRef.current = controller;
 
       setRunning(true);
@@ -824,13 +828,14 @@ export function useOrchestrator(
           }
 
           ensureGithubEnv();
-          const parentOps = new TicketOps(normalizedParent, "github");
+          const parentOps = new TicketOps(normalizedParent, "github", { signal: controller.signal });
           if (!parentOps.isAvailable()) {
             addMessage("GitHub auth/repo not available. Run `gh auth login` and ensure git remote points to GitHub.");
             return;
           }
 
           const parent = await parentOps.fetchTicket();
+          controller.signal.throwIfAborted();
           if (!parent) {
             addMessage(`Could not fetch parent issue ${normalizedParent}.`);
             return;
@@ -850,6 +855,7 @@ export function useOrchestrator(
               config,
               parent,
               (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
+              controller.signal,
             );
 
             const decomposedCount = decomposition.cards.length;
@@ -863,6 +869,7 @@ export function useOrchestrator(
               parent,
               (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
               decomposition,
+              controller.signal,
             );
             epics = generated.epics;
             if (epics.length === 0) {
@@ -892,6 +899,7 @@ export function useOrchestrator(
               }
             } else {
               emitLine(`[${getEmoji("system")} system] Existing program state did not match current plan; resetting saved state.`);
+              controller.signal.throwIfAborted();
               clearProgramRun(workingDir, normalizedParent);
             }
           }
@@ -1023,9 +1031,16 @@ export function useOrchestrator(
             emitLine(`[${getEmoji("system")} system] Running program gates after epic "${epicTitle}" (${gateMode})...`);
             for (const gate of programGates) {
               try {
-                await runGateCommand(gate, workingDir, 300_000);
+                controller.signal.throwIfAborted();
+                const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+                await runGateCommand(gate, workingDir, {
+                  timeoutMs: 300_000, signal: controller.signal, runId: programRunId,
+                  runProcess: request => runScopedProcess(request, { sandbox: sandboxed, scope, capabilities: config.sandboxCapabilities }),
+                });
+                controller.signal.throwIfAborted();
                 emitLine(`[${getEmoji("system")} system] Gate passed: \`${gate}\``);
               } catch (error: unknown) {
+                controller.signal.throwIfAborted();
                 const raw = error as { stdout?: string; stderr?: string; message?: string };
                 const detail = [raw.stdout, raw.stderr, raw.message].filter(Boolean).join("\n").trim();
                 const condensed = detail ? detail.slice(0, 280) : "no output";
@@ -1138,6 +1153,7 @@ export function useOrchestrator(
             }
           }
 
+          controller.signal.throwIfAborted();
           clearProgramRun(workingDir, normalizedParent);
 
           flushLine();
@@ -1153,7 +1169,7 @@ export function useOrchestrator(
           addSessionSummaryDivider(addMessage, hasOperationalOutput);
           addMessage(`**Program complete.** ${parts.join(" · ")}`);
           const usageSummaryMessage = formatModelBreakdown(usageSummaryRef.current);
-          if (usageSummaryMessage) addMessage(usageSummaryMessage);
+          if (usageSummaryMessage) addMessage(`Last build usage (session totals include all builds):\n${usageSummaryMessage}`);
           const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
           if (usageNote) addMessage(usageNote);
           notifyIfEnabled(config.bell, "WorkerMill", "Program complete");

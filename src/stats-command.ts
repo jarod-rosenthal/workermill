@@ -181,7 +181,10 @@ function aggregateSessions(sessions: Session[]): StatsSummary {
   for (const session of sessions) {
     const limitation = formatUsageLedgerLimitation(session.usageLedger);
     if (limitation) estimateLimitations.add(limitation);
-    if (session.usageLedgerHistoryIncomplete) estimateLimitations.add("Some historical session totals have no call-level model or role breakdown.");
+    const modelTokens = session.costByModel?.reduce((sum, model) => sum + model.inputTokens + model.outputTokens, 0) ?? 0;
+    if (session.usageLedgerHistoryIncomplete || (session.usageLedger && modelTokens < session.totalTokens)) {
+      estimateLimitations.add("Some historical session totals have no complete model/role or input/output breakdown; unsplit tokens use the legacy input bucket.");
+    }
     // Count tokens properly using the breakdown function
     const tokenBreakdown = getSessionTokenBreakdown(session);
     totalInputTokens += tokenBreakdown.inputTokens;
@@ -506,6 +509,7 @@ export function runStatsCommand(options: {
         total_tokens: stats.tokens.total,
       },
       cost_usd: Number(stats.costUsd.toFixed(6)),
+      estimate_limitations: stats.estimateLimitations,
       avg_cost_per_session_usd: Number(stats.avgCostPerSessionUsd.toFixed(6)),
       by_model: stats.byModel.map(m => ({
         key: m.key,

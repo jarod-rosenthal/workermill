@@ -102,7 +102,10 @@ export function appendUsageLedger(
 export function applySessionUsageLedger(session: Session, ledger: LedgerSnapshot): boolean {
   const hadLedger = session.usageLedger;
   const hadHistoricalTotals = session.totalTokens > 0 || (session.totalCostUsd ?? 0) > 0;
-  if (!hadLedger && hadHistoricalTotals) session.usageLedgerHistoryIncomplete = true;
+  if ((!hadLedger && hadHistoricalTotals) || (hadLedger && (
+    session.totalTokens > hadLedger.totals.inputTokens + hadLedger.totals.outputTokens
+    || (session.totalCostUsd ?? 0) > hadLedger.totals.estimatedApiCost + 1e-12
+  ))) session.usageLedgerHistoryIncomplete = true;
   const existing = new Set(hadLedger?.calls.map((call) => call.callId) ?? []);
   const newCalls = ledger.calls.filter((call) => {
     if (existing.has(call.callId)) return false;

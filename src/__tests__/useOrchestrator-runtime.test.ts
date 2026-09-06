@@ -14,6 +14,15 @@ vi.mock("../config.js", async (original) => ({
 }));
 vi.mock("../notify.js", () => ({ notifyIfEnabled: vi.fn() }));
 
+vi.mock("../ticket-ops.js", () => ({ TicketOps: class {
+  isAvailable() { return true; }
+  async fetchTicket() { return { title: "Fixture", body: "existing plan" }; }
+} }));
+vi.mock("../program-queue.js", () => ({ parseProgramEpicsFromIssueBody: () => [{ title: "Fixture", issueKeys: ["#2"] }] }));
+vi.mock("../program-state.js", () => ({ getProgramRun: vi.fn(), saveProgramRun: vi.fn(), clearProgramRun: vi.fn() }));
+vi.mock("../engine/scoped-process.js", () => ({ runScopedProcess: vi.fn() }));
+import { runScopedProcess } from "../engine/scoped-process.js";
+import { CostTracker } from "../cost-tracker.js";
 import { useOrchestrator, type UseOrchestratorReturn } from "../ui/useOrchestrator.js";
 import type { OrchestrationOutput } from "../orchestrator/types.js";
 
@@ -28,8 +37,11 @@ describe("mounted orchestration lifecycle", () => {
   let hook: UseOrchestratorReturn;
   const pending: Array<ReturnType<typeof deferred<{ stories: []; completedStoryIds: []; featureBranch: null; userTask: string }>>> = [];
 
+  const messages = vi.fn();
+  const externalUsage = vi.fn();
+  const setCost = vi.fn();
   function Harness(): null {
-    hook = useOrchestrator(() => {});
+    hook = useOrchestrator(messages, setCost, undefined, undefined, undefined, undefined, externalUsage);
     return null;
   }
 
@@ -49,7 +61,44 @@ describe("mounted orchestration lifecycle", () => {
       exitOnCtrlC: false, patchConsole: false,
     });
   });
-  afterEach(() => { app?.unmount(); app = undefined; pending.splice(0); vi.clearAllMocks(); });
+  afterEach(() => { app?.unmount(); app = undefined; pending.splice(0); vi.clearAllMocks(); vi.unstubAllEnvs(); });
+
+  it("forwards cumulative run ledgers without replacing cumulative session cost", async () => {
+    const tracker = new CostTracker();
+    tracker.recordCall({ callId: "run-call", persona: "Planner", provider: "unknown", model: "unknown" });
+    const ledger = tracker.getLedgerSnapshot();
+    runOrchestration.mockImplementation(async (_config, task, _trust, _sandbox, output: OrchestrationOutput) => {
+      output.updateCost?.(0);
+      output.updateUsageLedger?.(ledger);
+      output.updateUsageLedger?.(ledger);
+      return { stories: [], completedStoryIds: [], featureBranch: null, userTask: task, outcome: "success" };
+    });
+    hook.start("ledger", true, false);
+    await vi.waitFor(() => expect(externalUsage).toHaveBeenCalledTimes(2));
+    expect(externalUsage).toHaveBeenLastCalledWith(ledger);
+    expect(setCost).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(hook.running).toBe(false));
+  });
+
+  it("cancels a scoped program gate and does not execute the next advisory gate", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "fixture"); vi.stubEnv("GITHUB_REPO", "fixture/repo");
+    resolveConfig.mockReturnValue({ providers: { test: { model: "test" } }, default: "test", program: { gates: ["first", "second"], gateMode: "advisory" } });
+    runOrchestration.mockResolvedValue({ stories: [], completedStoryIds: [], featureBranch: null, userTask: "#2", outcome: "success" });
+    vi.mocked(runScopedProcess).mockImplementation(async request => new Promise(resolve => {
+      request.signal.addEventListener("abort", () => resolve({ reason: "cancelled", exitCode: null, stdout: "", stderr: "", outputTruncated: false }), { once: true });
+    }));
+    hook.startProgram("#1", true, "os");
+    await vi.waitFor(() => expect(runScopedProcess).toHaveBeenCalledOnce());
+    const [request, options] = vi.mocked(runScopedProcess).mock.calls[0];
+    expect(options.sandbox).toBe("os");
+    expect(request.runId).toMatch(/^program-/);
+    expect(request.signal.aborted).toBe(false);
+    hook.cancel();
+    await vi.waitFor(() => expect(hook.running).toBe(false));
+    expect(request.signal.aborted).toBe(true);
+    expect(runScopedProcess).toHaveBeenCalledOnce();
+    expect(messages.mock.calls.flat().join(" ")).not.toContain("Program complete.");
+  });
 
   it.each(["success", "failed", "cancelled", "partial"])("reports finalized %s even when all stories finished", async (outcome) => {
     const onComplete = vi.fn();

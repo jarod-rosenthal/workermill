@@ -12,6 +12,8 @@ No paid models, publication, pushes, PRs, releases, or cleanup of preserved work
 
 Final-review finding (2026-09-06 22:41 UTC): `/orchestrate` program-level gates omit the parent signal/scoped runner; program decomposition and generated-issue requests omit cancellation. Root owns a narrow correction in program-bootstrap.ts/useOrchestrator.ts plus runtime tests after the R18c3b candidate freezes. Pass the existing parent signal through these operations, use the shared scoped gate runner, and prevent another issue/gate after abort. This is a discovered lifecycle completion blocker, not a new feature. No external requests will be executed by tests. R22 dispatch waits for combined qualification.
 
+R18c3b candidate 202523eb integrated as f193d54b. Worker focused checks: 223 passed and typecheck. Root added mounted orchestration forwarding, historical-ledger/stat JSON coverage and older-run evidence labels. Root lifecycle correction passes program signal to ticket/decomposition/materialization, bounds issue HTTP requests to 60 seconds, runs program gates through scoped process with parent signal, and stops subsequent advisory gates on abort. New tests mock external requests; no external issue writes occur. Root typecheck passed; combined full qualification pending.
+
 ## Historical audit state (before the repair below)
 
 - Repository: `/home/user/github/workermill`, a single-package TypeScript CLI, npm package `workermill` (commands `wm` / `workermill`). This is not the archived server/frontend project.

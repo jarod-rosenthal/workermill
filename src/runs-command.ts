@@ -67,7 +67,7 @@ export function runsList(options: { json?: boolean }): void {
     const date = run.startedAt ? formatDate(run.startedAt) : "unknown";
     const cost = run.totalCost > 0 ? ` · $${run.totalCost.toFixed(2)}` : "";
     const branch = run.featureBranch ? ` · ${run.featureBranch}` : "";
-    const evidence = formatUsageLedgerLimitation("usageLedger" in run ? run.usageLedger : undefined);
+    const evidence = "usageLedger" in run && run.usageLedger ? formatUsageLedgerLimitation(run.usageLedger) : "Call-level usage evidence unavailable for this older record.";
     const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : run.phase === "active" ? chalk.cyan(" · active") : evidence ? chalk.yellow(" · estimate incomplete") : "";
 
     console.log(
@@ -150,7 +150,7 @@ function printRunDetails(run: StoredRunManifest): void {
   if (run.ticketKey) console.log(`  Ticket:     ${run.ticketKey}`);
   console.log(`  Cost:       $${run.totalCost.toFixed(2)}`);
   console.log(`  Tokens:     ${run.totalInputTokens.toLocaleString()} in · ${run.totalOutputTokens.toLocaleString()} out`);
-  const ledgerNote = formatUsageLedgerLimitation("usageLedger" in run ? run.usageLedger : undefined);
+  const ledgerNote = "usageLedger" in run && run.usageLedger ? formatUsageLedgerLimitation(run.usageLedger) : "Call-level usage evidence unavailable for this older record.";
   if (ledgerNote) console.log(chalk.yellow(`  ${ledgerNote}`));
   console.log();
 

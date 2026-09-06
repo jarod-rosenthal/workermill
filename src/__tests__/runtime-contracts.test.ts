@@ -85,6 +85,20 @@ describe("runtime governance contracts", () => {
     model.assertComplete();
   });
 
+  it.each([
+    [null, "missing", 0],
+    [{ inputTokens: 8 }, "partial", 8],
+  ] as const)("retains unreported usage dimensions in the actual SDK headless ledger (%j)", async (usage, state, input) => {
+    const model = install([{ text: "done", usage }]);
+    const result = await runCommand({ prompt: "report", singlePrompt: true }, config({}), workspace);
+    expect(result).toMatchObject({ status: "ok", usageComplete: false, tokens: { input, output: 0 } });
+    expect(result.usageLedger?.calls).toEqual([
+      expect.objectContaining({ usageState: state, pricingState: "unknown" }),
+    ]);
+    expect(result.usageLedger?.calls[0]?.usage?.outputTokens).toBeUndefined();
+    model.assertComplete();
+  });
+
   it("records the selected model's child invocation once after the parent tool settles", async () => {
     const model = install([
       { toolCalls: [{ toolName: "sub_agent", input: { prompt: "Inspect README.md", maxTurns: 1 } }] },

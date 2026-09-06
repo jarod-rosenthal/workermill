@@ -1,10 +1,10 @@
 # WorkerMill recovery handoff
 
-Updated UTC: 2026-09-06T20:21:04.629168+00:00. User-authorized recovery repair batch is implemented and qualified on `reliability/core`. Base: `f613413b`; `08077002` contains the tested implementation. No release, push, paid evaluation, or unrelated feature expansion.
+Updated UTC: 2026-09-06T20:47:53.420127+00:00. User authorized completion of remaining reliability work as far as possible. Latest implementation: `e85a32e7` on `reliability/core`, R15 and R23 accepted. **1,655 passed, zero failed, one existing skip; typecheck passed.** Build passed before final timestamp correction; next batch boundary rebuilds.
 
-**Current qualification: 1,643 passed, zero failed, one pre-existing skipped test across 107 files; typecheck and build passed on Node 22.22.2.** The original 80 failures are resolved. Read the final checkpoint below before acting; historical audit sections preserve the evidence from the broken head.
+Active batch: R16a and R18a only. R16a worker `/root/r16a_fixture` owns test fixture/helper tests in `/home/user/github/workermill-r16a-cont`, branch `reliability/r16a-cont`, base `e85a32e7`. R18a worker `/root/r18a_ledger` owns `cost-tracker.ts`, provider types and cost tests in `/home/user/github/workermill-r18a-cont`, branch `reliability/r18a-cont`, same base. Coordinator owns core integration/checkpoint docs and read-only R18b/c/R17 call-site preparation. Neither worker owns adapters yet.
 
-User has directed completion of the remaining work as far as possible. Current batch: R15/R23 acceptance reconciliation at base `8cd7c733`. Coordinator owns R15 runtime/storage/readers and related tests; one bounded worker owns R23 read-only call-site and removed-coverage audit, writing only `docs/recovery/r23-acceptance.md`. Acceptance: evidence-backed closure or explicit bounded defects, then combined qualification before R16/R18. No publication or live paid evaluation.
+Acceptance: real SDK scripted tool/result/abort fixture and additive ledger identity/unknown-pricing contract; focused/full/typecheck worker evidence, then combined core qualification before successor dispatch. Broader R16/R18 parents remain incomplete. No live paid evaluation, publication, push, release, or worktree cleanup.
 
 
 ## Historical audit state (before the repair below)

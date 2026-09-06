@@ -55,6 +55,7 @@ vi.mock("../orchestrator/completion.js", () => ({
 import type { CliConfig } from "../config.js";
 import { runOrchestration, type OrchestrationOutput } from "../orchestrator.js";
 import { createTempWorkerMillHome, type TempHome } from "./helpers/temp-workermill-home.js";
+import { getOSSandboxDependencyStatus } from "../sandbox-mode.js";
 
 function git(directory: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -114,6 +115,7 @@ describe("orchestration startup runtime", () => {
 
   afterEach(() => {
     process.chdir(previousDirectory);
+    tempHome.restore();
     tempHome.cleanup();
     fs.rmSync(directory, { recursive: true, force: true });
   });
@@ -146,6 +148,40 @@ describe("orchestration startup runtime", () => {
     expect(git(directory, ["merge-base", "--is-ancestor", existingHead, "HEAD"])).toBe("");
     expect(runOutput.confirm).toHaveBeenCalledWith(`Reset \`${branch}\` and start fresh?`);
     expect(runOutput.confirm).toHaveBeenCalledWith(`Continue on existing \`${branch}\`?`);
+    expect(runOutput.errors).toEqual([]);
+  });
+
+  it("contains a configured checkout smudge filter in explicit OS mode", async (test) => {
+    const status = getOSSandboxDependencyStatus();
+    if (!status.supported || status.errors.length > 0) {
+      if (process.env.WM_REQUIRE_OS_SANDBOX === "1") throw new Error(status.errors.join(", ") || "OS runtime unsupported");
+      test.skip(`OS runtime unavailable: ${status.errors.join(", ")}`);
+      return;
+    }
+    const mainBranch = git(directory, ["branch", "--show-current"]);
+    const branch = "remote-project/contain-checkout-filter";
+    const sentinel = path.join(tempHome.homeDir, "outside-sentinel");
+    git(directory, ["switch", "-c", branch]);
+    fs.writeFileSync(path.join(directory, ".gitattributes"), "payload.txt filter=wm-startup\n");
+    fs.writeFileSync(path.join(directory, "payload.txt"), "payload\n");
+    git(directory, ["add", "."]);
+    git(directory, ["commit", "-m", "filtered branch"]);
+    git(directory, ["switch", mainBranch]);
+    const quoted = `'${sentinel.replace(/'/g, "'\\''")}'`;
+    git(directory, ["config", "filter.wm-startup.smudge", `printf ran > checkout-filter-ran; printf escaped > ${quoted}; cat`]);
+    // Positive control: this exact filter really can write outside the repo.
+    git(directory, ["switch", branch]);
+    expect(fs.readFileSync(sentinel, "utf8")).toBe("escaped");
+    git(directory, ["switch", mainBranch]);
+    fs.unlinkSync(sentinel);
+    fs.unlinkSync(path.join(directory, "checkout-filter-ran"));
+
+    const runOutput = output([false, true]);
+    const result = await runOrchestration({ ...config(), sandbox: "os" }, "Contain checkout filter", true, "os", runOutput);
+    expect(result.featureBranch).toBe(branch);
+    expect(fs.existsSync(sentinel)).toBe(false);
+    expect(fs.readFileSync(path.join(directory, "checkout-filter-ran"), "utf8")).toBe("ran");
+    expect(fs.readFileSync(path.join(directory, "payload.txt"), "utf8")).toBe("payload\n");
     expect(runOutput.errors).toEqual([]);
   });
 });

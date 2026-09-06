@@ -3380,7 +3380,7 @@ FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
   });
 
   it("retries a standalone review once when the reviewer is rate limited", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const reviewerApprovesText = `Looks good.
 REVIEW_DECISION: approved
 CODE_QUALITY_SCORE: 9
@@ -3408,6 +3408,7 @@ FEEDBACK: Shippable.`;
     const output = createMockOutput();
 
     const promise = runStandaloneReview(config as any, output, "diff");
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/rate limited/i));
     await vi.advanceTimersByTimeAsync(5_000);
     const result = await promise;
     vi.useRealTimers();

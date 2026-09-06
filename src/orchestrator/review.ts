@@ -9,7 +9,6 @@ import { streamText, stepCountIs, type ToolSet } from "ai";
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "node:crypto";
-import { execSync } from "child_process";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
 import { createPathScope } from "../engine/path-policy.js";
@@ -23,7 +22,7 @@ import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
 import { getProviderForPersona, loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
-import { getDiffForReview, getDiffSinceCommit, getUncommittedDiffForReview, getHeadHash, captureStoryPriorWork } from "../git-ops.js";
+import { createReviewGit, ReviewGitError } from "./git-context.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { checkpoint } from "../checkpoints.js";
 import { durablePermissionRules } from "../safety.js";
@@ -489,6 +488,7 @@ export async function runStandaloneReview(
   // provider stream. It must never silently fall back to path mode here.
   const sandboxed = requestedSandbox === "os" ? resolveSandboxMode("os").effective : requestedSandbox;
   const reviewRunId = randomUUID();
+  const reviewGit = createReviewGit({ workingDir, runId: reviewRunId, signal: abortSignal, sandboxed, capabilities: config.sandboxCapabilities });
   const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
 
   // Get the diff based on target
@@ -500,9 +500,7 @@ export async function runStandaloneReview(
     // PR review -- fetch diff via gh CLI
     const prNumber = prMatch[1];
     try {
-      const prDiff = execSync(`gh pr diff ${prNumber}`, {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 30_000,
-      }).trim();
+      const prDiff = await reviewGit.prDiff(prNumber);
       codeDiff += `## PR #${prNumber}\n\n${prDiff}`;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -513,20 +511,14 @@ export async function runStandaloneReview(
   } else if (normalizedTarget === "diff") {
     // Uncommitted changes only
     try {
-      const { stat, diff } = getUncommittedDiffForReview(workingDir);
+      const { stat, diff } = await reviewGit.uncommitted();
       if (stat) codeDiff += `## Uncommitted Changes\n${stat}\n\n`;
       if (diff) codeDiff += diff;
     } catch { /* not a git repo */ }
   } else {
     // "branch" or anything else -- diff current branch vs main
-    let mainBranch = "main";
-    try {
-      mainBranch = execSync("git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/heads/main", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim().replace(/^refs\/heads\/|^refs\/remotes\/origin\//g, "");
-    } catch { /* default to main */ }
-
-    const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+    const mainBranch = await reviewGit.defaultBranch();
+    const { stat, diff } = await reviewGit.branchDiff(mainBranch);
     if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
     if (diff) codeDiff += diff;
   }
@@ -908,6 +900,7 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     // Fail an explicit OS request before the provider is initialized.
     const effectiveSandbox = sandboxed === "os" ? resolveSandboxMode("os").effective : sandboxed;
     const reviewRunId = randomUUID();
+    const reviewGit = createReviewGit({ workingDir, runId: reviewRunId, signal: abortSignal, sandboxed: effectiveSandbox, capabilities: config.sandboxCapabilities });
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
 
     let previousReviewFeedback = "";
@@ -996,7 +989,7 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
             // Revision rounds: send ONLY what changed since last review.
             // The reviewer already saw the full diff — sending it again wastes context
             // and risks exceeding the model's context window on later rounds.
-            const revisionDelta = getDiffSinceCommit(workingDir, preRevisionHash);
+            const revisionDelta = await reviewGit.delta(preRevisionHash);
             if (revisionDelta) {
               codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Use read_file to inspect any file in full.\n\n${revisionDelta}`;
             } else {
@@ -1004,17 +997,17 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
             }
           } else {
             // First review: send the full branch diff
-            const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+            const { stat, diff } = await reviewGit.branchDiff(mainBranch);
             if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
             if (diff) codeDiff += diff;
           }
         } else {
           // Fallback: uncommitted changes diff
           try {
-            const { stat, diff } = getUncommittedDiffForReview(workingDir);
+            const { stat, diff } = await reviewGit.uncommitted();
             if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
             if (diff) codeDiff += diff;
-          } catch { /* not a git repo */ }
+          } catch (error) { throw error; }
         }
 
         // Cap diff to fit within the reviewer model's context window.
@@ -1413,7 +1406,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Capture HEAD before revision — so next review shows only what changed
         if (featureBranch) {
-          preRevisionHash = getHeadHash(workingDir);
+          preRevisionHash = await reviewGit.head();
         }
 
         for (let i = 0; i < sorted.length; i++) {
@@ -1474,7 +1467,7 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           // Capture per-story prior work from git history — matches worker/epic/git-ops.ts:captureStoryBranchSummaries()
           const whatYouDidLastTime = featureBranch
-            ? captureStoryPriorWork(workingDir, mainBranch, i + 1)
+            ? await reviewGit.priorWork(mainBranch, i + 1)
             : "";
 
           const revisionSystemPrompt = `${storyPersona.systemPrompt}
@@ -1649,7 +1642,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
         // Loop back to review again
       } catch (err) {
         output.statusDone();
-        if (err instanceof ResourceCleanupError) {
+        if (err instanceof ResourceCleanupError || err instanceof ReviewGitError) {
           output.error(err.message);
           return { finalReviewText: "", aborted: true, outcome: { kind: "unverified", approved: false, error: err.message } };
         }

@@ -19,12 +19,15 @@ vi.mock("../project-context.js", () => ({ formatPromptProjectContext: vi.fn(() =
 vi.mock("../hooks.js", () => ({ runHooks: vi.fn(), runLifecycleHooks: vi.fn(), runPreHooksWithBlocking: vi.fn(() => ({ blocked: false })) }));
 vi.mock("../checkpoints.js", () => ({ checkpoint: vi.fn() }));
 vi.mock("../sandbox-mode.js", () => ({ resolveSandboxMode: vi.fn(() => ({ requested: "os", effective: "os" })) }));
-vi.mock("../git-ops.js", () => ({
-  getDiffForReview: vi.fn(() => ({ stat: " file | 1 +", diff: "diff --git a/file b/file" })),
-  getDiffSinceCommit: vi.fn(() => "diff --git a/file b/file"),
-  getHeadHash: vi.fn(() => "head"),
-  captureStoryPriorWork: vi.fn(() => ""),
-  commitRevisionChanges: vi.fn(() => ""),
+vi.mock("../orchestrator/git-context.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../orchestrator/git-context.js")>(),
+  createReviewGit: vi.fn(() => ({
+    branchDiff: vi.fn(async () => ({ stat: " file | 1 +", diff: "diff --git a/file b/file" })),
+    uncommitted: vi.fn(async () => ({ stat: " file | 1 +", diff: "diff --git a/file b/file" })),
+    delta: vi.fn(async () => "diff --git a/file b/file"),
+    head: vi.fn(async () => "head"), priorWork: vi.fn(async () => ""),
+    defaultBranch: vi.fn(async () => "main"), prDiff: vi.fn(async () => "diff --git a/file b/file"),
+  })),
 }));
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();

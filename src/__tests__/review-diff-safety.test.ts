@@ -3,10 +3,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getDiffForReview, getDiffSinceCommit, getUncommittedDiffForReview } from "../git-ops.js";
+import { createReviewGit } from "../orchestrator/git-context.js";
 
 describe("review diff reads", () => {
-  it("does not execute effective text converters or external diff programs", () => {
+  it("does not execute effective text converters or external diff programs", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-review-diff-"));
     const repo = path.join(directory, "repo");
     fs.mkdirSync(repo);
@@ -23,21 +23,22 @@ describe("review diff reads", () => {
       git("add", ".");
       git("commit", "-m", "initial");
       const initial = git("rev-parse", "HEAD");
+      const context = createReviewGit({ workingDir: repo, runId: "review-diff-fixture", sandboxed: true });
       fs.writeFileSync(path.join(repo, "source.txt"), "after\n");
       git("add", ".");
       git("commit", "-m", "candidate");
       fs.writeFileSync(path.join(repo, "source.txt"), "dirty\n");
       const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(program)}`;
       git("config", "diff.unsafe.textconv", command);
-      expect(getDiffForReview(repo, initial).diff).toContain("+after");
-      expect(getDiffSinceCommit(repo, initial)).toContain("+after");
-      expect(getUncommittedDiffForReview(repo).diff).toContain("+dirty");
+      expect((await context.branchDiff(initial)).diff).toContain("+after");
+      expect(await context.delta(initial)).toContain("+after");
+      expect((await context.uncommitted()).diff).toContain("+dirty");
       expect(fs.existsSync(marker)).toBe(false);
       git("diff", "HEAD");
       expect(fs.readFileSync(marker, "utf8")).toBe("executed"); // Effective positive control.
       fs.unlinkSync(marker);
       git("config", "diff.external", command);
-      expect(getUncommittedDiffForReview(repo).diff).toContain("+dirty");
+      expect((await context.uncommitted()).diff).toContain("+dirty");
       expect(fs.existsSync(marker)).toBe(false);
       git("diff", "HEAD");
       expect(fs.readFileSync(marker, "utf8")).toBe("executed");

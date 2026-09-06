@@ -284,6 +284,10 @@ describe("headless runtime governance", () => {
 
     expect(result.reason).toBe("provider_error");
     expect(result.tokens).toEqual({ input: 11, output: 4 });
+    expect(result.usageLedger).toMatchObject({
+      totals: { callCount: 1, inputTokens: 11, outputTokens: 4, partialUsageCalls: 1 },
+    });
+    expect(result.usageComplete).toBe(false);
   });
 
   it("drains an already-dispatched tool before returning a provider failure", async () => {

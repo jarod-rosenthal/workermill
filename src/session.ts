@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 import { getProjectSessionsDir, ensureProjectDirs } from "./project-data.js";
+import type { LedgerSnapshot } from "./cost-tracker.js";
 
 // Sessions stored in project-specific directory
 const SESSIONS_DIR = getProjectSessionsDir();
@@ -44,6 +45,8 @@ export interface Session {
   totalCostUsd?: number;            // Sum of all cost entries
   costByModel?: SessionCostModel[]; // Per-model breakdown
   costByRole?: SessionCostByRole;   // Worker / planner / reviewer split
+  /** Per-call observations for the most recently completed headless run. */
+  usageLedger?: LedgerSnapshot;
 }
 
 export interface SessionSummary {

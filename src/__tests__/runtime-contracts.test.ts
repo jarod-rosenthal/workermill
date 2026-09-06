@@ -68,16 +68,37 @@ describe("runtime governance contracts", () => {
     fs.writeFileSync(path.join(workspace, "note.txt"), "governed result\n");
     const model = install([
       { toolCalls: [{ toolName: "read_file", input: { path: "note.txt" } }] },
-      { text: "The governed result was read." },
+      { text: "The governed result was read.", usage: { inputTokens: 8, outputTokens: 3 } },
     ]);
 
     const result = await runCommand({ prompt: "Read note.txt", singlePrompt: true }, config({ allow: ["read_file"] }), workspace);
 
     expect(result).toMatchObject({ status: "ok", exitCode: 0, text: "The governed result was read.", toolCalls: 1 });
+    expect(result.usageLedger).toMatchObject({
+      totals: { callCount: 1, inputTokens: 8, outputTokens: 3, reportedUsageCalls: 1 },
+    });
+    expect(result.usageComplete).toBe(true);
     expect(model.calls[1]?.options.prompt).toContainEqual(expect.objectContaining({
       role: "tool",
       content: [expect.objectContaining({ toolName: "read_file", output: expect.objectContaining({ value: expect.stringContaining("governed result") }) })],
     }));
+    model.assertComplete();
+  });
+
+  it("records the selected model's child invocation once after the parent tool settles", async () => {
+    const model = install([
+      { toolCalls: [{ toolName: "sub_agent", input: { prompt: "Inspect README.md", maxTurns: 1 } }] },
+      { text: "Child found the fixture.", usage: { inputTokens: 5, outputTokens: 2 } },
+      { text: "Parent received the child report.", usage: { inputTokens: 9, outputTokens: 4 } },
+    ]);
+
+    const result = await runCommand({ prompt: "Ask a child", singlePrompt: true }, config({ allow: ["sub_agent"] }), workspace);
+
+    expect(result).toMatchObject({ status: "ok", tokens: { input: 14, output: 6 } });
+    expect(result.usageLedger).toMatchObject({ totals: { callCount: 2, inputTokens: 14, outputTokens: 6 } });
+    expect(result.usageLedger?.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ persona: "child", provider: "test", model: "scripted", usage: { inputTokens: 5, outputTokens: 2 } }),
+    ]));
     model.assertComplete();
   });
 

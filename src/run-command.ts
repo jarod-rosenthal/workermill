@@ -17,6 +17,9 @@ import type { SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
+import { addUsage, usageFromSdk } from "./engine/model-usage.js";
+import type { LedgerSnapshot } from "./cost-tracker.js";
+import type { TokenUsage } from "./providers/types.js";
 import type { CliConfig } from "./config.js";
 import type { AIProvider } from "./engine/types.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
@@ -49,6 +52,8 @@ export interface RunResult {
   tokens: { input: number; output: number };
   costUsd: number;
   durationMs: number;
+  usageLedger?: LedgerSnapshot;
+  usageComplete?: boolean;
 }
 export interface RunOptions {
   prompt: string;
@@ -83,6 +88,8 @@ function failure(
     tokens: extra.tokens ?? { input: 0, output: 0 },
     costUsd: extra.costUsd ?? 0,
     durationMs: Date.now() - start,
+    usageLedger: extra.usageLedger ?? { calls: [], totals: { callCount: 0, reportedUsageCalls: 0, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 0, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0 } },
+    usageComplete: extra.usageComplete ?? true,
   };
 }
 function maxSteps(value: number | undefined, start: number): number | RunResult {
@@ -93,18 +100,34 @@ function maxSteps(value: number | undefined, start: number): number | RunResult 
 function effectiveSandbox(value: SandboxSetting | undefined): EffectiveSandbox {
   return value === "os" ? "os" : value === false ? "none" : "path";
 }
+function appendLedger(previous: LedgerSnapshot | undefined, next: LedgerSnapshot): LedgerSnapshot {
+  if (!previous) return next;
+  const a = previous.totals;
+  const b = next.totals;
+  return {
+    calls: [...previous.calls, ...next.calls],
+    totals: {
+      callCount: a.callCount + b.callCount,
+      reportedUsageCalls: a.reportedUsageCalls + b.reportedUsageCalls,
+      partialUsageCalls: a.partialUsageCalls + b.partialUsageCalls,
+      missingUsageCalls: a.missingUsageCalls + b.missingUsageCalls,
+      knownPricingCalls: a.knownPricingCalls + b.knownPricingCalls,
+      unknownPricingCalls: a.unknownPricingCalls + b.unknownPricingCalls,
+      localApiCalls: a.localApiCalls + b.localApiCalls,
+      inputTokens: a.inputTokens + b.inputTokens,
+      outputTokens: a.outputTokens + b.outputTokens,
+      cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
+      cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+      estimatedApiCost: a.estimatedApiCost + b.estimatedApiCost,
+    },
+  };
+}
 function reasonFor(error: unknown, signal: AbortSignal): RunFailureReason {
   if (signal.aborted || (error instanceof ToolExecutionError && error.code === "cancelled")) return "cancelled";
   if (error instanceof ToolExecutionError && (error.code === "denied" || error.code === "permission_required")) return error.code;
   if (error && typeof error === "object" && "code" in error && error.code === "os_sandbox_unavailable") return "os_sandbox_unavailable";
   return "provider_error";
 }
-function usageOf(usage: unknown): { input: number; output: number } {
-  // SDK gap: usage field names differ across provider transports.
-  const record = usage as { promptTokens?: number; inputTokens?: number; completionTokens?: number; outputTokens?: number } | undefined;
-  return { input: record?.promptTokens ?? record?.inputTokens ?? 0, output: record?.completionTokens ?? record?.outputTokens ?? 0 };
-}
-
 function checkpointAuthorizedTargets(
   toolName: string,
   input: Record<string, unknown>,
@@ -168,7 +191,10 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
   const costs = new CostTracker();
   let toolCalls = 0;
   let text = "";
-  let usage = { input: 0, output: 0 };
+  let usage: Partial<TokenUsage> | undefined;
+  let hasFinalUsage = false;
+  let modelStarted = false;
+  let result: RunResult | undefined;
   let completedSteps = 0;
   let lastStepHadToolCalls = false;
   let terminalToolError: ToolExecutionError | undefined;
@@ -243,6 +269,9 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     const aiModel = createModel(provider as AIProvider, model, providerConfig.host, providerConfig.contextLength, providerConfig.apiKey);
     const builtinTools = createToolDefinitions(workingDir, aiModel, requestedSandbox, {
       runId, signal: controller.signal, scope, sandboxCapabilities: config.sandboxCapabilities, executionContext: context,
+      onSubAgentUsage: async (childUsage) => {
+        costs.recordCall({ callId: childUsage.callId, persona: "child", provider, model, usage: childUsage.usage, usageComplete: childUsage.usageComplete });
+      },
     });
     const mcpTools = mcpResources.getToolDefinitions();
     const tools = wrapTools({ ...builtinTools, ...mcpTools }, context, (error) => {
@@ -259,6 +288,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     const mcpKeys = Object.keys(mcpTools);
     if (mcpKeys.length) system += "\n\n## MCP Tools\n\nAdditional MCP servers: " + [...new Set(mcpKeys.map((key) => key.split("__")[1]))].join(", ");
     // SDK gap: streamText's generic tool map cannot represent dynamic MCP tools.
+    modelStarted = true;
     const stream = streamText({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK gap documented above.
       model: aiModel, system, messages: messages as any, tools: tools as any, stopWhen: stepCountIs(stepLimit),
@@ -268,8 +298,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
         if (stepText) text += stepText;
         if (stepCalls) toolCalls += stepCalls.length;
         lastStepHadToolCalls = Boolean(stepCalls?.length);
-        const knownUsage = usageOf(stepUsage);
-        usage = { input: usage.input + knownUsage.input, output: usage.output + knownUsage.output };
+        usage = addUsage(usage, usageFromSdk(stepUsage));
       },
     });
     for await (const _ of stream.textStream) { /* drive stream */ }
@@ -279,28 +308,31 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failedTool) throw failedTool.reason;
     text = await stream.text;
-    const totalUsage = usageOf(await stream.totalUsage);
-    if (totalUsage.input !== 0 || totalUsage.output !== 0) usage = totalUsage;
-    costs.addUsage("run", provider, model, usage.input, usage.output);
+    const totalUsage = usageFromSdk(await stream.totalUsage);
+    if (totalUsage) {
+      hasFinalUsage = totalUsage.inputTokens !== undefined && totalUsage.outputTokens !== undefined;
+      // Failed transports sometimes expose an all-zero placeholder total after
+      // reporting useful completed-step usage. Keep that observed subtotal.
+      if (usage === undefined || totalUsage.inputTokens !== 0 || totalUsage.outputTokens !== 0 || totalUsage.cacheCreationTokens !== undefined || totalUsage.cacheReadTokens !== undefined) usage = totalUsage;
+    }
     if (terminalToolError) throw terminalToolError;
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     const finishReason = await stream.finishReason;
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     if ((completedSteps >= stepLimit && lastStepHadToolCalls) || finishReason === "tool-calls") {
-      return failure(start, "step_limit", "The configured maximum step count was exhausted", {
-        sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
-      });
+      result = failure(start, "step_limit", "The configured maximum step count was exhausted", { sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls });
+      return result;
     }
     if (finishReason !== "stop") {
       throw new Error("Model stream ended with non-success finish reason: " + finishReason);
     }
     if (!options.singlePrompt) shouldSaveSession = true;
-    return { status: "ok", exitCode: 0, sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(), durationMs: Date.now() - start };
+    result = { status: "ok", exitCode: 0, sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: { input: 0, output: 0 }, costUsd: 0, durationMs: Date.now() - start, usageLedger: costs.getLedgerSnapshot(), usageComplete: true };
+    return result;
   } catch (error) {
     const reason = terminalToolError?.code ?? reasonFor(error, controller.signal);
-    return failure(start, reason, error instanceof Error ? error.message : String(error), {
-      sessionId: options.singlePrompt ? null : session?.id ?? null, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
-    });
+    result = failure(start, reason, error instanceof Error ? error.message : String(error), { sessionId: options.singlePrompt ? null : session?.id ?? null, model: modelIdentity, text, toolCalls });
+    return result;
   } finally {
     process.removeListener("SIGINT", abortFromSigint);
     options.signal?.removeEventListener("abort", abortFromParent);
@@ -310,6 +342,15 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     // before returning, but do not relabel the provider failure as a cleanup
     // failure merely because abort correctly rejected an in-flight tool.
     await Promise.allSettled([...pendingTools]);
+    if (modelStarted) costs.recordCall({ callId: `headless:${runId}`, persona: "run", provider, model, usage, usageComplete: hasFinalUsage });
+    const ledger = costs.getLedgerSnapshot();
+    if (result) {
+      result.tokens = { input: ledger.totals.inputTokens, output: ledger.totals.outputTokens };
+      result.costUsd = ledger.totals.estimatedApiCost;
+      result.usageLedger = ledger;
+      result.usageComplete = ledger.totals.partialUsageCalls === 0 && ledger.totals.missingUsageCalls === 0;
+      result.durationMs = Date.now() - start;
+    }
     try {
       await cancelAndWaitForRunProcesses(runId);
     } catch (error) {
@@ -333,16 +374,19 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     if (cleanupErrors.length) {
       return failure(start, "cleanup_error", cleanupErrors.join("; "), {
         sessionId: options.singlePrompt ? null : session?.id ?? null,
-        model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
+        model: modelIdentity, text, toolCalls, tokens: result?.tokens, costUsd: result?.costUsd, usageLedger: ledger, usageComplete: result?.usageComplete,
       });
     }
     if (shouldSaveSession && session) {
       try {
         addMessage(session, "assistant", text);
+        session.totalTokens += ledger.totals.inputTokens + ledger.totals.outputTokens;
+        session.totalCostUsd = (session.totalCostUsd ?? 0) + ledger.totals.estimatedApiCost;
+        session.usageLedger = appendLedger(session.usageLedger, ledger);
         saveSession(session);
       } catch (error) {
         return failure(start, "provider_error", "Unable to save the completed session: " + String(error), {
-          sessionId: session.id, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),
+          sessionId: session.id, model: modelIdentity, text, toolCalls, tokens: result?.tokens, costUsd: result?.costUsd, usageLedger: ledger, usageComplete: result?.usageComplete,
         });
       }
     }

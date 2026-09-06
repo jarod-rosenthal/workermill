@@ -6,6 +6,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { canonicalizePath, createPathScope, type PathGrant, type PathScope } from "../path-policy.js";
 import { executeToolCall, type ToolExecutionContext } from "../tool-executor.js";
+import { cancelAndWaitForRunProcesses } from "../process-runner.js";
+import { runScopedProcess } from "../scoped-process.js";
+import { cleanupScopedBackgroundProcesses } from "./bash-background.js";
 import type { PermissionState } from "../tool-policy.js";
 
 export const name = "sub_agent";
@@ -82,15 +85,26 @@ export function createWorktree(workingDir: string, prompt: string): WorktreeInfo
   const branchId = crypto.randomUUID();
   const name = `${slugify(prompt)}-${branchId}`;
   const branchName = `workermill/${branchId}/work`;
-  const worktreePath = path.join(workingDir, ".workermill", "worktrees", name);
-  fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
-  // Argument arrays make prompt/branch/path shell inert. UUID makes both names collision-safe.
-  git(workingDir, ["worktree", "add", "-b", branchName, worktreePath, "HEAD"]);
-  const startHead = git(worktreePath, ["rev-parse", "HEAD"]);
+  const workspace = canonicalizePath(workingDir);
+  const worktreeBase = path.join(workspace, ".workermill", "worktrees");
+  if (canonicalizePath(worktreeBase) !== worktreeBase) {
+    throw new Error("Worktree directory must not redirect through a symlink");
+  }
+  const commonDir = canonicalizePath(git(workspace, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  for (const relative of ["objects", "worktrees", "refs/heads/workermill", "logs/refs/heads/workermill"]) {
+    const candidate = path.join(commonDir, relative);
+    if (canonicalizePath(candidate) !== candidate) throw new Error("Git metadata namespace must not redirect through a symlink");
+  }
+  const worktreePath = path.join(worktreeBase, name);
   try {
+    fs.mkdirSync(worktreeBase, { recursive: true });
+    // Do not run checkout filters on the host. Populate the checkout through
+    // the child's selected process boundary after its scope is established.
+    git(workspace, ["worktree", "add", "--no-checkout", "-b", branchName, worktreePath, "HEAD"]);
+    const startHead = git(worktreePath, ["rev-parse", "HEAD"]);
     return { worktreePath, branchName, startHead, scope: createPathScope(worktreePath, gitMetadataGrants(workingDir, worktreePath, branchId)) };
   } catch (error) {
-    throw new Error(`Failed to establish isolated child scope: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Failed to establish isolated child scope: ${error instanceof Error ? error.message : String(error)}. Inspect branch ${branchName} and worktree ${worktreePath}; any partial work is preserved.`);
   }
 }
 
@@ -136,79 +150,195 @@ function childContext(parent: ToolExecutionContext | undefined, scope: PathScope
 }
 
 /** Every child tool takes the same policy/hook/cancellation path as parent tools. */
-export function wrapChildTools(tools: Record<string, ChildTool>, context: ToolExecutionContext): Record<string, ChildTool> {
+export function wrapChildTools(tools: Record<string, ChildTool>, context: ToolExecutionContext, onFailure?: (error: unknown) => void): Record<string, ChildTool> {
   return Object.fromEntries(Object.entries(tools).flatMap(([toolName, definition]) => {
     if (!definition.execute || toolName === "sub_agent") return [];
     const execute = definition.execute;
-    return [[toolName, { ...definition, execute: (input: Record<string, unknown>) => executeToolCall(toolName, input, () => execute(input), context) }]];
+    return [[toolName, { ...definition, execute: async (input: Record<string, unknown>) => {
+      try {
+        return await executeToolCall(toolName, input, () => execute(input), context);
+      } catch (error) {
+        onFailure?.(error);
+        throw error;
+      }
+    } }]];
   }));
 }
 function childAbortController(parent: AbortSignal | undefined): { controller: AbortController; dispose: () => void } {
   const controller = new AbortController();
   const abort = () => controller.abort();
   const timer = setTimeout(abort, 5 * 60 * 1000);
+  timer.unref();
   parent?.addEventListener("abort", abort, { once: true });
+  if (parent?.aborted) controller.abort();
   return { controller, dispose: () => { clearTimeout(timer); parent?.removeEventListener("abort", abort); } };
 }
-async function runSubAgent(model: LanguageModel, tools: Record<string, ChildTool>, prompt: string, maxTurns: number, system: string, signal: AbortSignal, onUsage?: SubAgentExecutorOptions["onUsage"]): Promise<SubAgentResult> {
+async function runSubAgent(
+  model: LanguageModel,
+  rawTools: Record<string, ChildTool>,
+  prompt: string,
+  maxTurns: number,
+  system: string,
+  context: ToolExecutionContext,
+  controller: AbortController,
+  onUsage?: SubAgentExecutorOptions["onUsage"],
+): Promise<SubAgentResult> {
+  let turnsUsed = 0;
+  let lastToolCount = 0;
+  let content = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let terminalError: unknown;
+  let result: SubAgentResult;
+  const tools = wrapChildTools(rawTools, context, (error) => {
+    terminalError ??= error;
+    controller.abort();
+  });
   try {
-    let turnsUsed = 0;
-    // ChildTool is structural because the SDK's generic input types are not
-    // preserved through the registered-tool selection in index.ts.
-    const stream = streamText({ model, system, prompt, tools: tools as unknown as ToolSet, stopWhen: stepCountIs(maxTurns), abortSignal: signal, onStepFinish() { turnsUsed++; } });
-    for await (const _chunk of stream.textStream) { /* consuming drives tool execution */ }
-    if (signal.aborted) return { success: false, content: "", turnsUsed, error: "Sub-agent cancelled." };
-    const content = await stream.text;
+    if (context.signal.aborted) throw new Error("Sub-agent cancelled before model startup.");
+    // ChildTool is structural because dynamic SDK schemas erase input generics.
+    const stream = streamText({
+      model, system, prompt, tools: tools as unknown as ToolSet,
+      stopWhen: stepCountIs(maxTurns),
+      abortSignal: context.signal,
+      onStepFinish({ toolCalls, usage, text }) {
+        turnsUsed++;
+        lastToolCount = toolCalls.length;
+        inputTokens += usage.inputTokens ?? 0;
+        outputTokens += usage.outputTokens ?? 0;
+        content += text;
+      },
+    });
+    for await (const _chunk of stream.textStream) { /* drives tool execution */ }
+    content = await stream.text;
     const usage = await stream.totalUsage;
-    if (onUsage) {
-      const inputTokens = usage?.inputTokens ?? 0;
-      const outputTokens = usage?.outputTokens ?? 0;
-      await onUsage({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
+    inputTokens = usage?.inputTokens ?? inputTokens;
+    outputTokens = usage?.outputTokens ?? outputTokens;
+    if (terminalError) throw terminalError;
+    if (context.signal.aborted) throw new Error("Sub-agent cancelled.");
+    const finishReason = await stream.finishReason;
+    if (finishReason === "tool-calls" || (turnsUsed >= maxTurns && lastToolCount > 0)) {
+      throw new Error("Sub-agent stopped with an unfinished tool loop at its turn limit.");
     }
-    return { success: true, content, turnsUsed };
+    if (finishReason !== "stop") throw new Error(`Sub-agent ended without completion: ${finishReason}`);
+    result = { success: true, content, turnsUsed };
   } catch (error) {
-    return { success: false, content: "", turnsUsed: 0, error: `Sub-agent failed: ${error instanceof Error ? error.message : String(error)}` };
+    const cause = terminalError ?? error;
+    result = {
+      success: false, content, turnsUsed,
+      error: `Sub-agent failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    };
   }
+  try {
+    await onUsage?.({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
+  } catch (error) {
+    result = { ...result, success: false, error: `Unable to record child usage: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  return result;
 }
 
-export function createSubAgentExecutor(model: LanguageModel, workingDir: string, readOnlyTools: Record<string, ChildTool>, options: SubAgentExecutorOptions) {
+export function createSubAgentExecutor(
+  model: LanguageModel,
+  workingDir: string,
+  readOnlyTools: Record<string, ChildTool>,
+  options: SubAgentExecutorOptions,
+) {
   return async function execute({ prompt, maxTurns = 20, isolated = false }: SubAgentParams): Promise<SubAgentResult> {
+    if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 50) {
+      return { success: false, content: "", turnsUsed: 0, error: "maxTurns must be an integer from 1 through 50." };
+    }
     const parent = options.executionContext;
-    if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 50) return { success: false, content: "", turnsUsed: 0, error: "maxTurns must be an integer from 1 through 50." };
     const lifetime = childAbortController(parent?.signal);
     const signal = lifetime.controller.signal;
-    if (!isolated) {
-      const scope = parent?.scope ?? createPathScope(workingDir);
-      const context = childContext(parent, scope, true, signal);
-      try { return await runSubAgent(model, wrapChildTools(readOnlyTools, context), prompt, maxTurns,
-        "You are a codebase exploration agent. You can read files, search, and list directories. You cannot modify files, run commands, access MCP tools, or spawn sub-agents. Provide specific findings.", signal, options.onUsage); }
-      finally { lifetime.dispose(); }
-    }
-    // Conservative no-context behavior: isolated writes never receive implicit permission.
-    if (!parent) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: a parent permission context is required." }; }
-    if (parent.signal.aborted) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent run is cancelled." }; }
-    const preflight = parent.getPermissionState();
-    if (preflight.mode === "plan" || preflight.readOnlyRole) { lifetime.dispose(); return { success: false, content: "", turnsUsed: 0, error: "Cannot start isolated sub-agent: parent permission state is read-only." }; }
-
-    let worktree: WorktreeInfo;
-    try { git(workingDir, ["rev-parse", "--is-inside-work-tree"]); worktree = createWorktree(workingDir, prompt); }
-    catch (error) { return { success: false, content: "", turnsUsed: 0, error: `Failed to create isolated worktree: ${error instanceof Error ? error.message : String(error)}` }; }
-    const identity = `Branch \`${worktree.branchName}\`; worktree \`${worktree.worktreePath}\`.`;
+    let context: ToolExecutionContext | undefined;
+    let worktree: WorktreeInfo | undefined;
     let result: SubAgentResult;
     try {
-      const context = childContext(parent, worktree.scope, false, signal);
-      result = await runSubAgent(model, wrapChildTools(options.createTools(worktree.worktreePath, worktree.scope, context), context), prompt, maxTurns,
-        `You are working in isolated git worktree ${worktree.worktreePath}. Work only in that checkout. Commit changes when appropriate; they remain on your branch. Do not spawn sub-agents. Path-mode checks constrain explicit file tools but do not contain arbitrary shell commands.`, signal, options.onUsage);
-    } catch (error) { result = { success: false, content: "", turnsUsed: 0, error: `Sub-agent failed: ${error instanceof Error ? error.message : String(error)}` }; }
+      if (signal.aborted) throw new Error("Parent run is cancelled.");
+      if (isolated) {
+        if (!parent) throw new Error("A parent permission context is required for isolated work.");
+        const state = parent.getPermissionState();
+        if (state.mode === "plan" || state.readOnlyRole) throw new Error("Parent permission state is read-only.");
+        worktree = createWorktree(workingDir, prompt);
+        context = childContext(parent, worktree.scope, false, signal);
+        const checkout = await runScopedProcess({
+          runId: context.runId, signal, cwd: worktree.worktreePath,
+          command: "git -c core.hooksPath=/dev/null -c core.fsmonitor=false read-tree --reset -u HEAD",
+          timeoutMs: 30_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+        }, {
+          sandbox: context.effectiveSandbox === "os" ? "os" : true,
+          scope: worktree.scope,
+          capabilities: {
+            allowedNetworkDomains: context.allowedNetworkDomains,
+            allowLocalBinding: context.allowLocalBinding,
+            allowDockerSocket: false,
+          },
+        });
+        if (checkout.reason !== "exited" || checkout.exitCode !== 0) {
+          throw new Error(`Child checkout failed (${checkout.reason}): ${checkout.stderr}`);
+        }
+        result = await runSubAgent(
+          model, options.createTools(worktree.worktreePath, worktree.scope, context),
+          prompt, maxTurns,
+          `Work only in isolated checkout ${worktree.worktreePath}. Changes remain on your branch for review. Do not spawn children. Path checks are not arbitrary-shell containment.`,
+          context, lifetime.controller, options.onUsage,
+        );
+      } else {
+        const scope = parent?.scope ?? createPathScope(workingDir);
+        context = childContext(parent, scope, true, signal);
+        // Rebuild closures with the child's scope/signal instead of retaining
+        // full-disk or stale parent execution options.
+        const rebuilt = options.createTools(workingDir, scope, context);
+        const tools = Object.fromEntries(Object.keys(readOnlyTools)
+          .filter((name) => rebuilt[name]).map((name) => [name, rebuilt[name]]));
+        result = await runSubAgent(
+          model, tools, prompt, maxTurns,
+          "Explore the codebase using read-only tools. Do not modify files or spawn children. Provide specific findings.",
+          context, lifetime.controller, options.onUsage,
+        );
+      }
+    } catch (error) {
+      result = {
+        success: false, content: "", turnsUsed: 0,
+        error: `Sub-agent failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    } finally {
+      lifetime.controller.abort();
+      try {
+        if (context) {
+          await cancelAndWaitForRunProcesses(context.runId);
+          await cleanupScopedBackgroundProcesses(context.runId);
+        }
+      } catch (error) {
+        result = {
+          success: false, content: "", turnsUsed: 0,
+          error: `Child cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      } finally {
+        lifetime.dispose();
+      }
+    }
 
+    if (!worktree) return result;
+    const identity = `Branch \`${worktree.branchName}\`; worktree \`${worktree.worktreePath}\`.`;
     const state = inspectWorktree(worktree);
     if (result.success && state.kind === "empty") {
-      try { removeConfirmedEmptyWorktree(workingDir, worktree); lifetime.dispose(); return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` }; }
-      catch (error) { lifetime.dispose(); return { success: false, content: `${result.content}\n\n${identity} Cleanup failed; preserved for inspection.`, turnsUsed: result.turnsUsed, error: `Failed to clean confirmed-empty worktree: ${error instanceof Error ? error.message : String(error)}` }; }
+      try {
+        removeConfirmedEmptyWorktree(workingDir, worktree);
+        return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` };
+      } catch (error) {
+        return {
+          ...result, success: false,
+          error: `Cleanup failed: ${error instanceof Error ? error.message : String(error)}\n\n${identity} Inspect the remaining local state.`,
+        };
+      }
     }
-    const detail = state.kind === "unknown" ? "State could not be confirmed; preserved for inspection." : `Preserved for inspection.\n${state.diffStat}`;
-    lifetime.dispose();
-    return result.success ? { ...result, content: `${result.content}\n\n${identity} ${detail}` } : { ...result, error: `${result.error ?? "Sub-agent failed"}\n\n${identity} ${detail}` };
+    const detail = state.kind === "unknown"
+      ? "State could not be confirmed; preserved for inspection."
+      : `Preserved for inspection.\n${state.diffStat}`;
+    return result.success
+      ? { ...result, content: `${result.content}\n\n${identity} ${detail}` }
+      : { ...result, error: `${result.error ?? "Sub-agent failed"}\n\n${identity} ${detail}` };
   };
 }
 

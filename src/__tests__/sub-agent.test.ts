@@ -47,6 +47,7 @@ function stream(): void {
       yield "done";
     })(),
     text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 3, outputTokens: 5 }),
+    finishReason: Promise.resolve("stop"),
   }));
 }
 

@@ -42,6 +42,7 @@ export async function runSpecCheck(
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
 ): Promise<string> {
+  if (abortSignal?.aborted) return userTask;
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
@@ -83,6 +84,7 @@ Return up to 3 gaps, or an empty array if the spec is clear enough. When in doub
     });
     gaps = result.object.gaps;
     output.statusDone();
+    if (abortSignal?.aborted) return userTask;
   } catch {
     output.statusDone();
     return userTask; // spec check failure is non-fatal
@@ -398,6 +400,7 @@ export async function classifyComplexity(
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
 ): Promise<{ isMulti: boolean; reason: string }> {
+  if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
   logger.info("Classifying complexity", { input: userInput.slice(0, 200) });
   // Resolve file references before classification so "spec.md" becomes the full spec content
   const resolvedInput = resolveTaskInput(userInput, process.cwd());
@@ -424,11 +427,13 @@ Task:
 ${resolvedInput}`,
     });
 
+    if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
     return {
       isMulti: result.object.complexity === "multi",
       reason: result.object.reason,
     };
   } catch (err) {
+    if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
     // Fallback to text-based classification
     try {
       const textResult = await generateText({
@@ -440,6 +445,7 @@ Task: ${resolvedInput}`,
       });
 
       const isMulti = /\bmulti\b/i.test(textResult.text);
+      if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
       return { isMulti, reason: textResult.text.slice(0, 200) };
     } catch (err2) {
       logger.debug("Classification double fallback failed", { error: err2 instanceof Error ? err2.message : String(err2) });
@@ -838,7 +844,7 @@ Rules:
       const waitSec = Math.ceil(rl.retryAfterMs / 1000);
       output.coordinatorLog(`Planner rate limited — retrying in ${waitSec}s (${_rateLimitRetries + 1}/3)`);
       logger.info("Planner rate limit retry", { attempt: _rateLimitRetries + 1, waitSec });
-      await rateLimitSleep(rl.retryAfterMs);
+      await rateLimitSleep(rl.retryAfterMs, abortSignal);
       return planStories(config, userTask, workingDir, sandboxed, output, abortSignal, _rateLimitRetries + 1);
     }
     const msg = planErr instanceof Error ? planErr.message : String(planErr);

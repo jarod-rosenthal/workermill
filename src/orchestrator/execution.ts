@@ -23,7 +23,9 @@ import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.j
 import { isGitRepo, commitStoryChanges } from "../git-ops.js";
 import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
-import { getMCPToolDefinitions } from "../mcp-client.js";
+import { randomUUID } from "node:crypto";
+import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
 import * as lspTool from "../engine/tools/lsp.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
 
@@ -699,6 +701,8 @@ export interface ExecuteStoriesParams {
   ticketOps: { postComment(comment: string): Promise<void> } | null;
   /** Run manifest ID — used for memory provenance tracking */
   runId?: string;
+  /** Run-owned MCP tools supplied by the orchestration owner. */
+  getMCPToolDefinitions?: () => Record<string, AnyToolDef>;
 
   // Callbacks from the orchestrator
   waitWhilePaused: () => Promise<boolean>;
@@ -737,6 +741,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     waitWhilePaused,
     pauseForBalanceIssue,
     logRetryHint,
+    getMCPToolDefinitions,
   } = params;
 
   const failedStories = new Set<string>();
@@ -858,9 +863,12 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     recentToolSignatures = [];
     loopAbort = new AbortController();
     const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, loopAbort.signal]) : loopAbort.signal;
+    // An attempt gets an identity before model/tool construction so its
+    // processes, LSP session, and tool calls cannot collide with a retry.
+    const attemptRunId = `${params.runId ?? "story"}-worker-${story.id}-${revision}-${randomUUID()}`;
     const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
     const executionContext: ToolExecutionContext = {
-      runId: params.runId ?? `story-${story.id}-${revision}`,
+      runId: attemptRunId,
       workspace: scope.workspace,
       scope,
       effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
@@ -957,15 +965,18 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     };
 
     const allTools = createToolDefinitions(workingDir, model, sandboxed, {
+      runId: attemptRunId,
+      signal: combinedSignal,
       executionContext,
       sandboxCapabilities: config.sandboxCapabilities,
     });
     const personaTools: Record<string, AnyToolDef> = {};
+    const pendingToolCalls = new Set<Promise<unknown>>();
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
       if (toolDef) personaTools[toolName] = toolDef;
     }
-    Object.assign(personaTools, getMCPToolDefinitions());
+    Object.assign(personaTools, getMCPToolDefinitions?.() ?? {});
     const mcpNames = Object.keys(personaTools).filter((name) => name.startsWith("mcp__"));
     if (mcpNames.length > 20) {
       for (const name of mcpNames.slice(20)) delete personaTools[name];
@@ -984,7 +995,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     for (const [toolName, toolDef] of Object.entries(personaTools)) {
       if (!toolDef || typeof toolDef.execute !== "function") continue;
       const original = toolDef.execute;
-      const execute = async (input: Record<string, unknown>): Promise<unknown> => {
+      const execute = (input: Record<string, unknown>): Promise<unknown> => {
+        const invocation = (async (): Promise<unknown> => {
         try {
           return await executeToolCall(toolName, input, () => original(input), executionContext);
         } catch (error) {
@@ -1007,6 +1019,10 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           }
           throw error;
         }
+        })();
+        pendingToolCalls.add(invocation);
+        void invocation.finally(() => pendingToolCalls.delete(invocation));
+        return invocation;
       };
       personaTools[toolName] = { ...toolDef, execute };
     }
@@ -1177,9 +1193,15 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // Drive the stream (required for streamText) — onStepFinish handles display
       try {
         for await (const _chunk of stream.textStream) { /* consumed */ }
-      } catch {
-        // Stream may throw on abort (user ESC or rambling detector) — that's expected
+      } catch (error) {
+        // Cancellation is expected; transport/provider failures are not a
+        // successful empty response and must reach the story failure path.
+        if (!combinedSignal.aborted) throw error;
       }
+
+      const settledTools = await Promise.allSettled([...pendingToolCalls]);
+      const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failedTool) throw failedTool.reason;
 
       // Check abort immediately after stream ends — user may have pressed ESC
       if (combinedSignal.aborted) {
@@ -1463,7 +1485,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         const waitSec = Math.ceil(rl.retryAfterMs / 1000);
         output.log("system", `Rate limited — retrying in ${waitSec}s (${storyRateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
         logger.info("Rate limit retry", { story: i + 1, attempt: storyRateLimitRetries, waitSec });
-        await rateLimitSleep(rl.retryAfterMs);
+        await rateLimitSleep(rl.retryAfterMs, abortSignal);
         continue; // retry same revision
       }
 
@@ -1512,6 +1534,21 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       }
       failedStories.add(story.id);
       break;
+    } finally {
+      // Do not let an attempt's tool/process/LSP lifetime survive a retry or
+      // a provider failure.  Attempt cleanup is scoped, never global.
+      loopAbort.abort(new Error("Worker attempt finished"));
+      const cleanup = await Promise.allSettled([
+        cancelAndWaitForRunProcesses(attemptRunId),
+        cleanupScopedBackgroundProcesses(attemptRunId),
+        lspTool.shutdownLSPRun(attemptRunId),
+      ]);
+      const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) {
+        const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
+        output.error(`Worker attempt cleanup failed: ${detail}`);
+        logger.error("Worker attempt cleanup failed", { runId: attemptRunId, detail });
+      }
     }
 
     } // end revision loop

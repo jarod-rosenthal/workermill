@@ -88,7 +88,8 @@ describe("worker execution policy runtime", () => {
       logRetryHint: vi.fn(),
     });
 
-    expect(factoryContext).toMatchObject({ runId: "run-r08", signal: abortController.signal });
+    expect(factoryContext).toMatchObject({ signal: abortController.signal });
+    expect(factoryContext?.runId).toMatch(/^run-r08-worker-story-0-/);
     expect(factoryContext?.allowedNetworkDomains).toEqual(["example.test"]);
     expect(factoryContext?.allowLocalBinding).toBe(true);
     expect(factoryContext?.allowDockerSocket).toBe(true);

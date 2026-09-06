@@ -30,6 +30,9 @@ import { durablePermissionRules } from "../safety.js";
 import { resolveSandboxMode } from "../sandbox-mode.js";
 import { captureRepositoryFingerprint, type VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
 import { prepareCandidate } from "./candidate.js";
+import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
+import { shutdownLSPRun } from "../engine/tools/lsp.js";
 
 import type {
   OrchestrationOutput,
@@ -64,6 +67,20 @@ import { emitFailureCode, extractCheckpointTargets, formatToolCallDisplay } from
 // Internal type used by runStandaloneReview for tool wrapping
 // ---------------------------------------------------------------------------
 type AnyToolDef = any;
+
+async function cleanupReviewAttempt(runId: string, output: OrchestrationOutput): Promise<void> {
+  const settled = await Promise.allSettled([
+    cancelAndWaitForRunProcesses(runId),
+    cleanupScopedBackgroundProcesses(runId),
+    shutdownLSPRun(runId),
+  ]);
+  const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length) {
+    const detail = failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join("; ");
+    output.error(`Review attempt cleanup failed: ${detail}`);
+    logger.error("Review attempt cleanup failed", { runId, detail });
+  }
+}
 
 const reviewSessionPermissionRules = new WeakMap<Set<string>, string[]>();
 
@@ -155,6 +172,8 @@ function createReviewTools(args: {
     },
   };
   const allTools = createToolDefinitions(args.workingDir, args.model as never, args.sandboxed, {
+    runId: args.runId,
+    signal: args.signal,
     executionContext,
     sandboxCapabilities: args.config.sandboxCapabilities,
   });
@@ -692,7 +711,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           ? `Tech Lead review rate limited; retrying once in ${Math.ceil(rl.retryAfterMs / 1000)}s...`
           : "Tech Lead review stalled or returned incomplete output; retrying once...";
         output.coordinatorLog(retryMessage);
-        if (rl) await rateLimitSleep(rl.retryAfterMs);
+        if (rl) await rateLimitSleep(rl.retryAfterMs, abortSignal);
         logger.warn("Retrying standalone tech lead review", {
           attempt,
           provider: revProvider,
@@ -701,6 +720,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           stack: err instanceof Error ? err.stack : undefined,
         });
       } finally {
+        await cleanupReviewAttempt(`${reviewRunId}-standalone-${attempt}`, output);
         timedAbort.dispose();
       }
     }
@@ -1202,7 +1222,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             if (!canRetry) throw err;
             const retryReason = timedAbort.didTimeout() ? "timed out" : rl ? `rate limited (waiting ${Math.ceil((rl.retryAfterMs) / 1000)}s)` : "hit a transient provider error";
             output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
-            if (rl) await rateLimitSleep(rl.retryAfterMs);
+            if (rl) await rateLimitSleep(rl.retryAfterMs, abortSignal);
             logger.warn("Retrying tech lead review", {
               attempt,
               provider: revProvider,
@@ -1211,6 +1231,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               stack: err instanceof Error ? err.stack : undefined,
             });
           } finally {
+            await cleanupReviewAttempt(`${reviewRunId}-inline-${reviewRound}-${attempt}`, output);
             timedAbort.dispose();
           }
         }
@@ -1470,6 +1491,7 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 Working directory: ${workingDir}`;
 
           const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
+          const revisionAttemptRunId = `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`;
           try {
             if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
             const storyTools = createReviewTools({
@@ -1481,7 +1503,7 @@ Working directory: ${workingDir}`;
               workingDir,
               sandboxed: effectiveSandbox,
               signal: revisionTimedAbort.signal,
-              runId: `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`,
+              runId: revisionAttemptRunId,
               readOnlyRole: false,
               trustAll,
               sessionAllow,
@@ -1600,7 +1622,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               const waitSec = Math.ceil(revRl.retryAfterMs / 1000);
               output.log("system", `Revision rate limited — retrying in ${waitSec}s`);
               logger.info("Revision rate limit retry", { story: i + 1, waitSec });
-              await rateLimitSleep(revRl.retryAfterMs);
+              await rateLimitSleep(revRl.retryAfterMs, abortSignal);
               // Fall through to next review loop iteration which will re-attempt
             } else {
               const errMsg = err instanceof Error ? err.message : String(err);
@@ -1608,6 +1630,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
           } finally {
+            await cleanupReviewAttempt(revisionAttemptRunId, output);
             revisionTimedAbort.dispose();
           }
 

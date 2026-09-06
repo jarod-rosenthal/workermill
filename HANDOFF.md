@@ -1,11 +1,14 @@
 # WorkerMill recovery handoff
 
-Current implementation base: `5c8b6b81` on `reliability/core`. User authorized completion of remaining reliability work as far as possible. R15/R23 complete; R16a/R18a complete. Latest combined qualification at `8ab95df8`: **1,665 passed, zero failed, one existing skip; typecheck/build passed.**
+Checkpoint: 2026-09-06 21:21 UTC. Integration branch `reliability/core`; current saved HEAD `d699d474`, latest implementation `36471d14`. User authorized finishing the remaining reliability work as far as possible. R15/R23, R16a/b, R18a/b1 accepted. Latest combined qualification: **1,675 passed, zero failed, one existing skip; typecheck/build passed.** Core clean at checkpoint before this docs edit.
 
-Active batch: R16b worker `/root/r16b_governance` owns real-SDK adapter tests in `/home/user/github/workermill-r16b-cont` (branch `reliability/r16b-cont`, base `5c8b6b81`). R18b1 worker `/root/r18b1_subcalls` owns child/compaction usage-event wiring/tests in `/home/user/github/workermill-r18b1-cont` (same base). Coordinator owns core docs and a narrow cost-tracker cache arithmetic correction/tests; all write scopes are disjoint.
+Active batch (two implementation workers):
+- `/root/r16c_lifecycle`, worktree `/home/user/github/workermill-r16c-cont`, branch `reliability/r16c-cont`, base `d699d474`: test-only mounted lifecycle/resume/child coverage and copied-helper removal. Dirty candidate; root focused four files passed 32 tests, exit 0. Remaining copied useAgent helpers and precise coverage documentation being corrected before acceptance.
+- `/root/r18b2_headless`, worktree `/home/user/github/workermill-r18b2-cont`, branch `reliability/r18b2-cont`, same base: candidate `e7674a1b`, root focused four files passed 28 tests, exit 0. Correcting all-zero total fallback completeness and cumulative-session comment. Not integrated yet.
 
-R18b is split sequentially into b1 child/compaction events, b2 headless, b3 chat. R18c follows for orchestration/session-manifest wiring. Workers submit focused/typechecked candidates; coordinator full combined qualification is required before accepting/advancing. Earlier worker full tool waits stalled and were interrupted without results; do not repeat those waits silently. No live paid evaluation, publication, push, release, or worktree cleanup.
+Workers must not request escalated tool calls: these stalled in the delegated environment. Freeze/report sandbox EPERM; coordinator runs the focused command through normal escalation. Root focused commands use plain `npm test -- <files>` under Node 22.22.2. Worker candidates require coordinator review and combined full qualification before advancing. No failed integrated check is currently unresolved.
 
+Next action: review corrected candidates, integrate and qualify together, then dispatch sequential R18b3 chat accounting alongside R17 packaged CLI/CI qualification once R16c meets acceptance. R18c orchestration ledger follows chat; split its adapter and storage work before dispatch if necessary. No live paid evaluation, publication, push, release, or worktree cleanup.
 
 ## Historical audit state (before the repair below)
 

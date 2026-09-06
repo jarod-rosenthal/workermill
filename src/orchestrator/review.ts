@@ -684,6 +684,9 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timedAbort,
           "Tech Lead review",
         );
+        // Retain totals before cancellation, empty-output, or marker validation.
+        ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+        reviewUsage = settledUsage;
         await resources.settleTools();
         if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
         attemptReviewerFinalText = result.finalText;
@@ -694,9 +697,6 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         if (!candidateReviewText.trim()) {
           throw new Error("Tech Lead review produced empty output.");
         }
-        // Preserve the invocation before validating model-authored markers.
-        ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
-        reviewUsage = settledUsage;
         parseRequiredReviewOutcome(candidateReviewText);
         reviewerOutput = attemptReviewerOutput;
         reviewerFinalText = attemptReviewerFinalText;
@@ -1276,11 +1276,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timedAbort,
               "Tech Lead review",
             );
+            ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+            reviewUsage = settledUsage;
             await resources.settleTools();
             if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
-            ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
-            reviewUsage = settledUsage;
             successfulReviewAttemptId = reviewAttemptId;
             successfulReviewAttemptNumber = attempt;
             lastReviewError = undefined;

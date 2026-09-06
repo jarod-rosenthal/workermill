@@ -67,10 +67,15 @@ describe("worker execution policy runtime", () => {
     } finally { vi.mocked(runPreHooksWithBlocking).mockReturnValue({ blocked: false }); }
   });
 
-  it("records provider failure as failed even though teardown aborts the attempt", async () => {
+  it("settles failed usage without awaiting an unresolved final total", async () => {
     vi.clearAllMocks();
     createToolDefinitions.mockReturnValue({});
-    streamText.mockImplementation(() => { throw new Error("Invalid API key"); });
+    streamText.mockImplementation((options) => {
+      options.onStepFinish({ usage: { inputTokens: 4, outputTokens: 2 } });
+      return { textStream: (async function* () { throw new Error("Invalid API key"); yield "unreachable"; })(),
+        text: Promise.resolve(""), totalUsage: new Promise(() => {}) };
+    });
+    const costs = new CostTracker();
     const attempts: string[] = [];
     const controller = new AbortController();
     const result = await executeStories({
@@ -79,7 +84,7 @@ describe("worker execution policy runtime", () => {
       output, trustAll: true, sandboxed: false, userTask: "task",
       context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       sessionAllow: new Set(), workingDir: process.cwd(),
-      costTracker: new CostTracker(),
+      costTracker: costs,
       featureBranch: null, mainBranch: "main", abortSignal: controller.signal, ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
       onStoryAttempt: (event) => { attempts.push(event.status); },
@@ -87,6 +92,31 @@ describe("worker execution policy runtime", () => {
     expect(result.failedStories.has("failed")).toBe(true);
     expect(controller.signal.aborted).toBe(false);
     expect(attempts).toEqual(["started", "failed"]);
+    expect(costs.getLedgerSnapshot()).toMatchObject({ totals: { callCount: 1, partialUsageCalls: 1, inputTokens: 4, outputTokens: 2 } });
+  });
+
+  it("records provider failure as failed even though teardown aborts the attempt", async () => {
+    vi.clearAllMocks();
+    createToolDefinitions.mockReturnValue({});
+    streamText.mockImplementation(() => { throw new Error("Invalid API key"); });
+    const costs = new CostTracker();
+    const attempts: string[] = [];
+    const controller = new AbortController();
+    const result = await executeStories({
+      sorted: [{ id: "failed", title: "Failed", persona: "worker", description: "provider failure" }],
+      completedStoryIds: [], config: { providers: {}, default: "ollama" },
+      output, trustAll: true, sandboxed: false, userTask: "task",
+      context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      sessionAllow: new Set(), workingDir: process.cwd(),
+      costTracker: costs,
+      featureBranch: null, mainBranch: "main", abortSignal: controller.signal, ticketOps: null,
+      waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+      onStoryAttempt: (event) => { attempts.push(event.status); },
+    });
+    expect(result.failedStories.has("failed")).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
+    expect(attempts).toEqual(["started", "failed"]);
+    expect(costs.getLedgerSnapshot()).toMatchObject({ totals: { callCount: 1, missingUsageCalls: 1 } });
   });
 
   it("threads the run context into tools and does not complete a cancelled story", async () => {

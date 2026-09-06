@@ -266,6 +266,7 @@ describe("review runtime policy", () => {
   });
 
   it("does not retain a failed retry classification after a later malformed response", async () => {
+    const costs = new CostTracker();
     let attempt = 0;
     vi.mocked(streamText).mockImplementation((() => {
       attempt += 1;
@@ -276,11 +277,14 @@ describe("review runtime policy", () => {
     const review = await runReviewLoop({
       config: config(), output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: new CostTracker(),
+      costTracker: costs,
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
     expect(attempt).toBe(2);
+    const ledger = costs.getLedgerSnapshot();
+    expect(ledger.totals).toMatchObject({ callCount: 2, missingUsageCalls: 1, reportedUsageCalls: 1, inputTokens: 1, outputTokens: 1 });
+    expect(new Set(ledger.calls.map(call => call.callId)).size).toBe(2);
     expect(review.outcome).toMatchObject({ kind: "parse_failed", approved: false });
   });
 

@@ -221,6 +221,7 @@ vi.mock("../safety.js", async (importOriginal) => ({
 const mockTicketPostComment = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../ticket-ops.js", () => ({
+  ticketEnvironment: () => ({ GITHUB_TOKEN: "dummy", GITHUB_REPO: "fixture/repo" }),
   TicketOps: class {
     isAvailable() { return true; }
     fetchTicket() {

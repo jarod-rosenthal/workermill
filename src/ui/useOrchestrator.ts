@@ -608,6 +608,7 @@ export function useOrchestrator(
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
               // Always show user decision prompts — bypass mode only applies
               // to tool permissions, not orchestrator decisions like revisions.
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve(false);
               return new Promise((resolve) => {
                 setConfirmRequest({
                   prompt,
@@ -625,6 +626,7 @@ export function useOrchestrator(
             },
 
             askText(question: string, suggestion: string): Promise<string> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve("");
               return new Promise((resolve) => {
                 setPromptRequest({
                   question,
@@ -931,6 +933,7 @@ export function useOrchestrator(
               setStatusMessage("");
             },
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve(false);
               return new Promise((resolve) => {
                 setConfirmRequest({
                   prompt,
@@ -944,6 +947,7 @@ export function useOrchestrator(
               });
             },
             askText(question: string, suggestion: string): Promise<string> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve("");
               return new Promise((resolve) => {
                 setPromptRequest({
                   question,
@@ -1296,6 +1300,7 @@ export function useOrchestrator(
             status(msg: string): void { setStatusMessage(msg); },
             statusDone(): void { setStatusMessage(""); },
             confirm: async (prompt: string) => {
+              if (controller.signal.aborted || abortRef.current !== controller) return false;
               return new Promise<boolean>((resolve) => {
                 setConfirmRequest({
                   prompt,

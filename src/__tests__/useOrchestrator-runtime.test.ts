@@ -15,6 +15,7 @@ vi.mock("../config.js", async (original) => ({
 vi.mock("../notify.js", () => ({ notifyIfEnabled: vi.fn() }));
 
 import { useOrchestrator, type UseOrchestratorReturn } from "../ui/useOrchestrator.js";
+import type { OrchestrationOutput } from "../orchestrator/types.js";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -81,5 +82,28 @@ describe("mounted orchestration lifecycle", () => {
     app?.unmount();
     expect(signal.aborted).toBe(true);
     pending[0].resolve({ stories: [], completedStoryIds: [], featureBranch: null, userTask: "unmount" });
+  });
+
+  it("rejects late prompts and ignores a cancelled run's stale response", async () => {
+    let firstOutput: OrchestrationOutput | undefined;
+    runOrchestration.mockImplementation(async (_config, task, _trust, _sandbox, output: OrchestrationOutput) => {
+      firstOutput ??= output;
+      await output.confirm(task);
+      return { stories: [], completedStoryIds: [], featureBranch: null, userTask: task };
+    });
+    hook.start("first confirmation", true, true);
+    await vi.waitFor(() => expect(hook.confirmRequest?.prompt).toBe("first confirmation"));
+    const stale = hook.confirmRequest!;
+    hook.cancel();
+    await vi.waitFor(() => expect(hook.running).toBe(false));
+    await expect(firstOutput!.confirm("too late")).resolves.toBe(false);
+    await expect(firstOutput!.askText!("too late", "unsafe default")).resolves.toBe("");
+    hook.start("second confirmation", true, true);
+    await vi.waitFor(() => expect(hook.confirmRequest?.prompt).toBe("second confirmation"));
+    stale.resolve(true);
+    await flush();
+    expect(hook.confirmRequest?.prompt).toBe("second confirmation");
+    hook.confirmRequest!.resolve(false);
+    await vi.waitFor(() => expect(hook.running).toBe(false));
   });
 });

@@ -297,8 +297,8 @@ describe("mounted chat execution adapter", () => {
     configured.permissions = { allow: ["bash"] };
     const started = path.join(workspace, "started.txt");
     const escaped = path.join(workspace, "escaped.txt");
-    const program = `require('fs').writeFileSync(${JSON.stringify(started)}, 'ready'); setTimeout(() => require('fs').writeFileSync(${JSON.stringify(escaped)}, 'escaped'), 5000)`;
-    script(async (tools) => { await tools.bash.execute({ command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(program)}` }); });
+    const program = "require('fs').writeFileSync('started.txt', 'ready'); setTimeout(() => require('fs').writeFileSync('escaped.txt', 'escaped'), 5000)";
+    script(async (tools) => { await tools.bash.execute({ command: `node -e ${JSON.stringify(program)}` }); });
     await mount();
     agent.submit("run cancellable command");
     await vi.waitFor(() => expect(stat(started).then(() => true, () => false)).resolves.toBe(true));

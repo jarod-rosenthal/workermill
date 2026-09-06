@@ -14,7 +14,7 @@ import { createToolDefinitions } from "../engine/tools/index.js";
 
 const tempDirs: string[] = [];
 function tempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-path-policy-"));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wm-path-policy-")));
   tempDirs.push(dir);
   return dir;
 }

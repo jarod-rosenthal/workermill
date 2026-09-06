@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -72,7 +72,7 @@ describe("headless runtime governance", () => {
   let workspace: string;
 
   beforeEach(async () => {
-    workspace = await mkdtemp(path.join(os.tmpdir(), "workermill-headless-runtime-"));
+    workspace = await realpath(await mkdtemp(path.join(os.tmpdir(), "workermill-headless-runtime-")));
     mcpWrite.mockClear();
     closedMcpRuns.length = 0;
     closeMcpRun.mockReset();
@@ -160,7 +160,7 @@ describe("headless runtime governance", () => {
   });
 
   it("checkpoints authorized full-disk writes outside the workspace", async () => {
-    const outside = await mkdtemp(path.join(os.tmpdir(), "wm-headless-full-disk-"));
+    const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), "wm-headless-full-disk-")));
     const sentinel = path.join(outside, "allowed.txt");
     try {
       vi.mocked(streamText).mockImplementation(successfulStream(async (tools) => {

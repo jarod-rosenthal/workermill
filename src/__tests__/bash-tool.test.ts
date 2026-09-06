@@ -130,13 +130,13 @@ describe("bash tool scoped sandbox handling", () => {
 
   it("does not launch registered bash or verify when explicit OS isolation is unavailable", async () => {
     const workspace = temporaryDirectory();
-    const sentinel = path.join(path.dirname(workspace), `wm-os-unavailable-${Date.now()}`);
+    const sentinel = path.join(workspace, "os-unavailable-sentinel");
     vi.mocked(SandboxManager.checkDependencies).mockReturnValue({ errors: ["bubblewrap missing"], warnings: [] });
     const tools = createToolDefinitions(workspace, undefined, "os") as Record<string, { execute: (input: { command: string }) => Promise<string> }>;
 
     try {
-      await expect(tools.bash.execute({ command: `printf escaped > ${sentinel}` })).resolves.toContain("OS sandbox unavailable");
-      await expect(tools.verify.execute({ command: `printf escaped > ${sentinel}` })).resolves.toContain("OS sandbox unavailable");
+      await expect(tools.bash.execute({ command: "printf escaped > os-unavailable-sentinel" })).resolves.toContain("OS sandbox unavailable");
+      await expect(tools.verify.execute({ command: "printf escaped > os-unavailable-sentinel" })).resolves.toContain("OS sandbox unavailable");
       expect(vi.mocked(SandboxManager.wrapWithSandbox)).not.toHaveBeenCalled();
       expect(fs.existsSync(sentinel)).toBe(false);
     } finally {

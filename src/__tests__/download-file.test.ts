@@ -11,7 +11,7 @@ describe("download_file", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-download-file-"));
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wm-download-file-")));
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
   });

@@ -2,6 +2,10 @@
 
 **Current state: first-release reliability work is locally complete.** Checkpoint: 2026-09-06 22:53 UTC. Repository `/home/user/github/workermill`, branch `reliability/core`. Qualified candidate **67e19c20**: **1,614 tests passed, zero failed, one existing skip, 111 files; four installed-package/PTY tests passed; typecheck and build passed**. Exact commands, limitations and reviewed contracts: [qualification report](docs/recovery/r24-qualification.md). Final evidence-only edits follow that candidate; production code/tests are unchanged.
 
+Remote qualification update (2026-09-06 23:18 UTC): the user explicitly authorized pushing reliability/core. Candidate 7e08a94a was pushed successfully and CI was manually dispatched against that exact SHA: https://github.com/jarod-rosenthal/workermill/actions/runs/34066504739 . The four-platform/version matrix is queued. No merge or release is authorized. The earlier no-push statements below describe the prior checkpoint. Next action: inspect all four job results, correct bounded CI failures if needed, and persist final remote evidence.
+
+CI run 34066504739 failed at unit tests in all four jobs after successful install/typecheck/build; package checks did not run. Node22.22.2 Linux: 4 failed/1604 passed/7 skipped; macOS: 8 failed/1605 passed/2 skipped. Raw logs: /tmp/workermill-ci-linux.log and /tmp/workermill-ci-macos.log (portable summary here). Bounded correction: canonicalize test temp roots, use relative marker paths/PATH Node in chat cancellation, keep OS-unavailable sentinel inside workspace to reach the intended check, load Ubuntu's packaged bwrap AppArmor profile and probe actual user-namespace startup. Do not weaken production path checks or skip supported CI containment tests. Local and remote requalification pending.
+
 ## Resume here
 
 1. Read this current section, [AGENTS.md](AGENTS.md), [qualification report](docs/recovery/r24-qualification.md), and [queue](docs/reliability-queue.json). Then inspect branch/status. Historical failures below describe repaired snapshots, not current readiness.

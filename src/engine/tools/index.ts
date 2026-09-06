@@ -54,6 +54,8 @@ export interface ToolDefinitionOptions {
   scope?: PathScope;
   /** R10 plumbing only; policy wrapping remains the caller's responsibility. */
   executionContext?: ToolExecutionContext;
+  /** Receives child model usage once, for the future run ledger adapter. */
+  onSubAgentUsage?: (usage: subAgentTool.SubAgentUsage) => void | Promise<void>;
 }
 
 function rewritePatchPaths(
@@ -604,7 +606,7 @@ export function createToolDefinitions(
         args: z.string().optional().describe("Additional arguments (e.g., file paths, branch name, commit message)"),
       }),
       execute: async ({ action, args }) => {
-        const result = await gitTool.execute({ action, args, cwd: pathScope.workspace });
+        const result = await gitTool.execute({ action, args, cwd: pathScope.workspace, runId, signal, runProcess: commandRunner });
         if (result.success) {
           return result.output || "(no output)";
         }
@@ -772,7 +774,11 @@ export function createToolDefinitions(
                 .describe("Run in an isolated git worktree with full write tools. Changes stay on a separate branch. Default: false."),
             }),
             execute: async ({ prompt, maxTurns, isolated }) => {
-              const readOnlyTools = {
+              /* Legacy ad-hoc child tools retained below only temporarily while
+               * this block is replaced by the scoped registered-tool factory.
+               * It is intentionally disabled; in particular download_file was
+               * a write capability on a supposedly read-only child. */
+              const legacyReadOnlyTools = {
                 read_file: tool({
                   description: readFileTool.description,
                   inputSchema: z.object({
@@ -847,32 +853,38 @@ export function createToolDefinitions(
                     return result.success ? result.tree : `Error: ${result.error}`;
                   },
                 }),
-                download_file: tool({
-                  description: downloadFileTool.description,
-                  inputSchema: z.object({
-                    url: z.string().describe("The URL to download from"),
-                    destination: z.string().describe("Path to save the file (absolute or relative to cwd)"),
-                    overwrite: z.boolean().optional().describe("Whether to overwrite existing files (default: false)"),
-                  }),
-                  execute: async ({ url, destination, overwrite }) => {
-                    const resolvedPath = path.isAbsolute(destination)
-                      ? destination
-                      : path.resolve(workingDir, destination);
-                    const canonicalPath = resolveToolPath(resolvedPath, "read_write");
-                    return downloadFileTool.execute({ url, destination: canonicalPath, overwrite });
-                  },
-                }),
               };
 
-              // Factory that creates full tool set for an isolated worktree
-              const writeToolsFactory = (worktreePath: string) => {
-                const wtTools = createToolDefinitions(worktreePath, model, false); // not sandboxed within worktree
-                // Remove sub_agent from isolated tools (no nesting)
-                const { sub_agent: _removed, ...safeTools } = wtTools as Record<string, unknown>;
-                return safeTools;
+              void legacyReadOnlyTools;
+              const childToolNames = ["bash", "verify", "read_file", "view_image", "write_file", "edit_file", "multi_edit_file", "glob", "grep", "ls", "git", "patch", "lsp"] as const;
+              const readOnlyChildToolNames = ["read_file", "view_image", "glob", "grep", "ls", "lsp"] as const;
+              const pickChildTools = (all: Record<string, unknown>, names: readonly string[]) => Object.fromEntries(
+                names.flatMap((toolName) => all[toolName] ? [[toolName, all[toolName]]] : []),
+              ) as Record<string, subAgentTool.ChildTool>;
+              const childCapabilities: SandboxCapabilities | undefined = options.executionContext && {
+                allowedNetworkDomains: options.executionContext.allowedNetworkDomains && [...options.executionContext.allowedNetworkDomains],
+                allowLocalBinding: options.executionContext.allowLocalBinding,
+                allowDockerSocket: false,
               };
-
-              const executor = subAgentTool.createSubAgentExecutor(model!, pathScope.workspace, readOnlyTools, writeToolsFactory);
+              const childTools = (childWorkingDir: string, childScope: PathScope, childContext: ToolExecutionContext) => {
+                const childExecutionContext = {
+                  ...childContext, scope: childScope, workspace: childScope.workspace,
+                  effectiveSandbox: childContext.effectiveSandbox === "os" ? "os" as const : "path" as const,
+                };
+                const all = createToolDefinitions(childWorkingDir, undefined, childExecutionContext?.effectiveSandbox === "os" ? "os" : true, {
+                  runId, signal, scope: childScope, sandboxCapabilities: childCapabilities, executionContext: childExecutionContext,
+                }) as Record<string, unknown>;
+                return pickChildTools(all, childToolNames);
+              };
+              const readOnlyContext: ToolExecutionContext = options.executionContext
+                ? { ...options.executionContext, scope: pathScope, workspace: pathScope.workspace }
+                : { runId: runId ?? "sub-agent-read-only", workspace: pathScope.workspace, scope: pathScope, effectiveSandbox: "path", signal: signal ?? new AbortController().signal, getPermissionState: () => ({ mode: "default", trustAll: false, sessionAllow: new Set(), rules: {}, readOnlyRole: true, workspace: pathScope.workspace }) };
+              const readOnlyTools = pickChildTools(childTools(pathScope.workspace, pathScope, readOnlyContext), readOnlyChildToolNames);
+              const executor = subAgentTool.createSubAgentExecutor(model!, pathScope.workspace, readOnlyTools, {
+                executionContext: options.executionContext,
+                onUsage: options.onSubAgentUsage,
+                createTools: childTools,
+              });
               const result = await executor({ prompt, maxTurns, isolated });
               if (result.success) {
                 return `Sub-agent completed (${result.turnsUsed} turns):\n\n${result.content}`;

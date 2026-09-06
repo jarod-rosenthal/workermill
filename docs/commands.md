@@ -581,7 +581,7 @@ wm --fork                   # Fork the resumed session (use with --resume)
 wm --plan                   # Start in plan mode (read-only tools)
 wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
-wm --trust                  # Skip all tool permission prompts
+wm --trust                  # Approve ordinary tools; deny/ask and safety rules still apply
 wm --auto-revise            # Auto-revise after a failed review without prompting
 wm --strict                 # Strict mode — zero gate failures, require review approval, block scope drift
 wm --full-disk              # Allow tools to access files outside working directory

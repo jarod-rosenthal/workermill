@@ -136,10 +136,10 @@ Four modes, cycled with `Shift+Tab`:
 
 | Mode | Behavior |
 |------|----------|
-| `default` | Prompt before every tool use |
-| `acceptEdits` | Auto-approve file edits, prompt for dangerous commands |
-| `plan` | Read-only — write tools removed from the schema entirely |
-| `bypassPermissions` | No prompts |
+| `default` | Read-only tools are allowed; other tools normally prompt |
+| `acceptEdits` | Approve ordinary file edits; shell commands still normally prompt |
+| `plan` | Deny mutation even if a write tool is exposed or explicitly allowed |
+| `bypassPermissions` | Approve ordinary calls; explicit deny/ask rules and safety checks still apply |
 
 On top of modes, **rule-based permissions** accept pattern matching:
 
@@ -148,6 +148,8 @@ On top of modes, **rule-based permissions** accept pattern matching:
 - `read_file(.ssh/*)` — deny reads from ssh directory
 
 Rule matching evaluates deny → ask → allow. An ask rule takes precedence over an allow rule.
+
+In chat, “don't ask again” for a shell command saves a command-family rule, not permission for every shell command. Verification and background commands retain their own command-family scope. These narrow rules remain active for the session if settings cannot be saved. Trust is session-only and cannot override an explicit deny. Concurrent permission requests are shown one at a time; cancellation dismisses the active request and invalidates its response.
 
 ### Adding a tool execution entry point
 
@@ -171,8 +173,8 @@ Before any compaction, the CLI scans message history for `::learning::` and `::r
 
 ## Safety
 
-- **Dangerous command detection** — blocks destructive patterns (`rm -rf /`, `git push --force`, etc.) unless in `bypassPermissions`
-- **Dangerous file detection** — blocks writes to `.env`, `.ssh/`, `.git/config`, lock files, etc.
+- **Dangerous command detection** — shared policy requires confirmation for destructive patterns even in trust mode; headless execution returns `permission_required`
+- **Sensitive file detection** — shared policy asks before sensitive writes, including `.env`, `.ssh/`, and Git configuration; explicit deny rules still win
 - **Rate limit handling** — detects HTTP 429 from any provider, extracts `retry-after`, retries up to 3 times with a visible countdown
 - **Tool call loop detection** — aborts the model early if it repeats the same tool call 4+ times in a 6-call window
 

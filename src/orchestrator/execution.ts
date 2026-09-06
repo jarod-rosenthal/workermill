@@ -2,7 +2,6 @@ import { streamText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
 import { checkpoint } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { estimateContextTokens } from "../compaction.js";
@@ -20,11 +19,12 @@ import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
 import { durablePermissionRules } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
-import { isGitRepo, commitStoryChanges } from "../git-ops.js";
+import { isGitRepo } from "../git-ops.js";
 import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
 import { randomUUID } from "node:crypto";
 import { createAttemptResources, ResourceCleanupError } from "../engine/run-resources.js";
+import { runScopedProcess } from "../engine/scoped-process.js";
 import * as lspTool from "../engine/tools/lsp.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
 
@@ -47,6 +47,7 @@ import {
   emitReasoningDelta,
 } from "./utils.js";
 import { isExcludedTestPath, deriveAutoRequiredTests } from "./planning.js";
+import { prepareCandidate } from "./candidate.js";
 
 // Re-export toPosixPath and uniqueStrings from planning for internal use
 import { toPosixPath, uniqueStrings } from "./planning.js";
@@ -842,35 +843,10 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     let contextOverflowSlackTokens = 0;
     const retryErrorSignatureCounts = new Map<string, number>();
 
-    // Snapshot workspace before story execution — restore on retry so each
-    // attempt starts clean instead of inheriting half-broken state.
-    let preStoryHash = "";
-    let preStoryUntrackedFiles: string[] = [];
-    try {
-      preStoryHash = execSync("git rev-parse HEAD 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-      preStoryUntrackedFiles = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
-    } catch { /* not a git repo or no commits yet */ }
-
     for (let revision = 0; revision <= 2; revision++) {
-
-    // On retry, restore workspace to pre-story state
-    if (revision > 0 && preStoryHash) {
-      try {
-        // Restore tracked files to pre-story state
-        execSync(`git checkout ${preStoryHash} -- . 2>/dev/null`, { cwd: workingDir, stdio: "pipe" });
-        // Remove files created by the failed attempt (not in pre-story untracked set)
-        const currentUntracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
-        const preSet = new Set(preStoryUntrackedFiles);
-        for (const file of currentUntracked) {
-          if (!preSet.has(file)) {
-            try { fs.unlinkSync(path.join(workingDir, file)); } catch { /* best effort */ }
-          }
-        }
-        logger.info("Workspace restored before retry", { story: story.id, revision, restoredTo: preStoryHash.slice(0, 8) });
-      } catch (restoreErr) {
-        logger.warn("Workspace restore failed — retrying on dirty state", { error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) });
-      }
-    }
+    // Retrying intentionally retains partial and pre-existing work. A HEAD
+    // snapshot cannot distinguish user edits from an attempt, and restoring
+    // it could delete nested Git metadata or unrelated untracked files.
 
     // Reset loop detection for each revision attempt
     recentToolSignatures = [];
@@ -1331,9 +1307,22 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         let hasDiskChanges = false;
         if (canCheckGitChanges) {
           try {
-            const diffOut = execSync("git diff HEAD --name-only", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-            const untrackedOut = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-            hasDiskChanges = diffOut.length > 0 || untrackedOut.length > 0;
+            const runGitProbe = (command: string) => runScopedProcess({
+              runId: attemptRunId, command, cwd: scope.workspace, signal: combinedSignal,
+              timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+            }, {
+              sandbox: sandboxed,
+              scope,
+              capabilities: config.sandboxCapabilities,
+            });
+            const [diff, untracked] = await Promise.all([
+              runGitProbe("git -c core.fsmonitor=false diff HEAD --name-only --no-ext-diff --no-textconv"),
+              runGitProbe("git -c core.fsmonitor=false ls-files --others --exclude-standard"),
+            ]);
+            if (diff.reason === "exited" && diff.exitCode === 0 && !diff.outputTruncated
+              && untracked.reason === "exited" && untracked.exitCode === 0 && !untracked.outputTruncated) {
+              hasDiskChanges = diff.stdout.trim().length > 0 || untracked.stdout.trim().length > 0;
+            }
           } catch { /* best effort */ }
         }
 
@@ -1376,6 +1365,26 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
         return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
+      }
+
+      // Commit through the selected scoped boundary before claiming story
+      // progress. Candidate preparation is source-changing evidence and a
+      // failure must remain retryable rather than publishing fake progress.
+      if (featureBranch) {
+        if (diagnosticErrors > 0) {
+          output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — candidate preparation blocked`);
+          failedStories.add(story.id);
+          break;
+        }
+        const prepared = await prepareCandidate({
+          config, workingDir, featureBranch, runId: attemptRunId,
+          signal: combinedSignal, sandboxed,
+        });
+        if (!prepared.prepared) {
+          output.error(`Story ${i + 1} candidate preparation failed: ${prepared.reason ?? "unknown error"}`);
+          failedStories.add(story.id);
+          break;
+        }
       }
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
@@ -1432,15 +1441,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // Persist progress so /retry works across terminal restarts
       if (featureBranch) {
         saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
-      }
-
-      // Commit story changes — creates a checkpoint on the feature branch
-      // Gate: don't commit if LSP found errors (diagnosticErrors === -1 means no LSP, allow commit)
-      if (featureBranch && diagnosticErrors <= 0) {
-        const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
-        if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
-      } else if (diagnosticErrors > 0) {
-        output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — commit skipped, will be caught in review`);
       }
 
       const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;
@@ -1564,9 +1564,24 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     // Auto-cleanup: stop any Docker Compose services started during this story
     for (const composeDir of startedDockerCompose) {
       try {
-        execSync("docker compose down --timeout 5 2>/dev/null", { cwd: composeDir, timeout: 15_000 });
-        output.log("system", "Auto-cleanup: stopped Docker services");
-        logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+        if (abortSignal?.aborted) break;
+        const composeScope = createPathScope(composeDir, config.sandboxCapabilities?.extraPathGrants);
+        const cleanup = await runScopedProcess({
+          runId: `${params.runId ?? "story"}-compose-cleanup-${randomUUID()}`,
+          command: "docker compose down --timeout 5", cwd: composeScope.workspace,
+          signal: abortSignal ?? new AbortController().signal,
+          timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 500,
+        }, {
+          sandbox: sandboxed,
+          scope: composeScope,
+          capabilities: config.sandboxCapabilities,
+        });
+        if (cleanup.reason === "exited" && cleanup.exitCode === 0 && !cleanup.outputTruncated) {
+          output.log("system", "Auto-cleanup: stopped Docker services");
+          logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+        } else {
+          output.error(`Docker cleanup did not complete (${cleanup.reason}).`);
+        }
       } catch { /* non-fatal */ }
     }
   }

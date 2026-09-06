@@ -45,7 +45,7 @@ export interface Session {
   totalCostUsd?: number;            // Sum of all cost entries
   costByModel?: SessionCostModel[]; // Per-model breakdown
   costByRole?: SessionCostByRole;   // Worker / planner / reviewer split
-  /** Per-call observations for the most recently completed headless run. */
+  /** Per-call observations accumulated across completed headless runs. */
   usageLedger?: LedgerSnapshot;
 }
 

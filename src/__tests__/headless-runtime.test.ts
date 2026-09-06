@@ -287,6 +287,7 @@ describe("headless runtime governance", () => {
     expect(result.usageLedger).toMatchObject({
       totals: { callCount: 1, inputTokens: 11, outputTokens: 4, partialUsageCalls: 1 },
     });
+    expect(result.usageLedger?.calls[0]).toMatchObject({ usageComplete: false });
     expect(result.usageComplete).toBe(false);
   });
 

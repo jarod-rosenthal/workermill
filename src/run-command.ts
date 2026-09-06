@@ -310,10 +310,15 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     text = await stream.text;
     const totalUsage = usageFromSdk(await stream.totalUsage);
     if (totalUsage) {
-      hasFinalUsage = totalUsage.inputTokens !== undefined && totalUsage.outputTokens !== undefined;
       // Failed transports sometimes expose an all-zero placeholder total after
       // reporting useful completed-step usage. Keep that observed subtotal.
-      if (usage === undefined || totalUsage.inputTokens !== 0 || totalUsage.outputTokens !== 0 || totalUsage.cacheCreationTokens !== undefined || totalUsage.cacheReadTokens !== undefined) usage = totalUsage;
+      const retainsStepSubtotal = usage !== undefined
+        && totalUsage.inputTokens === 0
+        && totalUsage.outputTokens === 0
+        && totalUsage.cacheCreationTokens === undefined
+        && totalUsage.cacheReadTokens === undefined;
+      hasFinalUsage = !retainsStepSubtotal && totalUsage.inputTokens !== undefined && totalUsage.outputTokens !== undefined;
+      if (!retainsStepSubtotal) usage = totalUsage;
     }
     if (terminalToolError) throw terminalToolError;
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");

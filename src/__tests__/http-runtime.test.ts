@@ -7,6 +7,7 @@ import { boundedFetch } from "../engine/http-request.js";
 import { execute as download, MAX_DOWNLOAD_BYTES } from "../engine/tools/download-file.js";
 import { execute as fetchTool } from "../engine/tools/fetch.js";
 import { TicketOps } from "../ticket-ops.js";
+import { resolveUrlReferences } from "../image-support.js";
 
 describe("owned HTTP lifetimes", () => {
   let server: Server;
@@ -83,6 +84,20 @@ describe("owned HTTP lifetimes", () => {
     await ready;
     controller.abort(new Error("cancelled"));
     expect(await result).toMatchObject({ success: false, error: expect.stringContaining("cancelled") });
+  });
+
+  it("cancels started URL expansion without fetching subsequent references", async () => {
+    const requests: string[] = [];
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    handler = (request, response) => { requests.push(request.url!); response.write("partial"); started(); };
+    const controller = new AbortController();
+    const result = resolveUrlReferences(`@${base}/first @${base}/second`, controller.signal);
+    const rejected = expect(result).rejects.toThrow("cancelled");
+    await ready;
+    controller.abort(new Error("cancelled"));
+    await rejected;
+    expect(requests).toEqual(["/first"]);
   });
 
   it("preserves the old destination and removes its temp file after a started download is cancelled", async () => {

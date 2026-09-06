@@ -247,6 +247,7 @@ export function resolveFolderReferences(input: string, workingDir: string): stri
  * Fetches URL content (10s timeout, max 10KB) and inlines it.
  */
 export async function resolveUrlReferences(input: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const urlPattern = /@(https?:\/\/[^\s]+)/g;
   const matches = [...input.matchAll(urlPattern)];
 
@@ -258,11 +259,14 @@ export async function resolveUrlReferences(input: string, signal?: AbortSignal):
     try {
       // Fetch is cancellable, unlike the old synchronous curl call. Limit the
       // embedded prompt content even when a server omits Content-Length.
-      const response = await fetch(url, { signal });
+      const { boundedFetch } = await import("./engine/http-request.js");
+      const response = await boundedFetch(url, {}, { signal, timeoutMs: 10_000, maxResponseBytes: 1024 * 1024 });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const content = (await response.text()).slice(0, 10_240).trim();
+      signal?.throwIfAborted();
       result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${content}\n\`\`\`\n`);
     } catch (err) {
+      signal?.throwIfAborted();
       logger.debug("Failed to fetch URL reference", { url, error: err instanceof Error ? err.message : String(err) });
       result = result.replace(match[0], `(failed to fetch: ${url})`);
     }

@@ -377,7 +377,7 @@ describe("resolveFolderReferences", () => {
 describe("resolveUrlReferences", () => {
   const mockedFetch = vi.fn();
 
-  const response = (body: string, status = 200) => ({ ok: status >= 200 && status < 300, status, text: vi.fn(async () => body) });
+  const response = (body: string, status = 200) => new Response(body, { status });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -407,7 +407,7 @@ describe("resolveUrlReferences", () => {
   it("passes the URL to cancellable fetch", async () => {
     mockedFetch.mockResolvedValueOnce(response("response body"));
     await resolveUrlReferences("@https://api.example.com/data");
-    expect(mockedFetch).toHaveBeenCalledWith("https://api.example.com/data", { signal: undefined });
+    expect(mockedFetch).toHaveBeenCalledWith("https://api.example.com/data", { signal: expect.any(AbortSignal) });
   });
 
   it("replaces URL with (failed to fetch: ...) when fetch throws", async () => {
@@ -447,6 +447,6 @@ describe("resolveUrlReferences", () => {
     }));
     const pending = resolveUrlReferences("@https://example.com/slow", controller.signal);
     controller.abort();
-    await expect(pending).resolves.toContain("failed to fetch");
+    await expect(pending).rejects.toThrow();
   });
 });

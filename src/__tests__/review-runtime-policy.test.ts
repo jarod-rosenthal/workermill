@@ -42,6 +42,7 @@ import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
 import { checkpoint } from "../checkpoints.js";
 import { resolveSandboxMode } from "../sandbox-mode.js";
 import { runReviewLoop, runStandaloneReview } from "../orchestrator/review.js";
+import { CostTracker } from "../cost-tracker.js";
 import type { CliConfig } from "../config.js";
 import type { OrchestrationOutput, SharedContext } from "../orchestrator/types.js";
 
@@ -142,7 +143,7 @@ describe("review runtime policy", () => {
       config: { ...config(), review: { enabled: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 9 } },
       output: output(calls), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
       onReviewRound: (event) => { events.push(event); },
@@ -181,7 +182,7 @@ describe("review runtime policy", () => {
       sorted: [{ id: "revision", title: "Revision", persona: "worker", description: "Fix it" }],
       context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] } as SharedContext,
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
       onRevisionAttempt: (event) => { revisionEvents.push(event.status); },
@@ -228,7 +229,7 @@ describe("review runtime policy", () => {
     const base = {
       output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     };
@@ -247,7 +248,7 @@ describe("review runtime policy", () => {
     const rejected = await runReviewLoop({
       config: { ...config(), review: { ...config().review!, maxRevisions: 1 } }, output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
@@ -257,7 +258,7 @@ describe("review runtime policy", () => {
     const malformed = await runReviewLoop({
       config: config(), output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
@@ -275,7 +276,7 @@ describe("review runtime policy", () => {
     const review = await runReviewLoop({
       config: config(), output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
@@ -290,7 +291,7 @@ describe("review runtime policy", () => {
     const base = {
       output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     };
@@ -335,7 +336,7 @@ describe("review runtime policy", () => {
       output: output([]), sorted: [{ id: "revision", title: "Revision", persona: "worker", description: "Fix it" }],
       context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });

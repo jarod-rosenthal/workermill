@@ -14,6 +14,7 @@ vi.mock("../hooks.js", () => ({ runHooks: vi.fn(), runPreHooksWithBlocking: vi.f
 vi.mock("../logger.js", () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 
 import { executeStories } from "../orchestrator/execution.js";
+import { CostTracker } from "../cost-tracker.js";
 import type { OrchestrationOutput } from "../orchestrator/types.js";
 
 const dirs: string[] = [];
@@ -56,7 +57,7 @@ describe("worker Git lifecycle", () => {
       sorted: [{ id: "git", title: "git", persona: "worker", description: "write" }], completedStoryIds: [],
       config: { providers: { test: { model: "test" } }, default: "test", permissions: { allow: ["write_file(*)"] } } as never,
       output, trustAll: true, sandboxed: true, userTask: "task", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
-      sessionAllow: new Set(), workingDir: workspace, costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      sessionAllow: new Set(), workingDir: workspace, costTracker: new CostTracker(),
       featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });

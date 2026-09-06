@@ -20,6 +20,7 @@ import type { CliConfig } from "../config.js";
 import { durablePermissionRules } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { CostTracker } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 import { saveShipRun } from "../ship-state.js";
 import { randomUUID } from "node:crypto";
 import { createAttemptResources, ResourceCleanupError } from "../engine/run-resources.js";
@@ -877,6 +878,11 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     const attemptStartedAt = new Date().toISOString();
     let attemptSucceeded = false;
     let blockedToolCode: string | undefined;
+    let workerStepUsage: ReturnType<typeof usageFromSdk>;
+    let workerUsage: ReturnType<typeof usageFromSdk>;
+    let workerUsageComplete = false;
+    let workerStream: ReturnType<typeof streamText> | undefined;
+    let modelStarted = false;
     try {
     await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: "started", at: attemptStartedAt });
     const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
@@ -982,6 +988,16 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       signal: combinedSignal,
       executionContext,
       sandboxCapabilities: config.sandboxCapabilities,
+      onSubAgentUsage: (childUsage) => {
+        costTracker.recordCall({
+          callId: childUsage.callId,
+          persona: "child",
+          provider,
+          model: modelName,
+          usage: childUsage.usage,
+          usageComplete: childUsage.usageComplete,
+        });
+      },
     });
     const personaTools: Record<string, AnyToolDef> = {};
     for (const toolName of persona.tools) {
@@ -1113,7 +1129,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       const storyActions: Array<{ tool: string; detail: string }> = [];
 
       const storyStartMs = Date.now();
-      const stream = streamText({
+      modelStarted = true;
+      const stream = workerStream = streamText({
         model,
         abortSignal: combinedSignal,
         system: systemPrompt,
@@ -1123,7 +1140,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         timeout: { chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
-        onStepFinish({ text, toolCalls, reasoningText }) {
+        onStepFinish({ text, toolCalls, reasoningText, usage }) {
+          workerStepUsage = addUsage(workerStepUsage, usageFromSdk(usage));
           emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, reasoningLength);
           if (toolCalls && toolCalls.length > 0) {
             // Track actions for ticket update
@@ -1221,6 +1239,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       const text = await stream.text;
       const usage = await stream.totalUsage;
+      ({ usage: workerUsage, usageComplete: workerUsageComplete } = settleUsage(workerStepUsage, usageFromSdk(usage)));
       combinedSignal.throwIfAborted();
 
       output.statusDone();
@@ -1254,12 +1273,9 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
       context.filesModified.push(...extractDeclaredFileMarkers(text, "file_modified"));
 
-      // Track cost
+      // Track performance; the per-call ledger is finalized after resource drain.
       const inTokens = usage?.inputTokens || 0;
       const outTokens = usage?.outputTokens || 0;
-      costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
-      output.updateCost?.(costTracker.getTotalCost());
-      output.updateUsageSummary?.(costTracker.getUsageSummary());
 
       // Track tok/s for worker model
       const storyElapsed = (Date.now() - storyStartMs) / 1000;
@@ -1587,6 +1603,18 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         if (index >= 0) completedStoryIds.splice(index, 1);
         failedStories.add(story.id);
         output.error(error instanceof Error ? error.message : String(error));
+      }
+      if (modelStarted) {
+        costTracker.recordCall({
+          callId: attemptRunId,
+          persona: persona.name,
+          provider,
+          model: modelName,
+          usage: workerUsage ?? workerStepUsage,
+          usageComplete: workerUsage === undefined ? false : workerUsageComplete,
+        });
+        output.updateCost?.(costTracker.getTotalCost());
+        output.updateUsageSummary?.(costTracker.getUsageSummary());
       }
       // Resource teardown aborts the attempt's local signal even on failure.
       // Only cancellation of the owning run means the user cancelled it.

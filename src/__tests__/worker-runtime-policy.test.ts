@@ -29,6 +29,7 @@ vi.mock("../hooks.js", () => ({ runHooks: vi.fn(), runPreHooksWithBlocking: vi.f
 vi.mock("../logger.js", () => ({ info: vi.fn(), debug: vi.fn(), error: vi.fn(), warn: vi.fn() }));
 
 import { executeStories } from "../orchestrator/execution.js";
+import { CostTracker } from "../cost-tracker.js";
 import type { OrchestrationOutput, SharedContext } from "../orchestrator/types.js";
 import { runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
 
@@ -57,7 +58,7 @@ describe("worker execution policy runtime", () => {
         sorted: [{ id: "blocked", title: "Blocked", persona: "worker", description: "fixture" }], completedStoryIds: [],
         config: { providers: {}, default: "ollama", permissions: code === "denied" ? { deny: ["bash"] } : undefined },
         output, trustAll: true, sandboxed: false, userTask: "task", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
-        sessionAllow: new Set(), workingDir: process.cwd(), costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+        sessionAllow: new Set(), workingDir: process.cwd(), costTracker: new CostTracker(),
         featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, ticketOps: null,
         waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(), onStoryAttempt: (event) => { events.push(event); },
       });
@@ -78,7 +79,7 @@ describe("worker execution policy runtime", () => {
       output, trustAll: true, sandboxed: false, userTask: "task",
       context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       sessionAllow: new Set(), workingDir: process.cwd(),
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       featureBranch: null, mainBranch: "main", abortSignal: controller.signal, ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
       onStoryAttempt: (event) => { attempts.push(event.status); },
@@ -128,7 +129,7 @@ describe("worker execution policy runtime", () => {
       context,
       sessionAllow: new Set(),
       workingDir: process.cwd(),
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       featureBranch: null,
       mainBranch: "main",
       abortSignal: abortController.signal,
@@ -169,7 +170,7 @@ describe("worker execution policy runtime", () => {
       output, trustAll: true, sandboxed: true, userTask: "task",
       context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
       sessionAllow: new Set(), workingDir: process.cwd(),
-      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      costTracker: new CostTracker(),
       featureBranch: null, mainBranch: "main", abortSignal: controller.signal, ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });

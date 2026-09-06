@@ -19,6 +19,7 @@ import { formatProjectInstructions } from "../instructions.js";
 import { formatPromptProjectContext } from "../project-context.js";
 import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 import type { CliConfig } from "../config.js";
 import { getProviderForPersona, loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
@@ -104,6 +105,9 @@ function createReviewTools(args: {
   trustAll?: boolean | (() => boolean);
   sessionAllow?: Set<string>;
   onToolStatus?: (status: string) => void;
+  costTracker?: CostTracker;
+  provider?: string;
+  modelName?: string;
 }): Record<string, AnyToolDef> {
   const sessionAllow = args.sessionAllow ?? new Set<string>();
   const scope = createPathScope(args.workingDir, args.config.sandboxCapabilities?.extraPathGrants);
@@ -160,6 +164,16 @@ function createReviewTools(args: {
     signal: args.signal,
     executionContext,
     sandboxCapabilities: args.config.sandboxCapabilities,
+    onSubAgentUsage: args.costTracker && args.provider && args.modelName ? (childUsage) => {
+      args.costTracker!.recordCall({
+        callId: childUsage.callId,
+        persona: "child",
+        provider: args.provider!,
+        model: args.modelName!,
+        usage: childUsage.usage,
+        usageComplete: childUsage.usageComplete,
+      });
+    } : undefined,
   });
   const selected: Record<string, AnyToolDef> = {};
   for (const toolName of args.persona.tools) {
@@ -471,6 +485,9 @@ export async function runStandaloneReview(
   let standaloneDiffFile: string | undefined;
   try {
   const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
+  // Keep failed and malformed attempts: this tracker is the standalone run's
+  // complete per-call ledger, rather than a success-only display aggregate.
+  const costTracker = new CostTracker();
 
   // Set API key
   if (revApiKey) {
@@ -614,6 +631,11 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
       let attemptReviewerOutput = "";
       let attemptReviewerFinalText = "";
       let attemptReviewerVisibleText = "";
+      let stepUsage: ReturnType<typeof usageFromSdk>;
+      let settledUsage: ReturnType<typeof usageFromSdk>;
+      let usageComplete = false;
+      let reviewStream: ReturnType<typeof streamText> | undefined;
+      let modelStarted = false;
       try {
         const reviewerTools = createReviewTools({
           persona: reviewer,
@@ -627,8 +649,12 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           runId: `${reviewRunId}-standalone-${attempt}`,
           resources,
           readOnlyRole: true,
+          costTracker,
+          provider: revProvider,
+          modelName: revModel,
         });
-        const reviewStream = streamText({
+        modelStarted = true;
+        reviewStream = streamText({
           model: reviewModel,
           abortSignal: timedAbort.signal,
           system: reviewer.systemPrompt,
@@ -638,7 +664,8 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timeout: { chunkMs: 120_000 },
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           ...buildReasoningOptions(revProvider, revModel),
-          onStepFinish({ text }) {
+          onStepFinish({ text, usage }) {
+            stepUsage = addUsage(stepUsage, usageFromSdk(usage));
             if (text) {
               attemptReviewerOutput += text + "\n";
               const lines = text.split("\n").filter((l: string) => l.trim());
@@ -667,12 +694,14 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         if (!candidateReviewText.trim()) {
           throw new Error("Tech Lead review produced empty output.");
         }
+        // Preserve the invocation before validating model-authored markers.
+        ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+        reviewUsage = settledUsage;
         parseRequiredReviewOutcome(candidateReviewText);
         reviewerOutput = attemptReviewerOutput;
         reviewerFinalText = attemptReviewerFinalText;
         reviewerVisibleText = attemptReviewerVisibleText;
         reviewText = candidateReviewText;
-        reviewUsage = result.usage;
         lastReviewError = undefined;
         break;
       } catch (err) {
@@ -701,15 +730,27 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           stack: err instanceof Error ? err.stack : undefined,
         });
       } finally {
-        try { await resources.close(); } finally { timedAbort.dispose(); }
+        let cleanupError: unknown;
+        try { await resources.close(); } catch (error) { cleanupError = error; }
+        try {
+          if (modelStarted) costTracker.recordCall({
+            callId: `${reviewRunId}-standalone-${attempt}`,
+            persona: "Tech Lead Review",
+            provider: revProvider,
+            model: revModel,
+            usage: settledUsage ?? stepUsage,
+            usageComplete: settledUsage === undefined ? false : usageComplete,
+          });
+          output.updateCost?.(costTracker.getTotalCost());
+          output.updateUsageSummary?.(costTracker.getUsageSummary());
+        } finally { timedAbort.dispose(); }
+        if (cleanupError) throw cleanupError;
       }
     }
     if (lastReviewError) throw lastReviewError;
     // Track cost
     const revInputTokens = reviewUsage?.inputTokens || 0;
     const revOutputTokens = reviewUsage?.outputTokens || 0;
-    const costTracker = new CostTracker();
-    costTracker.addUsage("Tech Lead Review", revProvider, revModel, revInputTokens, revOutputTokens);
     output.updateCost?.(costTracker.getTotalCost());
     output.updateUsageSummary?.(costTracker.getUsageSummary());
     // Track tok/s for reviewer model
@@ -1182,6 +1223,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
           const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
           const reviewAttemptId = `${reviewRunId}-inline-${reviewRound}-${attempt}`;
           const resources = createAttemptResources(reviewAttemptId, () => timedAbort.abort());
+          let stepUsage: ReturnType<typeof usageFromSdk>;
+          let settledUsage: ReturnType<typeof usageFromSdk>;
+          let usageComplete = false;
+          let reviewStream: ReturnType<typeof streamText> | undefined;
+          let modelStarted = false;
           try {
             await onReviewRound?.({ attemptId: reviewAttemptId, round: reviewRound, attempt, role: "tech_lead", provider: revProvider, model: revModel, status: "started", at: new Date().toISOString() });
             const reviewerTools = createReviewTools({
@@ -1196,8 +1242,12 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               runId: reviewAttemptId,
               resources,
               readOnlyRole: true,
+              costTracker,
+              provider: revProvider,
+              modelName: revModel,
             });
-            const reviewStream = streamText({
+            modelStarted = true;
+            reviewStream = streamText({
               model: reviewModel,
               abortSignal: timedAbort.signal,
               system: reviewer.systemPrompt,
@@ -1207,7 +1257,8 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timeout: { chunkMs: 120_000 },
               ...buildOllamaOptions(revProvider as AIProvider, revCtx),
               ...buildReasoningOptions(revProvider, revModel),
-              onStepFinish({ text }) {
+              onStepFinish({ text, usage }) {
+                stepUsage = addUsage(stepUsage, usageFromSdk(usage));
                 if (text) {
                   reviewerOutput += text + "\n";
                   const lines = text.split("\n").filter(l => l.trim());
@@ -1228,7 +1279,8 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             await resources.settleTools();
             if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
-            reviewUsage = result.usage;
+            ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+            reviewUsage = settledUsage;
             successfulReviewAttemptId = reviewAttemptId;
             successfulReviewAttemptNumber = attempt;
             lastReviewError = undefined;
@@ -1254,7 +1306,21 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               stack: err instanceof Error ? err.stack : undefined,
             });
           } finally {
-            try { await resources.close(); } finally { timedAbort.dispose(); }
+            let cleanupError: unknown;
+            try { await resources.close(); } catch (error) { cleanupError = error; }
+            try {
+              if (modelStarted) costTracker.recordCall({
+                callId: reviewAttemptId,
+                persona: `Reviewer (round ${reviewRound})`,
+                provider: revProvider,
+                model: revModel,
+                usage: settledUsage ?? stepUsage,
+                usageComplete: settledUsage === undefined ? false : usageComplete,
+              });
+              output.updateCost?.(costTracker.getTotalCost());
+              output.updateUsageSummary?.(costTracker.getUsageSummary());
+            } finally { timedAbort.dispose(); }
+            if (cleanupError) throw cleanupError;
           }
         }
         if (lastReviewError) throw lastReviewError;
@@ -1351,9 +1417,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
 
-        // Track reviewer cost
-        costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
-          revInputTokens, revOutputTokens);
+        // The per-call ledger is finalized after each attempt's resources drain.
         output.updateCost?.(costTracker.getTotalCost());
         output.updateUsageSummary?.(costTracker.getUsageSummary());
 
@@ -1520,6 +1584,11 @@ Working directory: ${workingDir}`;
           const resources = createAttemptResources(revisionAttemptRunId, () => revisionTimedAbort.abort());
           let revisionSucceeded = false;
           let revisionUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+          let revisionStepUsage: ReturnType<typeof usageFromSdk>;
+          let revisionSettledUsage: ReturnType<typeof usageFromSdk>;
+          let revisionUsageComplete = false;
+          let revisionStream: ReturnType<typeof streamText> | undefined;
+          let modelStarted = false;
           try {
             await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status: "started", at: new Date().toISOString() });
             if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
@@ -1538,10 +1607,14 @@ Working directory: ${workingDir}`;
               trustAll,
               sessionAllow,
               onToolStatus: (status) => output.status(status),
+              costTracker,
+              provider: sProvider,
+              modelName: sModel,
             });
             const revisionStartMs = Date.now();
             const revisionReasoningLength = { value: 0 };
-            const revStream = streamText({
+            modelStarted = true;
+            const revStream = revisionStream = streamText({
               model: storyModel,
               abortSignal: revisionTimedAbort.signal,
               system: revisionSystemPrompt,
@@ -1577,7 +1650,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               timeout: { chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
-              onStepFinish({ text, toolCalls, reasoningText }) {
+              onStepFinish({ text, toolCalls, reasoningText, usage }) {
+                revisionStepUsage = addUsage(revisionStepUsage, usageFromSdk(usage));
                 emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, revisionReasoningLength);
                 if (toolCalls && toolCalls.length > 0) {
                   for (const tc of toolCalls) {
@@ -1609,7 +1683,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             for await (const _chunk of revStream.textStream) { /* drive */ }
             await resources.settleTools();
             const revUsage = await revStream.totalUsage;
-            revisionUsage = revUsage;
+            ({ usage: revisionSettledUsage, usageComplete: revisionUsageComplete } = settleUsage(revisionStepUsage, usageFromSdk(revUsage)));
+            revisionUsage = revisionSettledUsage;
             if (revisionTimedAbort.signal.aborted) {
               return {
                 finalReviewText: "",
@@ -1617,11 +1692,6 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
                 outcome: { kind: revisionTimedAbort.didTimeout() ? "timed_out" : "cancelled", approved: false },
               };
             }
-
-            costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
-              revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
-            output.updateCost?.(costTracker.getTotalCost());
-            output.updateUsageSummary?.(costTracker.getUsageSummary());
 
             // Track tok/s for revision worker model
             const revisionElapsed = (Date.now() - revisionStartMs) / 1000;
@@ -1667,10 +1737,20 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
           } finally {
             let cleanupError: unknown;
             try { await resources.close(); } catch (error) { cleanupError = error; }
-            const status = cleanupError ? "failed" : revisionSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
             try {
-              await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status, at: new Date().toISOString(), inputTokens: revisionUsage?.inputTokens, outputTokens: revisionUsage?.outputTokens });
+              if (modelStarted) costTracker.recordCall({
+                callId: revisionAttemptRunId,
+                persona: `${storyPersona.name} (revision)`,
+                provider: sProvider,
+                model: sModel,
+                usage: revisionSettledUsage ?? revisionStepUsage,
+                usageComplete: revisionSettledUsage === undefined ? false : revisionUsageComplete,
+              });
+              output.updateCost?.(costTracker.getTotalCost());
+              output.updateUsageSummary?.(costTracker.getUsageSummary());
             } finally { revisionTimedAbort.dispose(); }
+            const status = cleanupError ? "failed" : revisionSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
+            await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status, at: new Date().toISOString(), inputTokens: revisionUsage?.inputTokens, outputTokens: revisionUsage?.outputTokens });
             if (cleanupError) throw cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
           }
 

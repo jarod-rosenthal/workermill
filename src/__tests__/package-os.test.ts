@@ -44,6 +44,24 @@ function start(args: string[], cwd: string, env: NodeJS.ProcessEnv): ChildProces
   return spawn(path.join(installRoot, "node_modules", ".bin", "wm"), args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function waitUntil(predicate: () => boolean, message: string, timeoutMs = 5_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error); else resolve();
+    };
+    const deadline = setTimeout(() => finish(new Error(message)), timeoutMs);
+    const check = () => {
+      if (settled) return;
+      if (predicate()) { clearTimeout(deadline); finish(); return; }
+      setTimeout(check, 25);
+    };
+    check();
+  });
+}
+
 async function writeConfig(root: string): Promise<NodeJS.ProcessEnv> {
   const state = path.join(root, "state");
   await mkdir(state, { recursive: true });
@@ -82,11 +100,22 @@ beforeAll(async () => {
 
   installRoot = await mkdtemp(path.join(os.tmpdir(), "wm-pack-install-"));
   roots.push(installRoot);
-  await writeFile(path.join(installRoot, "package.json"), '{"private":true}');
-  // Keep resolution pinned to the dependency graph CI installed for this
-  // revision; `--offline` must never silently fetch a newer compatible range.
-  await writeFile(path.join(installRoot, "package-lock.json"), await readFile(path.join(source, "package-lock.json"), "utf8"));
-  const installed = command("npm", ["install", "--offline", "--cache", npmCache, artifact], installRoot);
+  const packageJson = { name: "workermill-packed-test", private: true, dependencies: { [packageMetadata.name]: `file:${artifact}` } };
+  await writeFile(path.join(installRoot, "package.json"), JSON.stringify(packageJson));
+  // Reuse the revision's exact dependency nodes but give the temporary root a
+  // coherent file dependency. `npm ci` therefore cannot resolve a newer range
+  // or touch the network while it installs the artifact and native modules.
+  const lock = JSON.parse(await readFile(path.join(source, "package-lock.json"), "utf8")) as {
+    packages: Record<string, Record<string, unknown>>;
+  };
+  const packedPackageNode = lock.packages[""];
+  lock.packages[""] = packageJson as unknown as Record<string, unknown>;
+  lock.packages[`node_modules/${packageMetadata.name}`] = {
+    ...packedPackageNode,
+    resolved: `file:${artifact}`,
+  };
+  await writeFile(path.join(installRoot, "package-lock.json"), JSON.stringify(lock));
+  const installed = command("npm", ["ci", "--offline", "--omit=dev", "--cache", npmCache], installRoot);
   if (installed.status !== 0) throw new Error(`offline artifact install failed: ${installed.stderr || installed.stdout}`);
   expect(existsSync(path.join(installRoot, "node_modules", "workermill", "dist", "index.js"))).toBe(true);
   expect(existsSync(path.join(installRoot, "node_modules", "workermill", "personas"))).toBe(true);
@@ -106,7 +135,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
   await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -141,16 +173,17 @@ describe("installed package and supported OS runtime", () => {
     child.stdout!.on("data", (data) => { stdout += data; });
     const exited = new Promise<number | null>((resolve) => child.on("close", resolve));
     const requestCountBefore = requests;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("fixture request did not start")), 5_000);
-      const check = () => requests > requestCountBefore ? (clearTimeout(timeout), resolve()) : setTimeout(check, 25);
-      check();
-    });
-    child.kill("SIGINT");
-    const code = await exited;
-    holdResponse = false;
-    expect(code).toBe(130);
-    expect(JSON.parse(stdout)).toMatchObject({ reason: "cancelled", exitCode: 130 });
+    try {
+      await waitUntil(() => requests > requestCountBefore, "fixture request did not start");
+      child.kill("SIGINT");
+      const code = await exited;
+      expect(code).toBe(130);
+      expect(JSON.parse(stdout)).toMatchObject({ reason: "cancelled", exitCode: 130 });
+    } finally {
+      holdResponse = false;
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await exited;
+    }
   });
 
   it("keeps the installed interactive UI responsive in a PTY and cancels without provider credentials", async () => {
@@ -176,21 +209,19 @@ describe("installed package and supported OS runtime", () => {
     let output = "";
     terminal.onData((data) => { output += data; });
     const exited = new Promise<number>((resolve) => terminal.onExit(({ exitCode }) => resolve(exitCode)));
-    await new Promise<void>((resolve, reject) => {
-      const deadline = setTimeout(() => reject(new Error(`PTY did not render its startup heartbeat: ${output.slice(-1500)}`)), 5_000);
-      const check = () => output.includes("WorkerMill") ? (clearTimeout(deadline), resolve()) : setTimeout(check, 25);
-      check();
-    });
-    terminal.write("wait for cancellation\r");
-    await new Promise<void>((resolve, reject) => {
-      const deadline = setTimeout(() => reject(new Error("PTY prompt did not reach offline fixture")), 5_000);
-      const check = () => requests > requestCountBefore ? (clearTimeout(deadline), resolve()) : setTimeout(check, 25);
-      check();
-    });
-    terminal.write("\u001b");
-    // A second Ctrl+C exits the now-idle terminal after the first key cancels.
-    setTimeout(() => terminal.write("\u0003"), 200);
-    expect(await exited).toBe(0);
-    holdResponse = false;
+    try {
+      await waitUntil(() => output.includes("WorkerMill"), `PTY did not render its startup heartbeat: ${output.slice(-1500)}`);
+      terminal.write("wait for cancellation\r");
+      await waitUntil(() => requests > requestCountBefore, "PTY prompt did not reach offline fixture");
+      terminal.write("\u001b");
+      terminal.write("/status\r");
+      await waitUntil(() => output.includes("Session Status"), `PTY did not become idle after cancellation: ${output.slice(-1500)}`);
+      terminal.write("\u0003");
+      expect(await exited).toBe(0);
+    } finally {
+      holdResponse = false;
+      terminal.kill();
+      await exited;
+    }
   });
 });

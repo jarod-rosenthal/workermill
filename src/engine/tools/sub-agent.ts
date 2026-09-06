@@ -219,6 +219,7 @@ async function runSubAgent(
   system: string,
   context: ToolExecutionContext,
   controller: AbortController,
+  outerSignal: AbortSignal,
   onUsage?: SubAgentExecutorOptions["onUsage"],
 ): Promise<SubAgentResult> {
   let turnsUsed = 0;
@@ -260,6 +261,7 @@ async function runSubAgent(
       throw new Error("Sub-agent stopped with an unfinished tool loop at its turn limit.");
     }
     if (finishReason !== "stop") throw new Error(`Sub-agent ended without completion: ${finishReason}`);
+    if (context.signal.aborted) throw new Error("Sub-agent cancelled after model completion.");
     result = { success: true, content, turnsUsed };
   } catch (error) {
     const cause = terminalError ?? error;
@@ -270,9 +272,9 @@ async function runSubAgent(
   }
   // Transport failure can finish before concurrently dispatched tool calls.
   // Await the whole tool lifetime, including hooks, not only OS process exit.
-  // The model/tool lifetime always closes after its stream settles. The outer
-  // administrative lifetime remains live for worktree inspection/removal.
-  controller.abort(new Error("Sub-agent model attempt finished"));
+  // Failed model attempts must stop tools before draining. Successful model
+  // attempts keep their signal live until every dispatched tool settles.
+  if (!result.success || terminalError) controller.abort(new Error("Sub-agent model attempt failed"));
   await Promise.allSettled([...pending]);
   if (result.success && terminalError) {
     result = { success: false, content, turnsUsed, error: `Sub-agent failed: ${terminalError instanceof Error ? terminalError.message : String(terminalError)}` };
@@ -282,6 +284,12 @@ async function runSubAgent(
   } catch (error) {
     result = { ...result, success: false, error: `Unable to record child usage: ${error instanceof Error ? error.message : String(error)}` };
   }
+  if (result.success && outerSignal.aborted) {
+    result = { ...result, success: false, error: "Sub-agent cancelled during finalization." };
+  }
+  // The model/tool lifetime always closes before returning. Administrative
+  // inspection has a distinct outer signal and remains available below.
+  controller.abort(new Error("Sub-agent model attempt finished"));
   return result;
 }
 
@@ -332,7 +340,7 @@ export function createSubAgentExecutor(
           model, options.createTools(worktree.worktreePath, worktree.scope, context),
           prompt, maxTurns,
           `Work only in isolated checkout ${worktree.worktreePath}. Changes remain on your branch for review. Do not spawn children. Path checks are not arbitrary-shell containment.`,
-          context, modelController, options.onUsage,
+          context, modelController, outerSignal, options.onUsage,
         );
       } else {
         const scope = parent?.scope ?? createPathScope(workingDir);
@@ -345,7 +353,7 @@ export function createSubAgentExecutor(
         result = await runSubAgent(
           model, tools, prompt, maxTurns,
           "Explore the codebase using read-only tools. Do not modify files or spawn children. Provide specific findings.",
-          context, modelController, options.onUsage,
+          context, modelController, outerSignal, options.onUsage,
         );
       }
     } catch (error) {

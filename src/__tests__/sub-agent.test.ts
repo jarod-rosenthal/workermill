@@ -162,6 +162,32 @@ describe("isolated sub-agents", () => {
     expect(result.error).toContain("late tool failure");
   });
 
+  it("keeps a successful in-flight read tool alive until it settles, then closes its model signal", async () => {
+    const workingDir = repo();
+    const started = deferred<void>();
+    const release = deferred<string>();
+    let childSignal: AbortSignal | undefined;
+    sdk.streamText.mockImplementation((options: { tools: Record<string, ChildTool> }) => ({
+      textStream: (async function* () { void options.tools.read_file.execute?.({ path: "base.txt" }); await started.promise; yield "done"; })(),
+      text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }), finishReason: Promise.resolve("stop"),
+    }));
+    const executor = createSubAgentExecutor({} as never, workingDir, { read_file: { execute: () => release.promise } }, {
+      executionContext: context(workingDir),
+      createTools: (_dir, _scope, childContext) => {
+        childSignal = childContext.signal;
+        return { read_file: { execute: () => release.promise } };
+      },
+    });
+    const running = executor({ prompt: "read", isolated: false });
+    started.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(childSignal?.aborted).toBe(false);
+    release.resolve("contents");
+    const result = await running;
+    expect(result.success).toBe(true);
+    expect(childSignal?.aborted).toBe(true);
+  });
+
   it("rejects a child explicit-file escape and preserves the failed worktree", async () => {
     const workingDir = repo();
     const sentinel = path.join(workingDir, "parent-sentinel");

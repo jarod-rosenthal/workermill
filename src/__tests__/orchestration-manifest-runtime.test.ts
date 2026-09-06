@@ -24,9 +24,10 @@ vi.mock("../engine/run-resources.js", () => ({
 }));
 vi.mock("../orchestrator/planning.js", async (original) => ({
   ...await original<typeof import("../orchestrator/planning.js")>(),
-  planStories: vi.fn(async () => {
+  planStories: vi.fn(async (...args: unknown[]) => {
     const { loadRunManifest } = await import("../run-manifest.js");
     state.active = loadRunManifest((await import("../run-manifest.js")).listRunManifests()[0]?.id ?? "", process.cwd());
+    await (args[7] as ((observation: { callId: string; persona: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number } }) => Promise<void>) | undefined)?.({ callId: "planner-usage", persona: "Planner", provider: "test", model: "test", usage: { inputTokens: 2, outputTokens: 3 } });
     if (state.plan === "throw") throw new Error("planner provider unavailable");
     if (state.plan === "rejected") return { rejected: true, failureReason: "planning_rejected", rejectionReason: "needs a decision", stories: [], provider: "test", model: "test", inputTokens: 0, outputTokens: 0 };
     return { rejected: false, stories: [story], provider: "test", model: "test", inputTokens: 2, outputTokens: 3 };
@@ -116,11 +117,15 @@ describe("orchestration manifest runtime", () => {
   });
 
   it("only succeeds after completion settles and retains real attempt and review evidence", async () => {
-    const result = await runOrchestration(config, "fixture", true, false, output());
+    const rendered = output();
+    const result = await runOrchestration(config, "fixture", true, false, rendered);
     const manifest = loadRunManifest(result.runId!, dir)!;
     expect(manifest).toMatchObject({ phase: "terminal", terminalReason: "success", outcome: "success" });
     expect(manifest.attempts).toMatchObject([{ storyId: "one", provider: "worker-provider", status: "completed" }]);
     expect(manifest.reviews).toMatchObject([{ provider: "review-provider", inputTokens: 5, outcome: { decision: "approved" } }]);
+    expect(result.usageLedger).toEqual(manifest.usageLedger);
+    expect(rendered.updateUsageLedger).toHaveBeenLastCalledWith(manifest.usageLedger);
+    expect(manifest.usageLedger).toMatchObject({ calls: [{ callId: "planner-usage", usage: { inputTokens: 2, outputTokens: 3 } }], totals: { callCount: 1, inputTokens: 2, outputTokens: 3 } });
   });
 
   it("does not call an invalidated completion a success", async () => {

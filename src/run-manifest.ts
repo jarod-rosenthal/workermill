@@ -7,6 +7,7 @@ import { getProjectRootDir } from "./project-data.js";
 import type { QualityGateResult } from "./orchestrator/gates.js";
 import type { ReviewOutcome } from "./orchestrator/review.js";
 import type { RepositoryFingerprintResult } from "./repository-fingerprint.js";
+import type { LedgerSnapshot } from "./cost-tracker.js";
 
 export const RUN_MANIFEST_VERSION = 2 as const;
 const MAX_ITEMS = 2_000;
@@ -56,6 +57,8 @@ export interface RunManifest {
   gates: RunManifestGate[]; reviews: RunManifestReview[]; fingerprint?: RunManifestFingerprint;
   effectiveSandbox?: "none" | "path" | "os";
   totalCost: number; totalInputTokens: number; totalOutputTokens: number;
+  /** Per-call, allowlisted usage evidence. Absent on records written before R18c3a. */
+  usageLedger?: LedgerSnapshot;
 }
 
 /** A readable pre-R15 record. It is explicitly not verified R13 evidence. */
@@ -74,6 +77,7 @@ export function isTerminalRunManifest(manifest: StoredRunManifest): manifest is 
 const boundedString = (max = MAX_SHORT_TEXT) => z.string().min(1).max(max);
 const optionalBoundedString = (max = MAX_SHORT_TEXT) => boundedString(max).optional();
 const nonNegative = z.number().finite().nonnegative();
+const finiteCost = z.number().finite().nonnegative();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "invalid ISO timestamp")
   .refine((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value, "invalid ISO date");
 const safeId = boundedString(128).regex(runIdPattern, "invalid run ID");
@@ -94,14 +98,59 @@ const fingerprintSchema = z.object({ verified: z.boolean(), algorithm: z.literal
   if (value.verified && (!value.algorithm || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value.head ?? "") || !/^[0-9a-f]{64}$/i.test(value.digest ?? ""))) ctx.addIssue({ code: "custom", message: "verified fingerprint is incomplete" });
   if (!value.verified && !value.reason) ctx.addIssue({ code: "custom", message: "unverified fingerprint needs a reason" });
 });
+const usageSchema = z.object({ inputTokens: nonNegative.optional(), outputTokens: nonNegative.optional(), cacheCreationTokens: nonNegative.optional(), cacheReadTokens: nonNegative.optional() }).strict();
+const ledgerCallSchema = z.object({
+  callId: boundedString(256), persona: boundedString(), provider: boundedString(), model: boundedString(),
+  usage: usageSchema.optional(), usageComplete: z.boolean().optional(),
+  usageState: z.enum(["reported", "partial", "missing"]), pricingState: z.enum(["known", "unknown", "local"]),
+  estimatedApiCost: finiteCost.optional(),
+}).strict();
+const ledgerTotalsSchema = z.object({
+  callCount: z.number().int().nonnegative(), reportedUsageCalls: z.number().int().nonnegative(), partialUsageCalls: z.number().int().nonnegative(), missingUsageCalls: z.number().int().nonnegative(),
+  knownPricingCalls: z.number().int().nonnegative(), unknownPricingCalls: z.number().int().nonnegative(), localApiCalls: z.number().int().nonnegative(),
+  inputTokens: nonNegative, outputTokens: nonNegative, cacheCreationTokens: nonNegative, cacheReadTokens: nonNegative, estimatedApiCost: finiteCost,
+}).strict();
+const ledgerSchema = z.object({ calls: z.array(ledgerCallSchema).max(MAX_ITEMS), totals: ledgerTotalsSchema }).strict().superRefine((ledger, ctx) => {
+  const ids = new Set<string>();
+  const tally = { reported: 0, partial: 0, missing: 0, known: 0, unknown: 0, local: 0, input: 0, output: 0, cacheCreation: 0, cacheRead: 0, cost: 0 };
+  for (const call of ledger.calls) {
+    if (ids.has(call.callId)) ctx.addIssue({ code: "custom", message: "duplicate ledger call ID" });
+    ids.add(call.callId);
+    const usage = call.usage;
+    const complete = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined && call.usageComplete !== false;
+    if ((call.usageState === "missing") !== (usage === undefined)) ctx.addIssue({ code: "custom", message: "ledger usage state must match usage presence" });
+    if (call.usageState === "reported" && !complete) ctx.addIssue({ code: "custom", message: "reported ledger usage must be complete" });
+    if (call.usageState === "partial" && (!usage || complete)) ctx.addIssue({ code: "custom", message: "partial ledger usage must be incomplete" });
+    const observed = usage !== undefined && Object.values(usage).some((value) => value !== undefined);
+    if (call.pricingState === "unknown" && call.estimatedApiCost !== undefined) ctx.addIssue({ code: "custom", message: "unknown pricing cannot have an estimate" });
+    if (call.pricingState === "local" && call.estimatedApiCost !== undefined && call.estimatedApiCost !== 0) ctx.addIssue({ code: "custom", message: "local pricing estimate must be zero" });
+    if (!observed && call.estimatedApiCost !== undefined) ctx.addIssue({ code: "custom", message: "unobserved usage cannot have an estimate" });
+    tally[call.usageState] += 1;
+    tally[call.pricingState] += 1;
+    tally.input += usage?.inputTokens ?? 0; tally.output += usage?.outputTokens ?? 0;
+    tally.cacheCreation += usage?.cacheCreationTokens ?? 0; tally.cacheRead += usage?.cacheReadTokens ?? 0;
+    tally.cost += call.estimatedApiCost ?? 0;
+  }
+  const totals = ledger.totals;
+  const exact: Array<[number, number, string]> = [[totals.callCount, ledger.calls.length, "call count"], [totals.reportedUsageCalls, tally.reported, "reported usage count"], [totals.partialUsageCalls, tally.partial, "partial usage count"], [totals.missingUsageCalls, tally.missing, "missing usage count"], [totals.knownPricingCalls, tally.known, "known pricing count"], [totals.unknownPricingCalls, tally.unknown, "unknown pricing count"], [totals.localApiCalls, tally.local, "local pricing count"]];
+  for (const [actual, expected, label] of exact) if (actual !== expected) ctx.addIssue({ code: "custom", message: `ledger ${label} does not match calls` });
+  const numeric: Array<[number, number, string]> = [[totals.inputTokens, tally.input, "input tokens"], [totals.outputTokens, tally.output, "output tokens"], [totals.cacheCreationTokens, tally.cacheCreation, "cache creation tokens"], [totals.cacheReadTokens, tally.cacheRead, "cache read tokens"], [totals.estimatedApiCost, tally.cost, "estimated cost"]];
+  for (const [actual, expected, label] of numeric) if (Math.abs(actual - expected) > 1e-12) ctx.addIssue({ code: "custom", message: `ledger ${label} does not match calls` });
+});
 const currentSchema = z.object({
   version: z.literal(RUN_MANIFEST_VERSION), id: safeId, startedAt: dateString, completedAt: dateString.optional(), phase: z.enum(["active", "terminal"]), terminalReason: z.enum(["success", "partial", "cancelled", "planner_failed", "planning_rejected", "permission_blocked", "required_gate_failed", "review_rejected", "verification_failed", "completion_blocked", "cleanup_failed", "no_progress", "provider_failed", "unknown"]).optional(), priorRunId: safeId.optional(),
   userTask: z.string().max(MAX_TEXT), ticketKey: optionalBoundedString(), featureBranch: z.union([boundedString(), z.null()]).optional(), mainBranch: optionalBoundedString(), outcome: z.enum(["in_progress", "success", "partial", "failed", "cancelled"]),
-  stories: z.array(storySchema).max(MAX_ITEMS), plannedStories: z.array(plannedStorySchema).max(MAX_ITEMS), attempts: z.array(attemptSchema).max(MAX_ITEMS), gates: z.array(gateSchema).max(MAX_ITEMS), reviews: z.array(reviewSchema).max(MAX_ITEMS), fingerprint: fingerprintSchema.optional(), effectiveSandbox: z.enum(["none", "path", "os"]).optional(), totalCost: nonNegative, totalInputTokens: nonNegative, totalOutputTokens: nonNegative,
+  stories: z.array(storySchema).max(MAX_ITEMS), plannedStories: z.array(plannedStorySchema).max(MAX_ITEMS), attempts: z.array(attemptSchema).max(MAX_ITEMS), gates: z.array(gateSchema).max(MAX_ITEMS), reviews: z.array(reviewSchema).max(MAX_ITEMS), fingerprint: fingerprintSchema.optional(), effectiveSandbox: z.enum(["none", "path", "os"]).optional(), totalCost: nonNegative, totalInputTokens: nonNegative, totalOutputTokens: nonNegative, usageLedger: ledgerSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.phase === "active" && (value.completedAt || value.terminalReason || value.outcome !== "in_progress")) ctx.addIssue({ code: "custom", message: "active manifests must be in-progress without terminal fields" });
   if (value.phase === "terminal" && (!value.completedAt || !value.terminalReason || value.outcome === "in_progress")) ctx.addIssue({ code: "custom", message: "terminal manifests require completedAt, terminalReason, and a terminal outcome" });
   if (value.completedAt && Date.parse(value.completedAt) < Date.parse(value.startedAt)) ctx.addIssue({ code: "custom", message: "manifest completed before it started" });
+  if (value.usageLedger) {
+    const totals = value.usageLedger.totals;
+    if (value.totalCost !== totals.estimatedApiCost || value.totalInputTokens !== totals.inputTokens || value.totalOutputTokens !== totals.outputTokens) {
+      ctx.addIssue({ code: "custom", message: "manifest usage totals must match ledger totals" });
+    }
+  }
   const attempts = new Set<string>();
   for (const attempt of value.attempts) {
     const key = `${attempt.storyId}\u0000${attempt.attempt}`;
@@ -127,6 +176,7 @@ export function createRunManifest(userTask: string, ticketKey?: string): RunMani
 
 function allowlistedManifest(manifest: RunManifest): RunManifest {
   if (manifest.version !== RUN_MANIFEST_VERSION) throw new Error(`Unsupported run manifest version: ${String(manifest.version)}`);
+  const ledger = manifest.usageLedger;
   return {
     version: manifest.version, id: manifest.id, startedAt: manifest.startedAt, completedAt: manifest.completedAt, phase: manifest.phase, terminalReason: manifest.terminalReason, priorRunId: manifest.priorRunId, userTask: manifest.userTask.slice(0, MAX_TEXT), ticketKey: manifest.ticketKey, featureBranch: manifest.featureBranch, mainBranch: manifest.mainBranch, outcome: manifest.outcome,
     stories: manifest.stories.map(({ id, title, persona, provider, model, status, retryCount, failureCode, inputTokens, outputTokens }) => ({ id, title, persona, provider, model, status, retryCount, failureCode, inputTokens, outputTokens })),
@@ -136,6 +186,7 @@ function allowlistedManifest(manifest: RunManifest): RunManifest {
     reviews: manifest.reviews.map(({ round, provider, model, score, decision, outcome, inputTokens, outputTokens }) => ({ round, provider, model, score, decision, outcome: { kind: outcome.kind, approved: outcome.approved, decision: outcome.decision, score: outcome.score }, inputTokens, outputTokens })),
     fingerprint: manifest.fingerprint ? { verified: manifest.fingerprint.verified, algorithm: manifest.fingerprint.algorithm, head: manifest.fingerprint.head, digest: manifest.fingerprint.digest, reason: manifest.fingerprint.reason } : undefined,
     effectiveSandbox: manifest.effectiveSandbox, totalCost: manifest.totalCost, totalInputTokens: manifest.totalInputTokens, totalOutputTokens: manifest.totalOutputTokens,
+    usageLedger: ledger ? { calls: ledger.calls.map(({ callId, persona, provider, model, usage, usageComplete, usageState, pricingState, estimatedApiCost }) => ({ callId, persona, provider, model, usage: usage && { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheCreationTokens: usage.cacheCreationTokens, cacheReadTokens: usage.cacheReadTokens }, usageComplete, usageState, pricingState, estimatedApiCost })), totals: { callCount: ledger.totals.callCount, reportedUsageCalls: ledger.totals.reportedUsageCalls, partialUsageCalls: ledger.totals.partialUsageCalls, missingUsageCalls: ledger.totals.missingUsageCalls, knownPricingCalls: ledger.totals.knownPricingCalls, unknownPricingCalls: ledger.totals.unknownPricingCalls, localApiCalls: ledger.totals.localApiCalls, inputTokens: ledger.totals.inputTokens, outputTokens: ledger.totals.outputTokens, cacheCreationTokens: ledger.totals.cacheCreationTokens, cacheReadTokens: ledger.totals.cacheReadTokens, estimatedApiCost: ledger.totals.estimatedApiCost } } : undefined,
   };
 }
 

@@ -743,6 +743,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           });
           output.updateCost?.(costTracker.getTotalCost());
           output.updateUsageSummary?.(costTracker.getUsageSummary());
+          output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
         } finally { timedAbort.dispose(); }
         if (cleanupError) throw cleanupError;
       }
@@ -753,6 +754,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     const revOutputTokens = reviewUsage?.outputTokens || 0;
     output.updateCost?.(costTracker.getTotalCost());
     output.updateUsageSummary?.(costTracker.getUsageSummary());
+    output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
     // Track tok/s for reviewer model
     const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
     if (revOutputTokens > 0 && reviewElapsed > 0) {
@@ -1319,6 +1321,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               });
               output.updateCost?.(costTracker.getTotalCost());
               output.updateUsageSummary?.(costTracker.getUsageSummary());
+              output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
             } finally { timedAbort.dispose(); }
             if (cleanupError) throw cleanupError;
           }
@@ -1420,6 +1423,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // The per-call ledger is finalized after each attempt's resources drain.
         output.updateCost?.(costTracker.getTotalCost());
         output.updateUsageSummary?.(costTracker.getUsageSummary());
+        output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
 
         // If approved or out of revision attempts, done
         if (approved) {
@@ -1748,6 +1752,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               });
               output.updateCost?.(costTracker.getTotalCost());
               output.updateUsageSummary?.(costTracker.getUsageSummary());
+              output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
             } finally { revisionTimedAbort.dispose(); }
             const status = cleanupError ? "failed" : revisionSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
             await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status, at: new Date().toISOString(), inputTokens: revisionUsage?.inputTokens, outputTokens: revisionUsage?.outputTokens });

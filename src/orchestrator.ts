@@ -107,10 +107,12 @@ export async function runOrchestration(
 
   const workingDir = process.cwd();
   const costTracker = new CostTracker();
+  const emitUsageLedger = (): void => output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
   const observePlanningUsage = async (observation: Parameters<typeof costTracker.recordCall>[0]) => {
     if (!costTracker.recordCall(observation)) return;
     output.updateCost?.(costTracker.getTotalCost());
     output.updateUsageSummary?.(costTracker.getUsageSummary());
+    emitUsageLedger();
   };
   const completedStoryIds: string[] = [...(retryPlan?.completedStoryIds ?? [])];
   let featureBranch: string | null = retryPlan?.featureBranch ?? null;
@@ -121,6 +123,7 @@ export async function runOrchestration(
   manifest.priorRunId = retryPlan?.priorRunId;
   let returnedResult: OrchestrationResult | undefined;
   const returning = (result: OrchestrationResult): OrchestrationResult => {
+    result.usageLedger = costTracker.getLedgerSnapshot();
     returnedResult = result;
     return result;
   };
@@ -140,12 +143,10 @@ export async function runOrchestration(
         retryCount: Math.max(0, actual.length - 1), failureCode: last?.failureCode,
       };
     });
-    manifest.totalCost = costTracker.getTotalCost();
-    if (typeof costTracker.getUsageSummary === "function") {
-      const usage = costTracker.getUsageSummary();
-      manifest.totalInputTokens = usage.total.inputTokens;
-      manifest.totalOutputTokens = usage.total.outputTokens;
-    }
+    manifest.usageLedger = costTracker.getLedgerSnapshot();
+    manifest.totalCost = manifest.usageLedger.totals.estimatedApiCost;
+    manifest.totalInputTokens = manifest.usageLedger.totals.inputTokens;
+    manifest.totalOutputTokens = manifest.usageLedger.totals.outputTokens;
     saveRunManifest(manifest, workingDir);
   };
   const onAttempt = (event: StoryAttemptEvent | RevisionAttemptEvent): void => {
@@ -981,9 +982,11 @@ export async function runOrchestration(
         }
       }
       persistProgress();
+      emitUsageLedger();
       if (returnedResult) {
         returnedResult.outcome = manifest.outcome;
         returnedResult.terminalReason = terminalReason;
+        returnedResult.usageLedger = manifest.usageLedger;
       }
     }
   }

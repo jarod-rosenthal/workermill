@@ -95,6 +95,33 @@ describe("run manifest storage", () => {
     expect(stored).not.toContain("do not persist");
   });
 
+  it("round-trips a partial and unknown-pricing usage ledger without persisting unlisted fields", () => {
+    const manifest = terminalManifest("run-ledger");
+    manifest.usageLedger = {
+      calls: [{ callId: "planner-1", persona: "planner", provider: "test", model: "unknown-model", usage: { inputTokens: 12 }, usageComplete: false, usageState: "partial", pricingState: "unknown" }],
+      totals: { callCount: 1, reportedUsageCalls: 0, partialUsageCalls: 1, missingUsageCalls: 0, knownPricingCalls: 0, unknownPricingCalls: 1, localApiCalls: 0, inputTokens: 12, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0 },
+    };
+    manifest.totalInputTokens = 12;
+    (manifest.usageLedger.calls[0] as typeof manifest.usageLedger.calls[0] & { prompt: string }).prompt = "secret prompt";
+    saveRunManifest(manifest, workspace);
+    expect(loadRunManifest(manifest.id, workspace)).toMatchObject({ usageLedger: { calls: [{ callId: "planner-1", usageState: "partial", pricingState: "unknown" }], totals: { inputTokens: 12, partialUsageCalls: 1 } } });
+    expect(fs.readFileSync(getRunManifestPath(manifest.id, workspace)!, "utf8")).not.toContain("secret prompt");
+  });
+
+  it("rejects duplicate or inconsistent usage-ledger evidence while older current records remain readable", () => {
+    const manifest = terminalManifest("run-ledger-invalid");
+    const call = { callId: "call-1", persona: "worker", provider: "test", model: "fake", usage: { inputTokens: 2, outputTokens: 3 }, usageState: "reported" as const, pricingState: "known" as const, estimatedApiCost: 0.01 };
+    manifest.usageLedger = { calls: [call, { ...call }], totals: { callCount: 2, reportedUsageCalls: 2, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 2, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 4, outputTokens: 6, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0.02 } };
+    expect(() => saveRunManifest(manifest, workspace)).toThrow();
+    manifest.usageLedger = { calls: [call], totals: { callCount: 1, reportedUsageCalls: 1, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 1, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 99, outputTokens: 3, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0.01 } };
+    expect(() => saveRunManifest(manifest, workspace)).toThrow();
+    const oldCurrent = terminalManifest("run-current-without-ledger");
+    saveRunManifest(oldCurrent, workspace);
+    const loaded = loadRunManifest(oldCurrent.id, workspace);
+    expect(loaded).toMatchObject({ id: oldCurrent.id });
+    expect(loaded && "usageLedger" in loaded ? loaded.usageLedger : undefined).toBeUndefined();
+  });
+
   it("renders a persisted active record as in-progress JSON", async () => {
     const originalCwd = process.cwd();
     try {

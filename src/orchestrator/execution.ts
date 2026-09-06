@@ -1615,6 +1615,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         });
         output.updateCost?.(costTracker.getTotalCost());
         output.updateUsageSummary?.(costTracker.getUsageSummary());
+        output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
       }
       // Resource teardown aborts the attempt's local signal even on failure.
       // Only cancellation of the owning run means the user cancelled it.

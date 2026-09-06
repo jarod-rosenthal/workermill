@@ -778,84 +778,6 @@ export function createToolDefinitions(
                * this block is replaced by the scoped registered-tool factory.
                * It is intentionally disabled; in particular download_file was
                * a write capability on a supposedly read-only child. */
-              const legacyReadOnlyTools = {
-                read_file: tool({
-                  description: readFileTool.description,
-                  inputSchema: z.object({
-                    path: z.string().describe("Path to the file to read"),
-                    maxLines: z.number().optional().describe("Max lines to read"),
-                    startLine: z.number().optional().describe("Start line (1-indexed)"),
-                  }),
-                  execute: async ({ path: filePath, maxLines, startLine }) => {
-                    const resolvedPath = path.isAbsolute(filePath)
-                      ? filePath
-                      : path.resolve(workingDir, filePath);
-                    const canonicalPath = resolveToolPath(resolvedPath, "read");
-                    const result = await readFileTool.execute({ path: canonicalPath, maxLines, startLine });
-                    return result.success ? result.content || "" : `Error: ${result.error}`;
-                  },
-                }),
-                glob: tool({
-                  description: globTool.description,
-                  inputSchema: z.object({
-                    pattern: z.string().describe("Glob pattern to match files"),
-                    cwd: z.string().optional().describe("Directory to search in"),
-                  }),
-                  execute: async ({ pattern, cwd }) => {
-                    const resolvedCwd = cwd
-                      ? path.isAbsolute(cwd) ? cwd : path.resolve(workingDir, cwd)
-                      : workingDir;
-                    const canonicalCwd = resolveToolPath(resolvedCwd, "read");
-                    const result = await globTool.execute({ pattern, cwd: canonicalCwd });
-                    return result.success
-                      ? result.count === 0
-                        ? `No files found matching: ${pattern}`
-                        : `Found ${result.count} file(s):\n${result.matches!.join("\n")}`
-                      : `Error: ${result.error}`;
-                  },
-                }),
-                grep: tool({
-                  description: grepTool.description,
-                  inputSchema: z.object({
-                    pattern: z.string().describe("Regex pattern to search for"),
-                    path: z.string().optional().describe("File or directory to search in"),
-                    filePattern: z.string().optional().describe("Glob to filter files"),
-                  }),
-                  execute: async ({ pattern, path: searchPath, filePattern }) => {
-                    const resolvedPath = searchPath
-                      ? path.isAbsolute(searchPath) ? searchPath : path.resolve(workingDir, searchPath)
-                      : workingDir;
-                    const canonicalPath = resolveToolPath(resolvedPath, "read");
-                    const result = await grepTool.execute({ pattern, path: canonicalPath, filePattern });
-                    if (!result.success) return `Error: ${result.error}`;
-                    if (result.matchCount === 0) return `No matches for: ${pattern}`;
-                    const lines: string[] = [`Found ${result.matchCount} match(es):`];
-                    for (const [file, matches] of Object.entries(result.results!)) {
-                      for (const match of matches) {
-                        lines.push(`${file}:${match.line}: ${match.content}`);
-                      }
-                    }
-                    return lines.join("\n");
-                  },
-                }),
-                ls: tool({
-                  description: lsTool.description,
-                  inputSchema: z.object({
-                    path: z.string().describe("Directory path to list"),
-                    maxDepth: z.number().optional().describe("Max depth (default: 3)"),
-                  }),
-                  execute: async ({ path: dirPath, maxDepth }) => {
-                    const resolvedPath = path.isAbsolute(dirPath)
-                      ? dirPath
-                      : path.resolve(workingDir, dirPath);
-                    const canonicalPath = resolveToolPath(resolvedPath, "read");
-                    const result = await lsTool.execute({ path: canonicalPath, maxDepth });
-                    return result.success ? result.tree : `Error: ${result.error}`;
-                  },
-                }),
-              };
-
-              void legacyReadOnlyTools;
               const childToolNames = ["bash", "verify", "read_file", "view_image", "write_file", "edit_file", "multi_edit_file", "glob", "grep", "ls", "git", "patch", "lsp"] as const;
               const readOnlyChildToolNames = ["read_file", "view_image", "glob", "grep", "ls", "lsp"] as const;
               const pickChildTools = (all: Record<string, unknown>, names: readonly string[]) => Object.fromEntries(
@@ -872,7 +794,11 @@ export function createToolDefinitions(
                   effectiveSandbox: childContext.effectiveSandbox === "os" ? "os" as const : "path" as const,
                 };
                 const all = createToolDefinitions(childWorkingDir, undefined, childExecutionContext?.effectiveSandbox === "os" ? "os" : true, {
-                  runId, signal, scope: childScope, sandboxCapabilities: childCapabilities, executionContext: childExecutionContext,
+                  runId: childExecutionContext.runId,
+                  signal: childExecutionContext.signal,
+                  scope: childScope,
+                  sandboxCapabilities: childCapabilities,
+                  executionContext: childExecutionContext,
                 }) as Record<string, unknown>;
                 return pickChildTools(all, childToolNames);
               };

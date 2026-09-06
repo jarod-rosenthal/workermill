@@ -36,7 +36,7 @@ ticket/spec → [spec check] → planner → [plan critic] → specialist worker
 Bracketed stages are off by default (`review.specCheck`, `review.critic`).
 
 - **Planner** reads the codebase and decomposes the task into scoped stories with specific files, acceptance criteria, and definition-of-done contracts (`requiredFiles`, `requiredTests`, `requiredCommands`)
-- **Plan critic** (optional) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk before any worker starts, refining it until it passes or 3 rounds are spent. Catching a bad plan here is far cheaper than catching it at review.
+- **Plan critic** (optional) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk before any worker starts, refining it until it passes or 3 rounds are spent. This adds model calls and can identify planning issues before implementation; it does not guarantee lower total cost.
 - **Workers** execute stories one at a time using their persona's system prompt
 - **Definition-of-done** — after each story, the orchestrator validates that required files and tests exist and required commands pass. Missing artifacts block completion with machine-readable failure codes
 - **Quality gates** — static gates from config plus planner-generated verification commands run before review

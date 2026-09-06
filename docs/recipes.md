@@ -248,7 +248,7 @@ For a native macOS notification instead:
 
 This fetches the PR's diff, runs the tech lead persona against it, and scores the code. If it finds issues, the CLI offers to create a GitHub issue from the findings and immediately kick off `/build` to fix them.
 
-**Tip:** Set the reviewer to a different model family than the PR author's toolchain. If the PR was written with Claude, review with GPT-5.4 or Gemini — you'll catch issues a same-family reviewer might rationalize away.
+Choose the reviewer binding deliberately. A different configured model or endpoint can provide another review pass, but its identifier does not prove independent training or better defect detection. Keep automated checks and human review for consequential changes regardless of which reviewer you use.
 
 ```
 /settings route tech_lead openai

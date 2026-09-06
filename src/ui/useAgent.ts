@@ -26,12 +26,13 @@ import {
 import { loadProjectMeta } from "../project-data.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
-import { killActiveProcess } from "../engine/tools/bash.js";
-import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
+import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { createMCPRunResources, autoDetectMCPServersForRun, type MCPRunResources } from "../mcp-client.js";
+import { shutdownLSPRun } from "../engine/tools/lsp.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
@@ -80,6 +81,23 @@ export { trackAbortCost, getLiveViewChangeTargets, shouldBlockUnverifiedImageAns
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
+
+function waitForRetry(signal: AbortSignal, milliseconds: number): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Retry cancelled"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, milliseconds);
+    function done(): void {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Retry cancelled"));
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -151,6 +169,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const liveViewServerRef = useRef<LiveViewServer | null>(null);
   const liveViewUrlRef = useRef<string | null>(null);
   const pendingSystemMessagesRef = useRef<string[]>([]);
+  const pendingToolsByRunRef = useRef(new Map<string, Set<Promise<void>>>());
 
   // Deferred tool loading — MCP tools start deferred, promoted on tool_search
   const deferredToolsRef = useRef<DeferredToolEntry[]>([]);
@@ -251,17 +270,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.apiKey,
     );
 
-    // Register MCP servers for lazy start — they won't spawn until first tool use
+    // Snapshot non-resource UI settings. MCP servers are intentionally not
+    // registered here: each submitted turn owns its own cancellable resources.
     try {
       const cliConfig = resolveConfig();
       // Skip Docker MCP auto-detection for local models (Ollama/LM Studio) —
       // 50+ MCP tools overwhelm small models, causing XML text fallback instead
       // of structured tool calls. Users can still configure MCP explicitly.
-      const skipAutoDetect = isLocalProvider(aiProviderRef.current);
-      const mcpConfig = skipAutoDetect
-        ? (cliConfig?.mcp || {})
-        : autoDetectMCPServers(cliConfig?.mcp || {});
-      registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
       bellEnabledRef.current = cliConfig?.bell;
       permissionRulesRef.current = cliConfig?.permissions;
@@ -539,7 +554,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * 3. The original execute runs.
    * 4. Status is updated to "done" (or "denied").
    */
-  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel): Record<string, AnyToolDef> => {
+  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, mcpTools: Record<string, AnyToolDef>): Record<string, AnyToolDef> => {
     // Factory tools are rebuilt for every run context. In particular, bash and
     // child tools must receive this turn's signal and run ID, not a closure
     // created during hook initialization.
@@ -557,8 +572,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
     // Merge MCP tools (dynamically resolved each call so tools from
     // servers that finish starting after init are picked up).
-    const allMcpTools = getMCPToolDefinitions();
-    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...allMcpTools };
+    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...mcpTools };
 
     // Browser tools — use Zod inputSchema for cross-provider compatibility.
     allRawTools.browser_open = {
@@ -687,6 +701,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // ALL visual updates are batched AFTER the tool completes.
 
           const wrapperEnterMs = Date.now();
+          const pendingTools = pendingToolsByRunRef.current.get(context.runId);
+          let releasePending!: () => void;
+          const pending = new Promise<void>((resolve) => { releasePending = resolve; });
+          pendingTools?.add(pending);
           traceDispatch("wrapper:enter", { tool: name });
 
           try {
@@ -765,6 +783,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             setStreamingToolCalls((prev) => [...prev, { ...info, status: "done" as const, result: `Error: ${errMsg}` }]);
             setStatus("streaming");
             throw err;
+          } finally {
+            releasePending();
+            pendingTools?.delete(pending);
           }
         },
       };
@@ -777,12 +798,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * mode which restricts to read-only tools.
    * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel): Promise<Record<string, AnyToolDef>> => {
-    // Lazy-start MCP servers on first prompt submission (not on CLI launch)
-    const { ensureMCPStarted } = await import("../mcp-client.js");
-    await ensureMCPStarted();
-
-    const all = buildPermissionedTools(context, model);
+  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, mcpResources: MCPRunResources): Promise<Record<string, AnyToolDef>> => {
+    // Lazy-start only resources owned by this turn; another chat/headless run
+    // must never supply, start, or close this tool map.
+    await mcpResources.ensureStarted();
+    const all = buildPermissionedTools(context, model, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>);
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
@@ -801,6 +821,33 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     (input: string, displayText?: string, submitOptions?: { modelOverride?: TurnModelOverride }) => {
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
+        if (abortRef.current) {
+          addSystemMessage("A response is still running. Cancel it before starting another prompt.");
+          return;
+        }
+        // A turn owns its cancellation boundary before *any* async work. This
+        // includes URL expansion and MCP startup, which previously escaped
+        // ESC because they ran before the controller existed.
+        const controller = new AbortController();
+        const runId = crypto.randomUUID();
+        pendingToolsByRunRef.current.set(runId, new Set());
+        abortRef.current = controller;
+        const isCurrentTurn = (): boolean => abortRef.current === controller;
+        let turnStarted = false;
+        let liveViewCompleted = false;
+        let mcpResources: MCPRunResources | undefined;
+        setStatus("thinking");
+        setStatusDetail("");
+        try {
+        const turnConfig = resolveConfig();
+        mcpResources = createMCPRunResources({ runId, workspace: workingDirRef.current, signal: controller.signal });
+        const skipAutoDetect = isLocalProvider((submitOptions?.modelOverride?.provider ?? aiProviderRef.current) as AIProvider);
+        const mcpConfig = skipAutoDetect
+          ? (turnConfig?.mcp || {})
+          : await autoDetectMCPServersForRun(turnConfig?.mcp || {}, {
+            runId, workspace: workingDirRef.current, signal: controller.signal,
+          });
+        mcpResources.register(mcpConfig);
         const session = sessionRef.current;
         const turnOverride = submitOptions?.modelOverride;
         const turnProvider = (turnOverride?.provider ?? aiProviderRef.current) as AIProvider;
@@ -815,7 +862,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         // Resolve @file, @folder/, and @url references
         let resolvedInput = resolveFileReferences(input, workingDirRef.current);
         resolvedInput = resolveFolderReferences(resolvedInput, workingDirRef.current);
-        resolvedInput = await resolveUrlReferences(resolvedInput);
+        resolvedInput = await resolveUrlReferences(resolvedInput, controller.signal);
+        if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Cancelled", "AbortError");
         const inlineImageParse = parseImageReferences(resolvedInput, workingDirRef.current);
         const turnHadInlineImages = inlineImageParse.hasImages;
 
@@ -843,9 +891,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         setStatusDetail("");
         recentToolSignaturesRef.current = [];
 
-        const controller = new AbortController();
-        const runId = crypto.randomUUID();
-        abortRef.current = controller;
+        turnStarted = true;
         if (liveViewServerRef.current) {
           liveViewServerRef.current.setAbortController(controller);
         }
@@ -863,13 +909,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         try {
           const executionContext = createExecutionContext(runId, controller.signal);
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
-          const activeTools = (await getActiveTools(executionContext, turnModel)) as ToolSet;
+          const activeTools = (await getActiveTools(executionContext, turnModel, mcpResources)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
           // text (memories, disk files), which invalidates Ollama's KV cache
           // and forces a full prompt reprocessing (~30s for 30B models).
           // Build once on first submit; only rebuild on explicit request.
           if (!systemPromptRef.current) {
-            systemPromptRef.current = buildSystemPrompt(workingDirRef.current)
+            systemPromptRef.current = buildSystemPrompt(workingDirRef.current, mcpResources.getTools())
               + formatDeferredToolsForPrompt(deferredToolsRef.current);
           }
           const systemPrompt = systemPromptRef.current;
@@ -1219,28 +1265,25 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           if (liveViewServerRef.current) {
             liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+            liveViewCompleted = true;
           }
-          setStatus("idle");
-          abortRef.current = null;
           break; // success — exit retry loop
 
         } catch (err) {
           // --- Rate limit retry ---
           const rateLimit = isRateLimitError(err);
-          if (rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          if (!controller.signal.aborted && rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
             rateLimitRetries++;
             const waitSec = Math.ceil(rateLimit.retryAfterMs / 1000);
             logger.info("Rate limited, retrying", { attempt: rateLimitRetries, waitSec });
             setStatusDetail(`Rate limited — retrying in ${waitSec}s (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
             setStreamingText("");
             setStreamingToolCalls([]);
-            await new Promise(resolve => setTimeout(resolve, rateLimit.retryAfterMs));
+            await waitForRetry(controller.signal, rateLimit.retryAfterMs);
             continue; // retry the streamText call
           }
 
-          abortRef.current = null;
-
-          if (err instanceof Error && err.name === "AbortError") {
+          if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
             // Cancellation -- already handled by cancel().
             // Preserve any tokens consumed in completed steps before the abort.
             trackAbortCost(
@@ -1252,7 +1295,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               costTrackerRef.current,
               setCost,
             );
-            setStatus("idle");
             return;
           }
 
@@ -1285,11 +1327,49 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStreamingToolCalls([]);
           if (liveViewServerRef.current) {
             liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+            liveViewCompleted = true;
           }
-          setStatus("idle");
           break; // error handled — exit retry loop
         }
         } // end while
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          const errText = err instanceof Error ? err.message : String(err);
+          logger.error("Agent startup error", { error: errText });
+          if (isCurrentTurn()) {
+            setMessages((prev) => [...prev, {
+              id: crypto.randomUUID(), role: "assistant" as const, content: `Error: ${errText}`,
+              timestamp: new Date().toISOString(),
+            }]);
+          }
+        } finally {
+          const cancelled = controller.signal.aborted;
+          controller.abort(new Error("Interactive turn settled"));
+          const pending = pendingToolsByRunRef.current.get(runId);
+          const cleanup = await Promise.allSettled([
+            ...(pending ? [...pending] : []),
+            Promise.resolve().then(() => cancelAndWaitForRunProcesses(runId)),
+            Promise.resolve().then(() => cleanupScopedBackgroundProcesses(runId)),
+            Promise.resolve().then(() => mcpResources?.close()),
+            Promise.resolve().then(() => shutdownLSPRun(runId)),
+          ]);
+          pendingToolsByRunRef.current.delete(runId);
+          const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (isCurrentTurn()) {
+            if (cleanupFailures.length > 0) {
+              const detail = cleanupFailures.map((result) => String(result.reason)).join("; ");
+              logger.error("Interactive turn cleanup failed", { error: detail });
+              setMessages((prev) => [...prev, {
+                id: crypto.randomUUID(), role: "assistant" as const,
+                content: `Error: cleanup failed: ${detail}`, timestamp: new Date().toISOString(),
+              }]);
+            }
+            if (turnStarted && cancelled && !liveViewCompleted && liveViewServerRef.current) liveViewServerRef.current.emitStoryComplete(1, 0);
+            abortRef.current = null;
+            setStatus("idle");
+            setStatusDetail("");
+          }
+        }
       })();
     },
     [createExecutionContext, getActiveTools],
@@ -1301,27 +1381,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     pendingPermissionResolveRef.current?.();
     if (abortRef.current) {
       abortRef.current.abort();
-      abortRef.current = null;
-      killActiveProcess();
-      cleanupAllBackgroundProcesses();
     }
-    // Commit any completed tool calls to Static before clearing.
-    const currentToolCalls = streamingToolCallsRef.current;
-    if (currentToolCalls.length > 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant" as const,
-          content: "",
-          toolCalls: currentToolCalls,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
-    setStatus("idle");
-    setStreamingText("");
-    setStreamingToolCalls([]);
+    // The turn finalizer publishes idle only after its model/tools/processes
+    // have all settled. Clearing it here used to allow a new turn to race an
+    // old process group and made cancellation look complete too early.
+    setStatusDetail("Cancelling…");
     setPermissionRequest(null);
   }, []);
 

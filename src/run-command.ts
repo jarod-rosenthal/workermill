@@ -11,7 +11,8 @@ import { cleanupScopedBackgroundProcesses } from "./engine/tools/bash-background
 import { formatProjectInstructions } from "./instructions.js";
 import { formatPromptProjectContext } from "./project-context.js";
 import { loadLearnings } from "./learnings.js";
-import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
+import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
+import { shutdownLSPRun } from "./engine/tools/lsp.js";
 import type { SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
@@ -118,14 +119,23 @@ function checkpointAuthorizedTargets(
     checkpoint(resolved, toolName);
   }
 }
-function wrapTools(rawTools: Record<string, unknown>, context: ToolExecutionContext, onError: (error: ToolExecutionError) => void): Record<string, unknown> {
+function wrapTools(
+  rawTools: Record<string, unknown>,
+  context: ToolExecutionContext,
+  onError: (error: ToolExecutionError) => void,
+  pending: Set<Promise<unknown>>,
+): Record<string, unknown> {
   return Object.fromEntries(Object.entries(rawTools).map(([name, definition]) => {
     // SDK gap: Tool generics are provider-schema-specific after dynamic MCP composition.
     const raw = definition as { execute?: (input: Record<string, unknown>) => unknown };
     if (!raw.execute) return [name, definition];
-    return [name, { ...raw, execute: async (input: Record<string, unknown>) => {
+    return [name, { ...raw, execute: (input: Record<string, unknown>) => {
+      const call = (async () => {
       try { return await executeToolCall(name, input, () => raw.execute!(input), context); }
       catch (error) { if (error instanceof ToolExecutionError) onError(error); throw error; }
+      })();
+      pending.add(call);
+      return call.finally(() => pending.delete(call));
     }}];
   }));
 }
@@ -162,11 +172,12 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
   let completedSteps = 0;
   let lastStepHadToolCalls = false;
   let terminalToolError: ToolExecutionError | undefined;
-  let mcpStarted = false;
-  let lspUsed = false;
+  const pendingTools = new Set<Promise<unknown>>();
+  let mcpResources: ReturnType<typeof createMCPRunResources> | undefined;
   let session: Session | null | undefined;
   let shouldSaveSession = false;
   try {
+    mcpResources = createMCPRunResources({ runId, workspace: workingDir, signal: controller.signal });
     const requestedSandbox = options.sandboxed ?? config.sandbox ?? true;
     if (requestedSandbox === "os") {
       const { getOSSandboxDependencyStatus } = await import("./sandbox-mode.js");
@@ -216,27 +227,28 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
         input: JSON.stringify(input), output: output === undefined ? undefined : JSON.stringify(output), success: error === undefined,
       }),
       event: (event, executingContext) => {
-        if (event.toolName === "lsp") lspUsed = true;
         if (event.phase === "complete" && event.error) {
           runLifecycleHooks("tool_error", config.hooks, executingContext.workspace);
         }
       },
     };
-    const mcpConfig = autoDetectMCPServers(config.mcp || {});
-    if (Object.keys(mcpConfig).length) {
-      mcpStarted = true;
-      await startAllMCPServers(mcpConfig);
-    }
+    const mcpConfig = await autoDetectMCPServersForRun(config.mcp || {}, {
+      runId,
+      workspace: workingDir,
+      signal: controller.signal,
+    });
+    mcpResources.register(mcpConfig);
+    await mcpResources.ensureStarted();
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     const aiModel = createModel(provider as AIProvider, model, providerConfig.host, providerConfig.contextLength, providerConfig.apiKey);
     const builtinTools = createToolDefinitions(workingDir, aiModel, requestedSandbox, {
       runId, signal: controller.signal, scope, sandboxCapabilities: config.sandboxCapabilities, executionContext: context,
     });
-    const mcpTools = getMCPToolDefinitions();
+    const mcpTools = mcpResources.getToolDefinitions();
     const tools = wrapTools({ ...builtinTools, ...mcpTools }, context, (error) => {
       terminalToolError ??= error;
       controller.abort();
-    });
+    }, pendingTools);
     let system = "You are WorkerMill, an AI coding agent. Working directory: " + workingDir + "\n";
     const instructions = formatProjectInstructions(workingDir);
     if (instructions) system += instructions;
@@ -288,6 +300,10 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort();
     const cleanupErrors: string[] = [];
+    // A provider can reject after dispatching a tool. Drain every owned call
+    // before returning, but do not relabel the provider failure as a cleanup
+    // failure merely because abort correctly rejected an in-flight tool.
+    await Promise.allSettled([...pendingTools]);
     try {
       await cancelAndWaitForRunProcesses(runId);
     } catch (error) {
@@ -298,20 +314,15 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     } catch (error) {
       cleanupErrors.push("Background cleanup failed: " + String(error));
     }
-    if (mcpStarted) {
-      try {
-        stopAllMCPServers();
-      } catch (error) {
-        cleanupErrors.push("MCP cleanup failed: " + String(error));
-      }
+    try {
+      await mcpResources?.close();
+    } catch (error) {
+      cleanupErrors.push("MCP cleanup failed: " + String(error));
     }
-    if (lspUsed) {
-      try {
-        const { shutdown } = await import("./engine/tools/lsp.js");
-        shutdown();
-      } catch (error) {
-        cleanupErrors.push("LSP cleanup failed: " + String(error));
-      }
+    try {
+      await shutdownLSPRun(runId);
+    } catch (error) {
+      cleanupErrors.push("LSP cleanup failed: " + String(error));
     }
     if (cleanupErrors.length) {
       return failure(start, "cleanup_error", cleanupErrors.join("; "), {

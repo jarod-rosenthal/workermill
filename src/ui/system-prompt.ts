@@ -4,7 +4,10 @@ import { formatPromptProjectContext } from "../project-context.js";
 import { getMCPTools } from "../mcp-client.js";
 import { loadCustomCommands } from "../custom-commands.js";
 
-export function buildSystemPrompt(workingDir: string): string {
+export function buildSystemPrompt(
+  workingDir: string,
+  activeMcpTools?: ReadonlyArray<{ serverName: string }>,
+): string {
   const base = `You are a senior coding assistant running in the user's terminal.
 
 Working directory: ${workingDir}
@@ -121,7 +124,9 @@ These are extracted automatically and saved into the structured project memory f
   prompt += formatMemoriesForPrompt(memories);
 
   // Add MCP tool awareness if any MCP servers are active
-  const mcpTools = getMCPTools();
+  // Compatibility callers retain the process-wide view. Run-owned chat
+  // callers pass their own collection so one run cannot advertise another.
+  const mcpTools = activeMcpTools ?? getMCPTools();
   if (mcpTools.length > 0) {
     const serverNames = [...new Set(mcpTools.map(t => t.serverName))];
     prompt += `\n\n## MCP Tools\n\nYou have additional tools from ${serverNames.length} MCP server(s): ${serverNames.join(", ")}. `;

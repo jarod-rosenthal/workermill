@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { execFileSync } from "child_process";
 import * as logger from "./logger.js";
 
 interface ContentPart {
@@ -247,7 +246,7 @@ export function resolveFolderReferences(input: string, workingDir: string): stri
  * Resolve @https://... and @http://... references in user input.
  * Fetches URL content (10s timeout, max 10KB) and inlines it.
  */
-export async function resolveUrlReferences(input: string): Promise<string> {
+export async function resolveUrlReferences(input: string, signal?: AbortSignal): Promise<string> {
   const urlPattern = /@(https?:\/\/[^\s]+)/g;
   const matches = [...input.matchAll(urlPattern)];
 
@@ -257,12 +256,11 @@ export async function resolveUrlReferences(input: string): Promise<string> {
   for (const match of matches) {
     const url = match[1];
     try {
-      // Use curl for fetching — avoids adding HTTP dependencies
-      const content = execFileSync(
-        "curl",
-        ["-sL", "--max-time", "10", "--max-filesize", "10240", url],
-        { encoding: "utf-8", timeout: 12_000 },
-      ).trim();
+      // Fetch is cancellable, unlike the old synchronous curl call. Limit the
+      // embedded prompt content even when a server omits Content-Length.
+      const response = await fetch(url, { signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const content = (await response.text()).slice(0, 10_240).trim();
       result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${content}\n\`\`\`\n`);
     } catch (err) {
       logger.debug("Failed to fetch URL reference", { url, error: err instanceof Error ? err.message : String(err) });

@@ -6,6 +6,9 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+const ensureRunMcp = vi.fn(async () => {});
+const closeRunMcp = vi.fn(async () => {});
+
 vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({})), buildOllamaOptions: () => ({}),
   ensureOllamaContext: vi.fn(), ensureLmStudioContext: vi.fn(),
@@ -13,7 +16,12 @@ vi.mock("../engine/model-factory.js", () => ({
 vi.mock("../mcp-client.js", () => ({
   getMCPToolDefinitions: () => ({}), stopAllMCPServers: vi.fn(),
   autoDetectMCPServers: () => ({}), registerMCPServers: vi.fn(),
+  autoDetectMCPServersForRun: async () => ({}),
   hasMCPRegistered: () => false, ensureMCPStarted: vi.fn(async () => {}),
+  createMCPRunResources: (options: { signal: AbortSignal }) => ({
+    register: vi.fn(), ensureStarted: () => ensureRunMcp(options.signal),
+    getToolDefinitions: () => ({}), getTools: () => [], close: () => closeRunMcp(),
+  }),
 }));
 vi.mock("../ui/system-prompt.js", () => ({ buildSystemPrompt: () => "Test coding agent" }));
 vi.mock("../config.js", async (original) => ({
@@ -50,6 +58,10 @@ describe("mounted chat execution adapter", () => {
     vi.mocked(runHooks).mockClear();
     vi.mocked(runPreHooksWithBlocking).mockClear();
     vi.mocked(saveLocalSettings).mockClear();
+    ensureRunMcp.mockReset();
+    ensureRunMcp.mockResolvedValue();
+    closeRunMcp.mockReset();
+    closeRunMcp.mockResolvedValue();
     turns = 0;
     clearCheckpoints();
   });
@@ -133,6 +145,19 @@ describe("mounted chat execution adapter", () => {
     expect(saveLocalSettings).not.toHaveBeenCalled();
     expect(getChangedFiles()).toEqual([]);
     expect(await stat(path.join(workspace, "cancelled.txt")).then(() => true, () => false)).toBe(false);
+  });
+
+  it("claims busy state before MCP startup and cancels it before model construction", async () => {
+    ensureRunMcp.mockImplementationOnce((signal: AbortSignal) => new Promise<void>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+    await mount();
+    agent.submit("cancel startup");
+    await vi.waitFor(() => expect(agent.status).toBe("thinking"));
+    agent.cancel();
+    await vi.waitFor(() => expect(agent.status).toBe("idle"));
+    expect(streamText).not.toHaveBeenCalled();
+    expect(closeRunMcp).toHaveBeenCalledOnce();
   });
 
   it("queues simultaneous prompts instead of losing an unresolved request", async () => {

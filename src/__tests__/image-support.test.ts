@@ -9,16 +9,6 @@ vi.mock("../logger.js", () => ({
   error: vi.fn(),
 }));
 
-// Mock child_process.execFileSync for URL tests — must be hoisted before importing the module
-vi.mock("child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("child_process")>();
-  return {
-    ...actual,
-    execFileSync: vi.fn(),
-  };
-});
-
-import { execFileSync } from "child_process";
 import {
   parseImageReferences,
   toMessageContent,
@@ -385,21 +375,28 @@ describe("resolveFolderReferences", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveUrlReferences", () => {
-  const mockedExecFileSync = execFileSync as ReturnType<typeof vi.fn>;
+  const mockedFetch = vi.fn();
+
+  const response = (body: string, status = 200) => ({ ok: status >= 200 && status < 300, status, text: vi.fn(async () => body) });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", mockedFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("returns input unchanged when there are no @https:// references", async () => {
     const input = "no urls here";
     const result = await resolveUrlReferences(input);
     expect(result).toBe(input);
-    expect(mockedExecFileSync).not.toHaveBeenCalled();
+    expect(mockedFetch).not.toHaveBeenCalled();
   });
 
   it("replaces @https://url with fetched content in a code block", async () => {
-    mockedExecFileSync.mockReturnValueOnce("fetched page content");
+    mockedFetch.mockResolvedValueOnce(response("fetched page content"));
     const result = await resolveUrlReferences("see @https://example.com/api");
     expect(result).toContain("```");
     expect(result).toContain("// fetched from https://example.com/api");
@@ -407,44 +404,49 @@ describe("resolveUrlReferences", () => {
     expect(result).not.toContain("@https://example.com/api");
   });
 
-  it("calls curl with the correct flags and URL", async () => {
-    mockedExecFileSync.mockReturnValueOnce("response body");
+  it("passes the URL to cancellable fetch", async () => {
+    mockedFetch.mockResolvedValueOnce(response("response body"));
     await resolveUrlReferences("@https://api.example.com/data");
-    expect(mockedExecFileSync).toHaveBeenCalledOnce();
-    const [cmd, args] = mockedExecFileSync.mock.calls[0] as [string, string[], ...unknown[]];
-    expect(cmd).toBe("curl");
-    expect(args).toEqual(["-sL", "--max-time", "10", "--max-filesize", "10240", "https://api.example.com/data"]);
+    expect(mockedFetch).toHaveBeenCalledWith("https://api.example.com/data", { signal: undefined });
   });
 
-  it("replaces URL with (failed to fetch: ...) when curl throws", async () => {
-    mockedExecFileSync.mockImplementationOnce(() => {
-      throw new Error("curl: (6) Could not resolve host");
-    });
+  it("replaces URL with (failed to fetch: ...) when fetch throws", async () => {
+    mockedFetch.mockRejectedValueOnce(new Error("network unavailable"));
     const result = await resolveUrlReferences("@https://unreachable.invalid");
     expect(result).toContain("(failed to fetch: https://unreachable.invalid)");
   });
 
   it("handles http:// URLs in addition to https://", async () => {
-    mockedExecFileSync.mockReturnValueOnce("plain http response");
+    mockedFetch.mockResolvedValueOnce(response("plain http response"));
     const result = await resolveUrlReferences("@http://example.com/page");
     expect(result).toContain("// fetched from http://example.com/page");
     expect(result).toContain("plain http response");
   });
 
   it("handles multiple URL references in one input", async () => {
-    mockedExecFileSync
-      .mockReturnValueOnce("first content")
-      .mockReturnValueOnce("second content");
+    mockedFetch
+      .mockResolvedValueOnce(response("first content"))
+      .mockResolvedValueOnce(response("second content"));
     const result = await resolveUrlReferences("@https://a.com and @https://b.com");
     expect(result).toContain("first content");
     expect(result).toContain("second content");
-    expect(mockedExecFileSync).toHaveBeenCalledTimes(2);
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 
   it("trims whitespace from fetched content", async () => {
-    mockedExecFileSync.mockReturnValueOnce("   trimmed content   ");
+    mockedFetch.mockResolvedValueOnce(response("   trimmed content   "));
     const result = await resolveUrlReferences("@https://example.com");
     expect(result).toContain("trimmed content");
     expect(result).not.toContain("   trimmed content   ");
+  });
+
+  it("returns promptly when URL expansion is cancelled", async () => {
+    const controller = new AbortController();
+    mockedFetch.mockImplementationOnce((_url: string, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+    const pending = resolveUrlReferences("@https://example.com/slow", controller.signal);
+    controller.abort();
+    await expect(pending).resolves.toContain("failed to fetch");
   });
 });

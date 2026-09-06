@@ -12,10 +12,18 @@ vi.mock("../engine/model-factory.js", () => ({
 
 vi.mock("../mcp-client.js", () => ({
   autoDetectMCPServers: (config: Record<string, unknown>) => config,
+  autoDetectMCPServersForRun: async (config: Record<string, unknown>) => config,
   startAllMCPServers: vi.fn(async () => {}),
   stopAllMCPServers: vi.fn(),
   getMCPToolDefinitions: () => ({
     mcp__test__write: { execute: mcpWrite },
+  }),
+  createMCPRunResources: () => ({
+    register: vi.fn(),
+    ensureStarted: () => startAllMCPServers({}),
+    getToolDefinitions: () => ({ mcp__test__write: { execute: mcpWrite } }),
+    getTools: () => [],
+    close: async () => { stopAllMCPServers(); },
   }),
 }));
 
@@ -279,6 +287,34 @@ describe("headless runtime governance", () => {
 
     expect(result.reason).toBe("provider_error");
     expect(result.tokens).toEqual({ input: 11, output: 4 });
+  });
+
+  it("drains an already-dispatched tool before returning a provider failure", async () => {
+    let finishTool!: () => void;
+    const toolPending = new Promise<void>((resolve) => { finishTool = resolve; });
+    mcpWrite.mockImplementationOnce(async () => {
+      await toolPending;
+      return "finished";
+    });
+    vi.mocked(streamText).mockImplementation((options) => {
+      const tools = (options as unknown as { tools: Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }> }).tools;
+      return {
+        textStream: (async function* () {
+          void tools.mcp__test__write.execute({}).catch(() => {});
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          throw new Error("provider failed after tool dispatch");
+        })(),
+        text: Promise.resolve(""), totalUsage: Promise.resolve({}), finishReason: Promise.resolve("error"), steps: Promise.resolve([]),
+      } as never;
+    });
+
+    const running = runCommand({ prompt: "drain", singlePrompt: true }, config({ allow: ["mcp__test__write"] }), workspace);
+    let settled = false;
+    void running.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    finishTool();
+    await expect(running).resolves.toMatchObject({ status: "failed", reason: "provider_error" });
   });
 
   it("returns cancellation when SIGINT interrupts a live model stream", async () => {

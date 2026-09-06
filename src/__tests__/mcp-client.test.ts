@@ -1031,6 +1031,51 @@ describe("mcp-client", () => {
       expect(mockClient.close).toHaveBeenCalled();
       expect(resources.hasServers()).toBe(false);
     });
+
+    it("reports a failed HTTP close after attempting every owned client", async () => {
+      mockClient.connect.mockResolvedValue(undefined);
+      mockClient.listTools.mockResolvedValue({ tools: [] });
+      mockClient.close.mockRejectedValue(new Error("close failed"));
+      const abort = new AbortController();
+      const resources = mcpClient.createMCPRunResources({
+        runId: "http-close-failure",
+        workspace: process.cwd(),
+        signal: abort.signal,
+        terminationGraceMs: 10,
+      });
+
+      await resources.startAll({
+        first: { transport: "http", url: "http://example.test/first" },
+        second: { transport: "http", url: "http://example.test/second" },
+      });
+
+      await expect(resources.close()).rejects.toThrow("MCP run http-close-failure cleanup failed");
+      expect(mockClient.close).toHaveBeenCalledTimes(2);
+    });
+
+    it("bounds a hanging HTTP close while still closing another owned client", async () => {
+      mockClient.connect.mockResolvedValue(undefined);
+      mockClient.listTools.mockResolvedValue({ tools: [] });
+      let closeCalls = 0;
+      mockClient.close.mockImplementation(() => {
+        closeCalls += 1;
+        return closeCalls === 1 ? new Promise<void>(() => {}) : Promise.resolve();
+      });
+      const resources = mcpClient.createMCPRunResources({
+        runId: "http-close-timeout",
+        workspace: process.cwd(),
+        signal: new AbortController().signal,
+        terminationGraceMs: 1,
+      });
+
+      await resources.startAll({
+        hanging: { transport: "http", url: "http://example.test/hanging" },
+        healthy: { transport: "http", url: "http://example.test/healthy" },
+      });
+
+      await expect(resources.close()).rejects.toThrow("MCP run http-close-timeout cleanup failed");
+      expect(mockClient.close).toHaveBeenCalledTimes(2);
+    });
   });
 
   // -------------------------------------------------------------------------

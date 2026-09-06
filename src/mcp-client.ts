@@ -51,6 +51,7 @@ export interface MCPRunResources {
 
 interface Collection {
   servers: Map<string, MCPServer>; starting: Map<string, Promise<MCPServer>>; startingServers: Map<string, MCPServer>; workspace: string; signal?: AbortSignal;
+  ownedServers: Set<MCPServer>;
   startupTimeoutMs: number; requestTimeoutMs: number; maxResponseBytes: number; maxStderrBytes: number; terminationGraceMs: number;
   closed: boolean; closePromise?: Promise<void>; controller?: AbortController; parentSignal?: AbortSignal; parentAbortListener?: () => void;
   pendingConfig?: Record<string, MCPServerConfig>; lazyStartPromise?: Promise<void>;
@@ -58,7 +59,7 @@ interface Collection {
 
 const activeServers = new Map<string, MCPServer>();
 const legacy: Collection = {
-  servers: activeServers, starting: new Map(), startingServers: new Map(), workspace: process.cwd(), startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
+  servers: activeServers, starting: new Map(), startingServers: new Map(), ownedServers: new Set(), workspace: process.cwd(), startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
   requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS, maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES, maxStderrBytes: DEFAULT_MAX_STDERR_BYTES,
   terminationGraceMs: DEFAULT_TERMINATION_GRACE_MS, closed: false,
 };
@@ -73,17 +74,18 @@ function validateLimit(name: string, value: number): number {
   return value;
 }
 function makeCollection(options: MCPRunResourcesOptions): Collection {
+  const startupTimeoutMs = validateLimit("MCP startupTimeoutMs", options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS);
+  const requestTimeoutMs = validateLimit("MCP requestTimeoutMs", options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const maxResponseBytes = validateLimit("MCP maxResponseBytes", options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES);
+  const maxStderrBytes = validateLimit("MCP maxStderrBytes", options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES);
+  const terminationGraceMs = validateLimit("MCP terminationGraceMs", options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
   const controller = new AbortController();
   const parentAbortListener = () => controller.abort(options.signal.reason);
   if (options.signal.aborted) parentAbortListener(); else options.signal.addEventListener("abort", parentAbortListener, { once: true });
   return {
-    servers: new Map(), starting: new Map(), startingServers: new Map(), workspace: options.workspace, signal: controller.signal, controller,
+    servers: new Map(), starting: new Map(), startingServers: new Map(), ownedServers: new Set(), workspace: options.workspace, signal: controller.signal, controller,
     parentSignal: options.signal, parentAbortListener,
-    startupTimeoutMs: validateLimit("MCP startupTimeoutMs", options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS),
-    requestTimeoutMs: validateLimit("MCP requestTimeoutMs", options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
-    maxResponseBytes: validateLimit("MCP maxResponseBytes", options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES),
-    maxStderrBytes: validateLimit("MCP maxStderrBytes", options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES),
-    terminationGraceMs: validateLimit("MCP terminationGraceMs", options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS), closed: false,
+    startupTimeoutMs, requestTimeoutMs, maxResponseBytes, maxStderrBytes, terminationGraceMs, closed: false,
   };
 }
 function parseGitHubRepoFromRemote(remoteUrl: string): GitHubRepoContext | null {
@@ -160,7 +162,14 @@ function listenToProcess(server: MCPServer, collection: Collection): void {
     if (server.stderrBytes <= collection.maxStderrBytes) logger.debug(`MCP ${server.name} stderr: ${chunk.toString().trim()}`);
   });
   proc.on("error", (error) => { logger.error(`MCP ${server.name} error: ${error.message}`); rejectPending(server, error); });
-  proc.on("exit", (code) => { logger.info(`MCP ${server.name} exited with code ${code}`); rejectPending(server, new Error(`MCP server ${server.name} exited`)); if (collection.servers.get(server.name) === server) collection.servers.delete(server.name); });
+  proc.on("exit", (code) => {
+    logger.info(`MCP ${server.name} exited with code ${code}`);
+    rejectPending(server, new Error(`MCP server ${server.name} exited`));
+    // The shell may be gone while descendants retain its process group. Keep
+    // this owned instance reachable until closeServer verifies group teardown.
+    if (collection === legacy && collection.servers.get(server.name) === server) collection.servers.delete(server.name);
+    void closeServer(collection, server).catch((error) => logger.error(`MCP ${server.name} teardown failed: ${error instanceof Error ? error.message : String(error)}`));
+  });
 }
 function sendRequest(server: MCPServer, collection: Collection, method: string, params: unknown, signal: AbortSignal | undefined, timeoutMs: number): Promise<unknown> {
   if (!server.process || server.closed) return Promise.reject(new Error(`No transport available for server ${server.name}`));
@@ -200,6 +209,7 @@ function waitForProcessExit(proc: ChildProcess, graceMs: number): Promise<void> 
     const endTimer = setTimeout(fail, Math.max(1_000, graceMs * 4));
     const pollTimer = setInterval(finish, 20);
     proc.once("close", finish); proc.once("exit", finish);
+    signalProcessGroup(proc, "SIGTERM");
     finish();
   });
 }
@@ -207,13 +217,15 @@ async function closeServer(collection: Collection, server: MCPServer): Promise<v
   if (server.closePromise) return server.closePromise;
   server.closePromise = (async () => {
     server.closed = true;
-    if (collection.servers.get(server.name) === server) collection.servers.delete(server.name);
     rejectPending(server, new Error(`MCP server ${server.name} closed`));
-    if (server.process) { signalProcessGroup(server.process, "SIGTERM"); await waitForProcessExit(server.process, collection.terminationGraceMs); }
+    if (server.process) await waitForProcessExit(server.process, collection.terminationGraceMs);
     if (server.client) {
       const scoped = scopedSignal([], Math.max(1_000, collection.terminationGraceMs * 4), `MCP close ${server.name}`);
       try { await abortable(Promise.resolve(server.client.close()), scoped.signal, `MCP close ${server.name}`); } finally { scoped.cleanup(); }
     }
+    if (collection.servers.get(server.name) === server) collection.servers.delete(server.name);
+    collection.startingServers.delete(server.name);
+    collection.ownedServers.delete(server);
   })();
   return server.closePromise;
 }
@@ -236,6 +248,7 @@ async function startServerInner(collection: Collection, name: string, config: MC
       const proc = spawn(config.command, config.args ?? [], { cwd: collection.workspace, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env: { ...process.env, ...(config.env ?? {}) } });
       server = { name, transport, process: proc, tools: [], nextId: 1, stdoutBuffer: Buffer.alloc(0), stderrBytes: 0, pending: new Map(), closed: false };
       collection.startingServers.set(name, server);
+      collection.ownedServers.add(server);
       listenToProcess(server, collection);
       await sendRequest(server, collection, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "workermill-cli", version: VERSION } }, startup.signal, collection.startupTimeoutMs);
       proc.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
@@ -247,6 +260,7 @@ async function startServerInner(collection: Collection, name: string, config: MC
       const client = new Client({ name: "workermill-cli", version: VERSION }, { capabilities: {} });
       server = { name, transport, client, tools: [], nextId: 1, stdoutBuffer: Buffer.alloc(0), stderrBytes: 0, pending: new Map(), closed: false };
       collection.startingServers.set(name, server);
+      collection.ownedServers.add(server);
       const connected = Promise.resolve(client.connect(clientTransport, { signal: startup.signal, timeout: collection.startupTimeoutMs }));
       try { await abortable(connected, startup.signal, `MCP startup ${name}`); } catch (error) { void connected.then(() => client.close()).catch(() => {}); throw error; }
       if (startup.signal.aborted) throw startup.signal.reason instanceof Error ? startup.signal.reason : new Error(`MCP startup ${name} cancelled`);
@@ -295,7 +309,7 @@ export function createMCPRunResources(options: MCPRunResourcesOptions): MCPRunRe
     collection.closed = true;
     collection.controller?.abort(new Error(`MCP run ${options.runId} closed`));
     collection.closePromise = (async () => {
-      const servers = new Set([...collection.servers.values(), ...collection.startingServers.values()]);
+      const servers = new Set(collection.ownedServers);
       const results = await Promise.allSettled([...servers].map((server) => closeServer(collection, server)));
       // Acquirers observe configuration/startup errors directly. The server
       // snapshot above retains and reports teardown errors from partial starts.
@@ -360,11 +374,11 @@ export function stopAllMCPServers(): void {
   for (const collection of runCollections) void (async () => {
     collection.closed = true;
     collection.controller?.abort(new Error("CLI exiting"));
-    for (const server of new Set([...collection.servers.values(), ...collection.startingServers.values()])) emergencyStopServer(server);
+    for (const server of collection.ownedServers) emergencyStopServer(server);
     await Promise.allSettled([...collection.starting.values()]);
     runCollections.delete(collection);
   })();
-  for (const server of new Set([...activeServers.values(), ...legacy.startingServers.values()])) emergencyStopServer(server);
+  for (const server of legacy.ownedServers) emergencyStopServer(server);
   activeServers.clear();
 }
 export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> { return Array.from(activeServers.values()).map((server) => ({ name: server.name, transport: server.transport, toolCount: server.tools.length })); }

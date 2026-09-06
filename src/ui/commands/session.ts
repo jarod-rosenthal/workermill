@@ -164,6 +164,8 @@ export function handleModelCommand(arg: string, ctx: SlashCommandContext): void 
         );
         void ctx.forceCompact().then(({ before, after }) => {
           ctx.addSystemMessage(`Compacted ${before} \u2192 ${after} messages.`);
+        }).catch((error: unknown) => {
+          ctx.addSystemMessage(`Compaction stopped: ${error instanceof Error ? error.message : String(error)}`);
         });
       } else {
         ctx.addSystemMessage(
@@ -234,6 +236,8 @@ export function handleCompactCommand(arg: string, ctx: SlashCommandContext): voi
   ctx.addSystemMessage(`**Compacting...** ~${ctx.tokens.toLocaleString()} tokens${arg ? ` (preserving: ${arg})` : ""}`);
   void ctx.forceCompact(arg || undefined).then(({ before, after }) => {
     ctx.addSystemMessage(`**Compacted.** ~${before.toLocaleString()} \u2192 ~${after.toLocaleString()} tokens.`);
+  }).catch((error: unknown) => {
+    ctx.addSystemMessage(`Compaction stopped: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
 

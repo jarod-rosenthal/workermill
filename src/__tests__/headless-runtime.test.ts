@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 
 const mcpWrite = vi.fn(async () => "mcp write");
+const closedMcpRuns: string[] = [];
+const closeMcpRun = vi.fn(async (runId: string) => { closedMcpRuns.push(runId); });
 
 vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({})),
@@ -18,12 +20,12 @@ vi.mock("../mcp-client.js", () => ({
   getMCPToolDefinitions: () => ({
     mcp__test__write: { execute: mcpWrite },
   }),
-  createMCPRunResources: () => ({
+  createMCPRunResources: (options: { runId: string }) => ({
     register: vi.fn(),
     ensureStarted: () => startAllMCPServers({}),
     getToolDefinitions: () => ({ mcp__test__write: { execute: mcpWrite } }),
     getTools: () => [],
-    close: async () => { stopAllMCPServers(); },
+    close: () => closeMcpRun(options.runId),
   }),
 }));
 
@@ -38,7 +40,7 @@ vi.mock("../engine/tools/bash-background.js", async (importOriginal) => {
 });
 
 import { streamText } from "ai";
-import { startAllMCPServers, stopAllMCPServers } from "../mcp-client.js";
+import { startAllMCPServers } from "../mcp-client.js";
 import { createModel } from "../engine/model-factory.js";
 import { clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import { runCommand } from "../run-command.js";
@@ -77,7 +79,9 @@ describe("headless runtime governance", () => {
   beforeEach(async () => {
     workspace = await mkdtemp(path.join(os.tmpdir(), "workermill-headless-runtime-"));
     mcpWrite.mockClear();
-    vi.mocked(stopAllMCPServers).mockClear();
+    closedMcpRuns.length = 0;
+    closeMcpRun.mockReset();
+    closeMcpRun.mockImplementation(async (runId: string) => { closedMcpRuns.push(runId); });
     vi.mocked(startAllMCPServers).mockReset();
     vi.mocked(startAllMCPServers).mockResolvedValue();
     vi.mocked(createModel).mockClear();
@@ -229,14 +233,12 @@ describe("headless runtime governance", () => {
     );
 
     expect(result.reason).toBe("provider_error");
-    expect(stopAllMCPServers).toHaveBeenCalledOnce();
+    expect(closedMcpRuns).toHaveLength(1);
   });
 
   it("reports cleanup failures as a typed non-success result", async () => {
     vi.mocked(streamText).mockImplementation(successfulStream(async () => {}) as never);
-    vi.mocked(stopAllMCPServers).mockImplementationOnce(() => {
-      throw new Error("MCP stop failed");
-    });
+    closeMcpRun.mockRejectedValueOnce(new Error("MCP stop failed"));
 
     const result = await runCommand(
       { prompt: "cleanup", singlePrompt: true },
@@ -252,7 +254,7 @@ describe("headless runtime governance", () => {
   it("still cleans up MCP after background cleanup fails", async () => {
     vi.mocked(streamText).mockImplementation(successfulStream(async () => {}) as never);
     vi.mocked(cleanupScopedBackgroundProcesses).mockRejectedValueOnce(new Error("background stop failed"));
-    vi.mocked(stopAllMCPServers).mockImplementationOnce(() => { throw new Error("MCP stop failed too"); });
+    closeMcpRun.mockRejectedValueOnce(new Error("MCP stop failed too"));
 
     const result = await runCommand(
       { prompt: "cleanup", singlePrompt: true },
@@ -260,7 +262,7 @@ describe("headless runtime governance", () => {
       workspace,
     );
 
-    expect(stopAllMCPServers).toHaveBeenCalledOnce();
+    expect(closeMcpRun).toHaveBeenCalledOnce();
     expect(result.reason).toBe("cleanup_error");
     expect(result.error).toContain("background stop failed");
     expect(result.error).toContain("MCP stop failed too");
@@ -290,9 +292,12 @@ describe("headless runtime governance", () => {
   });
 
   it("drains an already-dispatched tool before returning a provider failure", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
     let finishTool!: () => void;
     const toolPending = new Promise<void>((resolve) => { finishTool = resolve; });
     mcpWrite.mockImplementationOnce(async () => {
+      markStarted();
       await toolPending;
       return "finished";
     });
@@ -301,7 +306,7 @@ describe("headless runtime governance", () => {
       return {
         textStream: (async function* () {
           void tools.mcp__test__write.execute({}).catch(() => {});
-          await new Promise((resolve) => setTimeout(resolve, 0));
+          await started;
           throw new Error("provider failed after tool dispatch");
         })(),
         text: Promise.resolve(""), totalUsage: Promise.resolve({}), finishReason: Promise.resolve("error"), steps: Promise.resolve([]),
@@ -311,10 +316,33 @@ describe("headless runtime governance", () => {
     const running = runCommand({ prompt: "drain", singlePrompt: true }, config({ allow: ["mcp__test__write"] }), workspace);
     let settled = false;
     void running.then(() => { settled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await started;
     expect(settled).toBe(false);
     finishTool();
     await expect(running).resolves.toMatchObject({ status: "failed", reason: "provider_error" });
+  });
+
+  it("lets a dispatched tool settle before successful stream finalization aborts resources", async () => {
+    let markStarted!: () => void;
+    let release!: () => void;
+    let signal: AbortSignal | undefined;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    mcpWrite.mockImplementationOnce(async () => { markStarted(); await pending; return "finished"; });
+    vi.mocked(streamText).mockImplementation((options) => {
+      signal = options.abortSignal;
+      const tools = options.tools as unknown as Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }>;
+      return {
+        textStream: (async function* () { void tools.mcp__test__write.execute({}).catch(() => {}); await started; yield "done"; })(),
+        text: Promise.resolve("done"), totalUsage: Promise.resolve({}), finishReason: Promise.resolve("stop"), steps: Promise.resolve([]),
+      } as never;
+    });
+    const running = runCommand({ prompt: "finish tool", singlePrompt: true }, config({ allow: ["mcp__test__write"] }), workspace);
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(signal?.aborted).toBe(false);
+    release();
+    await expect(running).resolves.toMatchObject({ status: "ok", text: "done" });
   });
 
   it("returns cancellation when SIGINT interrupts a live model stream", async () => {
@@ -335,6 +363,32 @@ describe("headless runtime governance", () => {
 
     expect(result.reason).toBe("cancelled");
     expect(result.exitCode).toBe(130);
+  });
+
+  it("closes only the cancelled run's MCP resource while an independent run succeeds", async () => {
+    const firstAbort = new AbortController();
+    let firstStarted!: () => void;
+    const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+    vi.mocked(streamText).mockImplementation((options) => {
+      const request = options as unknown as { messages: Array<{ content: string }>; abortSignal: AbortSignal };
+      const first = request.messages.at(-1)?.content === "first";
+      return {
+        textStream: (async function* () {
+          if (!first) { yield ""; return; }
+          firstStarted();
+          await new Promise<void>((_resolve, reject) => request.abortSignal.addEventListener("abort", () => reject(request.abortSignal.reason), { once: true }));
+          yield "";
+        })(),
+        text: Promise.resolve(first ? "cancelled" : "second"), totalUsage: Promise.resolve({}), finishReason: Promise.resolve("stop"), steps: Promise.resolve([]),
+      } as never;
+    });
+    const first = runCommand({ prompt: "first", singlePrompt: true, signal: firstAbort.signal }, config({}), workspace);
+    await started;
+    const second = runCommand({ prompt: "second", singlePrompt: true }, config({}), workspace);
+    firstAbort.abort(new Error("cancel first only"));
+    await expect(second).resolves.toMatchObject({ status: "ok", text: "second" });
+    await expect(first).resolves.toMatchObject({ status: "cancelled" });
+    expect(new Set(closedMcpRuns).size).toBe(2);
   });
 
   it("does not start MCP or create a model for an already-aborted run", async () => {
@@ -361,7 +415,7 @@ describe("headless runtime governance", () => {
       workspace,
     );
     expect(partialStart.reason).toBe("provider_error");
-    expect(stopAllMCPServers).toHaveBeenCalledOnce();
+    expect(closedMcpRuns).toHaveLength(1);
     expect(process.listenerCount("SIGINT")).toBe(listenersBefore);
 
     const invalidScope = await runCommand({ prompt: "scope", singlePrompt: true }, config({}), "\0");

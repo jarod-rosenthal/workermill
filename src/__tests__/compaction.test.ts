@@ -111,6 +111,30 @@ describe("compaction", () => {
   describe("compactMessages()", () => {
     const fakeModel = {} as any;
 
+    it("does not call the provider after cancellation", async () => {
+      const controller = new AbortController();
+      controller.abort(new Error("cancelled"));
+      await expect(compactMessages(fakeModel, [], "soft", undefined, controller.signal)).rejects.toThrow("cancelled");
+      expect(mockGenerateText).not.toHaveBeenCalled();
+    });
+
+    it("rejects late summaries without tripping the failure circuit", async () => {
+      resetCompactionState();
+      const messages = Array.from({ length: 6 }, (_, index) => ({ role: "user" as const, content: `message ${index}` }));
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const controller = new AbortController();
+        mockGenerateText.mockImplementationOnce(async (options) => {
+          expect(options.abortSignal).toBe(controller.signal);
+          controller.abort(new Error("cancelled"));
+          return { text: "late summary" } as Awaited<ReturnType<typeof generateText>>;
+        });
+        await expect(compactMessages(fakeModel, messages, "soft", undefined, controller.signal)).rejects.toThrow("cancelled");
+      }
+      expect(mockGenerateText).toHaveBeenCalledTimes(4);
+      expect(messages[0].content).toBe("message 0");
+      resetCompactionState();
+    });
+
     it("returns messages unchanged when 4 or fewer", async () => {
       const msgs = [
         { role: "user" as const, content: "hello" },

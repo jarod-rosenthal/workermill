@@ -347,15 +347,24 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       WORKERMILL_RESUMED: options.resume ? "true" : "false",
     });
 
-    // Set finishedAt on clean exit
-    process.on('exit', () => {
+  }
+
+  useEffect(() => {
+    // The listener belongs to this mounted session, not to every future mount.
+    const finishSession = () => {
       const session = sessionRef.current;
       if (session && !session.finishedAt) {
         session.finishedAt = new Date().toISOString();
         saveSession(session);
       }
-    });
-  }
+    };
+    process.on("exit", finishSession);
+    return () => {
+      process.off("exit", finishSession);
+      abortRef.current?.abort(new Error("Interactive session unmounted"));
+      finishSession();
+    };
+  }, []);
 
   // Push restored messages into React state after first render.
   useEffect(() => {
@@ -1004,8 +1013,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
 
           // ---- Finalise ---- //
+          await Promise.allSettled([...(pendingToolsByRunRef.current.get(runId) ?? [])]);
           let finalText = await stream.text;
           const usage = await stream.totalUsage;
+          // Some transports finish the iterator normally on abort and still
+          // resolve buffered text/usage. That is not a successful turn.
+          if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Cancelled", "AbortError");
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
           const turnElapsedMs = Date.now() - turnStartTime;
@@ -1131,6 +1144,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStreamingText("");
 
           // Persist assistant text in the session.
+          controller.signal.throwIfAborted();
           addMessage(session, "assistant", finalText);
           session.totalTokens += inputTokens + outputTokens;
           logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
@@ -1247,7 +1261,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               turnModel,
               plainMessages,
               compactionResult.level,
+              undefined,
+              controller.signal,
             );
+            controller.signal.throwIfAborted();
             session.messages = compacted.map((m) => ({
               role: m.role,
               content: m.content,
@@ -1272,7 +1289,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         } catch (err) {
           // --- Rate limit retry ---
           const rateLimit = isRateLimitError(err);
-          if (!controller.signal.aborted && rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          if (!controller.signal.aborted && rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES
+            && (pendingToolsByRunRef.current.get(runId)?.size ?? 0) === 0) {
             rateLimitRetries++;
             const waitSec = Math.ceil(rateLimit.retryAfterMs / 1000);
             logger.info("Rate limited, retrying", { attempt: rateLimitRetries, waitSec });
@@ -1356,6 +1374,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           pendingToolsByRunRef.current.delete(runId);
           const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
           if (isCurrentTurn()) {
+            // Cancellation leaves completed tool calls inspectable in the
+            // transcript, then clears the live area only after all owned work
+            // has drained. This avoids stale pending rows on the next turn.
+            const completedToolCalls = streamingToolCallsRef.current;
+            if (cancelled && completedToolCalls.length > 0) {
+              setMessages((previous) => [...previous, {
+                id: crypto.randomUUID(), role: "assistant" as const, content: "",
+                toolCalls: completedToolCalls, timestamp: new Date().toISOString(),
+              }]);
+            }
+            setStreamingText("");
+            setStreamingToolCalls([]);
             if (cleanupFailures.length > 0) {
               const detail = cleanupFailures.map((result) => String(result.reason)).join("; ");
               logger.error("Interactive turn cleanup failed", { error: detail });
@@ -1538,38 +1568,50 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- forceCompact() — user-triggered compaction -------- //
 
   const forceCompact = useCallback(async (focusInstructions?: string): Promise<{ before: number; after: number }> => {
+    if (abortRef.current) throw new Error("Wait for the current operation to finish before compacting.");
     const session = sessionRef.current;
     const model = modelRef.current;
     if (!model || !session || session.messages.length === 0) {
       return { before: 0, after: 0 };
     }
 
-    const beforeChars = session.messages.reduce((s, m) => s + m.content.length, 0);
-    const plainMessages = session.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus("thinking");
+    setStatusDetail("Compacting conversation…");
+    try {
+      const originalMessages = session.messages;
+      const beforeChars = originalMessages.reduce((s, m) => s + m.content.length, 0);
+      const plainMessages = originalMessages.map((m) => ({ role: m.role, content: m.content }));
+      const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions, controller.signal);
+      controller.signal.throwIfAborted();
+      if (sessionRef.current !== session || session.messages !== originalMessages) {
+        throw new Error("Session changed during compaction; history was not replaced.");
+      }
+      session.messages = compacted.map((m) => ({
+        role: m.role, content: m.content, timestamp: new Date().toISOString(),
+      }));
+      saveSession(session);
 
-    const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions);
-    session.messages = compacted.map((m) => ({
-      role: m.role,
-      content: m.content,
-      timestamp: new Date().toISOString(),
-    }));
-    saveSession(session);
+      runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
+        WORKERMILL_COMPACTION_LEVEL: "soft",
+        WORKERMILL_COMPACTION_TRIGGER: "manual",
+        WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
+        WORKERMILL_MESSAGES_AFTER: String(compacted.length),
+      });
 
-    runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
-      WORKERMILL_COMPACTION_LEVEL: "soft",
-      WORKERMILL_COMPACTION_TRIGGER: "manual",
-      WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
-      WORKERMILL_MESSAGES_AFTER: String(compacted.length),
-    });
-
-    const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
-    const afterTokens = Math.round(afterChars / 4);
-    // Update the displayed token count so the status bar reflects compaction
-    setTokens(afterTokens);
-    return { before: Math.round(beforeChars / 4), after: afterTokens };
+      const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
+      const afterTokens = Math.round(afterChars / 4);
+      setTokens(afterTokens);
+      return { before: Math.round(beforeChars / 4), after: afterTokens };
+    } finally {
+      controller.abort();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setStatus("idle");
+        setStatusDetail("");
+      }
+    }
   }, []);
 
   // ------- Tool count helper (for orchestrator) -------- //

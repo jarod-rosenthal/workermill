@@ -273,6 +273,11 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
       },
     });
     for await (const _ of stream.textStream) { /* drive stream */ }
+    // A transport can finish before a dispatched tool promise settles. Let
+    // successful work finish before finalization aborts the owned resources.
+    const settledTools = await Promise.allSettled([...pendingTools]);
+    const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failedTool) throw failedTool.reason;
     text = await stream.text;
     const totalUsage = usageOf(await stream.totalUsage);
     if (totalUsage.input !== 0 || totalUsage.output !== 0) usage = totalUsage;
@@ -280,6 +285,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     if (terminalToolError) throw terminalToolError;
     if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     const finishReason = await stream.finishReason;
+    if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
     if ((completedSteps >= stepLimit && lastStepHadToolCalls) || finishReason === "tool-calls") {
       return failure(start, "step_limit", "The configured maximum step count was exhausted", {
         sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: usage, costUsd: costs.getTotalCost(),

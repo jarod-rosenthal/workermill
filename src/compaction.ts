@@ -258,7 +258,9 @@ export async function compactMessages(
   messages: Message[],
   mode: "soft" | "hard",
   focusInstructions?: string,
+  signal?: AbortSignal,
 ): Promise<Message[]> {
+  signal?.throwIfAborted();
   if (messages.length === 0) return messages;
 
   // --- Micro-compaction pre-pass (free, no API call) ---
@@ -336,10 +338,12 @@ Do NOT preserve raw file contents, command output, or tool results — just note
   try {
     const result = await generateText({
       model,
+      abortSignal: signal,
       system: systemPrompt,
       prompt: summaryText,
     });
 
+    signal?.throwIfAborted();
     consecutiveFailures = 0;
 
     return [
@@ -348,6 +352,8 @@ Do NOT preserve raw file contents, command output, or tool results — just note
       ...toKeep,
     ];
   } catch {
+    // Cancellation must not replace history with the failure fallback.
+    signal?.throwIfAborted();
     consecutiveFailures++;
     // If summarization fails, just keep recent messages
     return toKeep;

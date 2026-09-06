@@ -17,6 +17,13 @@ const request = (overrides: Partial<Parameters<typeof runProcess>[0]> = {}) => (
 });
 
 describe("process runner", () => {
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])("rejects invalid timeout %s before spawning", async (timeoutMs) => {
+    const result = await runProcess(request({ timeoutMs, command: "printf should-not-run" }));
+    expect(result.reason).toBe("spawn_failed");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Process limits");
+  });
+
   it("does not block the event loop while a child is running", async () => {
     let heartbeats = 0;
     const heartbeat = setInterval(() => heartbeats++, 10);

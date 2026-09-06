@@ -198,6 +198,18 @@ function spawnFailed(
 }
 
 export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
+  // Reject invalid limits rather than allowing negative timeouts to disable
+  // cancellation or Node's timer overflow to turn a long timeout into 1 ms.
+  const invalidLimits = !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 0 || request.timeoutMs > 2_147_483_647
+    || !Number.isSafeInteger(request.terminationGraceMs) || request.terminationGraceMs < 0 || request.terminationGraceMs > 2_147_483_647
+    || !Number.isSafeInteger(request.maxOutputBytes) || request.maxOutputBytes < 0;
+  if (invalidLimits) {
+    return Promise.resolve({
+      reason: "spawn_failed", exitCode: null, stdout: "",
+      stderr: "Process limits must be finite non-negative integers; timer limits must not exceed 2147483647 ms.",
+      outputTruncated: false,
+    });
+  }
   if (request.signal.aborted) {
     return Promise.resolve({
       reason: "cancelled",

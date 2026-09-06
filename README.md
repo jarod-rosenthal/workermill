@@ -437,11 +437,9 @@ Connect external tools via the [Model Context Protocol](https://modelcontextprot
 ```json
 {
   "mcp": {
-    "servers": {
-      "my-server": {
-        "command": "npx",
-        "args": ["-y", "my-mcp-server"]
-      }
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "my-mcp-server"]
     }
   }
 }

@@ -6,6 +6,7 @@ import { VERSION } from "./version.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { runProcess } from "./engine/process-runner.js";
 
 interface MCPTool { name: string; description?: string; inputSchema: Record<string, unknown>; }
 interface PendingRequest { reject: (error: Error) => void; cleanup: () => void; resolve: (result: unknown) => void; }
@@ -377,6 +378,31 @@ export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> { re
 export function hasMCPServers(): boolean { return activeServers.size > 0; }
 export function detectDockerMCP(): MCPServerConfig | null { for (const command of ["/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe", "docker.exe", "docker"]) try { if (nodeExecSync(`"${command}" mcp server list 2>&1`, { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }).includes("enabled")) return { command, args: ["mcp", "gateway", "run"] }; } catch { /* unavailable */ } return null; }
 export function autoDetectMCPServers(existing: Record<string, MCPServerConfig>): Record<string, MCPServerConfig> { if (existing.docker) return existing; const docker = detectDockerMCP(); return docker ? { ...existing, docker } : existing; }
+
+/** Async discovery for active runs: probes remain responsive to cancellation. */
+export async function autoDetectMCPServersForRun(
+  existing: Record<string, MCPServerConfig>,
+  context: { runId: string; workspace: string; signal: AbortSignal },
+): Promise<Record<string, MCPServerConfig>> {
+  context.signal.throwIfAborted();
+  if (existing.docker) return existing;
+  for (const command of ["/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe", "docker.exe", "docker"]) {
+    context.signal.throwIfAborted();
+    // These executable candidates are constants, never model/user shell text.
+    const result = await runProcess({
+      runId: context.runId, cwd: context.workspace, signal: context.signal,
+      command: `"${command}" mcp server list`, timeoutMs: 5_000,
+      maxOutputBytes: 64 * 1024, terminationGraceMs: 500,
+    });
+    context.signal.throwIfAborted();
+    if (result.reason === "cancelled") throw new Error("MCP discovery cancelled");
+    if (result.reason === "exited" && result.exitCode === 0 && !result.outputTruncated
+      && `${result.stdout}${result.stderr}`.includes("enabled")) {
+      return { ...existing, docker: { command, args: ["mcp", "gateway", "run"] } };
+    }
+  }
+  return existing;
+}
 function emergencyStopServer(server: MCPServer): void {
   server.closed = true;
   rejectPending(server, new Error(`MCP server ${server.name} closed during CLI exit`));

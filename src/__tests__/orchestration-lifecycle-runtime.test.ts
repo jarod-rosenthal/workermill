@@ -27,6 +27,7 @@ vi.mock("../engine/tools/lsp.js", async (importOriginal) => ({
   shutdownLSPRun,
 }));
 
+import { CostTracker } from "../cost-tracker.js";
 import { executeStories } from "../orchestrator/execution.js";
 import { planStories } from "../orchestrator/planning.js";
 import type { OrchestrationOutput } from "../orchestrator/types.js";
@@ -122,7 +123,7 @@ describe("orchestration lifecycle runtime", () => {
       sorted: [{ id: "worker", title: "worker", persona: "worker", description: "run" }], completedStoryIds: [],
       config: { providers: { test: { model: "lifecycle-test" } }, default: "test", permissions: { allow: ["bash(*)"] } } as never,
       output, trustAll: true, sandboxed: true, userTask: "run", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
-      sessionAllow: new Set(), workingDir: workspace, costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      sessionAllow: new Set(), workingDir: workspace, costTracker: new CostTracker(),
       featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, runId: "lifecycle", ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
@@ -153,7 +154,7 @@ describe("orchestration lifecycle runtime", () => {
       sorted: [{ id: "cleanup", title: "cleanup", persona: "worker", description: "run" }], completedStoryIds,
       config: { providers: { test: { model: "lifecycle-test" } }, default: "test" } as never,
       output, trustAll: true, sandboxed: true, userTask: "run", context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
-      sessionAllow: new Set(), workingDir: workspace, costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      sessionAllow: new Set(), workingDir: workspace, costTracker: new CostTracker(),
       featureBranch: null, mainBranch: "main", abortSignal: new AbortController().signal, runId: "lifecycle", ticketOps: null,
       waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     })).rejects.toThrow("LSP close failed");

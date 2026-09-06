@@ -1456,6 +1456,21 @@ describe("handleSlashCommand", () => {
   // ---- /mcp ----
 
   describe("/mcp", () => {
+    it("lists configured run-owned servers without claiming they are connected or exposing credentials", () => {
+      vi.mocked(resolveConfig).mockReturnValueOnce({
+        providers: {}, default: "ollama",
+        mcp: { remote: { transport: "http", url: "https://example.invalid/private-token", headers: { Authorization: "Bearer secret" } } },
+      });
+      const ctx = createContext();
+      handleSlashCommand("/mcp", ctx);
+      const text = vi.mocked(ctx.addSystemMessage).mock.calls.map(([message]) => message).join("\n");
+      expect(text).toContain("MCP Servers (configured)");
+      expect(text).toContain("**remote** (http)");
+      expect(text).toContain("not a connection health check");
+      expect(text).not.toContain("private-token");
+      expect(text).not.toContain("Bearer secret");
+    });
+
     it("shows no MCP servers message", () => {
       const ctx = createContext();
       handleSlashCommand("/mcp", ctx);

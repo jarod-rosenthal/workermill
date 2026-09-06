@@ -86,7 +86,7 @@ Check that the provider has an API key set and the model ID matches what the pro
 
 ### MCP tools not loading
 
-`/mcp` shows the current MCP server status. If a server is configured but not connecting, check its stderr in `~/.workermill/logs/`. Docker Desktop's MCP gateway is auto-detected — make sure Docker Desktop is running and has at least one MCP server enabled.
+`/mcp` lists configured servers; configuration alone does not prove a connection is healthy. Run-owned connections close when that run settles. If a server cannot connect during a prompt, check the error and its stderr in `~/.workermill/logs/`. For Docker Desktop's auto-detected MCP gateway, make sure Docker Desktop is running and has at least one MCP server enabled.
 
 ### Anthropic rejects tools with `input_schema.type: Field required`
 

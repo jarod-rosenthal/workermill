@@ -367,6 +367,15 @@ export function handleMcpCommand(_arg: string, ctx: SlashCommandContext): void {
       "**MCP servers detected.** Tools will be available on your first prompt."
     );
   } else {
+    const configured = Object.entries(resolveConfig().mcp ?? {});
+    if (configured.length > 0) {
+      ctx.addSystemMessage([
+        "**MCP Servers (configured)**\n",
+        ...configured.map(([name, server]) => `- **${name}** (${server.transport ?? "stdio"})`),
+        "\nConnections and tool discovery belong to each active run and close when it settles. This list shows configuration, not a connection health check.",
+      ].join("\n"));
+      return;
+    }
     ctx.addSystemMessage(
       "**No MCP servers configured.**\n\n" +
       "MCP servers are auto-detected from Docker Desktop, or add them to `~/.workermill/cli.json`:\n\n" +

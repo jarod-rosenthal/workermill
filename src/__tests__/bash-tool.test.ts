@@ -14,8 +14,9 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
 
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { commandUsesDocker, execute, killActiveProcess } from "../engine/tools/bash.js";
+import { createToolDefinitions } from "../engine/tools/index.js";
 
-describe("bash tool docker sandbox handling", () => {
+describe("bash tool scoped sandbox handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(SandboxManager.isSupportedPlatform).mockReturnValue(true);
@@ -31,7 +32,7 @@ describe("bash tool docker sandbox handling", () => {
     expect(commandUsesDocker("echo docker compose up -d")).toBe(false);
   });
 
-  it("bypasses OS sandbox wrapping for docker commands", async () => {
+  it("does not let docker commands bypass explicit OS sandbox wrapping", async () => {
     const result = await execute({
       command: "docker || true",
       osSandbox: true,
@@ -39,7 +40,7 @@ describe("bash tool docker sandbox handling", () => {
       timeout: 5_000,
     });
 
-    expect(vi.mocked(SandboxManager.wrapWithSandbox)).not.toHaveBeenCalled();
+    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("docker || true", undefined, undefined, expect.any(AbortSignal));
     expect(result.success).toBe(true);
   });
 
@@ -51,7 +52,7 @@ describe("bash tool docker sandbox handling", () => {
       timeout: 5_000,
     });
 
-    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("printf ok");
+    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("printf ok", undefined, undefined, expect.any(AbortSignal));
     expect(result.success).toBe(true);
     expect(result.stdout).toBe("ok");
   });
@@ -88,5 +89,18 @@ describe("bash tool docker sandbox handling", () => {
 
     expect(result.success).toBe(true);
     expect(result.stdout).toContain("[output truncated: command output exceeded 10 MiB]");
+  });
+
+  it("turns a scoped teardown failure into a direct bash failure", async () => {
+    vi.mocked(SandboxManager.reset).mockRejectedValueOnce(new Error("sandbox reset failed"));
+    const result = await execute({ command: "printf ok", osSandbox: true, cwd: process.cwd(), timeout: 5_000 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("sandbox cleanup failed");
+  });
+
+  it("turns a scoped teardown failure into a registered verify failure", async () => {
+    vi.mocked(SandboxManager.reset).mockRejectedValueOnce(new Error("sandbox reset failed"));
+    const tools = createToolDefinitions(process.cwd(), undefined, "os") as Record<string, { execute: (input: { command: string }) => Promise<string> }>;
+    await expect(tools.verify.execute({ command: "printf ok" })).resolves.toContain("Failed to execute command");
   });
 });

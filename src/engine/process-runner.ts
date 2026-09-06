@@ -11,6 +11,8 @@ export interface ProcessRequest {
   terminationGraceMs: number;
   /** Observe output as it arrives without taking bounded capture ownership. */
   onOutput?: (stream: "stdout" | "stderr", chunk: Buffer) => void;
+  /** Observe the child PID without taking lifecycle ownership. */
+  onSpawn?: (pid: number) => void;
 }
 
 export interface ProcessResult {
@@ -279,6 +281,11 @@ export function runProcess(request: ProcessRequest): Promise<ProcessResult> {
       abortListener,
     });
     addActive(processState);
+    try {
+      request.onSpawn?.(pid);
+    } catch {
+      // Observers must not interfere with the process lifecycle.
+    }
 
     child.stdout?.on("data", (chunk: Buffer) => {
       try {
@@ -332,6 +339,18 @@ export function cancelRunProcesses(runId: string): void {
   const processes = activeByRun.get(runId);
   if (!processes) return;
   for (const process of [...processes]) requestTermination(process, "cancelled");
+}
+
+/**
+ * Exit handlers cannot await TERM/KILL timers. This is intentionally only a
+ * last-resort synchronous group kill; normal cancellation uses runProcess.
+ */
+export function killRunProcessGroupsSynchronously(runId?: string): void {
+  const runs = runId ? [activeByRun.get(runId)] : [...activeByRun.values()];
+  for (const processes of runs) {
+    if (!processes) continue;
+    for (const active of processes) signalGroup(active, "SIGKILL");
+  }
 }
 
 export function cancelLegacyProcesses(): void {

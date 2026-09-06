@@ -34,13 +34,26 @@ import {
   type PathGrant,
   type PathScope,
 } from "../path-policy.js";
+import type { SandboxCapabilities } from "../../config.js";
+import type { ToolExecutionContext } from "../tool-executor.js";
+import { createScopedCommandRunner } from "./bash.js";
 
 // Re-export all tool modules
 export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool, memoryTool, ticketTool };
+export { createScopedCommandRunner };
 
 export interface ToolDefinitionOptions {
   /** Explicit capabilities for attached/approved paths; never inferred from absoluteness. */
   extraPathGrants?: readonly PathGrant[];
+  /** Immutable run identity and cancellation supplied by a caller context. */
+  runId?: string;
+  signal?: AbortSignal;
+  /** Global-user-config capabilities, never derived from a model tool input. */
+  sandboxCapabilities?: SandboxCapabilities;
+  /** Reuse a caller-authorized canonical scope without re-granting paths. */
+  scope?: PathScope;
+  /** R10 plumbing only; policy wrapping remains the caller's responsibility. */
+  executionContext?: ToolExecutionContext;
 }
 
 function rewritePatchPaths(
@@ -90,9 +103,30 @@ export function createToolDefinitions(
   sandboxed: boolean | "os" = true,
   options: ToolDefinitionOptions = {},
 ) {
-  const osSandbox = sandboxed === "os";
-  const pathSandboxed = sandboxed === true || sandboxed === "os";
-  const pathScope: PathScope = createPathScope(workingDir, options.extraPathGrants ?? []);
+  const effectiveSandbox = options.executionContext?.effectiveSandbox;
+  const requestedSandbox = effectiveSandbox === "os" ? "os" : effectiveSandbox === "path" ? true : effectiveSandbox === "none" ? false : sandboxed;
+  const osSandbox = requestedSandbox === "os";
+  const pathSandboxed = requestedSandbox === true || requestedSandbox === "os";
+  // Snapshot once: raw capability grants become canonical only here. A reused
+  // scope is already an authorization decision and must not be widened again.
+  const capabilitySource: SandboxCapabilities | undefined = options.sandboxCapabilities ?? (options.executionContext && {
+    allowedNetworkDomains: options.executionContext.allowedNetworkDomains,
+    allowLocalBinding: options.executionContext.allowLocalBinding,
+    allowDockerSocket: options.executionContext.allowDockerSocket,
+  });
+  const sandboxCapabilities = capabilitySource && {
+    extraPathGrants: capabilitySource.extraPathGrants && [...capabilitySource.extraPathGrants],
+    allowedNetworkDomains: capabilitySource.allowedNetworkDomains && [...capabilitySource.allowedNetworkDomains],
+    allowLocalBinding: capabilitySource.allowLocalBinding,
+    allowDockerSocket: capabilitySource.allowDockerSocket,
+  };
+  const pathScope: PathScope = options.scope ?? options.executionContext?.scope ?? createPathScope(workingDir, [
+    ...(sandboxCapabilities?.extraPathGrants ?? []),
+    ...(options.extraPathGrants ?? []),
+  ]);
+  const runId = options.runId ?? options.executionContext?.runId;
+  const signal = options.signal ?? options.executionContext?.signal;
+  const commandRunner = createScopedCommandRunner({ sandbox: requestedSandbox === "os" ? "os" : false, scope: pathScope, capabilities: sandboxCapabilities });
   const resolveToolPath = (inputPath: string, access: PathAccess = "read"): string =>
     resolvePath(pathScope, inputPath, access, { enforceScope: pathSandboxed });
   return {
@@ -121,7 +155,11 @@ export function createToolDefinitions(
           cwd: canonicalCwd,
           timeout,
           osSandbox,
-          sandboxRoot: pathScope.workspace,
+          scope: pathScope,
+          sandboxCapabilities,
+          runId,
+          signal,
+          runProcess: commandRunner,
         });
         if (result.success) {
           return result.stdout || "(no output)";
@@ -165,6 +203,9 @@ export function createToolDefinitions(
           env: env as Record<string, string> | undefined,
           workspaceRoot: pathScope.workspace,
           enforceWorkspacePaths: pathSandboxed,
+          runId,
+          signal,
+          runProcess: commandRunner,
         });
         return `Shell started: ${result.shellId}, PID: ${result.pid}`;
       },
@@ -183,6 +224,8 @@ export function createToolDefinitions(
         const result = await bashOutputTool.execute({
           shellId,
           wait,
+          runId,
+          signal,
         });
         if (result.done) {
           return `Process ${result.status} (exit code: ${result.exitCode})\n${result.output}`;
@@ -204,6 +247,7 @@ export function createToolDefinitions(
         const result = await bashKillTool.execute({
           shellId,
           signal,
+          runId,
         });
         return result.killed ? "Process terminated" : "Process not found or already terminated";
       },
@@ -648,11 +692,19 @@ export function createToolDefinitions(
             : path.resolve(workingDir, cwd)
           : workingDir;
         const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
-        const result = await verifyTool.execute({
-          command,
-          cwd: canonicalCwd,
-          timeout,
-        });
+        let result: Awaited<ReturnType<typeof verifyTool.execute>>;
+        try {
+          result = await verifyTool.execute({
+            command,
+            cwd: canonicalCwd,
+            timeout,
+            runId,
+            signal,
+            runProcess: commandRunner,
+          });
+        } catch (error) {
+          return `Error: Failed to execute command: ${error instanceof Error ? error.message : String(error)}`;
+        }
         if (!result.success) {
           return `Error: ${result.error || result.summary}`;
         }

@@ -156,7 +156,8 @@ vi.mock("../engine/tools/index.js", () => ({
 }));
 
 // Mock safety
-vi.mock("../safety.js", () => ({
+vi.mock("../safety.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../safety.js")>(),
   isDangerous: vi.fn(() => null),
   READ_TOOLS: new Set(["read_file", "glob", "grep", "list_files"]),
   checkPermissionRules: vi.fn(() => "none"),
@@ -2657,7 +2658,13 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("allow mode=always adds tool to sessionAllow for future calls", async () => {
+  it("allow mode=always remembers only the approved worker command family", async () => {
+    const safety = await import("../safety.js");
+    const actualSafety = await vi.importActual<typeof import("../safety.js")>("../safety.js");
+    vi.mocked(safety.checkPermissionRules).mockImplementation(actualSafety.checkPermissionRules);
+    let exercisedPermissions = false;
+    const promptCounts: number[] = [];
+    let toolError: unknown;
     const planText = `\`\`\`json
 {
   "stories": [{ "id": "s1", "title": "Write files", "persona": "backend_developer", "description": "Create files." }]
@@ -2680,7 +2687,20 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       const tools = opts.tools as Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }>;
       if (tools?.bash) capturedBashTool = tools.bash.execute;
       return {
-        textStream: (async function* () { yield "done"; })(),
+        textStream: (async function* () {
+          try {
+            expect(capturedBashTool).toBeDefined();
+            await capturedBashTool!({ command: "npm run test" });
+            const confirmsBefore = vi.mocked(output.confirm).mock.calls.length;
+            promptCounts.push(confirmsBefore);
+            await capturedBashTool!({ command: "npm run build" });
+            promptCounts.push(vi.mocked(output.confirm).mock.calls.length);
+            await capturedBashTool!({ command: "npm test" });
+            promptCounts.push(vi.mocked(output.confirm).mock.calls.length);
+            exercisedPermissions = true;
+          } catch (error) { toolError = error; }
+          yield "done";
+        })(),
         text: Promise.resolve("done"),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
@@ -2699,20 +2719,17 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       return { allowed: true, mode: "always" as const };
     });
 
-    const config = createTestConfig();
+    const config = { ...createTestConfig(), review: { enabled: false } };
     await runOrchestration(config, "Create files", false, false, output);
-
-    if (capturedBashTool) {
-      const confirmsBefore = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // Second bash call should be auto-allowed (sessionAllow has it)
-      await capturedBashTool({ command: "echo hello" });
-      const confirmsAfter = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // No new confirm call needed since bash was added to sessionAllow
-      expect(confirmsAfter).toBe(confirmsBefore);
-    }
+    expect(capturedBashTool).toBeDefined();
+    expect(toolError).toBeUndefined();
+    expect(exercisedPermissions, output.errors.join("\n")).toBe(true);
+    expect(promptCounts.slice(0, 3)).toEqual([promptCounts[0], promptCounts[0], promptCounts[0]! + 1]);
+    vi.mocked(safety.checkPermissionRules).mockReturnValue("none");
   });
 
-  it("allow mode=trust adds all common tools to sessionAllow", async () => {
+  it("allow mode=trust permits subsequent worker commands without another prompt", async () => {
+    let exercisedPermissions = false;
     const planText = `\`\`\`json
 {
   "stories": [{ "id": "s1", "title": "Write files", "persona": "backend_developer", "description": "Work." }]
@@ -2720,7 +2737,6 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
 \`\`\``;
 
     let callCount = 0;
-    let capturedWriteTool: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
     let capturedBashTool: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
 
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
@@ -2737,7 +2753,15 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       // We only have bash and read_file in our mock tool definitions
       if (tools?.bash) capturedBashTool = tools.bash.execute;
       return {
-        textStream: (async function* () { yield "done"; })(),
+        textStream: (async function* () {
+          expect(capturedBashTool).toBeDefined();
+          await capturedBashTool!({ command: "echo hello" });
+          const confirmsBefore = vi.mocked(output.confirm).mock.calls.length;
+          await capturedBashTool!({ command: "npm test" });
+          expect(vi.mocked(output.confirm).mock.calls.length).toBe(confirmsBefore);
+          exercisedPermissions = true;
+          yield "done";
+        })(),
         text: Promise.resolve("done"),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
@@ -2752,17 +2776,10 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       return { allowed: true, mode: "trust" as const };
     });
 
-    const config = createTestConfig();
+    const config = { ...createTestConfig(), review: { enabled: false } };
     await runOrchestration(config, "Work on files", false, false, output);
-
-    if (capturedBashTool) {
-      const confirmsBefore = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // After trust mode, bash should be in sessionAllow and not prompt
-      await capturedBashTool({ command: "ls" });
-      const confirmsAfter = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // No additional confirm needed
-      expect(confirmsAfter).toBe(confirmsBefore);
-    }
+    expect(capturedBashTool).toBeDefined();
+    expect(exercisedPermissions).toBe(true);
   });
 
   it("simple boolean false from confirm denies tool and does NOT add to sessionAllow", async () => {

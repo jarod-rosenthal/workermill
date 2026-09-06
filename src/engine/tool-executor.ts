@@ -66,6 +66,9 @@ function acquire(workspace: string, signal: AbortSignal): Promise<() => void> {
   const current = new Promise<void>((resolve) => { releaseCurrent = () => { if (!released) { released = true; resolve(); } }; });
   const queued = prior.then(() => current);
   mutationQueues.set(workspace, queued);
+  void queued.then(() => {
+    if (mutationQueues.get(workspace) === queued) mutationQueues.delete(workspace);
+  });
 
   return new Promise<() => void>((resolve, reject) => {
     let settled = false;

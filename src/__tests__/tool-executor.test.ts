@@ -105,4 +105,30 @@ describe("executeToolCall", () => {
     await expect(executeToolCall("write_file", {}, () => "ok", makeContext({ postHook: () => { throw new Error("post"); } }))).rejects.toThrow("post");
     await expect(executeToolCall("write_file", {}, () => "next", makeContext())).resolves.toBe("next");
   });
+
+  it("does not let a cancelled waiter release an active mutation", async () => {
+    let releaseOwner!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const owner = executeToolCall("write_file", {}, () => new Promise<string>((resolve) => {
+      releaseOwner = () => resolve("owner");
+      markStarted();
+    }), makeContext());
+    await started;
+    const controller = new AbortController();
+    const skipped = vi.fn(() => "skipped");
+    const waiting = errorCode(executeToolCall("write_file", {}, skipped, makeContext({ signal: controller.signal })));
+    // Let the waiter join the queue behind the running mutation.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort();
+    expect(await waiting).toBe("cancelled");
+    const after = vi.fn(() => "after");
+    const next = executeToolCall("write_file", {}, after, makeContext());
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(skipped).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
+    releaseOwner();
+    await expect(owner).resolves.toBe("owner");
+    await expect(next).resolves.toBe("after");
+  });
 });

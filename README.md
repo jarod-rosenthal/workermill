@@ -413,7 +413,7 @@ WorkerMill gives its agents 23 tools — file operations, shell, search, git, we
 | `grep` | Search file contents with regex |
 | `ls` | Directory listing |
 | `bash` | Shell command execution (sandboxed) |
-| `bash_background` / `bash_output` / `bash_kill` | Long-running processes |
+| `bash_background` / `bash_output` / `bash_kill` | Run-owned background commands with bounded output and a 15-minute deadline; unavailable in OS sandbox mode |
 | `git` | Branch, commit, diff, log operations |
 | `lsp` | Language server — diagnostics, definitions, references, hover, symbols |
 | `web_search` | Search the web |

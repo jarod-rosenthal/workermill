@@ -188,6 +188,6 @@ Pre- and post-tool hooks run shell commands or HTTP requests around tool executi
 
 ## What the CLI Is Not
 
-- Not a server — nothing runs in the background
+- Not a hosted service — no persistent WorkerMill daemon is required; a CLI run can still start subprocesses, MCP servers, and optional live-view services
 - Not a SaaS — no account, no cloud sync, no telemetry
 - Not an IDE plugin — it's a terminal-native tool

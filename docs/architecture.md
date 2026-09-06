@@ -145,6 +145,14 @@ On top of modes, **rule-based permissions** accept pattern matching:
 
 Rule matching evaluates deny → ask → allow. An ask rule takes precedence over an allow rule.
 
+### Adding a tool execution entry point
+
+Use `decideToolPermission` from `src/engine/tool-policy.ts` for decisions and `executeToolCall` from `src/engine/tool-executor.ts` to execute an authorized call. Supply a per-run context with a canonical `PathScope`, abort signal, current permission-state getter, and optional prompt/hook/checkpoint callbacks. Keep UI and model-stream concerns in the caller; shared policy must not import React at runtime.
+
+The executor checks permission and cancellation before callbacks. Authorized calls run the pre-hook before checkpointing and mutation, then post-hook and completion callbacks, releasing the workspace mutation lock even on errors. A denied call invokes none of those callbacks. Without a prompt callback, an ask decision throws `ToolExecutionError` with code `permission_required`; it never assumes approval. Tool closures must propagate the same signal to subprocesses and other cancellable operations.
+
+Do not copy the decision table into new adapters or wrap already-governed tools repeatedly. Deferred and MCP tools need the same boundary as built-ins; unknown tools are not assumed read-only. See `tool-policy.test.ts` and `tool-executor.test.ts` for executable contract examples.
+
 ## Context Management
 
 Long conversations hit context window limits. Three layers of compaction run automatically:

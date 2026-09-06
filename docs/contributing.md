@@ -98,6 +98,10 @@ workermill/
 │   ├── schedule.ts            # /schedule cron tasks
 │   ├── engine/                # AI model factory, tools, types
 │   │   ├── model-factory.ts   # Provider → LanguageModel construction
+│   │   ├── process-runner.ts  # Async subprocess lifetime and run-scoped cancellation
+│   │   ├── path-policy.ts     # Canonical explicit-file scope and grants
+│   │   ├── tool-policy.ts     # Shared permission decision table
+│   │   ├── tool-executor.ts   # Permission/hook/checkpoint execution ordering
 │   │   └── tools/             # All agent tools + tool-metadata.ts
 │   ├── providers/             # Provider registry and pricing engines
 │   ├── ui/                    # React + Ink UI components

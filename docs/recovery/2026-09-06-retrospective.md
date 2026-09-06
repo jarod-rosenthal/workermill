@@ -2,7 +2,9 @@
 
 Prepared on 2026-09-06 from the local repository, all 38 registered worktrees, the prior coordinator and final worker session records, and a fresh test run. Implementation snapshot: `22ba7d7c0d12dd9bed85586fcbf6f966030245c7`. This is an incident/recovery document requested by the user, not a product guarantee or release qualification.
 
-## Findings
+The findings below describe the initial audit snapshot. Implementation resumed under the user's later instruction; see [Continuation results](#continuation-results) and the current [handoff](../../HANDOFF.md) for repaired state.
+
+## Initial audit findings
 
 The prior work was **not erased**. WorkerMill has 146 commits on `reliability/core` beyond the `9e317488` baseline, affecting 163 paths. A further R15b worker commit survives on its own branch. Repeating eleven hours of implementation is not the recovery plan.
 
@@ -214,8 +216,35 @@ Future checkpoints should answer: what is authorized now, what commit was tested
 
 Full host transcripts/databases are not copied into the repo; the report preserves the required facts without credentials, private tool payloads, or hidden reasoning. Local files survive this conversation restart, but they are not an off-machine backup. No claim of remote backup is made.
 
-## Recovery deliverable status
+## Initial recovery deliverable status
 
 The retrospective, root handoff, inventory, historical evidence, fresh validation evidence, and continuity instructions have been written locally. `AGENTS.md` and the docs index link the recovery entry points. The queue includes a recovery snapshot so historical completed-task entries cannot be mistaken for current qualification. Implementation source remains at `22ba7d7c`; the known runtime failures are documented and unfixed. No new implementation batch is active.
 
 Final documentation verification: 32 documentation/hook tests passed (exit 0); local Markdown links, JSON parsing, and `git diff --check` passed. This does not change the failed implementation qualification.
+
+
+## Continuation results
+
+Updated 2026-09-06 22:11 UTC. The user authorized finishing the remaining work as far as possible. Existing implementation and worktrees were preserved; the recovery continued from saved changes. No push, PR, release, tag, paid model evaluation, or worktree deletion was performed.
+
+| Work accepted locally | Result and evidence |
+| --- | --- |
+| Broken orchestration persistence | Integrated saved R15b events and repaired active/terminal manifest finalization, identity preflight, retry lineage, failure/cancellation outcomes, and final UI/result agreement. [R15 acceptance](r15-acceptance.md). |
+| Browser test failure | The fake browser published DevToolsActivePort asynchronously, racing a 100ms startup timeout/poll. Synchronous fixture publication fixed it with the assertion preserved; speculative production changes stayed unintegrated. |
+| Superseded runtime code | Reconciled removed tests and restored meaningful MCP remote-transport/emergency coverage. [R23 acceptance](r23-acceptance.md). |
+| Runtime contract tests | Added an installed-SDK scripted model and actual adapter/registered-tool tests; mounted chat, lifecycle, resume, and child checks. Removed copied helpers with an explicit [coverage map](r16-coverage.md), including which drivers remain mocked. |
+| Usage foundation | Added call identities, first-observation deduplication, missing/partial/reported usage, unknown/local/known pricing, cache arithmetic, and partial observed costs. Existing rates and model defaults were preserved. |
+| Chat and headless accounting | Included actual main/child/compaction calls, retained interrupted usage, preserved resumed totals, and distinguished missing usage from reported zero. |
+| Planning accounting | Included spec checks, planner/extraction, critic score/refinement, and fallback/retry observations. Worker/reviewer/revision and final ledger storage remained the next batch at this checkpoint. |
+| Installed package and CI | Packed and installed outside the source checkout; help/version, headless JSON, SIGINT and PTY active-request cancellation plus subsequent /status passed. Linux/macOS and Node22.12.0/22.22.2 CI matrix configured. Remote jobs were not executed. |
+
+The latest combined implementation checkpoint `38917ed6` passed **1,600 tests, zero failures, one existing skip across110files**, plus typecheck/build, on Node22.22.2/Linux with the exact locked dependencies. The package/PTY suite passed four tests at `a9b0976e`; final package qualification must be rerun after remaining production work. Lower test counts than earlier checkpoints reflect documented removal of mirrored helper tests, not omitted failed tests.
+
+Two additional process problems were identified and contained:
+
+- Delegated escalated tool requests stalled without usable execution results. The coordinator interrupted those waits and moved native checks to root tools. These were coordinator interruptions, not new user cancellations. Worker commits remain candidates until root qualifies their combined tree.
+- The pre-existing installed dependency tree differed from package-lock.json (`fast-uri`3.1.0 installed versus3.1.5 locked; Vite8.0.8 versus8.2.2). An independent `npm ci` in the qualification worktree populated the exact graph. Core's original dependencies were preserved, and the locked graph passed full checks. Package fixture failures also exposed incorrect startup request counting and combined input/Enter events; corrected fixtures now assert actual model-request cancellation and subsequent UI responsiveness.
+
+Planning integration briefly failed91orchestration tests because its old hand-written CostTracker mock lacked recordCall. Removing that mock made the same assertions exercise the real tracker; all113orchestration tests then passed with the existing skip. The failure was checkpointed before correction, and no downstream implementation was dispatched while the integrated checks were red.
+
+Remaining required work at this checkpoint: finish worker/reviewer/revision accounting, persist and display complete run ledger metadata, qualify whole-run sums, align final reference/migration documentation, and perform final release-candidate review. Optional run budgets and comparison harness/live measurements remain outside the first release scope unless explicitly added. This retrospective does not claim a completed release or explain the host's original safety-block trigger beyond the recorded error.

@@ -147,3 +147,17 @@ Base8cd7c733 dirty R15 final-outcome/UI agreement plus permission failure eviden
 Base `8cd7c733` plus this commit's bounded diff: R15/R23 accepted. Combined `npm test` exit0, 1655 passed/0 failed/1 pre-existing skip,107files,30.99s; `npm run typecheck` exit0; build passed before final timestamp-only correction and will be repeated at next integration boundary. Evidence: `docs/recovery/r15-acceptance.md`, `r23-acceptance.md`. UI/program completion now uses the finalized persisted outcome; terminal reason visible in run details; partial/retry/blocked/clock tests passed. MCP transport and emergency-stop gaps restored. No active workers.
 
 Next batch: R16a scripted-model fixture (test-harness lock) and R18a ledger/types only (cost lock), in separate worktrees from this committed integration. Coordinator owns integration and checkpoint docs, no overlapping adapter changes. No live calls or pricing/default changes. R16/R18 parents remain in progress until suffix packages integrate.
+
+### Prepared successor inventory (read-only)
+
+R18b: headless success-only addUsage is `run-command.ts:284`; chat success-only addUsage `ui/useAgent.ts:1093`; child callback already exists as `onSubAgentUsage` through `engine/tools/index.ts:60,835` to `sub-agent.ts:284`; compaction generateText has no usage callback (`compaction.ts:338`). Chat invokes auto and manual compaction. Preserve reported failed/partial usage, record each invocation once in finalization, and distinguish missing usage. R18c: planner/critic aggregates added in `orchestrator.ts`, workers/review/revisions in adapters; session stores numeric summaries in `session.ts`, manifest has a strict allowlist/schema, both need explicit ledger completeness metadata. New call IDs should identify SDK invocations and document step aggregation.
+
+R17 prep: current CI only Ubuntu/Node22 and duplicates lint/typecheck; existing headless CLI tests run source through tsx with a node_modules symlink, so they do not qualify a packed install. Package already has node-pty and engines>=22.12; matrix must explicitly include22.12.0/22.22.2 on Linux/macOS. Installed-package tests need built dist and offline scripted transport, no keys/live calls.
+
+### Worker wait intervention — 2026-09-06T20:56:08.503955+00:00
+
+Both worker full-test tool calls stopped returning output for over five minutes and provided no process session IDs. Coordinator interrupted both waits; no full-test pass is claimed. Saved edits/focused checks remain intact. Workers are producing candidate commits after bounded corrections and focused/typecheck results; full acceptance remains coordinator-owned on combined core. Do not restart duplicate worker full suites. R16a focused corrected4/4 and typecheck pass; R18a corrections preserve unknown-price token totals/local LMStudio/partial completeness before handoff.
+
+## R16a/R18a accepted and successor batch
+
+Implementation8ab95df8 (R16a e9184308, R18a8ab95df8). Full suite1665passed0failed1skip108files31.34s; typecheck/buildexit0. Original worker full waits aborted; this combined run qualifies both candidates. Next R16b owns real-SDK governance tests only. R18b split before implementation into b1 child/compaction usage events, b2 headless, b3 chat, preserving sequential runtime ownership and150-350line target. Coordinator owns integration; no parallel adapter writers. All suffixes require combined qualification before advancing.

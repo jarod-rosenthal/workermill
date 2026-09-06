@@ -59,13 +59,6 @@ interface Collection {
 }
 
 const activeServers = new Map<string, MCPServer>();
-const legacy: Collection = {
-  servers: activeServers, starting: new Map(), startingServers: new Map(), ownedServers: new Set(), workspace: process.cwd(), startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
-  requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS, maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES, maxStderrBytes: DEFAULT_MAX_STDERR_BYTES,
-  terminationGraceMs: DEFAULT_TERMINATION_GRACE_MS, closed: false,
-};
-let pendingConfig: Record<string, MCPServerConfig> | null = null;
-let lazyStartPromise: Promise<void> | null = null;
 type GitHubRepoContext = { owner: string; repo: string };
 const gitHubRepoContexts = new Map<string, GitHubRepoContext | null>();
 const runCollections = new Set<Collection>();
@@ -175,7 +168,6 @@ function listenToProcess(server: MCPServer, collection: Collection): void {
     rejectPending(server, new Error(`MCP server ${server.name} exited`));
     // The shell may be gone while descendants retain its process group. Keep
     // this owned instance reachable until closeServer verifies group teardown.
-    if (collection === legacy && collection.servers.get(server.name) === server) collection.servers.delete(server.name);
     void closeServer(collection, server).catch((error) => logger.error(`MCP ${server.name} teardown failed: ${error instanceof Error ? error.message : String(error)}`));
   });
 }
@@ -362,22 +354,15 @@ export function createMCPRunResources(options: MCPRunResourcesOptions): MCPRunRe
   };
 }
 
-// Compatibility exports stay process-global until their callers migrate.
-export async function startMCPServer(name: string, config: MCPServerConfig): Promise<MCPServer> {
-  legacy.workspace = process.cwd();
-  return startServer(legacy, name, config);
+/**
+ * Process-global status remains for the UI and system prompt. MCP execution
+ * is run-owned; these APIs deliberately do not expose another run's tools.
+ */
+export function hasMCPRegistered(): boolean { return activeServers.size > 0; }
+export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> {
+  return Array.from(activeServers, ([serverName, server]) => server.tools.map((tool) => ({ serverName, tool }))).flat();
 }
-export async function startAllMCPServers(config: Record<string, MCPServerConfig>): Promise<void> { await Promise.all(Object.entries(config).map(async ([name, server]) => { try { await startMCPServer(name, server); } catch (error) { logger.error(`Failed to start MCP server "${name}": ${error instanceof Error ? error.message : String(error)}`); } })); }
-export function registerMCPServers(config: Record<string, MCPServerConfig>): void { if (Object.keys(config).length > 0) pendingConfig = config; }
-export async function ensureMCPStarted(): Promise<void> { if (!pendingConfig) return; if (lazyStartPromise) return lazyStartPromise; const config = pendingConfig; pendingConfig = null; lazyStartPromise = startAllMCPServers(config); try { await lazyStartPromise; } finally { lazyStartPromise = null; } }
-export function hasMCPRegistered(): boolean { return pendingConfig !== null || activeServers.size > 0; }
-export async function callMCPTool(server: string, tool: string, args: Record<string, unknown>): Promise<string> { await ensureMCPStarted(); return callTool(legacy, server, tool, args); }
-export async function getMCPToolDefinitionsAsync(): Promise<Record<string, AnyToolDef>> { await ensureMCPStarted(); return getMCPToolDefinitions(); }
-export function getMCPToolDefinitions(): Record<string, AnyToolDef> { return getToolDefinitions(legacy, callMCPTool); }
-export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> { return getTools(legacy); }
 export function hasMCPServers(): boolean { return activeServers.size > 0; }
-export function detectDockerMCP(): MCPServerConfig | null { for (const command of ["/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe", "docker.exe", "docker"]) try { if (nodeExecSync(`"${command}" mcp server list 2>&1`, { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }).includes("enabled")) return { command, args: ["mcp", "gateway", "run"] }; } catch { /* unavailable */ } return null; }
-export function autoDetectMCPServers(existing: Record<string, MCPServerConfig>): Record<string, MCPServerConfig> { if (existing.docker) return existing; const docker = detectDockerMCP(); return docker ? { ...existing, docker } : existing; }
 
 /** Async discovery for active runs: probes remain responsive to cancellation. */
 export async function autoDetectMCPServersForRun(
@@ -421,7 +406,6 @@ export function stopAllMCPServers(): void {
     await Promise.allSettled([...collection.starting.values()]);
     runCollections.delete(collection);
   })();
-  for (const server of legacy.ownedServers) emergencyStopServer(server);
   activeServers.clear();
 }
 export function getMCPServerInfo(): Array<{ name: string; transport: string; toolCount: number }> { return Array.from(activeServers.values()).map((server) => ({ name: server.name, transport: server.transport, toolCount: server.tools.length })); }

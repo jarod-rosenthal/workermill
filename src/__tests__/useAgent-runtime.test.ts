@@ -15,10 +15,7 @@ vi.mock("../engine/model-factory.js", () => ({
   ensureOllamaContext: vi.fn(), ensureLmStudioContext: vi.fn(),
 }));
 vi.mock("../mcp-client.js", () => ({
-  getMCPToolDefinitions: () => ({}), stopAllMCPServers: vi.fn(),
-  autoDetectMCPServers: () => ({}), registerMCPServers: vi.fn(),
   autoDetectMCPServersForRun: async () => ({}),
-  hasMCPRegistered: () => false, ensureMCPStarted: vi.fn(async () => {}),
   createMCPRunResources: (options: { signal: AbortSignal }) => ({
     register: vi.fn(), ensureStarted: () => ensureRunMcp(options.signal),
     getToolDefinitions: () => runMcpTools, getTools: () => [], close: () => closeRunMcp(),

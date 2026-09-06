@@ -15,7 +15,6 @@ import {
   isGitRepo,
   getCurrentBranch,
   createFeatureBranch,
-  commitStoryChanges,
   getDiffForReview,
   returnToOriginalBranch,
   getHeadHash,
@@ -114,39 +113,6 @@ describe("git-ops", () => {
     it("uses Jira key as prefix when provided", () => {
       const branch = createFeatureBranch(repoDir, "add login", "ACME-123");
       expect(branch).toBe("ACME-123/add-login");
-    });
-  });
-
-  describe("commitStoryChanges()", () => {
-    it("commits with Story: S{N} trailer", () => {
-      fs.writeFileSync(path.join(repoDir, "app.ts"), "console.log('hello');\n");
-
-      const hash = commitStoryChanges(repoDir, 1, "Add app entry", "frontend_developer");
-      expect(hash).toBeTruthy();
-      expect(hash.length).toBeGreaterThan(0);
-
-      // Verify commit message
-      const msg = execSync("git log -1 --format=%B", {
-        cwd: repoDir,
-        encoding: "utf-8",
-      }).trim();
-      expect(msg).toContain("Story: S1");
-      expect(msg).toContain("feat: Story 1 - Add app entry");
-      expect(msg).toContain("Frontend Developer");
-    });
-
-    it("returns empty string when nothing to commit", () => {
-      // Ensure .gitignore already exists so ensureGitignoreSafety doesn't create changes
-      const gitignorePath = path.join(repoDir, ".gitignore");
-      fs.writeFileSync(
-        gitignorePath,
-        "node_modules/\n.workermill/\ndist/\n.env\n.env.local\n*.log\n",
-      );
-      execSync("git add .gitignore", { cwd: repoDir, stdio: "pipe" });
-      execSync('git commit -m "add gitignore"', { cwd: repoDir, stdio: "pipe" });
-
-      const hash = commitStoryChanges(repoDir, 1, "Nothing", "planner");
-      expect(hash).toBe("");
     });
   });
 

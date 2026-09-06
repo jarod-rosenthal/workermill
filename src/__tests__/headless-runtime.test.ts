@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 const mcpWrite = vi.fn(async () => "mcp write");
+const ensureMcpRun = vi.fn(async () => {});
 const closedMcpRuns: string[] = [];
 const closeMcpRun = vi.fn(async (runId: string) => { closedMcpRuns.push(runId); });
 
@@ -13,16 +14,11 @@ vi.mock("../engine/model-factory.js", () => ({
 }));
 
 vi.mock("../mcp-client.js", () => ({
-  autoDetectMCPServers: (config: Record<string, unknown>) => config,
   autoDetectMCPServersForRun: async (config: Record<string, unknown>) => config,
-  startAllMCPServers: vi.fn(async () => {}),
   stopAllMCPServers: vi.fn(),
-  getMCPToolDefinitions: () => ({
-    mcp__test__write: { execute: mcpWrite },
-  }),
   createMCPRunResources: (options: { runId: string }) => ({
     register: vi.fn(),
-    ensureStarted: () => startAllMCPServers({}),
+    ensureStarted: () => ensureMcpRun(),
     getToolDefinitions: () => ({ mcp__test__write: { execute: mcpWrite } }),
     getTools: () => [],
     close: () => closeMcpRun(options.runId),
@@ -40,7 +36,6 @@ vi.mock("../engine/tools/bash-background.js", async (importOriginal) => {
 });
 
 import { streamText } from "ai";
-import { startAllMCPServers } from "../mcp-client.js";
 import { createModel } from "../engine/model-factory.js";
 import { clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import { runCommand } from "../run-command.js";
@@ -82,8 +77,8 @@ describe("headless runtime governance", () => {
     closedMcpRuns.length = 0;
     closeMcpRun.mockReset();
     closeMcpRun.mockImplementation(async (runId: string) => { closedMcpRuns.push(runId); });
-    vi.mocked(startAllMCPServers).mockReset();
-    vi.mocked(startAllMCPServers).mockResolvedValue();
+    ensureMcpRun.mockReset();
+    ensureMcpRun.mockResolvedValue();
     vi.mocked(createModel).mockClear();
     clearCheckpoints();
   });
@@ -402,12 +397,12 @@ describe("headless runtime governance", () => {
     );
 
     expect(result.reason).toBe("cancelled");
-    expect(startAllMCPServers).not.toHaveBeenCalled();
+    expect(ensureMcpRun).not.toHaveBeenCalled();
     expect(createModel).not.toHaveBeenCalled();
   });
 
   it("cleans up a partially started MCP runtime and removes SIGINT listeners on setup failure", async () => {
-    vi.mocked(startAllMCPServers).mockRejectedValueOnce(new Error("partial MCP startup"));
+    ensureMcpRun.mockRejectedValueOnce(new Error("partial MCP startup"));
     const listenersBefore = process.listenerCount("SIGINT");
     const partialStart = await runCommand(
       { prompt: "mcp", singlePrompt: true },

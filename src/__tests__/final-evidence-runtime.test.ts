@@ -35,10 +35,6 @@ vi.mock("../hooks.js", () => ({
 vi.mock("../mcp-client.js", () => ({
   autoDetectMCPServersForRun: vi.fn(async (value: unknown) => value),
   createMCPRunResources: () => ({ register: vi.fn(), ensureStarted: vi.fn(async () => {}), getToolDefinitions: () => ({}), close: vi.fn(async () => {}) }),
-  startAllMCPServers: vi.fn().mockResolvedValue(undefined),
-  stopAllMCPServers: vi.fn(), autoDetectMCPServers: vi.fn((value: unknown) => value),
-  getMCPToolDefinitions: vi.fn(() => ({})), getMCPToolDefinitionsAsync: vi.fn().mockResolvedValue({}),
-  registerMCPServers: vi.fn(), ensureMCPStarted: vi.fn().mockResolvedValue(undefined), hasMCPRegistered: vi.fn(() => false),
 }));
 vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({ modelId: "scripted", provider: "ollama" })),

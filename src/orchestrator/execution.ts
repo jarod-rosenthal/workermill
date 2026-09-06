@@ -411,7 +411,7 @@ export function fitWorkerPromptToContext(args: {
 
 /**
  * Check tool permission using output.confirm() instead of readline.
- * Mirrors the logic from PermissionManager but uses the callback-based output interface.
+ * Uses the shared callback-based tool-policy interface.
  */
 export async function checkToolPermission(
   toolName: string,

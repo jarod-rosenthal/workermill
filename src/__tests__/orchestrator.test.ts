@@ -55,14 +55,7 @@ vi.mock("../mcp-client.js", () => ({
     getToolDefinitions: vi.fn(() => ({})), close: vi.fn().mockResolvedValue(undefined),
   })),
   autoDetectMCPServersForRun: vi.fn(async (existing: Record<string, unknown>) => existing),
-  startAllMCPServers: vi.fn().mockResolvedValue(undefined),
-  getMCPToolDefinitions: vi.fn(() => ({})),
-  getMCPToolDefinitionsAsync: vi.fn().mockResolvedValue({}),
   stopAllMCPServers: vi.fn(),
-  autoDetectMCPServers: vi.fn((existing: Record<string, unknown>) => existing),
-  registerMCPServers: vi.fn(),
-  ensureMCPStarted: vi.fn().mockResolvedValue(undefined),
-  hasMCPRegistered: vi.fn(() => false),
 }));
 
 // Observe the real completion boundary without replacing its behavior.

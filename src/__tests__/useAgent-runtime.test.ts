@@ -375,6 +375,37 @@ describe("mounted chat execution adapter", () => {
     expect(agent.messages.at(-1)?.content).toContain("cleanup failed");
   });
 
+  it("persists one reported call with the active turn model", async () => {
+    script(async () => {});
+    await mount();
+    agent.submit("record usage", undefined, { modelOverride: { provider: "test", model: "turn-model" } });
+    await vi.waitFor(() => expect(streamText).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(agent.status).toBe("idle"));
+    expect(agent.session.usageLedger).toMatchObject({
+      totals: { callCount: 1, reportedUsageCalls: 1, inputTokens: 1, outputTokens: 1 },
+      calls: [expect.objectContaining({ provider: "test", model: "turn-model", usageState: "reported" })],
+    });
+    expect(agent.session.totalTokens).toBe(2);
+  });
+
+  it("retains completed-step usage as partial when a stream fails", async () => {
+    vi.mocked(streamText).mockImplementation((options) => {
+      const callback = (options as unknown as { onStepFinish?: (event: { usage: unknown }) => void }).onStepFinish;
+      callback?.({ usage: { inputTokens: 11, outputTokens: 4 } });
+      return {
+        textStream: (async function* () { throw new Error("transport failed"); })(),
+        text: Promise.resolve(""), totalUsage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }),
+      } as never;
+    });
+    await mount();
+    agent.submit("fail after step");
+    await vi.waitFor(() => expect(streamText).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(agent.status).toBe("idle"));
+    expect(agent.session.usageLedger).toMatchObject({
+      totals: { callCount: 1, partialUsageCalls: 1, inputTokens: 11, outputTokens: 4 },
+    });
+  });
+
   it("queues simultaneous prompts instead of losing an unresolved request", async () => {
     script(async (tools) => {
       await Promise.all([

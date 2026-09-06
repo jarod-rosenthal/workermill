@@ -21,11 +21,14 @@ import {
   addMessage,
   loadLatestSession,
   forkSession,
+  appendUsageLedger,
   type Session,
 } from "../session.js";
 import { loadProjectMeta } from "../project-data.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
+import type { CallSnapshot } from "../cost-tracker.js";
 import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
 import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
@@ -170,6 +173,37 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const liveViewUrlRef = useRef<string | null>(null);
   const pendingSystemMessagesRef = useRef<string[]>([]);
   const pendingToolsByRunRef = useRef(new Map<string, Set<Promise<void>>>());
+
+  const recordUsage = useCallback((session: Session, snapshot: CallSnapshot): void => {
+    if (!costTrackerRef.current.recordCall(snapshot)) return;
+    const ledger = costTrackerRef.current.getLedgerSnapshot();
+    const call = ledger.calls.find((entry) => entry.callId === snapshot.callId);
+    if (!call) return;
+    session.usageLedger = appendUsageLedger(session.usageLedger, { calls: [call], totals: ledger.totals });
+    session.totalTokens += (call.usage?.inputTokens ?? 0) + (call.usage?.outputTokens ?? 0);
+    session.totalCostUsd = (session.totalCostUsd ?? 0) + (call.estimatedApiCost ?? 0);
+    const role = snapshot.persona.includes("planner") ? "planner"
+      : snapshot.persona.includes("review") ? "reviewer" : "worker";
+    const inputTokens = call.usage?.inputTokens ?? 0;
+    const outputTokens = call.usage?.outputTokens ?? 0;
+    const costUsd = call.estimatedApiCost ?? 0;
+    const modelKey = `${call.provider}/${call.model}`;
+    const models = session.costByModel ? [...session.costByModel] : [];
+    const modelEntry = models.find((entry) => entry.key === modelKey);
+    if (modelEntry) {
+      modelEntry.inputTokens += inputTokens; modelEntry.outputTokens += outputTokens; modelEntry.costUsd += costUsd;
+      if (!modelEntry.roles.includes(role)) modelEntry.roles.push(role);
+    } else {
+      models.push({ key: modelKey, provider: call.provider, model: call.model, inputTokens, outputTokens, costUsd, roles: [role] });
+    }
+    session.costByModel = models;
+    const roles = session.costByRole ?? {
+      worker: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, planner: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, reviewer: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    };
+    roles[role].inputTokens += inputTokens; roles[role].outputTokens += outputTokens; roles[role].costUsd += costUsd;
+    session.costByRole = roles;
+    setCost(session.totalCostUsd);
+  }, []);
 
   // Deferred tool loading — MCP tools start deferred, promoted on tool_search
   const deferredToolsRef = useRef<DeferredToolEntry[]>([]);
@@ -369,6 +403,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // Push restored messages into React state after first render.
   useEffect(() => {
     const s = sessionRef.current as Session & { _restored?: Message[] };
+    setCost(s.totalCostUsd ?? 0);
     const pending = pendingSystemMessagesRef.current.splice(0);
     if (s._restored) {
       const restored = s._restored;
@@ -563,7 +598,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * 3. The original execute runs.
    * 4. Status is updated to "done" (or "denied").
    */
-  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, mcpTools: Record<string, AnyToolDef>, browser: BrowserRunResources): Record<string, AnyToolDef> => {
+  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, session: Session, provider: string, modelName: string, mcpTools: Record<string, AnyToolDef>, browser: BrowserRunResources): Record<string, AnyToolDef> => {
     // Factory tools are rebuilt for every run context. In particular, bash and
     // child tools must receive this turn's signal and run ID, not a closure
     // created during hook initialization.
@@ -576,6 +611,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         allowedNetworkDomains: context.allowedNetworkDomains,
         allowLocalBinding: context.allowLocalBinding,
         allowDockerSocket: context.allowDockerSocket,
+      },
+      onSubAgentUsage: async (childUsage) => {
+        recordUsage(session, {
+          callId: childUsage.callId,
+          persona: "child",
+          provider,
+          model: modelName,
+          usage: childUsage.usage,
+          usageComplete: childUsage.usageComplete,
+        });
       },
     }) as Record<string, AnyToolDef>;
 
@@ -800,18 +845,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       };
     }
     return wrapped;
-  }, [options.sandboxed]);
+  }, [options.sandboxed, recordUsage]);
 
   /**
    * Return the tool set that should be active for this turn, respecting plan
    * mode which restricts to read-only tools.
    * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, mcpResources: MCPRunResources, browser: BrowserRunResources): Promise<Record<string, AnyToolDef>> => {
+  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, session: Session, provider: string, modelName: string, mcpResources: MCPRunResources, browser: BrowserRunResources): Promise<Record<string, AnyToolDef>> => {
     // Lazy-start only resources owned by this turn; another chat/headless run
     // must never supply, start, or close this tool map.
     await mcpResources.ensureStarted();
-    const all = buildPermissionedTools(context, model, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>, browser);
+    const all = buildPermissionedTools(context, model, session, provider, modelName, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>, browser);
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
@@ -914,12 +959,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
         let rateLimitRetries = 0;
         while (true) {
-        let partialInputTokens = 0;
-        let partialOutputTokens = 0;
+        const callId = `chat:${session.id}:${runId}:${rateLimitRetries}`;
+        let stepUsage: ReturnType<typeof usageFromSdk>;
+        let settledAttemptUsage: ReturnType<typeof usageFromSdk>;
+        let settledAttemptComplete = false;
+        let modelStarted = false;
         try {
           const executionContext = createExecutionContext(runId, controller.signal);
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
-          const activeTools = (await getActiveTools(executionContext, turnModel, mcpResources, browserResources)) as ToolSet;
+          const activeTools = (await getActiveTools(executionContext, turnModel, session, turnProvider, turnModelName, mcpResources, browserResources)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
           // text (memories, disk files), which invalidates Ollama's KV cache
           // and forces a full prompt reprocessing (~30s for 30B models).
@@ -937,6 +985,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             messageCount: session.messages.length,
           });
           const agentStreamStartMs = Date.now();
+          modelStarted = true;
           const stream = streamText({
             model: turnModel,
             system: systemPrompt,
@@ -960,9 +1009,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             ...(["openai"].includes(turnProvider)
               ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
               : {}),
-            onStepFinish({ text, toolCalls: calls, usage: stepUsage, reasoningText }) {
-              partialInputTokens += stepUsage?.inputTokens ?? 0;
-              partialOutputTokens += stepUsage?.outputTokens ?? 0;
+            onStepFinish({ text, toolCalls: calls, usage: sdkStepUsage, reasoningText }) {
+              stepUsage = addUsage(stepUsage, usageFromSdk(sdkStepUsage));
               const stepStartMs = Date.now();
               const callCount = calls?.length ?? 0;
               traceDispatch("onStepFinish:enter", {
@@ -1016,7 +1064,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // ---- Finalise ---- //
           await Promise.allSettled([...(pendingToolsByRunRef.current.get(runId) ?? [])]);
           let finalText = await stream.text;
-          const usage = await stream.totalUsage;
+          const { usage, usageComplete } = settleUsage(stepUsage, usageFromSdk(await stream.totalUsage));
+          settledAttemptUsage = usage;
+          settledAttemptComplete = usageComplete;
           // Some transports finish the iterator normally on abort and still
           // resolve buffered text/usage. That is not a successful turn.
           if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Cancelled", "AbortError");
@@ -1088,18 +1138,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             });
           }
 
-          // Cost tracking — use active refs, not startup options (user may have switched via /model).
-          const totalCostBefore = costTrackerRef.current.getTotalCost();
-          costTrackerRef.current.addUsage(
-            "agent",
-            turnProvider,
-            turnModelName,
-            inputTokens,
-            outputTokens,
-          );
-          const totalCostAfter = costTrackerRef.current.getTotalCost();
-          const turnCost = Math.max(0, totalCostAfter - totalCostBefore);
-          setCost(totalCostAfter);
+          // Record after final totals settle. The call ID makes retries and
+          // callback replays first-wins without converting missing usage to 0.
+          recordUsage(session, { callId, persona: "agent", provider: turnProvider, model: turnModelName, usage, usageComplete });
+          const turnCost = costTrackerRef.current.getLedgerSnapshot().calls.find((call) => call.callId === callId)?.estimatedApiCost ?? 0;
 
           // Commit the full response to Static as one message.
           // Tool calls and text were kept in the dynamic area until now.
@@ -1147,7 +1189,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // Persist assistant text in the session.
           controller.signal.throwIfAborted();
           addMessage(session, "assistant", finalText);
-          session.totalTokens += inputTokens + outputTokens;
           logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
 
           // Track tok/s for this model — use active refs, not startup options
@@ -1157,36 +1198,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             const tps = Math.round(outputTokens / agentElapsed);
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
-
-          // Enrich session with cost data before saving
-          const usageSummary = costTrackerRef.current.getUsageSummary();
-          session.totalCostUsd = Math.round(usageSummary.total.cost * 10000) / 10000;
-          session.costByModel = usageSummary.byModel.map(m => ({
-            key: m.key,
-            provider: m.provider,
-            model: m.model,
-            inputTokens: m.inputTokens,
-            outputTokens: m.outputTokens,
-            costUsd: Math.round(m.cost * 10000) / 10000,
-            roles: m.roles,
-          }));
-          session.costByRole = {
-            worker: {
-              inputTokens: usageSummary.byRole.worker.inputTokens,
-              outputTokens: usageSummary.byRole.worker.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.worker.cost * 10000) / 10000,
-            },
-            planner: {
-              inputTokens: usageSummary.byRole.planner.inputTokens,
-              outputTokens: usageSummary.byRole.planner.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.planner.cost * 10000) / 10000,
-            },
-            reviewer: {
-              inputTokens: usageSummary.byRole.reviewer.inputTokens,
-              outputTokens: usageSummary.byRole.reviewer.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.reviewer.cost * 10000) / 10000,
-            },
-          };
 
           // Save session to disk.
           saveSession(session);
@@ -1264,6 +1275,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               compactionResult.level,
               undefined,
               controller.signal,
+              async (compactionUsage) => {
+                recordUsage(session, {
+                  callId: `chat-compaction:${session.id}:${compactionUsage.callId}`,
+                  persona: "compaction", provider: turnProvider, model: turnModelName,
+                  usage: compactionUsage.usage,
+                  usageComplete: compactionUsage.usageComplete,
+                });
+              },
             );
             controller.signal.throwIfAborted();
             session.messages = compacted.map((m) => ({
@@ -1288,6 +1307,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           break; // success — exit retry loop
 
         } catch (err) {
+          if (modelStarted) {
+            recordUsage(session, {
+              callId, persona: "agent", provider: turnProvider, model: turnModelName,
+              usage: settledAttemptUsage ?? stepUsage, usageComplete: settledAttemptComplete,
+            });
+            saveSession(session);
+          }
           // --- Rate limit retry ---
           const rateLimit = isRateLimitError(err);
           if (!controller.signal.aborted && rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES
@@ -1304,16 +1330,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
             // Cancellation -- already handled by cancel().
-            // Preserve any tokens consumed in completed steps before the abort.
-            trackAbortCost(
-              partialInputTokens,
-              partialOutputTokens,
-              "agent",
-              turnProvider,
-              turnModelName,
-              costTrackerRef.current,
-              setCost,
-            );
             return;
           }
 
@@ -1374,6 +1390,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             Promise.resolve().then(() => browserResources.dispose()),
           ]);
           pendingToolsByRunRef.current.delete(runId);
+          // A child can finish its own model call while this turn is handling
+          // an error. Persist only after every owned callback has drained.
+          if (sessionRef.current) saveSession(sessionRef.current);
           const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
           if (isCurrentTurn()) {
             // Cancellation leaves completed tool calls inspectable in the
@@ -1573,6 +1592,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     if (abortRef.current) throw new Error("Wait for the current operation to finish before compacting.");
     const session = sessionRef.current;
     const model = modelRef.current;
+    const provider = aiProviderRef.current;
+    const modelName = activeModelNameRef.current;
     if (!model || !session || session.messages.length === 0) {
       return { before: 0, after: 0 };
     }
@@ -1585,7 +1606,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const originalMessages = session.messages;
       const beforeChars = originalMessages.reduce((s, m) => s + m.content.length, 0);
       const plainMessages = originalMessages.map((m) => ({ role: m.role, content: m.content }));
-      const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions, controller.signal);
+      const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions, controller.signal,
+        async (compactionUsage) => {
+          recordUsage(session, {
+            callId: `chat-compaction:${session.id}:${compactionUsage.callId}`,
+            persona: "compaction", provider, model: modelName,
+            usage: compactionUsage.usage,
+            usageComplete: compactionUsage.usageComplete,
+          });
+        });
       controller.signal.throwIfAborted();
       if (sessionRef.current !== session || session.messages !== originalMessages) {
         throw new Error("Session changed during compaction; history was not replaced.");
@@ -1614,7 +1643,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         setStatusDetail("");
       }
     }
-  }, []);
+  }, [recordUsage]);
 
   // ------- Tool count helper (for orchestrator) -------- //
 

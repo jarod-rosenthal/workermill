@@ -36,3 +36,26 @@ export function addUsage(
     ...(sum("cacheReadTokens") === undefined ? {} : { cacheReadTokens: sum("cacheReadTokens") }),
   };
 }
+
+/**
+ * Prefer a complete SDK total, but retain observed completed steps when a
+ * transport reports an all-zero final placeholder or never supplies totals.
+ */
+export function settleUsage(
+  steps: Partial<TokenUsage> | undefined,
+  total: Partial<TokenUsage> | undefined,
+): { usage: Partial<TokenUsage> | undefined; usageComplete: boolean } {
+  if (!total) return { usage: steps, usageComplete: false };
+  const zeroPlaceholder = steps !== undefined
+    && ((steps.inputTokens ?? 0) > 0 || (steps.outputTokens ?? 0) > 0
+      || (steps.cacheCreationTokens ?? 0) > 0 || (steps.cacheReadTokens ?? 0) > 0)
+    && total.inputTokens === 0
+    && total.outputTokens === 0
+    && total.cacheCreationTokens === undefined
+    && total.cacheReadTokens === undefined;
+  if (zeroPlaceholder) return { usage: steps, usageComplete: false };
+  return {
+    usage: total,
+    usageComplete: total.inputTokens !== undefined && total.outputTokens !== undefined,
+  };
+}

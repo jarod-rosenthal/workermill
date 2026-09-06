@@ -59,6 +59,40 @@ export interface SessionSummary {
   preview: string;
 }
 
+/** Append only newly observed calls. Replayed callbacks retain the first entry. */
+export function appendUsageLedger(
+  previous: LedgerSnapshot | undefined,
+  next: LedgerSnapshot,
+): LedgerSnapshot {
+  const calls = [...(previous?.calls ?? [])];
+  const callIds = new Set(calls.map((call) => call.callId));
+  for (const call of next.calls) {
+    if (!callIds.has(call.callId)) {
+      calls.push(call);
+      callIds.add(call.callId);
+    }
+  }
+  const totals = {
+    callCount: calls.length, reportedUsageCalls: 0, partialUsageCalls: 0, missingUsageCalls: 0,
+    knownPricingCalls: 0, unknownPricingCalls: 0, localApiCalls: 0,
+    inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0,
+  };
+  for (const call of calls) {
+    if (call.usageState === "reported") totals.reportedUsageCalls++;
+    else if (call.usageState === "partial") totals.partialUsageCalls++;
+    else totals.missingUsageCalls++;
+    if (call.pricingState === "known") totals.knownPricingCalls++;
+    else if (call.pricingState === "local") totals.localApiCalls++;
+    else totals.unknownPricingCalls++;
+    totals.inputTokens += call.usage?.inputTokens ?? 0;
+    totals.outputTokens += call.usage?.outputTokens ?? 0;
+    totals.cacheCreationTokens += call.usage?.cacheCreationTokens ?? 0;
+    totals.cacheReadTokens += call.usage?.cacheReadTokens ?? 0;
+    totals.estimatedApiCost += call.estimatedApiCost ?? 0;
+  }
+  return { calls, totals };
+}
+
 function migrateGlobalSessions(): void {
   const oldSessionsDir = path.join(getStateRoot(), "sessions");
   if (!fs.existsSync(oldSessionsDir)) return;

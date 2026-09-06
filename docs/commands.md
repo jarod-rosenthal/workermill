@@ -41,6 +41,8 @@ Also bound to `Ctrl+P`.
 
 Cancel whatever is currently running — a `/build` orchestration or a single-agent turn. Same as pressing `ESC`.
 
+Chat cancellation keeps the interface busy while its dispatched tools and owned processes settle. Wait for the idle prompt before starting another turn. Cancellation also interrupts manual compaction; a late summary does not replace the conversation. Direct `!command` shell commands use the same process cancellation mechanism without granting future model tools permission.
+
 A cancelled `/build` leaves its state on disk, so `/retry` can pick it back up.
 
 A saved run can also need `/retry` after every story is implemented: final gates, review, or completion may still be pending. Completed stories are retained rather than implemented again.
@@ -132,7 +134,7 @@ Compress conversation history to free up context. Runs an LLM summarization pass
 
 With a focus string, the summarizer preserves messages related to that topic. Before compacting, the CLI scans for `::learning::` and `::remember::` markers and saves them as persistent memories.
 
-**Micro-compaction** (free, no LLM call) runs automatically at ~60% context usage. Manual `/compact` is only needed if you want to force it earlier.
+**Micro-compaction** (free, no LLM call) runs automatically at 50% context usage. Manual `/compact` is only needed if you want to force it earlier. Start it when the current turn is idle; cancelling it preserves the original conversation.
 
 ### `/clear`
 

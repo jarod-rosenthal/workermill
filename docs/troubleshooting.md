@@ -64,7 +64,7 @@ Check your rules with `/permissions`. Deny rules override allow rules. Remove a 
 
 ### Conversation feels slow, responses lag
 
-Context window is probably full. Run `/compact` to compress history, or `/clear` to reset. Micro-compaction runs automatically at ~60% context usage, but you can force it manually.
+Context window is probably full. Run `/compact` to compress history, or `/clear` to reset. Micro-compaction runs automatically at 50% context usage. Manual compaction waits for an idle conversation; cancelling it keeps the original history.
 
 ### Cost shows `<$0.01` or `$0.00`
 

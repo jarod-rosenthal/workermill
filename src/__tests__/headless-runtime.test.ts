@@ -291,6 +291,22 @@ describe("headless runtime governance", () => {
     expect(result.usageComplete).toBe(false);
   });
 
+  it("marks retained step usage partial when final totals are a zero placeholder", async () => {
+    vi.mocked(streamText).mockImplementation((options) => {
+      // SDK gap: invoke the callback with a transport's completed-step observation.
+      const callback = (options as unknown as { onStepFinish?: (event: { usage: unknown }) => void }).onStepFinish;
+      callback?.({ usage: { inputTokens: 11, outputTokens: 4 } });
+      return {
+        textStream: (async function* () { yield "done"; })(), text: Promise.resolve("done"),
+        totalUsage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }),
+        finishReason: Promise.resolve("stop"), steps: Promise.resolve([]),
+      } as never;
+    });
+    const result = await runCommand({ prompt: "observe", singlePrompt: true }, config({}), workspace);
+    expect(result).toMatchObject({ status: "ok", tokens: { input: 11, output: 4 }, usageComplete: false });
+    expect(result.usageLedger?.totals.partialUsageCalls).toBe(1);
+  });
+
   it("drains an already-dispatched tool before returning a provider failure", async () => {
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => { markStarted = resolve; });

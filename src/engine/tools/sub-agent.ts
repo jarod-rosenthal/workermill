@@ -1,12 +1,11 @@
 import { streamText, stepCountIs } from "ai";
 import type { LanguageModel, ToolSet } from "ai";
-import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { canonicalizePath, createPathScope, type PathGrant, type PathScope } from "../path-policy.js";
 import { executeToolCall, type ToolExecutionContext } from "../tool-executor.js";
-import { cancelAndWaitForRunProcesses } from "../process-runner.js";
+import { cancelAndWaitForRunProcesses, runProcess } from "../process-runner.js";
 import { runScopedProcess } from "../scoped-process.js";
 import { cleanupScopedBackgroundProcesses } from "./bash-background.js";
 import { shutdownLSPRun } from "./lsp.js";
@@ -42,8 +41,16 @@ export interface SubAgentExecutorOptions {
   createTools: (worktreePath: string, scope: PathScope, context: ToolExecutionContext) => Record<string, ChildTool>;
 }
 
-function git(cwd: string, args: readonly string[]): string {
-  return execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 }).trim();
+function shellQuote(arg: string): string { return `'${arg.replace(/'/g, "'\\''")}'`; }
+async function gitAdmin(cwd: string, args: readonly string[], signal: AbortSignal, runId: string): Promise<string> {
+  signal.throwIfAborted();
+  const command = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args].map(shellQuote).join(" ");
+  const result = await runProcess({ runId, command, cwd, signal, timeoutMs: 30_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250 });
+  signal.throwIfAborted();
+  if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
+    throw new Error(`git ${args[0]} failed (${result.reason}): ${(result.stderr || result.stdout).trim()}`);
+  }
+  return result.stdout.trim();
 }
 function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().split(/\s+/).slice(0, 4).join("-").slice(0, 40) || "task";
@@ -55,11 +62,11 @@ function isWithin(root: string, candidate: string): boolean { return candidate =
  * only this child worktree's git dir, object store, and own branch ref/log.
  * They intentionally exclude the parent checkout, config, hooks, and other refs.
  */
-function gitMetadataGrants(workingDir: string, worktreePath: string, branchId: string): PathGrant[] {
-  const parentGitDir = canonicalizePath(git(workingDir, ["rev-parse", "--absolute-git-dir"]));
-  const commonDir = canonicalizePath(git(workingDir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
-  const childCommonDir = canonicalizePath(git(worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
-  const childGitDir = canonicalizePath(git(worktreePath, ["rev-parse", "--absolute-git-dir"]));
+async function gitMetadataGrants(workingDir: string, worktreePath: string, branchId: string, signal: AbortSignal, runId: string): Promise<PathGrant[]> {
+  const parentGitDir = canonicalizePath(await gitAdmin(workingDir, ["rev-parse", "--absolute-git-dir"], signal, runId));
+  const commonDir = canonicalizePath(await gitAdmin(workingDir, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal, runId));
+  const childCommonDir = canonicalizePath(await gitAdmin(worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal, runId));
+  const childGitDir = canonicalizePath(await gitAdmin(worktreePath, ["rev-parse", "--absolute-git-dir"], signal, runId));
   if (!isWithin(commonDir, parentGitDir) || childCommonDir !== commonDir || !isWithin(path.join(commonDir, "worktrees"), childGitDir)) {
     throw new Error("Unable to grant minimum Git metadata: worktree Git directories are outside canonical repository metadata");
   }
@@ -82,7 +89,7 @@ function gitMetadataGrants(workingDir: string, worktreePath: string, branchId: s
   ];
 }
 
-export function createWorktree(workingDir: string, prompt: string): WorktreeInfo {
+export async function createWorktree(workingDir: string, prompt: string, signal = new AbortController().signal, runId = `child-admin-${crypto.randomUUID()}`): Promise<WorktreeInfo> {
   const branchId = crypto.randomUUID();
   const name = `${slugify(prompt)}-${branchId}`;
   const branchName = `workermill/${branchId}/work`;
@@ -91,7 +98,7 @@ export function createWorktree(workingDir: string, prompt: string): WorktreeInfo
   if (canonicalizePath(worktreeBase) !== worktreeBase) {
     throw new Error("Worktree directory must not redirect through a symlink");
   }
-  const commonDir = canonicalizePath(git(workspace, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const commonDir = canonicalizePath(await gitAdmin(workspace, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal, runId));
   for (const relative of ["objects", "worktrees", "refs/heads/workermill", "logs/refs/heads/workermill"]) {
     const candidate = path.join(commonDir, relative);
     if (canonicalizePath(candidate) !== candidate) throw new Error("Git metadata namespace must not redirect through a symlink");
@@ -101,9 +108,9 @@ export function createWorktree(workingDir: string, prompt: string): WorktreeInfo
     fs.mkdirSync(worktreeBase, { recursive: true });
     // Do not run checkout filters on the host. Populate the checkout through
     // the child's selected process boundary after its scope is established.
-    git(workspace, ["worktree", "add", "--no-checkout", "-b", branchName, worktreePath, "HEAD"]);
-    const startHead = git(worktreePath, ["rev-parse", "HEAD"]);
-    return { worktreePath, branchName, startHead, scope: createPathScope(worktreePath, gitMetadataGrants(workingDir, worktreePath, branchId)) };
+    await gitAdmin(workspace, ["worktree", "add", "--no-checkout", "-b", branchName, worktreePath, "HEAD"], signal, runId);
+    const startHead = await gitAdmin(worktreePath, ["rev-parse", "HEAD"], signal, runId);
+    return { worktreePath, branchName, startHead, scope: createPathScope(worktreePath, await gitMetadataGrants(workingDir, worktreePath, branchId, signal, runId)) };
   } catch (error) {
     throw new Error(`Failed to establish isolated child scope: ${error instanceof Error ? error.message : String(error)}. Inspect branch ${branchName} and worktree ${worktreePath}; any partial work is preserved.`);
   }
@@ -140,9 +147,9 @@ async function inspectWorktree(worktree: WorktreeInfo, context: ToolExecutionCon
     return { kind: !status && head === worktree.startHead ? "empty" : "changed", diffStat: diffStat || (head === worktree.startHead ? "(no diff stat available)" : "(committed changes)") };
   } catch { return { kind: "unknown", diffStat: "(unable to inspect worktree state)" }; }
 }
-function removeConfirmedEmptyWorktree(workingDir: string, worktree: WorktreeInfo): void {
-  git(workingDir, ["worktree", "remove", worktree.worktreePath]);
-  git(workingDir, ["branch", "-d", worktree.branchName]);
+async function removeConfirmedEmptyWorktree(workingDir: string, worktree: WorktreeInfo, signal: AbortSignal, runId: string): Promise<void> {
+  await gitAdmin(workingDir, ["worktree", "remove", worktree.worktreePath], signal, runId);
+  await gitAdmin(workingDir, ["branch", "-d", worktree.branchName], signal, runId);
 }
 
 function conservativePermissionState(workspace: string, readOnlyRole: boolean): PermissionState {
@@ -257,7 +264,10 @@ async function runSubAgent(
   }
   // Transport failure can finish before concurrently dispatched tool calls.
   // Await the whole tool lifetime, including hooks, not only OS process exit.
-  controller.abort();
+  // A normal completed child may still perform conservative administrative
+  // inspection. Abort only failing attempts; successful dispatched tools are
+  // drained before their owner proceeds.
+  if (!result.success || terminalError) controller.abort();
   await Promise.allSettled([...pending]);
   if (result.success && terminalError) {
     result = { success: false, content, turnsUsed, error: `Sub-agent failed: ${terminalError instanceof Error ? terminalError.message : String(terminalError)}` };
@@ -285,14 +295,14 @@ export function createSubAgentExecutor(
     const signal = lifetime.controller.signal;
     let context: ToolExecutionContext | undefined;
     let worktree: WorktreeInfo | undefined;
-    let result: SubAgentResult;
+    let result: SubAgentResult = { success: false, content: "", turnsUsed: 0, error: "Child did not start." };
     try {
       if (signal.aborted) throw new Error("Parent run is cancelled.");
       if (isolated) {
         if (!parent) throw new Error("A parent permission context is required for isolated work.");
         const state = parent.getPermissionState();
         if (state.mode === "plan" || state.readOnlyRole) throw new Error("Parent permission state is read-only.");
-        worktree = createWorktree(workingDir, prompt);
+        worktree = await createWorktree(workingDir, prompt, signal, `child-admin-${crypto.randomUUID()}`);
         context = childContext(parent, worktree.scope, false, signal);
         const checkout = await runScopedProcess({
           runId: context.runId, signal, cwd: worktree.worktreePath,
@@ -336,7 +346,10 @@ export function createSubAgentExecutor(
         error: `Sub-agent failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     } finally {
-      lifetime.controller.abort();
+      // A successful child still needs a live signal for its conservative
+      // worktree inspection/removal below. Failed or cancelled children are
+      // aborted before cleanup and are always preserved.
+      if (!result?.success || signal.aborted) lifetime.controller.abort();
       if (context) {
         const cleanup = await Promise.allSettled([
           cancelAndWaitForRunProcesses(context.runId),
@@ -364,7 +377,7 @@ export function createSubAgentExecutor(
       : { kind: "unknown", diffStat: "(inspection skipped after failure or cancellation)" };
     if (result.success && state.kind === "empty") {
       try {
-        removeConfirmedEmptyWorktree(workingDir, worktree);
+        await removeConfirmedEmptyWorktree(workingDir, worktree, signal, `child-admin-${crypto.randomUUID()}`);
         return { ...result, content: `${result.content}\n\n${identity} Confirmed empty and removed.` };
       } catch (error) {
         return {
@@ -383,4 +396,6 @@ export function createSubAgentExecutor(
 }
 
 /** Prune Git administrative records only; never removes child worktrees. */
-export function cleanupStaleWorktrees(workingDir: string): void { try { git(workingDir, ["worktree", "prune"]); } catch { /* best effort */ } }
+export function cleanupStaleWorktrees(workingDir: string, signal = new AbortController().signal): void {
+  void gitAdmin(workingDir, ["worktree", "prune"], signal, `child-admin-${crypto.randomUUID()}`).catch(() => { /* best effort */ });
+}

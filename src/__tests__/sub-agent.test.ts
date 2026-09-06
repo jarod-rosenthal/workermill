@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sdk = vi.hoisted(() => ({ action: "empty" as "empty" | "escape" | "commit" | "dirty_failure", streamText: vi.fn() }));
@@ -52,17 +53,57 @@ function stream(): void {
   }));
 }
 
+async function waitForFile(file: string): Promise<void> {
+  if (fs.existsSync(file)) return;
+  const watcher = fs.watch(path.dirname(file));
+  try {
+    while (!fs.existsSync(file)) await once(watcher, "change");
+  } finally {
+    watcher.close();
+  }
+}
+
 afterEach(() => {
   sdk.streamText.mockReset();
   while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
 describe("isolated sub-agents", () => {
-  it("uses UUID worktree and branch identities for concurrent children", () => {
+  it("uses UUID worktree and branch identities for concurrent children", async () => {
     const workingDir = repo();
-    const [one, two] = [createWorktree(workingDir, "same task"), createWorktree(workingDir, "same task")];
+    const [one, two] = await Promise.all([createWorktree(workingDir, "same task"), createWorktree(workingDir, "same task")]);
     expect(one.worktreePath).not.toBe(two.worktreePath);
     expect(one.branchName).not.toBe(two.branchName);
+  });
+
+  it("cancels a started worktree-add administration command without creating the child", async () => {
+    const workingDir = repo();
+    const wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-git-wrapper-"));
+    dirs.push(wrapperDir);
+    const ready = path.join(wrapperDir, "started");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const wrapper = path.join(wrapperDir, "git");
+    fs.writeFileSync(wrapper, [
+      "#!/bin/sh",
+      "for arg in \"$@\"; do",
+      `  if [ \"$arg\" = worktree ]; then touch \"${ready}\"; while :; do sleep 1; done; fi`,
+      "done",
+      `exec \"${realGit}\" \"$@\"`,
+      "",
+    ].join("\n"));
+    fs.chmodSync(wrapper, 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${wrapperDir}:${oldPath ?? ""}`;
+    const controller = new AbortController();
+    try {
+      const creating = createWorktree(workingDir, "cancel admin", controller.signal, "child-admin-cancel");
+      await waitForFile(ready);
+      controller.abort(new Error("cancel child admin"));
+      await expect(creating).rejects.toThrow(/cancel|worktree add/i);
+      expect(fs.readdirSync(path.join(workingDir, ".workermill", "worktrees"), { recursive: true })).toEqual([]);
+    } finally {
+      process.env.PATH = oldPath;
+    }
   });
 
   it("rejects a child explicit-file escape and preserves the failed worktree", async () => {

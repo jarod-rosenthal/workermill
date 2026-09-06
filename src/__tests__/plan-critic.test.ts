@@ -24,6 +24,7 @@ vi.mock("ai", () => ({
 }));
 
 import { generateObject, generateText } from "ai";
+import { createModel } from "../engine/model-factory.js";
 import { runPlanCritic, DEFAULT_CRITIC_THRESHOLD, MAX_CRITIC_ITERATIONS } from "../orchestrator/planning.js";
 import type { Story, OrchestrationOutput } from "../orchestrator/types.js";
 import type { CliConfig } from "../config.js";
@@ -166,7 +167,25 @@ describe("runPlanCritic", () => {
     const result = await runPlanCritic(createConfig(), "task", STORIES, "/work", createOutput(), controller.signal);
 
     expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(createModel).not.toHaveBeenCalled();
     expect(result.stories).toEqual(STORIES);
+    expect(result.cancelled).toBe(true);
+    expect(result.approved).toBe(false);
+  });
+
+  it("rejects a late successful score after cancellation and preserves its usage", async () => {
+    const controller = new AbortController();
+    mockGenerateObject.mockImplementationOnce(async () => {
+      controller.abort();
+      return scored(9);
+    });
+
+    const result = await runPlanCritic(createConfig(), "task", STORIES, "/work", createOutput(), controller.signal);
+
+    expect(result).toMatchObject({ cancelled: true, approved: false, stories: STORIES });
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(50);
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("exposes a default threshold of 8", () => {

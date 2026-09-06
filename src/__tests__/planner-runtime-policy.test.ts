@@ -153,6 +153,8 @@ describe("planner runtime policy", () => {
     const result = await planStories(config(), "Plan then cancel", workspace, true, output([]), controller.signal);
 
     expect(result).toMatchObject({ rejected: true, rejectionReason: "Cancelled", stories: [] });
+    expect(result.inputTokens).toBe(1);
+    expect(result.outputTokens).toBe(1);
   });
 
   it("fails an explicitly unavailable OS sandbox before model work", async () => {

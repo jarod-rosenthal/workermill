@@ -204,13 +204,15 @@ export async function runPlanCritic(
     model: modelName,
   };
 
-  const cancelled = (iterations: number): PlanCriticResult => ({
+  const cancelled = (iterations: number, inputTokens = 0, outputTokens = 0): PlanCriticResult => ({
     ...base,
     stories,
     approved: false,
     score: 0,
     critique: null,
     iterations,
+    inputTokens,
+    outputTokens,
     cancelled: true,
   });
 
@@ -231,7 +233,7 @@ export async function runPlanCritic(
   let outputTokens = 0;
 
   for (let iteration = 1; iteration <= MAX_CRITIC_ITERATIONS; iteration++) {
-    if (abortSignal?.aborted) return cancelled(iteration - 1);
+    if (abortSignal?.aborted) return cancelled(iteration - 1, inputTokens, outputTokens);
 
     // ── Score the current plan ──
     let critique: PlanCritique;
@@ -275,8 +277,11 @@ Report only issues that would change what a worker builds. Do NOT report style p
       inputTokens += scored.usage?.inputTokens || 0;
       outputTokens += scored.usage?.outputTokens || 0;
       output.statusDone();
+      // Some SDK transports resolve successfully after receiving an abort.
+      // Do not adopt that score or approve a plan after cancellation.
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
     } catch (err) {
-      if (abortSignal?.aborted) return cancelled(iteration - 1);
+      if (abortSignal?.aborted) return cancelled(iteration - 1, inputTokens, outputTokens);
       // Critic failure is non-fatal — proceed with the plan we have.
       output.statusDone();
       logger.error("Plan critic scoring failed", { error: err instanceof Error ? err.message : String(err) });
@@ -351,6 +356,9 @@ Output ONLY the JSON block, no other text.`,
       inputTokens += refined.usage?.inputTokens || 0;
       outputTokens += refined.usage?.outputTokens || 0;
       output.statusDone();
+      // As above, an ignored abort must not let a late refinement become the
+      // executable plan.
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
 
       const revised = parseStoriesFromText(refined.text, output);
       if (revised.length === 0) {
@@ -360,7 +368,7 @@ Output ONLY the JSON block, no other text.`,
       }
       currentStories = normalizeStoryDependencies(revised);
     } catch (err) {
-      if (abortSignal?.aborted) return cancelled(iteration);
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
       output.statusDone();
       logger.error("Plan critic refinement failed", { error: err instanceof Error ? err.message : String(err) });
       output.log("critic", "Could not refine the plan — keeping the previous version.");
@@ -490,12 +498,12 @@ export async function planStories(
   _rateLimitRetries = 0,
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
   const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
-  const cancelled = () => ({
+  const cancelled = (...usage: Array<{ inputTokens?: number; outputTokens?: number } | undefined>) => ({
     stories: [],
     provider: pProvider,
     model: pModel,
-    inputTokens: 0,
-    outputTokens: 0,
+    inputTokens: usage.reduce((total, value) => total + (value?.inputTokens || 0), 0),
+    outputTokens: usage.reduce((total, value) => total + (value?.outputTokens || 0), 0),
     rejected: true,
     rejectionReason: "Cancelled",
   });
@@ -776,16 +784,24 @@ Rules:
       output.log("planner", lineBuffer);
     }
     if (abortSignal?.aborted) {
+      // The text stream may have ended just as cancellation arrived. Retain
+      // usage that the transport has already made available without parsing a
+      // plan or starting another model call.
+      try {
+        planUsage = await planStream.totalUsage;
+      } catch {
+        // Cancellation remains terminal even when usage is unavailable.
+      }
       output.statusDone();
       output.coordinatorLog("Build cancelled by user.");
-      return cancelled();
+      return cancelled(planUsage);
     }
     planText = await planStream.text;
     planUsage = await planStream.totalUsage;
     if (abortSignal?.aborted) {
       output.statusDone();
       output.coordinatorLog("Build cancelled by user.");
-      return cancelled();
+      return cancelled(planUsage);
     }
     // Track tok/s for planner model
     const planElapsed = (Date.now() - planStart) / 1000;
@@ -893,7 +909,7 @@ Rules:
       if (abortSignal?.aborted) {
         output.statusDone();
         output.coordinatorLog("Build cancelled by user.");
-        return cancelled();
+        return cancelled(planUsage);
       }
       const extractionInput = truncateForPrompt(planText, 12_000, "planner analysis");
       const extractionResult = await generateText({
@@ -912,7 +928,7 @@ Rules:
       if (abortSignal?.aborted) {
         output.statusDone();
         output.coordinatorLog("Build cancelled by user.");
-        return cancelled();
+        return cancelled(planUsage, extractionResult.usage);
       }
 
       const retryStories = parseStoriesFromText(extractionResult.text, output);
@@ -932,7 +948,7 @@ Rules:
       if (abortSignal?.aborted) {
         output.statusDone();
         output.coordinatorLog("Build cancelled by user.");
-        return cancelled();
+        return cancelled(planUsage);
       }
       logger.error("JSON extraction retry failed", { error: extractErr instanceof Error ? extractErr.message : String(extractErr) });
     }

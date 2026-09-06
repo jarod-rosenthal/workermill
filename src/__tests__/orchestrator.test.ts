@@ -531,6 +531,27 @@ describe("orchestrator", () => {
       expect(workerIndex).toBeGreaterThan(criticIndex);
     });
 
+    it("does not execute a late-approved plan after critique cancellation", async () => {
+      const { generateObject } = await import("ai");
+      const controller = new AbortController();
+      vi.mocked(generateObject).mockImplementation(async (options) => {
+        if (typeof options.prompt === "string" && options.prompt.includes("Score the plan")) {
+          controller.abort();
+          return { object: { score: 10, summary: "Late approval", issues: [] }, usage: { inputTokens: 3, outputTokens: 2 } } as never;
+        }
+        return { object: { complexity: "multi", reason: "Multiple concerns" } } as never;
+      });
+      const output = createMockOutput();
+      const result = await runOrchestration(
+        { ...createTestConfig(), review: { enabled: false, critic: true } },
+        "Add a health check endpoint", true, false, output, controller.signal,
+      );
+      expect(result.completedStoryIds).toEqual([]);
+      expect(result.featureBranch).toBeNull();
+      expect(output.logs.some((line) => line.startsWith("[backend_developer]"))).toBe(false);
+      expect(output.logs.some((line) => line.includes("cancelled during plan critique"))).toBe(true);
+    });
+
     it("executes the critic's refined plan, not the planner's original", async () => {
       const { generateObject, generateText } = await import("ai");
       vi.mocked(generateObject).mockClear();

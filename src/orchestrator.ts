@@ -305,6 +305,11 @@ export async function runOrchestration(
       output.updateCost?.(costTracker.getTotalCost());
       output.updateUsageSummary?.(costTracker.getUsageSummary());
 
+      if (critique.cancelled || abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled during plan critique.");
+        return { stories: [], completedStoryIds: [], featureBranch: null, userTask };
+      }
+
       if (!critique.approved) {
         const threshold = config.review?.criticThreshold ?? 8;
         output.log("critic", `Plan still scores ${critique.score}/10 after ${critique.iterations} rounds (needs ${threshold}).`);

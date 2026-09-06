@@ -165,3 +165,9 @@ Implementation8ab95df8 (R16a e9184308, R18a8ab95df8). Full suite1665passed0faile
 Current coordinator-only correction during R16b/R18b1: clarify ledger inputTokens are SDK total input including cache tokens; subtract cache-priced dimensions before applying ordinary input rate. Existing cache test double-charged those dimensions. Own only cost-tracker.ts and cost-tracker.test.ts; worker files disjoint. Provider rate values unchanged.
 
 Coordinator R18 accounting correction also includes observed partial-call cost in known subtotal while preserving partial/missing flags, rather than dropping known failed-attempt usage. Focused initial correction hit floating-point exact equality (.0012 vs .0012000000000000001); assertion now uses tight numeric tolerance. No rate/default changes.
+
+## R16b/R18b1 accepted checkpoint
+
+Exact tested implementation36471d14 including coordinator cache/partial corrections aeea7bb5, child/compaction43f3b197, SDKgovernance36471d14. Combined npmtest exit0:1675passed0failed1skip109files31.07s; typecheck/buildexit0. Root-run focused SDK6pass and child13pass; worker compaction39pass. Revision fixture corrected to actually enter a revision (maxRevisions2); worker fixture declares required file and verifies failure after denied writes. No production permission assertions weakened.
+
+Next scopes: R16c test-only mounted chat/session/child lifecycle and mirrored-test replacement; R18b2 headless ledger/child callback integration, optional shared SDK usage normalization helper and session metadata type only. Separate worktrees from current core. Coordinator runs all escalation-requiring checks directly; workers must freeze/report after sandbox failure, never submit another long delegated escalation wait. Candidates only until combined full qualification.

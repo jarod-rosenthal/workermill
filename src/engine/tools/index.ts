@@ -594,7 +594,7 @@ export function createToolDefinitions(
         timeout: z.number().optional().describe("Timeout in milliseconds (default: 30000, max: 120000)"),
       }),
       execute: async ({ url, format, timeout }) => {
-        const result = await fetchTool.execute({ url, format, timeout });
+        const result = await fetchTool.execute({ url, format, timeout }, signal);
         if (result.success) {
           return `Content from ${result.url} (${result.contentType || "unknown"}):\n\n${result.content}`;
         }
@@ -614,7 +614,7 @@ export function createToolDefinitions(
           ? destination
           : path.resolve(workingDir, destination);
         const canonicalPath = resolveToolPath(resolvedPath, "read_write");
-        return downloadFileTool.execute({ url, destination: canonicalPath, overwrite });
+        return downloadFileTool.execute({ url, destination: canonicalPath, overwrite }, signal);
       },
     }),
 
@@ -663,7 +663,7 @@ export function createToolDefinitions(
         maxResults: z.number().optional().describe("Maximum results to return (default: 8)"),
       }),
       execute: async ({ query, maxResults }) => {
-        const result = await webSearchTool.execute({ query, maxResults });
+        const result = await webSearchTool.execute({ query, maxResults }, signal);
         if (result.success && result.results && result.results.length > 0) {
           return result.results
             .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
@@ -950,7 +950,7 @@ export function createToolDefinitions(
         query: z.string().optional().describe("Search query for the list action"),
       }),
       execute: async (input) => {
-        const result = await ticketTool.execute(input);
+        const result = await ticketTool.execute(input, { signal, runId: options.runId ?? options.executionContext?.runId, workspace: workingDir });
         if (result.success) return result.content || "Done";
         return `Error: ${result.error}`;
       },

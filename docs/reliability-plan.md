@@ -6,7 +6,7 @@ Contributor implementation guide. Use [reliability-queue.json](reliability-queue
 
 Make WorkerMill's ticket-to-PR workflow trustworthy and measurable: consistent permissions and isolation, responsive cancellation, enforced verification of the delivered code, truthful run records, and evidence for cost/quality claims. Preserve the existing provider defaults and routing selections. Improve the existing architecture incrementally; do not replace the CLI, add a server, or expand the provider/persona catalog.
 
-This document is the task specification. [reliability-queue.json](reliability-queue.json) is a dependency/ownership index for a coordinator, not an executable WorkerMill plan or a command to launch agents. There are 24 work items, decomposed into 38 individually dispatchable packages. Do not feed the backlog into one `/build`: WorkerMill's main story executor is sequential, and its current isolated sub-agent path is itself being repaired.
+This document is the task specification. [reliability-queue.json](reliability-queue.json) is a dependency/ownership index for a coordinator, not an executable WorkerMill plan or a command to launch agents. There are 24 work items, decomposed into individually dispatchable packages. Do not feed the backlog into one `/build`: WorkerMill's main story executor is sequential, and its current isolated sub-agent path is itself being repaired.
 
 Use the task contracts below when implementing changes. Publishing issues/PRs, paid evaluations, and package releases require separate authorization. User-facing behavior belongs in the configuration, commands, and architecture references; avoid adding chronological implementation reports to those documents.
 
@@ -228,7 +228,7 @@ Verification: new unit/runtime sub-agent tests; no paid E2E needed. Handoff: wor
 
 ### R11 — Wire end-to-end cancellation and deterministic cleanup
 
-Priority P0; integration task; dependencies R06, R07, R08, R09, R10; locks `interactive-runtime`, `headless-runtime`, `worker-runtime`, `review-runtime`, `orchestrator`.
+Priority P0; integration task; dependencies R06, R07, R08, R09, R10; locks `interactive-runtime`, `headless-runtime`, `worker-runtime`, `review-runtime`, `orchestrator`, `tool-registry`, `mcp-runtime`, `lsp-runtime`.
 
 Files: adapter files above, `src/ui/Root.tsx` (direct `!command` lifecycle only), `src/ui/useOrchestrator.ts`, `src/orchestrator.ts`, relevant cancellation tests; modify MCP/LSP stop APIs only if a demonstrated teardown gap requires it.
 

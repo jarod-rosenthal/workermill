@@ -70,9 +70,10 @@ async function waitForFile(file: () => string | undefined, timeout = 1_500): Pro
   throw new Error("child command did not create its start marker");
 }
 
-function executor(workspace: string, context: ToolExecutionContext) {
+function executor(workspace: string, context: ToolExecutionContext, onUsage?: (usage: { callId: string; inputTokens: number; outputTokens: number; totalTokens: number; usageComplete: boolean; usage?: { inputTokens?: number; outputTokens?: number } }) => void | Promise<void>) {
   return createSubAgentExecutor({} as never, workspace, {}, {
     executionContext: context,
+    onUsage,
     createTools: (childWorkspace, scope, childContext) => {
       const definitions = createToolDefinitions(childWorkspace, undefined, childContext.effectiveSandbox === "os" ? "os" : true, {
         scope,
@@ -95,6 +96,22 @@ afterEach(() => {
 });
 
 describe("sub-agent runtime boundaries", () => {
+  it("reports one frozen per-call usage record after a registered child tool dispatch", async () => {
+    const workspace = makeRepo();
+    const observed: Array<{ callId: string; inputTokens: number; outputTokens: number; totalTokens: number; usageComplete: boolean; usage?: { inputTokens?: number; outputTokens?: number } }> = [];
+    installStream([{ name: "write_file", input: { path: "usage.txt", content: "observed\n" } }]);
+
+    const result = await executor(workspace, parentContext(workspace), usage => { observed.push(usage); })({ prompt: "write through the child tool", isolated: true });
+
+    expect(result.success).toBe(true);
+    const child = worktreeFrom(result);
+    expect(fs.readFileSync(path.join(child, "usage.txt"), "utf8")).toBe("observed\n");
+    expect(observed).toEqual([expect.objectContaining({
+      callId: expect.any(String), inputTokens: 2, outputTokens: 3, totalTokens: 5,
+      usageComplete: true, usage: { inputTokens: 2, outputTokens: 3 },
+    })]);
+  });
+
   it("uses registered OS tools to commit child-only work and denies parent output paths", async (test) => {
     const status = getOSSandboxDependencyStatus();
     if (!status.supported || status.errors.length) {

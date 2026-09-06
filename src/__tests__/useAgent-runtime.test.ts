@@ -9,6 +9,7 @@ import path from "node:path";
 const ensureRunMcp = vi.fn(async () => {});
 const closeRunMcp = vi.fn(async () => {});
 let runMcpTools: TestTools = {};
+const storedSession = vi.hoisted(() => ({ loadLatestSession: vi.fn(), saveSession: vi.fn() }));
 
 vi.mock("../engine/model-factory.js", () => ({
   createModel: vi.fn(() => ({})), buildOllamaOptions: () => ({}),
@@ -25,6 +26,11 @@ vi.mock("../ui/system-prompt.js", () => ({ buildSystemPrompt: () => "Test coding
 vi.mock("../config.js", async (original) => ({
   ...await original<typeof import("../config.js")>(),
   resolveConfig: vi.fn(), saveLocalSettings: vi.fn(), loadLocalSettings: vi.fn(() => ({})),
+}));
+vi.mock("../session.js", async (original) => ({
+  ...await original<typeof import("../session.js")>(),
+  loadLatestSession: storedSession.loadLatestSession,
+  saveSession: storedSession.saveSession,
 }));
 vi.mock("ai", async (original) => ({ ...await original<typeof import("ai")>(), streamText: vi.fn(), generateText: vi.fn() }));
 vi.mock("../hooks.js", async (original) => ({
@@ -73,6 +79,8 @@ describe("mounted chat execution adapter", () => {
     runMcpTools = {};
     vi.mocked(cancelAndWaitForRunProcesses).mockClear();
     vi.mocked(cleanupScopedBackgroundProcesses).mockClear();
+    storedSession.loadLatestSession.mockReset();
+    storedSession.saveSession.mockReset();
     turns = 0;
     clearCheckpoints();
   });
@@ -89,10 +97,10 @@ describe("mounted chat execution adapter", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  async function mount() {
+  async function mount(overrides: Partial<Parameters<typeof useAgent>[0]> = {}) {
     let rendered = false;
     function Harness() {
-      agent = useAgent({ provider: "test", model: "test-model", trustAll: false, planMode: false, sandboxed: true, resume: false, fork: false, liveView: false });
+      agent = useAgent({ provider: "test", model: "test-model", trustAll: false, planMode: false, sandboxed: true, resume: false, fork: false, liveView: false, ...overrides });
       rendered = true;
       return null;
     }
@@ -129,6 +137,67 @@ describe("mounted chat execution adapter", () => {
     expect(getChangedFiles()).toEqual([]);
     expect(runHooks).not.toHaveBeenCalled();
     expect(runPreHooksWithBlocking).not.toHaveBeenCalled();
+  });
+
+  it("sends the persisted session conversation in the first resumed turn", async () => {
+    const restored = {
+      id: "restored-session",
+      provider: "previous-provider",
+      model: "previous-model",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      totalTokens: 7,
+      messages: [
+        { role: "user" as const, content: "keep this request", timestamp: "2026-01-01T00:00:00.000Z" },
+        { role: "assistant" as const, content: "keep this answer", timestamp: "2026-01-01T00:00:01.000Z" },
+      ],
+    };
+    storedSession.loadLatestSession.mockReturnValue(restored);
+
+    await mount({ resume: true });
+
+    await vi.waitFor(() => expect(agent.messages.map(message => message.content)).toEqual([
+      "keep this request", "keep this answer",
+    ]));
+    expect(agent.session).toBe(restored);
+    script(async () => {});
+    agent.submit("continue from the saved answer");
+    await vi.waitFor(() => expect(turns).toBe(1));
+    const call = vi.mocked(streamText).mock.calls[0]?.[0] as { messages: Array<{ role: string; content: string }> };
+    expect(call.messages).toEqual(expect.arrayContaining([
+      { role: "user", content: "keep this request" },
+      { role: "assistant", content: "keep this answer" },
+      { role: "user", content: "continue from the saved answer" },
+    ]));
+  });
+
+  it("changes visible messages and rolls back the production session exchange", async () => {
+    await mount();
+    agent.addSystemMessage("system context");
+    agent.addUserMessage("discard this request");
+    agent.session.messages.push(
+      { role: "user", content: "discard this request", timestamp: new Date().toISOString() },
+      { role: "assistant", content: "discard this answer", timestamp: new Date().toISOString() },
+    );
+    await vi.waitFor(() => expect(agent.messages.map(message => message.content)).toEqual([
+      "system context", "discard this request",
+    ]));
+
+    expect(agent.rollback()).toEqual({ rolledBack: true, restoredInput: "discard this request" });
+    await vi.waitFor(() => expect(agent.messages.map(message => message.content)).toEqual(["system context"]));
+    expect(agent.session.messages).toEqual([]);
+  });
+
+  it("cycles the mounted hook through each permission mode", async () => {
+    await mount();
+    expect(agent.permissionMode).toBe("default");
+    agent.cyclePermissionMode();
+    await vi.waitFor(() => expect(agent.permissionMode).toBe("acceptEdits"));
+    agent.cyclePermissionMode();
+    await vi.waitFor(() => expect(agent.permissionMode).toBe("plan"));
+    agent.cyclePermissionMode();
+    await vi.waitFor(() => expect(agent.permissionMode).toBe("bypassPermissions"));
+    expect(agent.isBypassMode()).toBe(true);
   });
 
   it("owns manual compaction until cancellation settles and preserves history", async () => {

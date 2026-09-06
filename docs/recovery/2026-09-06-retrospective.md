@@ -225,7 +225,7 @@ Final documentation verification: 32 documentation/hook tests passed (exit 0); l
 
 ## Continuation results
 
-Updated 2026-09-06 22:48 UTC. The user authorized finishing the remaining work as far as possible. Existing implementation and worktrees were preserved; recovery continued from saved changes. No push, PR, release, tag, paid model evaluation, or worktree deletion was performed.
+Updated 2026-09-06 22:53 UTC. The user authorized finishing the remaining work as far as possible. Existing implementation and worktrees were preserved; recovery continued from saved changes. No push, PR, release, tag, paid model evaluation, or worktree deletion was performed.
 
 | Work accepted locally | Result and evidence |
 | --- | --- |
@@ -240,7 +240,7 @@ Updated 2026-09-06 22:48 UTC. The user authorized finishing the remaining work a
 | Program cancellation review correction | Parent cancellation now reaches program gates, decomposition, ticket lookup and generated-issue HTTP requests. Gates use the shared scoped runner; cancellation stops subsequent advisory gates. External-request tests are mocked. |
 | Installed package and CI | Packed and installed outside the source checkout; help/version, headless JSON, SIGINT and PTY active-request cancellation plus subsequent /status passed. Linux/macOS and Node 22.12.0/22.22.2 CI matrix configured. Remote jobs were not executed. |
 
-The latest combined implementation checkpoint `d85284de` passed **1,614 tests, zero failures, one existing skip across 111 files**, plus typecheck/build, on Node 22.22.2/Linux with the exact locked dependencies. The package/PTY suite previously passed four tests at `a9b0976e`; final qualification follows the documentation pass. Lower test counts than early checkpoints reflect documented removal of mirrored helper tests, not omitted failed tests.
+Final combined candidate `67e19c20` passed **1,614 tests, zero failures, one existing skip across 111 files**, plus typecheck/build and **four installed-package/PTY tests**, on Node 22.22.2/Linux with the exact locked dependencies. Reference documentation and migration notes are integrated. All first-release P0/P1 tasks are locally complete; the qualification report records platform and evaluation limits. Lower test counts than early checkpoints reflect documented removal of mirrored helper tests, not omitted failed tests.
 
 The [qualification record](r24-qualification.md) maps reviewed contracts to source and regression tests. It distinguishes local deterministic evidence from remote platform checks and live model evaluation. [Continuation inventory](2026-09-06-continuation.json) lists saved changes and worktrees at its stated snapshot; the initial incident inventory remains preserved separately.
 
@@ -254,4 +254,4 @@ Additional problems identified during continuation were contained:
 
 Continuity safeguards are now repository instructions in [AGENTS.md](../../AGENTS.md): read the current handoff first; checkpoint before dispatch/integration and after failures; qualify combined callers/storage contracts; stop unrelated expansion on a failing check; preserve worker commits and local evidence; and record an exact next action. These measures make restart recoverable. They cannot prevent host outages or safety blocks, and no setting or instruction here guarantees an uninterrupted session.
 
-Remaining at this checkpoint: R22 final reference/migration documentation and R24 final installed-package qualification/report. Optional R19 budgets and R21 comparison harness/live measurements are deferred from the first reliability release; R20 offline fixtures do not establish comparative quality or cost. The original host safety-block trigger remains unknown beyond the recorded error category. Code repairs do not establish why that host decision occurred.
+Remaining work: remote Linux/macOS CI matrix execution before claiming those platforms are qualified, and any separately authorized publication. Optional R19 budgets and R21 comparison harness/live measurements are deferred from the first reliability release; R20 offline fixtures do not establish comparative quality or cost. The original host safety-block trigger remains unknown beyond the recorded error category. Code repairs do not establish why that host decision occurred.

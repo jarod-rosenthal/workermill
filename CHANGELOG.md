@@ -15,7 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`/settings review.specCheck` and `/settings editor`** — both had config fields but no way to set them from inside the CLI.
 
 ### Changed
-- **Headless permissions** — `wm run` enforces allow/ask/deny rules and returns non-success when a required permission cannot be obtained. `--full-disk` changes file scope, not tool permission. See [migration examples](docs/commands.md#wm-run).
+- **Headless permissions** — `wm run` enforces allow/ask/deny rules and returns non-success when a required permission cannot be obtained. `--full-disk` changes file scope, not tool permission. See [migration examples](docs/commands.md).
 - **Sandbox capabilities** — Docker socket access defaults off. The optional socket capability is unsupported by the Linux OS boundary; write grants and network allowances are explicit. See [configuration](docs/configuration.md#sandbox).
 - **Qualification** — deterministic tests cover actual adapters, installed-package startup, headless JSON and PTY cancellation. Platform and live-evaluation limits are recorded in the [qualification report](docs/recovery/r24-qualification.md).
 

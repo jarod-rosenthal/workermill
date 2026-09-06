@@ -1,13 +1,15 @@
 {
-  "capturedAt": "2026-09-06T22:17:10.562861+00:00",
+  "capturedAt": "2026-09-06T22:54:46.751158+00:00",
   "repository": "/home/user/github/workermill",
   "branch": "reliability/core",
-  "head": "a901e2b83560caf04a22210da9709efc8888d16a",
+  "head": "67e19c20e1f282c2df200c1ccda66bb15578ae00",
   "baseline": "9e317488",
-  "note": "Continuation snapshot; initial incident inventory is preserved separately. Git changes include saved commits, not a claim that each task is complete. Current worker candidates are in HANDOFF.md. No remote refs refreshed.",
+  "note": "Final continuation snapshot; initial incident inventory/evidence remain preserved separately. No remote refs refreshed. Tracked-file modification times include checkout effects and are not authorship evidence. Worktree status includes preserved dependency symlinks. Current qualification and excluded work are in HANDOFF.md and r24-qualification.md.",
+  "commitsBeyondBaseline": 205,
   "changedPathsSinceBaseline": [
     ".github/workflows/ci-cd.yml",
     "AGENTS.md",
+    "CHANGELOG.md",
     "CONTRIBUTING.md",
     "HANDOFF.md",
     "README.md",
@@ -19,6 +21,7 @@
     "docs/contributing.md",
     "docs/quality-gates.md",
     "docs/recipes.md",
+    "docs/recovery/2026-09-06-continuation.json",
     "docs/recovery/2026-09-06-evidence.json",
     "docs/recovery/2026-09-06-inventory.json",
     "docs/recovery/2026-09-06-retrospective.md",
@@ -26,6 +29,7 @@
     "docs/recovery/r15-acceptance.md",
     "docs/recovery/r16-coverage.md",
     "docs/recovery/r23-acceptance.md",
+    "docs/recovery/r24-qualification.md",
     "docs/reliability-plan.md",
     "docs/reliability-queue.json",
     "docs/troubleshooting.md",
@@ -96,6 +100,7 @@
     "src/__tests__/plan-critic.test.ts",
     "src/__tests__/planner-runtime-policy.test.ts",
     "src/__tests__/process-runner.test.ts",
+    "src/__tests__/program-cancellation.test.ts",
     "src/__tests__/provider-registry.test.ts",
     "src/__tests__/publication-lifecycle.test.ts",
     "src/__tests__/recovery.test.ts",
@@ -112,7 +117,9 @@
     "src/__tests__/schema-command.test.ts",
     "src/__tests__/scoped-process.test.ts",
     "src/__tests__/scripted-model.test.ts",
+    "src/__tests__/session.test.ts",
     "src/__tests__/slash-commands.test.ts",
+    "src/__tests__/stats-command.test.ts",
     "src/__tests__/sub-agent-runtime.test.ts",
     "src/__tests__/sub-agent.test.ts",
     "src/__tests__/system-prompt.test.ts",
@@ -169,6 +176,7 @@
     "src/orchestrator/types.ts",
     "src/orchestrator/utils.ts",
     "src/permissions.ts",
+    "src/program-bootstrap.ts",
     "src/providers/types.ts",
     "src/recovery.ts",
     "src/repository-fingerprint.ts",
@@ -180,9 +188,11 @@
     "src/sandbox-mode.ts",
     "src/session.ts",
     "src/ship-state.ts",
+    "src/stats-command.ts",
     "src/ticket-ops.ts",
     "src/tool-concurrency.ts",
     "src/ui/Root.tsx",
+    "src/ui/agent/types.ts",
     "src/ui/agent/utils.ts",
     "src/ui/commands/project.ts",
     "src/ui/commands/session.ts",
@@ -194,444 +204,1756 @@
     "vitest.config.ts",
     "vitest.package-os.config.ts"
   ],
-  "diffStat": "187 files changed, 27009 insertions(+), 8424 deletions(-)",
+  "diffStat": "196 files changed, 28299 insertions(+), 8492 deletions(-)",
+  "trackedDocumentation": [
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    ".github/ISSUE_TEMPLATE/feature_request.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "HANDOFF.md",
+    "README.md",
+    "SECURITY.md",
+    "docs/README.md",
+    "docs/architecture.md",
+    "docs/commands.md",
+    "docs/configuration.md",
+    "docs/contributing.md",
+    "docs/hooks-and-skills.md",
+    "docs/personas.md",
+    "docs/quality-gates.md",
+    "docs/recipes.md",
+    "docs/recovery/2026-09-06-retrospective.md",
+    "docs/recovery/r15-acceptance.md",
+    "docs/recovery/r16-coverage.md",
+    "docs/recovery/r23-acceptance.md",
+    "docs/recovery/r24-qualification.md",
+    "docs/reliability-plan.md",
+    "docs/troubleshooting.md",
+    "evals/README.md",
+    "personas/architect.md",
+    "personas/backend_developer.md",
+    "personas/data_ml_engineer.md",
+    "personas/devops_engineer.md",
+    "personas/frontend_developer.md",
+    "personas/mobile_developer.md",
+    "personas/planner.md",
+    "personas/qa_engineer.md",
+    "personas/security_engineer.md",
+    "personas/tech_lead.md",
+    "personas/tech_writer.md"
+  ],
   "recentCommits": [
+    "67e19c20e1f282c2df200c1ccda66bb15578ae00 2026-09-06T18:52:23-04:00 docs: finalize migration notes for reliability candidate",
+    "f06e171c77b45a49addc0f2b2fba979cea6b32bd 2026-09-06T18:52:23-04:00 docs: align reliability guarantees",
+    "f5a70abc8f8639ee7e5aa58f39a048bde15d4561 2026-09-06T18:51:29-04:00 docs: align reliability guarantees",
+    "3c4212a9335e4173b53022b53987cbcb8068d833 2026-09-06T18:48:42-04:00 docs: reconcile recovered work and continuation outcomes",
+    "a15ffd6578dc26b70ab910c0b72203b221eacaf7 2026-09-06T18:47:03-04:00 docs: qualify session ledger and program cancellation",
+    "d85284dee22939f4e1089693d4bf269b7ead188b 2026-09-06T18:45:41-04:00 fix: propagate program cancellation and qualify session ledger output",
+    "f193d54b673a516c63e3ce5cf28c9fbe77d72e04 2026-09-06T18:41:56-04:00 feat: persist cumulative usage ledger in sessions",
+    "202523eb7e1df0bb3d0093bb358a1881eed7aa19 2026-09-06T18:41:16-04:00 feat: persist cumulative usage ledger in sessions",
+    "d1c093f2916818ab79e8d52ffe03ad0ab85e71b8 2026-09-06T18:40:58-04:00 docs: record program cancellation gap before correction",
+    "3232bb723f893c17febf2a828beb04f624e60397 2026-09-06T18:37:04-04:00 docs: record release review boundaries and evidence map",
+    "8f3e51c1b60c7982b991b314f87249a4aa772fc9 2026-09-06T18:34:48-04:00 docs: qualify run ledger and checkpoint session migration",
+    "0efe49344fd04a5c7df0bb7a91687d5713f85818 2026-09-06T18:33:42-04:00 test: align review evidence with multi-call fixture",
+    "4c7cbc050c35097c61b18f992f6b10430f92482d 2026-09-06T18:32:44-04:00 fix: retain child usage when SDK totals are placeholders",
+    "946f023ad16800d1d1de90b9c94428a3c980065d 2026-09-06T18:32:12-04:00 test: cover orchestration usage ledger totals",
+    "45b2437f7366cf0a09e352f2d7781616b6f7ab88 2026-09-06T18:32:12-04:00 feat: persist orchestration usage ledger",
+    "7b42332566b4d80ee852ecac0be97f056bd5c549 2026-09-06T18:31:54-04:00 test: cover orchestration usage ledger totals",
+    "011ce55be694400ad885f437c37e0d092414b0f9 2026-09-06T18:28:32-04:00 feat: persist orchestration usage ledger",
+    "ccfcd18a794c3e19b3c47e86dc8173f3e0a55db5 2026-09-06T18:26:14-04:00 test: disable remote catalog refresh in offline package fixture",
+    "8c8914932da2fa1fd54273e46e272c66e500d873 2026-09-06T18:23:21-04:00 docs: qualify worker review ledger and stage persistence",
+    "1c33f857cfba1a0b4183db042655be1b870c9999 2026-09-06T18:21:31-04:00 test: exercise real accounting in lifecycle cleanup regressions",
+    "c9cb139beaf8c2e88141ba7e9eb02ccca432286c 2026-09-06T18:21:16-04:00 docs: record lifecycle fixture blocker in full qualification",
+    "0b7a708c77b738c9ec750a1ee0b6164fe001f363 2026-09-06T18:19:28-04:00 fix: preserve review totals before terminal validation",
+    "6f99264b428d6017759d500e4e7473c91fe6a3cf 2026-09-06T18:18:08-04:00 feat: record worker and reviewer SDK usage calls",
+    "bb51a14770a22408d2fc96f182021119de00192e 2026-09-06T18:17:20-04:00 feat: record worker and reviewer SDK usage calls",
+    "4fcb0706168ac6cdc143a8d05ae4c467f6454ab5 2026-09-06T18:17:10-04:00 docs: preserve continuation commit and worktree inventory",
     "a901e2b83560caf04a22210da9709efc8888d16a 2026-09-06T18:14:09-04:00 docs: separate run ledger persistence from session UI migration",
     "ff5198d77b3e6c461424421699a3f96e4919743f 2026-09-06T18:11:30-04:00 docs: extend retrospective with recovered implementation results",
     "f98144a20d52c3eb5f010710a74e499529c67cc0 2026-09-06T18:10:09-04:00 docs: qualify planning ledger and unblock review wiring",
     "38917ed6222e493897013c7110a02427486a2f0f 2026-09-06T18:08:18-04:00 test: use real cost tracker in orchestration integration",
     "d9461bf03b5ca5f14ec084102635ca8dbd4f18a4 2026-09-06T18:08:02-04:00 docs: record planning integration fixture failure",
-    "52b120368fe154007d14ed54dda98708e7f8453f 2026-09-06T18:06:53-04:00 feat: observe planning model usage per call",
+    "52b120368fe154007d14ed54dda98708e7f8453f 2026-09-06T18:07:31-04:00 feat: observe planning model usage per call",
     "31d95e0cadfd282ce5c65c5a3a46b6e7963b65c7 2026-09-06T18:07:18-04:00 fix: retain known cache charges in partial usage",
+    "8d89e4a3f8b79a5d6c8e3ef9e94ccd7a040fdf4a 2026-09-06T18:06:53-04:00 feat: observe planning model usage per call",
     "976de221f5e7783b8a910476b3a46d617b1683c1 2026-09-06T18:06:11-04:00 docs: record locked package and runtime qualification",
     "73f67638e1390ad4423731ec50540774d1e3c321 2026-09-06T18:05:30-04:00 ci: provision supported sandbox test dependencies",
     "a9b0976e0597579e089f616281fffab2e2b8dcda 2026-09-06T18:03:48-04:00 test: bound package subprocesses and reuse configured cache",
+    "fb842354dc9c24c08227ed83c424f679da0b478e 2026-09-06T18:03:12-04:00 test: qualify locked install and synchronized PTY input",
     "53add66598b8c487b6fad1057e53f2e40bd9dfa3 2026-09-06T18:03:12-04:00 test: qualify locked install and synchronized PTY input",
-    "22e1abb1fc87b0adf93d710eec0af1eae1e53dd1 2026-09-06T17:42:51-04:00 test: bound packaged runtime cleanup",
-    "eff641177c7c8187c5a7a0613c408b14c6d909de 2026-09-06T17:29:31-04:00 test: qualify packaged CLI on supported CI hosts",
+    "22e1abb1fc87b0adf93d710eec0af1eae1e53dd1 2026-09-06T18:03:12-04:00 test: bound packaged runtime cleanup",
+    "eff641177c7c8187c5a7a0613c408b14c6d909de 2026-09-06T18:03:12-04:00 test: qualify packaged CLI on supported CI hosts",
     "10bb2c90a90d0062cc0d88ce06653fea320680c5 2026-09-06T18:01:57-04:00 docs: qualify chat ledger and record locked dependency gap",
     "a325170b8fc7f5b66c88a3a840a394de0b964aae 2026-09-06T18:00:37-04:00 fix: share final usage semantics across chat and headless",
-    "6b8f0f91d02e26867dc01d1e14911b30df597039 2026-09-06T17:44:14-04:00 fix: persist chat compaction usage safely",
-    "4c1cbc2798708d98e03305e35ecb3283a515d8cd 2026-09-06T17:30:37-04:00 fix: record interactive chat usage ledger",
+    "6b8f0f91d02e26867dc01d1e14911b30df597039 2026-09-06T17:59:12-04:00 fix: persist chat compaction usage safely",
+    "4c1cbc2798708d98e03305e35ecb3283a515d8cd 2026-09-06T17:59:12-04:00 fix: record interactive chat usage ledger",
+    "f75f0314628aa67944afc08c5f3720aa7945a22b 2026-09-06T17:44:14-04:00 fix: persist chat compaction usage safely",
+    "76da45d09f70b0f2b2fc2b72e6fe70a37979ec38 2026-09-06T17:42:51-04:00 test: bound packaged runtime cleanup",
     "d8e7ec74add096440bd701ada2773e82b99b2b04 2026-09-06T17:42:51-04:00 docs: checkpoint unqualified package and chat candidates",
+    "0e4a401d342fa1267af9ee9fb19f2666fe377847 2026-09-06T17:30:37-04:00 fix: record interactive chat usage ledger",
+    "5940db9a81d5806b68a42fbde27d6b48a08f550a 2026-09-06T17:29:31-04:00 test: qualify packaged CLI on supported CI hosts",
     "f7b781f34193a759e46f3737926aa3473dd33195 2026-09-06T17:27:01-04:00 test: verify missing headless usage through actual SDK",
     "f71e6a129fd5b24b3142bc0f5900d359328c50e2 2026-09-06T17:25:56-04:00 test: model missing partial and cached SDK usage explicitly",
     "5e7d73ac072312a107d05e56e07ba3cb8f112563 2026-09-06T17:24:57-04:00 docs: bound remaining orchestration ledger migrations",
     "ac3528725ded36b853b1e8f28ad793ba2d3518cf 2026-09-06T17:23:38-04:00 docs: qualify runtime coverage and headless accounting",
-    "47dc4d7fd0a11c1fbe4b5626ecc5f06d31213160 2026-09-06T17:21:38-04:00 test: cover runtime lifecycle contracts",
+    "47dc4d7fd0a11c1fbe4b5626ecc5f06d31213160 2026-09-06T17:22:19-04:00 test: cover runtime lifecycle contracts",
+    "ed038c9e2760d10b31249eb707949030fa25edc5 2026-09-06T17:22:02-04:00 test: cover runtime lifecycle contracts",
     "6eaaeab98d0a2158553f4e17c997600b8df23b98 2026-09-06T17:21:02-04:00 test: exercise zero final usage fallback after stream completion",
-    "4a295f3fd65995a48dfc1946f68370662aeb772d 2026-09-06T17:20:03-04:00 fix(usage): keep placeholder totals partial",
-    "6a402911e40a26d2f67230301a026e8afdcf11a9 2026-09-06T17:18:19-04:00 feat(usage): record headless model calls",
+    "4a295f3fd65995a48dfc1946f68370662aeb772d 2026-09-06T17:20:30-04:00 fix(usage): keep placeholder totals partial",
+    "6a402911e40a26d2f67230301a026e8afdcf11a9 2026-09-06T17:20:30-04:00 feat(usage): record headless model calls",
     "0602ddff2f8d3a2dc63a34322bfe9758acb784b5 2026-09-06T17:20:16-04:00 docs: checkpoint runtime and usage candidates",
+    "83967db801ce461ddeffe0b2732bb71239fb0761 2026-09-06T17:20:03-04:00 fix(usage): keep placeholder totals partial",
+    "e7674a1b27de732b1c154138c1d42349516899af 2026-09-06T17:18:19-04:00 feat(usage): record headless model calls",
     "d699d474944f52ba5116c39a8993b84efd703a61 2026-09-06T17:12:51-04:00 docs: qualify runtime governance and subcall usage events",
+    "58e7ecfbc0c450ec86ea4325c7bc9596ea01bc6a 2026-09-06T17:10:58-04:00 test: exercise governed adapters through the real SDK",
     "36471d144ae8496118dfacf2d05d05ac4750e61f 2026-09-06T17:10:58-04:00 test: exercise governed adapters through the real SDK",
-    "43f3b1974e59676825b6b6dfa5125fd8f08e380e 2026-09-06T17:09:05-04:00 feat(usage): report child and compaction calls",
+    "43f3b1974e59676825b6b6dfa5125fd8f08e380e 2026-09-06T17:10:42-04:00 feat(usage): report child and compaction calls",
+    "f637f621162b99629d4abe2ad339da69b84e0d23 2026-09-06T17:09:05-04:00 feat(usage): report child and compaction calls",
     "aeea7bb596dcf6e7e940efc115dceae721645894 2026-09-06T17:05:13-04:00 fix(cost): count observed partial and cached usage once",
     "5c8b6b818b836af7e843b7e550fd85e28aa85ded 2026-09-06T16:58:26-04:00 docs: qualify fixture and ledger contracts and bound usage migrations",
-    "8ab95df89864e02798ebe6cf05129fbe6236c612 2026-09-06T16:56:23-04:00 feat(cost): add per-call usage ledger",
-    "e918430881a705b2301946429254c1ba1e5f5c5b 2026-09-06T16:55:53-04:00 test: add scripted AI SDK model fixture",
+    "8ab95df89864e02798ebe6cf05129fbe6236c612 2026-09-06T16:56:59-04:00 feat(cost): add per-call usage ledger",
+    "e918430881a705b2301946429254c1ba1e5f5c5b 2026-09-06T16:56:24-04:00 test: add scripted AI SDK model fixture",
+    "70e1cf263667b7684cde05a84748d9a310ca62a0 2026-09-06T16:56:23-04:00 feat(cost): add per-call usage ledger",
+    "192ef813a4300cfb332b7005c226b272b193ba57 2026-09-06T16:55:53-04:00 test: add scripted AI SDK model fixture",
     "605f591463376cf32a4374f89616a6debfdce803 2026-09-06T16:47:53-04:00 docs: checkpoint R16a and R18a worker ownership",
     "e85a32e7891719e0c691fcf31789fd1e3eef4383 2026-09-06T16:45:55-04:00 fix: align finalized run outcomes and close reliability acceptance gaps",
     "8cd7c7331d54a39f1b5ac606c56341def0777f7a 2026-09-06T16:21:23-04:00 docs: pin qualified repair and next reliability checkpoint",
     "08077002d6ef10b98c7c38b3cb7092dc68c4c82e 2026-09-06T16:21:04-04:00 fix: reconcile run evidence lifecycle and qualify recovery repair",
+    "cd42e38e000c2a4ebfc98f6077ecc0498b449f2b 2026-09-06T15:20:14-04:00 fix(browser): bound discovery cancellation cleanup",
+    "9ca76df3cf8fd88fed525a6d37d7bbaa9164a50c 2026-09-06T15:10:46-04:00 fix(browser): await discovery stream cleanup",
     "f613413bd3b3ce87179c18de122e04a86484799d 2026-09-06T15:04:27-04:00 docs: preserve reliability incident evidence and recovery handoff",
-    "22ba7d7c0d12dd9bed85586fcbf6f966030245c7 2026-09-06T14:36:00-04:00 fix(runs): harden manifest evidence validation",
-    "5aa6a940d342da7677da61810568b3238c26d3d4 2026-09-06T14:28:37-04:00 feat(runs): validate atomic run manifest storage",
-    "b1fec7febbffb5c78462fffeb4cc407ca96e007b 2026-09-06T14:36:35-04:00 test(runtime): retain run-owned MCP coverage",
+    "7aa8e08929293456a21fe687696dbe17a4fc1368 2026-09-06T14:45:49-04:00 feat(orchestrator): emit truthful R15 attempt events",
+    "8b279527b28baca1447a05a076de7dbcddb6468e 2026-09-06T14:42:02-04:00 fix(recovery): keep unverified branch state discoverable",
+    "0c98ecd76e7e297e5de8a71cd7883d0b8591a45b 2026-09-06T14:42:02-04:00 fix(runs): harden manifest evidence validation",
+    "386db7983bc04ada8d4fe15d8a41bcc2bccc09eb 2026-09-06T14:42:02-04:00 feat(runs): validate atomic run manifest storage",
+    "22ba7d7c0d12dd9bed85586fcbf6f966030245c7 2026-09-06T14:40:32-04:00 fix(runs): harden manifest evidence validation",
+    "5aa6a940d342da7677da61810568b3238c26d3d4 2026-09-06T14:40:32-04:00 feat(runs): validate atomic run manifest storage",
+    "b1fec7febbffb5c78462fffeb4cc407ca96e007b 2026-09-06T14:40:32-04:00 test(runtime): retain run-owned MCP coverage",
+    "9a78d6bcb06ea6edfc866a590d8ab384aa2fd372 2026-09-06T14:36:35-04:00 test(runtime): retain run-owned MCP coverage",
+    "80ba3362416ebad60fdd90a37923b58222d73237 2026-09-06T14:36:00-04:00 fix(runs): harden manifest evidence validation",
     "cc6aa8b8bf343d328ec91d90a9f96a4b02f868b3 2026-09-06T14:35:25-04:00 docs: describe scoped review evidence and track runtime cleanup",
+    "94dab01f6fa5d898007156ce7ea2f534dd1fe889 2026-09-06T14:33:44-04:00 fix(review): scope asynchronous repository context reads",
+    "52e35ed29af717b2a023212b15fe3b277b6ac175 2026-09-06T14:33:32-04:00 fix(recovery): keep unverified branch state discoverable",
     "c397ad751b329fd99109a47762d0f177b0db5134 2026-09-06T14:33:07-04:00 fix(recovery): keep unverified branch state discoverable",
-    "861008d9f204fdfa774237a8d4316b52d4653a33 2026-09-06T14:28:52-04:00 refactor(runtime): remove superseded legacy adapters",
+    "861008d9f204fdfa774237a8d4316b52d4653a33 2026-09-06T14:32:05-04:00 refactor(runtime): remove superseded legacy adapters",
     "0452742acde59f3d14e77125c6b07ef5c2eb69b1 2026-09-06T14:31:39-04:00 fix(review): scope asynchronous repository context reads",
-    "bb271fcf107c5f60f284a7cf2494fe0a0043311c 2026-09-06T14:19:30-04:00 test(orchestrator): exercise startup branch lifecycle",
+    "8d967c748bbf08ea8db71b17a591e80ca3eb147c 2026-09-06T14:28:52-04:00 refactor(runtime): remove superseded legacy adapters",
+    "1ad60e60e82dd048a9113bb90f73dec899e5f96b 2026-09-06T14:28:37-04:00 feat(runs): validate atomic run manifest storage",
+    "bb271fcf107c5f60f284a7cf2494fe0a0043311c 2026-09-06T14:19:52-04:00 test(orchestrator): exercise startup branch lifecycle",
+    "2245fc82c5aa93ec542749ddbd766984013f4a7a 2026-09-06T14:19:30-04:00 test(orchestrator): exercise startup branch lifecycle",
     "ccc7b7c77aefdfa1f1bf7f7562058ff65a8d4c3e 2026-09-06T14:19:22-04:00 docs: qualify lifecycle contracts and scope manifest storage work",
     "8a5994b626cbaa19b4d631a3a5fdc40fbcebca0c 2026-09-06T14:18:01-04:00 fix(ui): reject prompts from cancelled orchestration owners",
-    "96e97fa3152c01d617d103988abf4f2edcb6ec77 2026-09-06T14:16:14-04:00 test(orchestrator): stabilize async startup fixtures",
+    "96e97fa3152c01d617d103988abf4f2edcb6ec77 2026-09-06T14:16:57-04:00 test(orchestrator): stabilize async startup fixtures",
+    "fc45773761b47b8f5ba76fe16cbf44eee0195193 2026-09-06T14:16:14-04:00 test(orchestrator): stabilize async startup fixtures",
     "75180e79794d40692197e611764d4f173cd8d7ac 2026-09-06T14:15:16-04:00 fix(orchestrator): preserve branch choices and await publication ownership",
-    "45b1d91639c6dd2b7d335635089f9305a0b421d5 2026-09-06T14:11:14-04:00 test(orchestrator): cover startup cancellation lifecycle",
-    "21f0c4f753ffc7603c8436ea652cf99161e58a4b 2026-09-06T14:06:15-04:00 fix(orchestrator): scope startup probes to run",
-    "07e169fb43e06e48330af0830a846d0e1b073778 2026-09-06T14:10:05-04:00 test(sub-agent): prove pending tool drain ordering",
-    "9736d1ccd2210b9df74c5e6572d8fd31572408c2 2026-09-06T14:07:35-04:00 fix(sub-agent): drain successful tools before abort",
-    "33bb90e3ae16d307ce3d2136f7ce48aecac2c787 2026-09-06T14:05:38-04:00 fix(sub-agent): separate model and admin lifetimes",
+    "45b1d91639c6dd2b7d335635089f9305a0b421d5 2026-09-06T14:12:40-04:00 test(orchestrator): cover startup cancellation lifecycle",
+    "21f0c4f753ffc7603c8436ea652cf99161e58a4b 2026-09-06T14:12:40-04:00 fix(orchestrator): scope startup probes to run",
+    "241c11570e6b53d5cd510a2b1622447c9ab5617f 2026-09-06T14:11:14-04:00 test(orchestrator): cover startup cancellation lifecycle",
+    "07e169fb43e06e48330af0830a846d0e1b073778 2026-09-06T14:10:31-04:00 test(sub-agent): prove pending tool drain ordering",
+    "9736d1ccd2210b9df74c5e6572d8fd31572408c2 2026-09-06T14:10:31-04:00 fix(sub-agent): drain successful tools before abort",
+    "33bb90e3ae16d307ce3d2136f7ce48aecac2c787 2026-09-06T14:10:31-04:00 fix(sub-agent): separate model and admin lifetimes",
     "626a6ca1be97519d5e9ce64b12bea0d561610c07 2026-09-06T14:10:31-04:00 fix(runtime): bound browser discovery and qualify owned tool drain",
-    "bd002cc9b55ad9b7bfecadaf5b67289d7ada3f76 2026-09-06T13:59:45-04:00 fix(worker): preserve retry work and scope git lifecycle",
+    "764a95b51e4af26723a64f89647584f8021ce4ca 2026-09-06T14:10:05-04:00 test(sub-agent): prove pending tool drain ordering",
+    "6fda08a39fb381cf2418a1138eedd8ec4f135eb4 2026-09-06T14:07:35-04:00 fix(sub-agent): drain successful tools before abort",
+    "8103b5d91bf74d604045c23af34788174b0aa51a 2026-09-06T14:07:28-04:00 fix(orchestrator): scope startup probes to run",
+    "6b6dbb549c91f65511c768ec99fc922675dbb6ad 2026-09-06T14:05:38-04:00 fix(sub-agent): separate model and admin lifetimes",
+    "bd002cc9b55ad9b7bfecadaf5b67289d7ada3f76 2026-09-06T14:03:30-04:00 fix(worker): preserve retry work and scope git lifecycle",
+    "bb1ad85541cddf5e8b3849e3aa3464de0c762e6e 2026-09-06T13:59:45-04:00 fix(worker): preserve retry work and scope git lifecycle",
     "7e52a8e080932f2dda77cec91350f58496bd2880 2026-09-06T13:56:59-04:00 fix(orchestrator): drain attempts before retry and fail closed on teardown",
-    "713cc37b1eff6b20f8509cf89415757271f16e8e 2026-09-06T13:54:53-04:00 fix(completion): scope publication processes to run",
-    "c8e5aed8c63d5d74f9075d1d009704faf0490aa6 2026-09-06T13:54:51-04:00 fix(ui): serialize orchestration lifecycle ownership",
-    "70d5db766c7a814f8618323fa4b0834816a4fe66 2026-09-06T13:51:44-04:00 fix(sub-agent): cancel bounded worktree administration",
-    "b8fb96e0084417bdbd3d049a8efca7f9747088bd 2026-09-06T13:49:18-04:00 fix(browser): harden startup and process cleanup",
-    "346983784458b1e1055bd153d257ffc7d230ca47 2026-09-06T13:35:01-04:00 fix(browser): scope Chrome resources to runs",
+    "713cc37b1eff6b20f8509cf89415757271f16e8e 2026-09-06T13:55:31-04:00 fix(completion): scope publication processes to run",
+    "c8e5aed8c63d5d74f9075d1d009704faf0490aa6 2026-09-06T13:55:31-04:00 fix(ui): serialize orchestration lifecycle ownership",
+    "0bff35ca3223c8310beb9d6cb6d19234b45b10fa 2026-09-06T13:54:53-04:00 fix(completion): scope publication processes to run",
+    "21049fb49cfc62445e03b8a4ce7fdd4115d8d714 2026-09-06T13:54:51-04:00 fix(ui): serialize orchestration lifecycle ownership",
+    "70d5db766c7a814f8618323fa4b0834816a4fe66 2026-09-06T13:54:40-04:00 fix(sub-agent): cancel bounded worktree administration",
+    "0c9510be2f91887f02c84976a75acad94d0d2608 2026-09-06T13:51:44-04:00 fix(sub-agent): cancel bounded worktree administration",
+    "b8fb96e0084417bdbd3d049a8efca7f9747088bd 2026-09-06T13:50:09-04:00 fix(browser): harden startup and process cleanup",
+    "346983784458b1e1055bd153d257ffc7d230ca47 2026-09-06T13:50:09-04:00 fix(browser): scope Chrome resources to runs",
     "4afbbb6133753e1132608e1dcd0b7b7eaa86f2f1 2026-09-06T13:50:09-04:00 fix(tools): bind HTTP operations to the owning run signal",
-    "f6ced7e55f07520b4b81024e30f9a9b13d072823 2026-09-06T13:47:22-04:00 test(orchestrator): add lifecycle runtime regression draft",
-    "e0ffeb766e1cf7f367218b8d6f1ee6aa82468f7d 2026-09-06T13:34:33-04:00 fix(orchestrator): finalize run-owned resources",
-    "604a1ad0f72ac1d7b880646c381494f6b8921335 2026-09-06T13:33:43-04:00 fix(orchestrator): scope role attempts to run lifetimes",
+    "f6ced7e55f07520b4b81024e30f9a9b13d072823 2026-09-06T13:49:40-04:00 test(orchestrator): add lifecycle runtime regression draft",
+    "801e17a317ec7f76d12c8b94503a77a6fb354aed 2026-09-06T13:49:18-04:00 fix(browser): harden startup and process cleanup",
+    "a4a987b41e7dc050034cb44370276f0048531f05 2026-09-06T13:47:22-04:00 test(orchestrator): add lifecycle runtime regression draft",
+    "d086f83906bb12a37a17857ae4f4ba0f8b10b940 2026-09-06T13:45:55-04:00 fix(http): cancel network tools and preserve interrupted downloads",
+    "e0ffeb766e1cf7f367218b8d6f1ee6aa82468f7d 2026-09-06T13:44:30-04:00 fix(orchestrator): finalize run-owned resources",
+    "604a1ad0f72ac1d7b880646c381494f6b8921335 2026-09-06T13:44:30-04:00 fix(orchestrator): scope role attempts to run lifetimes",
     "d408dd999348fc78cd074077f0836a6c4320abea 2026-09-06T13:44:30-04:00 fix(chat): bound URL expansion through response consumption",
     "674ab686bbb2eb8a37ec6b3ec3778cd67e24fe61 2026-09-06T13:40:37-04:00 docs: define HTTP cancellation acceptance",
     "899fa4dff03dcaca1a27a58965c69611558bd0f4 2026-09-06T13:40:37-04:00 fix(http): cancel network tools and preserve interrupted downloads",
+    "2472a8c755794cc3b89c1d54492f5d7218d098eb 2026-09-06T13:35:01-04:00 fix(browser): scope Chrome resources to runs",
+    "01e31f6453cd653ed9672bba96535cc9fed82773 2026-09-06T13:34:33-04:00 fix(orchestrator): finalize run-owned resources",
+    "d9a30a2d2c601ecb9db8d704d78cc48fc3264a50 2026-09-06T13:33:43-04:00 fix(orchestrator): scope role attempts to run lifetimes",
+    "a4f4e81dc2c2cf9667f2826fbd91affb12e058ae 2026-09-06T13:33:35-04:00 refactor(http): add bounded signal-aware request lifetime",
     "d2fc403c8d623b9c077f68497f2cec299c0653ed 2026-09-06T13:33:18-04:00 refactor(http): add bounded signal-aware request lifetime",
     "97b25e240c9817434f25915015f3764975ba7eea 2026-09-06T13:30:31-04:00 docs: specify manifest storage and real SDK test contracts",
     "3c523a1ddea2cd88da87da4998815aa6bb439725 2026-09-06T13:29:26-04:00 docs: use blocking gate recipes and qualify routing claims",
     "913721393603a43728f3e5e197ec1c36184e2dec 2026-09-06T13:25:40-04:00 docs: explain cancellation and compaction recovery",
-    "40723a876ec5a1437c75a20a013b953009537d27 2026-09-06T13:24:40-04:00 fix(runtime): drain cancelled chat tools and preserve compaction history",
+    "40723a876ec5a1437c75a20a013b953009537d27 2026-09-06T13:24:49-04:00 fix(runtime): drain cancelled chat tools and preserve compaction history",
+    "1b2c4c42d75fbc101549ed38eb74e22b7d5ccbb8 2026-09-06T13:24:40-04:00 fix(runtime): drain cancelled chat tools and preserve compaction history",
     "3aa4cc47dbe3f22b82451281c5f882ba08178f56 2026-09-06T13:09:34-04:00 test(orchestrator): qualify final-state verification and document recovery",
-    "09c18b8ebe9323cacc82eae44fd9b74c4176da00 2026-09-06T13:07:24-04:00 fix(orchestrator): bind completion to verified final repository state",
+    "09c18b8ebe9323cacc82eae44fd9b74c4176da00 2026-09-06T13:07:35-04:00 fix(orchestrator): bind completion to verified final repository state",
+    "1c74b002a83bdb0043effcf6b8c325fa817e40c6 2026-09-06T13:07:24-04:00 fix(orchestrator): bind completion to verified final repository state",
     "d9ff5f10b8fa6072f9cee687e2825693d91e8266 2026-09-06T12:56:27-04:00 docs: define browser resource ownership acceptance",
-    "8d0a945507495a040b6d0c4a5de86a2b4229c052 2026-09-06T12:54:01-04:00 fix(runtime): scope chat and headless lifecycles to runs",
+    "8d0a945507495a040b6d0c4a5de86a2b4229c052 2026-09-06T12:54:31-04:00 fix(runtime): scope chat and headless lifecycles to runs",
     "3d02f3ff35320f5a6587c27602b928cdaf292b0f 2026-09-06T12:54:16-04:00 fix(ui): show configured MCP servers after run resources close",
+    "6a7b07a97e09551b1f7597caacb6039f536708cd 2026-09-06T12:54:01-04:00 fix(runtime): scope chat and headless lifecycles to runs",
+    "f3e00c83eeffbeb258995ebc2bc257e7398f8160 2026-09-06T12:52:13-04:00 fix(mcp): make active-run server discovery cancellable",
     "7d821de9dcd1e9ba8c079e68dcbed7b72199e310 2026-09-06T12:51:45-04:00 fix(mcp): make active-run server discovery cancellable",
     "356b3daeab6183806f9173798ba5bd5dc779a634 2026-09-06T12:48:36-04:00 fix(recovery): retain final-verification retries and quote Git refs",
     "384a3fb1ad50326f1ee19c2ac118815529d63c90 2026-09-06T12:45:34-04:00 docs: replace obsolete server security claims with CLI boundaries",
     "5b38c278135a4c3e8099d8c66b883b020287e69d 2026-09-06T12:42:55-04:00 fix(lsp): parse bounded UTF-8 response frames by bytes",
-    "584eb04926a865973d34736a0610badc480cf9d8 2026-09-06T12:30:07-04:00 test(lsp): harden lifecycle fixture readiness",
-    "c501afb271c5946ddfdbe892a238be5af1070995 2026-09-06T12:24:34-04:00 fix(lsp): scope language servers to runs",
+    "584eb04926a865973d34736a0610badc480cf9d8 2026-09-06T12:31:20-04:00 test(lsp): harden lifecycle fixture readiness",
+    "c501afb271c5946ddfdbe892a238be5af1070995 2026-09-06T12:31:20-04:00 fix(lsp): scope language servers to runs",
+    "8ce2fdc44008dc768b0a2587926a02ce4d784ea2 2026-09-06T12:30:07-04:00 test(lsp): harden lifecycle fixture readiness",
     "9dd8693f2c3bcd28157be9144f20227a7449e667 2026-09-06T12:25:24-04:00 docs(queue): qualify structured review and fingerprint contract",
-    "bd63db24836baaa5de16bc37fe7ccfd0f42ec19c 2026-09-06T12:22:09-04:00 fix(fingerprint): make evidence collection cancellable",
+    "5ad90b0edd0f13b06f562ebc2aa385928f22369b 2026-09-06T12:24:34-04:00 fix(lsp): scope language servers to runs",
+    "bd63db24836baaa5de16bc37fe7ccfd0f42ec19c 2026-09-06T12:22:26-04:00 fix(fingerprint): make evidence collection cancellable",
+    "d248635cec3ea7905a282ec42db9a251a27ad52c 2026-09-06T12:22:09-04:00 fix(fingerprint): make evidence collection cancellable",
     "35a00f0fe4809b24ddef93cbf9f5830d382a13c2 2026-09-06T12:22:09-04:00 docs(review): require explicit decision and qualifying score",
     "e84093e476b37dcdf3169056574690ec4fe065ca 2026-09-06T12:20:07-04:00 fix(review): stop immediately when revision timeout throws",
-    "45c4d50e150bee99e0b0fcadf348bb1c2c05ba18 2026-09-06T12:17:04-04:00 fix(review): harden fingerprints and outcome states",
-    "b2991e9e50ffec33efc5c2d0f146deaef5295ec2 2026-09-06T12:12:35-04:00 feat(review): add typed outcomes and state fingerprints",
+    "45c4d50e150bee99e0b0fcadf348bb1c2c05ba18 2026-09-06T12:17:28-04:00 fix(review): harden fingerprints and outcome states",
+    "b2991e9e50ffec33efc5c2d0f146deaef5295ec2 2026-09-06T12:17:28-04:00 feat(review): add typed outcomes and state fingerprints",
     "f39d4dca26dc1ce96e9bd2d1dcf045cd202145fc 2026-09-06T12:17:06-04:00 docs(plan): define owned review artifact lifetime",
+    "9dcef678d910604dc182ec4cd34a7107a2535c2f 2026-09-06T12:17:04-04:00 fix(review): harden fingerprints and outcome states",
     "393504de78eb583b2286b2d9d6bf911f1b4258c2 2026-09-06T12:14:24-04:00 test(mcp): prove started descendant cleanup and qualify run ownership",
-    "5ec42ffa84d2cc98de4a74c986f07caa4379fe15 2026-09-06T12:09:56-04:00 fix(mcp): retain exited server ownership for cleanup",
-    "51b2b0f580525670361ede1a4298eaeeca037bbf 2026-09-06T12:03:02-04:00 fix(mcp): scope servers to cancellable runs",
+    "60abab4370acf621b91ba283375851788d9605c3 2026-09-06T12:12:35-04:00 feat(review): add typed outcomes and state fingerprints",
+    "5ec42ffa84d2cc98de4a74c986f07caa4379fe15 2026-09-06T12:10:25-04:00 fix(mcp): retain exited server ownership for cleanup",
+    "51b2b0f580525670361ede1a4298eaeeca037bbf 2026-09-06T12:10:25-04:00 fix(mcp): scope servers to cancellable runs",
+    "c95838b215a58f69795924f591ace88c1525124f 2026-09-06T12:09:56-04:00 fix(mcp): retain exited server ownership for cleanup",
     "2d44e07f9e648a59700360ff305de296e78eced9 2026-09-06T12:07:53-04:00 docs(gates): explain blocking exits and publication prompts",
+    "d4c0b4aabb7a25ca9fc8cd996a3301f614510c54 2026-09-06T12:05:44-04:00 fix(mcp): scope servers to cancellable runs",
     "8120c4e47a2f9f3273aff9710b962541117864f1 2026-09-06T12:04:39-04:00 docs: replace unmeasured reviewer claims with practical tradeoffs",
     "53e50d4811a3ad701dd9b51bb8b1479109f74e99 2026-09-06T12:02:49-04:00 fix(gates): cancellation wins over stale command success",
-    "17f3d0405138c39990c4055dfdb473441597837c 2026-09-06T12:01:22-04:00 feat(gates): add typed required gate policy",
+    "17f3d0405138c39990c4055dfdb473441597837c 2026-09-06T12:01:53-04:00 feat(gates): add typed required gate policy",
+    "635db240fe793daa0673b590fe5bacab5dc4d56d 2026-09-06T12:01:22-04:00 feat(gates): add typed required gate policy",
     "cd856889db5184da77ba0c12a97bb93d4b75c12b 2026-09-06T12:01:05-04:00 test(review): reject approval delivered after cancellation",
     "b9e56b7d4761352c22369d80c96217e36b6188ec 2026-09-06T11:55:14-04:00 test(review): qualify revision writes and document runtime contracts",
     "1422bd51fee641577440ad7c16400a094acfa361 2026-09-06T11:52:34-04:00 test(orchestrator): exercise live approval rules before reviewer teardown",
     "9eb9c76d5aaafc2b685a505c0f04253c044905e1 2026-09-06T11:48:13-04:00 test(evals): qualify complete offline fixture inventory",
-    "b925aa35163abc44b987d0e273da421fa755c721 2026-09-06T11:41:36-04:00 fix(review): route review tools through policy executor",
-    "a677a2e3f00532cfd3cb356375a5e62e98b865df 2026-09-06T11:37:31-04:00 test(evals): harden R20e security acceptance",
-    "053cb69ad77ff0e2b1b3b8c44ce15e244aefc605 2026-09-06T11:30:47-04:00 test(evals): add R20e maintenance and security fixtures",
+    "b925aa35163abc44b987d0e273da421fa755c721 2026-09-06T11:42:13-04:00 fix(review): route review tools through policy executor",
+    "3adcb1160bc9ce65227fabef9ed5aafc2999f7a4 2026-09-06T11:41:36-04:00 fix(review): route review tools through policy executor",
+    "a677a2e3f00532cfd3cb356375a5e62e98b865df 2026-09-06T11:38:47-04:00 test(evals): harden R20e security acceptance",
+    "053cb69ad77ff0e2b1b3b8c44ce15e244aefc605 2026-09-06T11:38:46-04:00 test(evals): add R20e maintenance and security fixtures",
     "9dcc092aaf731ab577675e02a1c49004b141d73c 2026-09-06T11:38:46-04:00 fix(orchestrator): preflight explicit isolation before retry work",
+    "c3eb129cf4c13ba5b174416466627a6725e84b3f 2026-09-06T11:37:31-04:00 test(evals): harden R20e security acceptance",
     "4b4c5fbe2bb6e6f752d26db9bbaf7691ee5ede71 2026-09-06T11:35:22-04:00 docs: distinguish process cancellation from tool settlement",
     "ab226a3e55838d996c076485c6fda93259765bfb 2026-09-06T11:30:56-04:00 docs: assign precise locks to independent lifecycle packages",
+    "5405d9cead5f111a1a4419982f00a952e358443f 2026-09-06T11:30:47-04:00 test(evals): add R20e maintenance and security fixtures",
     "96adb3784657aa40a94fedb9a17bf6698cc0705f 2026-09-06T11:29:50-04:00 docs: record qualified worker and child runtime contracts",
     "1e269feb32d25c75a136189b2de3c03a0fb451b7 2026-09-06T11:28:13-04:00 fix(orchestrator): stop after cancelled plan critique",
     "23ae8c152409ffc7058a8e4bcd9f3ef46abe60af 2026-09-06T11:27:40-04:00 fix(children): await dispatched tools and qualify filter containment",
-    "e855bd1a2d65d13389d3593db5b825dae4e8f8fe 2026-09-06T11:22:11-04:00 test(children): harden runtime acceptance probes",
-    "d9fe6afbf4b6b896c21539cbd33abb561ddf081f 2026-09-06T11:08:22-04:00 test(children): cover isolated runtime boundaries",
-    "6959c60eb01e08f1bb3b3d5133ed11c179e68235 2026-09-06T11:21:52-04:00 fix(planner): preserve late cancellation outcomes",
-    "6bd2887d44888091be5cb5c8f82c0b2ca66f8d74 2026-09-06T11:19:03-04:00 fix(planner): enforce shared read-only tool policy",
+    "6959c60eb01e08f1bb3b3d5133ed11c179e68235 2026-09-06T11:22:45-04:00 fix(planner): preserve late cancellation outcomes",
+    "e855bd1a2d65d13389d3593db5b825dae4e8f8fe 2026-09-06T11:22:45-04:00 test(children): harden runtime acceptance probes",
+    "6bd2887d44888091be5cb5c8f82c0b2ca66f8d74 2026-09-06T11:22:45-04:00 fix(planner): enforce shared read-only tool policy",
+    "d9fe6afbf4b6b896c21539cbd33abb561ddf081f 2026-09-06T11:22:45-04:00 test(children): cover isolated runtime boundaries",
+    "70c35243efe6cbddee757748377337e2660e166e 2026-09-06T11:22:11-04:00 test(children): harden runtime acceptance probes",
+    "17bbad39d199fdd5512bce25902e2acc5461c53f 2026-09-06T11:21:52-04:00 fix(planner): preserve late cancellation outcomes",
+    "158f71c5ee9f02655807604005f00209c32abf16 2026-09-06T11:20:38-04:00 fix(children): contain repository filters during final inspection",
     "b42fb335a903cdaa90ff4674be89489801cc5c1d 2026-09-06T11:20:24-04:00 fix(children): contain repository filters during final inspection",
+    "211282ff84278ca994ffd757162f9c7553bc96fd 2026-09-06T11:19:03-04:00 fix(planner): enforce shared read-only tool policy",
     "aac2d0faf7773127118d431de24eaa5ef6af1b56 2026-09-06T11:16:40-04:00 fix(runtime): honor authorized full-disk checkpoints",
     "8347ddd3919197bb1958fe0ed08187a19fb66925 2026-09-06T11:16:40-04:00 fix(orchestrator): preserve effective gate isolation and narrow approvals",
-    "b361631a56f8268ccde5d4fe031e7576474a8bfb 2026-09-06T11:11:55-04:00 fix(orchestrator): harden worker execution cancellation",
-    "07f78a24e1c547653131bdc60d5227c78badc38c 2026-09-06T11:05:22-04:00 fix(orchestrator): route workers through shared tool policy",
+    "b361631a56f8268ccde5d4fe031e7576474a8bfb 2026-09-06T11:13:10-04:00 fix(orchestrator): harden worker execution cancellation",
+    "07f78a24e1c547653131bdc60d5227c78badc38c 2026-09-06T11:13:10-04:00 fix(orchestrator): route workers through shared tool policy",
     "4ecfff9566c1c92ee9b68a8b77abdcd7d092d4c2 2026-09-06T11:12:21-04:00 docs: bound server lifecycle migrations by resource owner",
+    "85f2362f468b710273c998d0c8f6da14d684dec9 2026-09-06T11:11:55-04:00 fix(orchestrator): harden worker execution cancellation",
     "7dfc1105345cfc389ac41ddab7ce84558de8a22d 2026-09-06T11:10:41-04:00 docs: split planner and review adapter dispatches",
     "38223adc1f39efe1e677959ed9d4ff988b848a87 2026-09-06T11:10:09-04:00 docs: explain child isolation limits and worktree recovery",
     "dddef36d9aa8ed87510e2559c19a6b31e7ae0c14 2026-09-06T11:08:41-04:00 docs: explain current chat and headless permission guarantees",
+    "c6409b0c02bdeab368bf07b2e3e28aa79bd18137 2026-09-06T11:08:22-04:00 test(children): cover isolated runtime boundaries",
     "6ef266831b9260df70e3427a929cecde76004a94 2026-09-06T11:07:37-04:00 fix(ui): scope approvals and qualify mounted chat adapter",
+    "038c5aa8e386a536298b1bfc60e34b06790cf7d5 2026-09-06T11:06:38-04:00 fix(children): bind command closures to child lifetime",
+    "bdfbb6a0c1cd06f4454b713ba15d3d09a07729d1 2026-09-06T11:06:33-04:00 fix(children): finalize owned resources and verify terminal state",
+    "1f77070bd3c1afcbb83472640b84e1efe80463dc 2026-09-06T11:06:32-04:00 fix(process): expose awaited run-owned cleanup",
+    "2affb7060dbf15bf13d08f13f54f9d32fee72d8d 2026-09-06T11:05:22-04:00 fix(orchestrator): route workers through shared tool policy",
     "71cbfae64cb2294e1d4add0f83095568122ad601 2026-09-06T11:02:26-04:00 fix(headless): attempt every cleanup and report hook blocks",
-    "7e577e6cf0344ef92b5c7cd42cac324744852fa6 2026-09-06T10:55:29-04:00 refactor(ui): route chat tools through shared policy",
+    "7e577e6cf0344ef92b5c7cd42cac324744852fa6 2026-09-06T10:58:51-04:00 refactor(ui): route chat tools through shared policy",
+    "3179d651820fbe4cf5a008ee13786624111934d1 2026-09-06T10:55:29-04:00 refactor(ui): route chat tools through shared policy",
     "b8f16bae2e810e71eca166ec9b27e471909bda81 2026-09-06T10:51:58-04:00 fix(children): bind command closures to child lifetime",
     "af906bc15050fa5a7d850da467f87bbf44ab8992 2026-09-06T10:50:30-04:00 fix(children): finalize owned resources and verify terminal state",
-    "01cf1485533d15e17f4b27d5e88e1e9454c58acc 2026-09-06T10:46:59-04:00 fix(cli): harden headless terminal handling",
+    "01cf1485533d15e17f4b27d5e88e1e9454c58acc 2026-09-06T10:47:52-04:00 fix(cli): harden headless terminal handling",
+    "061ddcaebdd07edde8d753992c5fb6bcae0905b8 2026-09-06T10:46:59-04:00 fix(cli): harden headless terminal handling",
+    "5603c6f91dfe08481adc5847d98b28767797150f 2026-09-06T10:45:08-04:00 fix(process): expose awaited run-owned cleanup",
     "14318813c67128021643a6ea3b2d735643cd9010 2026-09-06T10:44:50-04:00 fix(process): expose awaited run-owned cleanup",
-    "bc6b871c6d600f88e2a17352ce171e353a114a43 2026-09-06T10:41:58-04:00 fix(tools): clean up child cancellation lifetime",
-    "9ccbc78ccf880396488941210fbbccf9e4532435 2026-09-06T10:39:39-04:00 fix(tools): constrain isolated sub-agents",
-    "b969bc9e6db5d86e0f554a7b4c002905be540ce5 2026-09-06T10:25:03-04:00 fix(cli): govern headless tool execution",
+    "bc6b871c6d600f88e2a17352ce171e353a114a43 2026-09-06T10:42:45-04:00 fix(tools): clean up child cancellation lifetime",
+    "9ccbc78ccf880396488941210fbbccf9e4532435 2026-09-06T10:42:45-04:00 fix(tools): constrain isolated sub-agents",
+    "878d5c51dac603c69538be070690113c5a5fc151 2026-09-06T10:41:58-04:00 fix(tools): clean up child cancellation lifetime",
+    "5c981a8a478b9664c08f1e11d4aad5069247efef 2026-09-06T10:40:23-04:00 fix(tools): constrain isolated sub-agents",
+    "b969bc9e6db5d86e0f554a7b4c002905be540ce5 2026-09-06T10:38:42-04:00 fix(cli): govern headless tool execution",
+    "c32a8c17a50b68eab89180a77ff506037b733750 2026-09-06T10:38:24-04:00 fix(policy): carry child context through completion events",
+    "4dc6ee0d22a26f95d4e4196381783487675f65b7 2026-09-06T10:38:21-04:00 fix(git): route tool commands through scoped process adapter",
     "8a5856f9753e943b5b294ac17875bf8c46028695 2026-09-06T10:34:11-04:00 docs: keep cancellation resource ownership explicit",
     "ee5d5a6d4864fa8547788b6dac9fdecba7613935 2026-09-06T10:31:49-04:00 docs: split resource ownership from cancellation caller migration",
     "9c707aaf82f4c18de9be158c9c6f89cd8e02415f 2026-09-06T10:29:59-04:00 docs: specify Git tool containment and child metadata limits",
+    "55c71cd878dc067475107c33a5ee0045593b69fe 2026-09-06T10:27:24-04:00 fix(policy): carry child context through completion events",
     "ace9d466289d750525f70bd998b1c7229cfaec40 2026-09-06T10:27:07-04:00 fix(policy): carry child context through completion events",
+    "be759d80f1ed2efa8fab52469f5720af6f7da3f1 2026-09-06T10:25:03-04:00 fix(cli): govern headless tool execution",
     "33d5ef9a1c8dd3864e896b39f487e3fbad867b28 2026-09-06T10:24:38-04:00 fix(git): route tool commands through scoped process adapter",
+    "e7d86bc4b587bdb90a65ef49cdebe068a0018706 2026-09-06T10:20:46-04:00 fix(policy): pass execution context to inherited callbacks",
+    "9933d12e6f601c5f66b7c3d44f0c67de94bc93b3 2026-09-06T10:20:42-04:00 fix(policy): pass execution context to inherited callbacks",
     "abd5bd9f5acd5cdebfcda18019b9925d2b1ae91d 2026-09-06T10:20:26-04:00 fix(policy): pass execution context to inherited callbacks",
     "62bd0f029e8577128f3bf05dacb4e651a4bb70db 2026-09-06T10:15:52-04:00 docs: include direct shell commands in cancellation acceptance",
     "00257f0e54a1221b61dc3cefd0f82935a09caaa6 2026-09-06T10:14:45-04:00 docs: clarify background command limits",
     "24e44fc1e296fb2e5b010faa6ef6204a16270780 2026-09-06T10:14:12-04:00 test(evals): check extracted modules and document review limits",
-    "3f20ef658d7383756e6a30a751e677c7e3f9d615 2026-09-06T10:11:48-04:00 test(evals): add R20d refactor fixtures",
+    "3f20ef658d7383756e6a30a751e677c7e3f9d615 2026-09-06T10:12:37-04:00 test(evals): add R20d refactor fixtures",
+    "746a2e555dc54eb59b797514355e2c6e6bc91933 2026-09-06T10:11:48-04:00 test(evals): add R20d refactor fixtures",
     "d54ad0728d2bba27ccada78b535dd9080fabac82 2026-09-06T10:11:24-04:00 docs: qualify shared process boundary and dispatch headless policy",
-    "5182243419db8f19a3a2eec342a96daa2827cda8 2026-09-06T10:10:21-04:00 fix(tools): harden scoped background cleanup",
+    "5182243419db8f19a3a2eec342a96daa2827cda8 2026-09-06T10:10:40-04:00 fix(tools): harden scoped background cleanup",
+    "d4a01c67717778846e5249551815d6a9de11ad0c 2026-09-06T10:10:21-04:00 fix(tools): harden scoped background cleanup",
     "805219c343a31d8aff213b6add6af645d9888048 2026-09-06T10:08:57-04:00 docs: track validated feature fixtures and next dispatch",
-    "86d3e9f2fb5083ea4bb8b1e763ed82ee0428325e 2026-09-06T10:07:53-04:00 test(evals): harden R20c feature fixtures",
-    "05cb197c1541f11f6efd09103799aac0d81505c7 2026-09-06T10:05:11-04:00 test(evals): add R20c feature fixtures",
+    "86d3e9f2fb5083ea4bb8b1e763ed82ee0428325e 2026-09-06T10:08:20-04:00 test(evals): harden R20c feature fixtures",
+    "05cb197c1541f11f6efd09103799aac0d81505c7 2026-09-06T10:08:20-04:00 test(evals): add R20c feature fixtures",
+    "5a1aad1c1212473bd5a0b04a4903df5034c636ee 2026-09-06T10:07:53-04:00 test(evals): harden R20c feature fixtures",
     "c6bf3d49938db4add859bec43d213fc61ce7c74f 2026-09-06T10:07:46-04:00 docs: explain scoped command lifecycle and supported runtime",
-    "33118262f5c244c8f464de1e2b8caf0800e19a0f 2026-09-06T10:04:01-04:00 fix(tools): scope shell execution to run lifecycle",
+    "33118262f5c244c8f464de1e2b8caf0800e19a0f 2026-09-06T10:07:07-04:00 fix(tools): scope shell execution to run lifecycle",
+    "dc21ad686905eaba7111d236c580cd11115f454a 2026-09-06T10:05:11-04:00 test(evals): add R20c feature fixtures",
     "68c10a6861b304df0e44e7dfdd2c01c615dbd81d 2026-09-06T10:05:10-04:00 fix(sandbox): retain private temp paths inside runtime wrapper",
+    "039c60dfda589175f9f560ce4ebc6bd442d54319 2026-09-06T10:04:01-04:00 fix(tools): scope shell execution to run lifecycle",
     "5a2c91d4bf2fc0e223338d1fbd723ff287100edd 2026-09-06T10:02:06-04:00 test(evals): strengthen fixture qualification and record sandbox progress",
     "ebff8acf0a91c2029c3287a66e4675b8e189774a 2026-09-06T09:54:04-04:00 fix: report sandbox teardown failures and reject unreadable grants",
     "479bbf9a790aa77922d767c1f24cd050930ef93d 2026-09-06T09:51:38-04:00 test: add R20b offline bug-fix fixtures",
-    "9de97c7ecbbd9ba58df024fa2959825c55aba9b8 2026-09-06T09:48:41-04:00 fix(sandbox): preserve scoped grant identities",
-    "41c5234feba348740711835402872c186057fdca 2026-09-06T09:44:46-04:00 feat(sandbox): add fail-closed scoped process boundary",
+    "9de97c7ecbbd9ba58df024fa2959825c55aba9b8 2026-09-06T09:49:57-04:00 fix(sandbox): preserve scoped grant identities",
+    "41c5234feba348740711835402872c186057fdca 2026-09-06T09:49:57-04:00 feat(sandbox): add fail-closed scoped process boundary",
+    "11a50219f9a8db79dcc95334059b62898a114a8e 2026-09-06T09:48:41-04:00 fix(sandbox): preserve scoped grant identities",
     "feb981f7c3436461193083b7819ae9ac1e61c5ab 2026-09-06T09:47:17-04:00 test: qualify command adapters and semantic evaluation fixture",
-    "8cb5a2268408f755c02196ff7272946952de5571 2026-09-05T23:56:57-04:00 test(evals): harden R20a fixture validation",
-    "0da1e3a38de7df5eb3b0c2e2dbe24d41fde279be 2026-09-05T23:54:01-04:00 test(evals): add bounded R20a fixture protocol",
-    "986b4e95de700716e6b78a22b2a3e1ee129c0966 2026-09-05T23:54:23-04:00 feat(reliability): route verification and gates through process runner",
+    "8caf7f84814e1a94e5bb1af091e37cc599a2a656 2026-09-06T09:44:46-04:00 feat(sandbox): add fail-closed scoped process boundary",
+    "8cb5a2268408f755c02196ff7272946952de5571 2026-09-05T23:57:40-04:00 test(evals): harden R20a fixture validation",
+    "0da1e3a38de7df5eb3b0c2e2dbe24d41fde279be 2026-09-05T23:57:40-04:00 test(evals): add bounded R20a fixture protocol",
+    "7eac477e63b9647fca1964ebc21af41013443b4a 2026-09-05T23:56:57-04:00 test(evals): harden R20a fixture validation",
+    "986b4e95de700716e6b78a22b2a3e1ee129c0966 2026-09-05T23:55:31-04:00 feat(reliability): route verification and gates through process runner",
+    "5be8bf0e54733ac81e391feb71adc0518d428bd0 2026-09-05T23:54:23-04:00 feat(reliability): route verification and gates through process runner",
+    "f5fc14ef9271057cf9ceb5bae6136f9589a937c7 2026-09-05T23:54:01-04:00 test(evals): add bounded R20a fixture protocol",
     "f2e802c6a73a79688bb467323b6c3b6057931460 2026-09-05T23:53:43-04:00 fix: align Node support with installed dependency requirements",
     "90d7439709ed08b3e0b12ec3ecc5d4998541f7bb 2026-09-05T23:48:18-04:00 docs: explain shared execution contracts for contributors",
     "ee749dafbb0e4f177b6a1b8534fb3b3f1a92f2ec 2026-09-05T23:46:06-04:00 test: qualify shared permission and identity foundations",
-    "837a4b41d76f6c0e30568d4a4b8e2b2cd7898662 2026-09-05T23:18:17-04:00 feat(review): add explicit reviewer identity preflight",
-    "e4f15720537735abfcf8cea0b252b0931a4eabcb 2026-09-05T23:18:11-04:00 feat(reliability): add shared tool policy and executor",
+    "837a4b41d76f6c0e30568d4a4b8e2b2cd7898662 2026-09-05T23:18:51-04:00 feat(review): add explicit reviewer identity preflight",
+    "e4f15720537735abfcf8cea0b252b0931a4eabcb 2026-09-05T23:18:37-04:00 feat(reliability): add shared tool policy and executor",
+    "64199e3d5c824a609b9d5decc7997a1879e10d34 2026-09-05T23:18:17-04:00 feat(review): add explicit reviewer identity preflight",
+    "e6ad4c59c963049d35d5dafd920c4e6045af3984 2026-09-05T23:18:11-04:00 feat(reliability): add shared tool policy and executor",
     "21ab18e96fa7494124e4207f1802e1e3b72ae15f 2026-09-05T23:09:17-04:00 fix: reject invalid subprocess execution limits",
     "b5761d1d2dc3b886c47e18bffd6d403bfa327ace 2026-09-05T23:05:46-04:00 docs: keep reliability guidance actionable and dispatch policy foundations",
     "e4031f629fcaed0a413a9b7651f4a3437f8dc858 2026-09-05T22:47:28-04:00 test: qualify process and filesystem reliability batch",
-    "80e74959c70cd4d7b9cc9a02162a11aec3ccd2d8 2026-09-05T22:10:43-04:00 fix: harden canonical path and patch validation",
-    "f2b05d789bb34645b5896d265ac53416e11f3c8d 2026-09-05T22:04:05-04:00 feat: enforce canonical tool path scope",
-    "9e87d82cc7b7167ed20e190aa4c41066843d3185 2026-09-05T22:09:38-04:00 fix: harden process cleanup and output reporting",
-    "cb09b22a685626b9363fb0e9140485cf9130508b 2026-09-05T22:04:36-04:00 fix: run bash commands asynchronously per run",
+    "80e74959c70cd4d7b9cc9a02162a11aec3ccd2d8 2026-09-05T22:30:58-04:00 fix: harden canonical path and patch validation",
+    "f2b05d789bb34645b5896d265ac53416e11f3c8d 2026-09-05T22:30:58-04:00 feat: enforce canonical tool path scope",
+    "d42ac877004b00290177e4e56f2bc69c4b2b7097 2026-09-05T22:10:43-04:00 fix: harden canonical path and patch validation",
+    "9e87d82cc7b7167ed20e190aa4c41066843d3185 2026-09-05T22:09:57-04:00 fix: harden process cleanup and output reporting",
+    "cb09b22a685626b9363fb0e9140485cf9130508b 2026-09-05T22:09:57-04:00 fix: run bash commands asynchronously per run",
+    "143bd38058fc28bb062e9095fdfc9592d3147191 2026-09-05T22:09:38-04:00 fix: harden process cleanup and output reporting",
+    "81a29a811919ddda479bee1b4f032a748964ad59 2026-09-05T22:04:36-04:00 fix: run bash commands asynchronously per run",
+    "f0ddb045ed215689460ec61a2303ca116450f3ce 2026-09-05T22:04:05-04:00 feat: enforce canonical tool path scope",
     "e2a2bc643b86f1125b85f76d161f9d9ee92d8357 2026-09-05T21:58:11-04:00 chore: dispatch process and path reliability tasks",
     "3d4f736a91e13a5d7f236931ea1470a412eedc4d 2026-09-05T21:40:04-04:00 test: verify completion boundary and record first reliability batch",
-    "df881efd1e27221a5afacb070688296547511f48 2026-09-05T21:37:02-04:00 test(orchestrator): cover gate exit boundaries",
-    "d3be4b80763b414e8ec104cb1cc47e8940ff51b5 2026-09-05T21:33:11-04:00 fix(orchestrator): honor blocking quality gates",
+    "df881efd1e27221a5afacb070688296547511f48 2026-09-05T21:38:00-04:00 test(orchestrator): cover gate exit boundaries",
+    "d3be4b80763b414e8ec104cb1cc47e8940ff51b5 2026-09-05T21:38:00-04:00 fix(orchestrator): honor blocking quality gates",
     "c09038489196b804c9a1d0f764fc3ad902d6486f 2026-09-05T21:38:00-04:00 test: transfer isolated state through Vitest context",
-    "52d80d527c790dbe93d70a52e6cf364ef96cd880 2026-09-05T21:35:37-04:00 test: move state cleanup to suite teardown",
-    "824e4d231b793211e9f4d437b74dd6f14aa9e750 2026-09-05T21:33:53-04:00 test: isolate worker application state",
+    "29297e340c82b10679751b811dfc484f65e2cae2 2026-09-05T21:37:02-04:00 test(orchestrator): cover gate exit boundaries",
+    "52d80d527c790dbe93d70a52e6cf364ef96cd880 2026-09-05T21:36:03-04:00 test: move state cleanup to suite teardown",
+    "824e4d231b793211e9f4d437b74dd6f14aa9e750 2026-09-05T21:36:03-04:00 test: isolate worker application state",
+    "e0c2115047288442592fe3f2a16081d86329056a 2026-09-05T21:35:37-04:00 test: move state cleanup to suite teardown",
     "3cbdbccf9eb7f56a00c77a36b0a88736e8cb9d05 2026-09-05T21:35:07-04:00 chore: start reliability implementation batch",
+    "48c9c8607c66664f221b004cc486699e2906416d 2026-09-05T21:33:53-04:00 test: isolate worker application state",
+    "3ea8d3625e8fd8e7307ec7a672e8a1f538d4f187 2026-09-05T21:33:11-04:00 fix(orchestrator): honor blocking quality gates",
     "c2aff776fb198ddb75f03e2c876ae1c508fee494 2026-09-05T21:30:28-04:00 docs: define reliability implementation backlog"
+  ],
+  "trackedFilesModifiedWithin24Hours": [
+    {
+      "path": ".github/workflows/ci-cd.yml",
+      "modifiedAt": "2026-09-06T22:05:29.920975+00:00",
+      "bytes": 1148
+    },
+    {
+      "path": "AGENTS.md",
+      "modifiedAt": "2026-09-06T22:52:23.471878+00:00",
+      "bytes": 9118
+    },
+    {
+      "path": "CHANGELOG.md",
+      "modifiedAt": "2026-09-06T22:54:46.308066+00:00",
+      "bytes": 71030
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "modifiedAt": "2026-09-06T14:07:46.237309+00:00",
+      "bytes": 2371
+    },
+    {
+      "path": "HANDOFF.md",
+      "modifiedAt": "2026-09-06T22:54:46.308066+00:00",
+      "bytes": 26245
+    },
+    {
+      "path": "README.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 23754
+    },
+    {
+      "path": "SECURITY.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 3087
+    },
+    {
+      "path": "docs/README.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 2102
+    },
+    {
+      "path": "docs/architecture.md",
+      "modifiedAt": "2026-09-06T22:52:23.496580+00:00",
+      "bytes": 20090
+    },
+    {
+      "path": "docs/commands.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 25336
+    },
+    {
+      "path": "docs/configuration.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 24561
+    },
+    {
+      "path": "docs/contributing.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 13631
+    },
+    {
+      "path": "docs/quality-gates.md",
+      "modifiedAt": "2026-09-06T17:07:01.232254+00:00",
+      "bytes": 14922
+    },
+    {
+      "path": "docs/recipes.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 13671
+    },
+    {
+      "path": "docs/recovery/2026-09-06-continuation.json",
+      "modifiedAt": "2026-09-06T22:17:10.640282+00:00",
+      "bytes": 40550
+    },
+    {
+      "path": "docs/recovery/2026-09-06-evidence.json",
+      "modifiedAt": "2026-09-06T18:53:06.902199+00:00",
+      "bytes": 102463
+    },
+    {
+      "path": "docs/recovery/2026-09-06-inventory.json",
+      "modifiedAt": "2026-09-06T18:53:06.777400+00:00",
+      "bytes": 128989
+    },
+    {
+      "path": "docs/recovery/2026-09-06-retrospective.md",
+      "modifiedAt": "2026-09-06T22:54:46.308066+00:00",
+      "bytes": 36013
+    },
+    {
+      "path": "docs/recovery/2026-09-06-validation.json",
+      "modifiedAt": "2026-09-06T19:04:27.514586+00:00",
+      "bytes": 91163
+    },
+    {
+      "path": "docs/recovery/r15-acceptance.md",
+      "modifiedAt": "2026-09-06T20:45:55.609779+00:00",
+      "bytes": 2289
+    },
+    {
+      "path": "docs/recovery/r16-coverage.md",
+      "modifiedAt": "2026-09-06T21:22:19.479842+00:00",
+      "bytes": 3732
+    },
+    {
+      "path": "docs/recovery/r23-acceptance.md",
+      "modifiedAt": "2026-09-06T20:42:37.897007+00:00",
+      "bytes": 5108
+    },
+    {
+      "path": "docs/recovery/r24-qualification.md",
+      "modifiedAt": "2026-09-06T22:54:46.308066+00:00",
+      "bytes": 7947
+    },
+    {
+      "path": "docs/reliability-plan.md",
+      "modifiedAt": "2026-09-06T22:14:08.982468+00:00",
+      "bytes": 67936
+    },
+    {
+      "path": "docs/reliability-queue.json",
+      "modifiedAt": "2026-09-06T22:54:46.308066+00:00",
+      "bytes": 23145
+    },
+    {
+      "path": "docs/troubleshooting.md",
+      "modifiedAt": "2026-09-06T22:52:23.475995+00:00",
+      "bytes": 7004
+    },
+    {
+      "path": "evals/README.md",
+      "modifiedAt": "2026-09-06T15:39:23.004306+00:00",
+      "bytes": 3817
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-batch-config.mjs",
+      "modifiedAt": "2026-09-06T13:50:52.915939+00:00",
+      "bytes": 5228
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-deep-config.mjs",
+      "modifiedAt": "2026-09-06T13:56:05.901996+00:00",
+      "bytes": 2977
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-pagination.mjs",
+      "modifiedAt": "2026-09-06T13:56:05.800796+00:00",
+      "bytes": 2566
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-queue-recovery.mjs",
+      "modifiedAt": "2026-09-06T13:56:06.007596+00:00",
+      "bytes": 3339
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-retry-backoff.mjs",
+      "modifiedAt": "2026-09-06T13:56:06.104396+00:00",
+      "bytes": 2376
+    },
+    {
+      "path": "evals/tasks/r20-feature-daily-summary-v1.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 2562
+    },
+    {
+      "path": "evals/tasks/r20-feature-expiring-cache-v1.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 2952
+    },
+    {
+      "path": "evals/tasks/r20-feature-release-notes-v1.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 2407
+    },
+    {
+      "path": "evals/tasks/r20-feature-tag-filter-v1.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 2518
+    },
+    {
+      "path": "evals/tasks/r20-feature-webhook-recovery-v1.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 3032
+    },
+    {
+      "path": "evals/tasks/r20-helper.mjs",
+      "modifiedAt": "2026-09-06T14:08:20.171006+00:00",
+      "bytes": 3847
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-async-checks-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:46.950428+00:00",
+      "bytes": 3283
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-stable-report-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:46.950428+00:00",
+      "bytes": 2874
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-temp-cleanup-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:46.950428+00:00",
+      "bytes": 3859
+    },
+    {
+      "path": "evals/tasks/r20-refactor-cursor-codec-v1.mjs",
+      "modifiedAt": "2026-09-06T14:13:40.591554+00:00",
+      "bytes": 3887
+    },
+    {
+      "path": "evals/tasks/r20-refactor-recipient-index-v1.mjs",
+      "modifiedAt": "2026-09-06T14:13:40.164754+00:00",
+      "bytes": 3649
+    },
+    {
+      "path": "evals/tasks/r20-refactor-report-projection-v1.mjs",
+      "modifiedAt": "2026-09-06T14:13:40.450754+00:00",
+      "bytes": 3288
+    },
+    {
+      "path": "evals/tasks/r20-refactor-retry-policy-v1.mjs",
+      "modifiedAt": "2026-09-06T14:13:40.309954+00:00",
+      "bytes": 3853
+    },
+    {
+      "path": "evals/tasks/r20-security-job-schema-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:47.381628+00:00",
+      "bytes": 5175
+    },
+    {
+      "path": "evals/tasks/r20-security-path-boundary-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:47.284827+00:00",
+      "bytes": 6539
+    },
+    {
+      "path": "evals/tasks/r20-security-prototype-config-v1.mjs",
+      "modifiedAt": "2026-09-06T15:38:47.482827+00:00",
+      "bytes": 5934
+    },
+    {
+      "path": "evals/tasks/schema.json",
+      "modifiedAt": "2026-09-06T03:57:40.835132+00:00",
+      "bytes": 1256
+    },
+    {
+      "path": "package-lock.json",
+      "modifiedAt": "2026-09-06T03:53:43.699425+00:00",
+      "bytes": 170400
+    },
+    {
+      "path": "package.json",
+      "modifiedAt": "2026-09-06T22:03:12.975787+00:00",
+      "bytes": 2500
+    },
+    {
+      "path": "src/__tests__/bash-background.test.ts",
+      "modifiedAt": "2026-09-06T14:10:40.899447+00:00",
+      "bytes": 8753
+    },
+    {
+      "path": "src/__tests__/bash-tool.test.ts",
+      "modifiedAt": "2026-09-06T14:10:40.899447+00:00",
+      "bytes": 6141
+    },
+    {
+      "path": "src/__tests__/browser.test.ts",
+      "modifiedAt": "2026-09-06T20:19:09.742702+00:00",
+      "bytes": 17056
+    },
+    {
+      "path": "src/__tests__/candidate-runtime.test.ts",
+      "modifiedAt": "2026-09-06T17:08:31.628173+00:00",
+      "bytes": 3139
+    },
+    {
+      "path": "src/__tests__/check-tool-permission.test.ts",
+      "modifiedAt": "2026-09-06T15:13:10.778092+00:00",
+      "bytes": 15586
+    },
+    {
+      "path": "src/__tests__/compaction.test.ts",
+      "modifiedAt": "2026-09-06T21:10:42.630218+00:00",
+      "bytes": 20026
+    },
+    {
+      "path": "src/__tests__/config.test.ts",
+      "modifiedAt": "2026-09-06T13:49:57.155571+00:00",
+      "bytes": 20107
+    },
+    {
+      "path": "src/__tests__/cost-tracker.test.ts",
+      "modifiedAt": "2026-09-06T22:07:07.178441+00:00",
+      "bytes": 8672
+    },
+    {
+      "path": "src/__tests__/e2e/lsp-tool.test.ts",
+      "modifiedAt": "2026-09-06T16:31:20.852939+00:00",
+      "bytes": 5692
+    },
+    {
+      "path": "src/__tests__/eval-fixtures.test.ts",
+      "modifiedAt": "2026-09-06T15:39:48.233905+00:00",
+      "bytes": 10998
+    },
+    {
+      "path": "src/__tests__/final-evidence-runtime.test.ts",
+      "modifiedAt": "2026-09-06T18:31:39.200044+00:00",
+      "bytes": 15280
+    },
+    {
+      "path": "src/__tests__/fixtures/lsp-jsonrpc-server.mjs",
+      "modifiedAt": "2026-09-06T16:32:25.467510+00:00",
+      "bytes": 3060
+    },
+    {
+      "path": "src/__tests__/fixtures/mcp-jsonrpc-server.mjs",
+      "modifiedAt": "2026-09-06T18:40:32.217595+00:00",
+      "bytes": 2482
+    },
+    {
+      "path": "src/__tests__/gate-runner.test.ts",
+      "modifiedAt": "2026-09-06T16:02:16.185567+00:00",
+      "bytes": 4392
+    },
+    {
+      "path": "src/__tests__/git-ops.test.ts",
+      "modifiedAt": "2026-09-06T18:40:32.217595+00:00",
+      "bytes": 4149
+    },
+    {
+      "path": "src/__tests__/git-tool.test.ts",
+      "modifiedAt": "2026-09-06T14:24:27.369474+00:00",
+      "bytes": 3950
+    },
+    {
+      "path": "src/__tests__/headless-cli.test.ts",
+      "modifiedAt": "2026-09-06T14:47:52.928326+00:00",
+      "bytes": 3006
+    },
+    {
+      "path": "src/__tests__/headless-ledger.test.ts",
+      "modifiedAt": "2026-09-06T22:41:56.572091+00:00",
+      "bytes": 2803
+    },
+    {
+      "path": "src/__tests__/headless-runtime.test.ts",
+      "modifiedAt": "2026-09-06T21:21:02.091322+00:00",
+      "bytes": 20095
+    },
+    {
+      "path": "src/__tests__/helpers/global-state.ts",
+      "modifiedAt": "2026-09-06T01:36:25.250794+00:00",
+      "bytes": 656
+    },
+    {
+      "path": "src/__tests__/helpers/scripted-model.ts",
+      "modifiedAt": "2026-09-06T21:25:46.676625+00:00",
+      "bytes": 5897
+    },
+    {
+      "path": "src/__tests__/helpers/setup-state.ts",
+      "modifiedAt": "2026-09-06T01:36:25.348040+00:00",
+      "bytes": 964
+    },
+    {
+      "path": "src/__tests__/helpers/temp-workermill-home.ts",
+      "modifiedAt": "2026-09-06T01:36:03.938904+00:00",
+      "bytes": 1346
+    },
+    {
+      "path": "src/__tests__/http-runtime.test.ts",
+      "modifiedAt": "2026-09-06T18:09:59.024186+00:00",
+      "bytes": 9730
+    },
+    {
+      "path": "src/__tests__/image-support.test.ts",
+      "modifiedAt": "2026-09-06T17:43:14.716014+00:00",
+      "bytes": 17924
+    },
+    {
+      "path": "src/__tests__/logs-command.test.ts",
+      "modifiedAt": "2026-09-06T01:36:03.938904+00:00",
+      "bytes": 4868
+    },
+    {
+      "path": "src/__tests__/lsp-run-resources.test.ts",
+      "modifiedAt": "2026-09-06T16:32:25.564310+00:00",
+      "bytes": 9371
+    },
+    {
+      "path": "src/__tests__/maturity-features.test.ts",
+      "modifiedAt": "2026-09-06T18:31:39.200044+00:00",
+      "bytes": 17821
+    },
+    {
+      "path": "src/__tests__/mcp-client.test.ts",
+      "modifiedAt": "2026-09-06T20:42:10.552776+00:00",
+      "bytes": 10058
+    },
+    {
+      "path": "src/__tests__/mcp-discovery.test.ts",
+      "modifiedAt": "2026-09-06T16:51:34.818345+00:00",
+      "bytes": 3263
+    },
+    {
+      "path": "src/__tests__/mcp-run-resources.test.ts",
+      "modifiedAt": "2026-09-06T16:11:07.751456+00:00",
+      "bytes": 5490
+    },
+    {
+      "path": "src/__tests__/orchestration-lifecycle-runtime.test.ts",
+      "modifiedAt": "2026-09-06T22:21:31.512727+00:00",
+      "bytes": 7985
+    },
+    {
+      "path": "src/__tests__/orchestration-manifest-runtime.test.ts",
+      "modifiedAt": "2026-09-06T22:33:42.230416+00:00",
+      "bytes": 16268
+    },
+    {
+      "path": "src/__tests__/orchestration-startup-runtime.test.ts",
+      "modifiedAt": "2026-09-06T18:21:30.039943+00:00",
+      "bytes": 8537
+    },
+    {
+      "path": "src/__tests__/orchestrator-gates-cancellation.test.ts",
+      "modifiedAt": "2026-09-06T15:15:04.136932+00:00",
+      "bytes": 3782
+    },
+    {
+      "path": "src/__tests__/orchestrator-gates.test.ts",
+      "modifiedAt": "2026-09-06T17:53:31.888085+00:00",
+      "bytes": 11794
+    },
+    {
+      "path": "src/__tests__/orchestrator.test.ts",
+      "modifiedAt": "2026-09-06T22:08:18.540836+00:00",
+      "bytes": 176933
+    },
+    {
+      "path": "src/__tests__/package-os.test.ts",
+      "modifiedAt": "2026-09-06T22:26:14.531026+00:00",
+      "bytes": 11518
+    },
+    {
+      "path": "src/__tests__/path-policy.test.ts",
+      "modifiedAt": "2026-09-06T02:30:58.363271+00:00",
+      "bytes": 8162
+    },
+    {
+      "path": "src/__tests__/plan-critic.test.ts",
+      "modifiedAt": "2026-09-06T22:07:31.481646+00:00",
+      "bytes": 8741
+    },
+    {
+      "path": "src/__tests__/planner-runtime-policy.test.ts",
+      "modifiedAt": "2026-09-06T22:07:31.481646+00:00",
+      "bytes": 8098
+    },
+    {
+      "path": "src/__tests__/process-runner.test.ts",
+      "modifiedAt": "2026-09-06T14:44:49.576584+00:00",
+      "bytes": 5411
+    },
+    {
+      "path": "src/__tests__/program-cancellation.test.ts",
+      "modifiedAt": "2026-09-06T22:43:49.827520+00:00",
+      "bytes": 3309
+    },
+    {
+      "path": "src/__tests__/provider-registry.test.ts",
+      "modifiedAt": "2026-09-06T01:36:03.938904+00:00",
+      "bytes": 11679
+    },
+    {
+      "path": "src/__tests__/publication-lifecycle.test.ts",
+      "modifiedAt": "2026-09-06T17:55:31.644015+00:00",
+      "bytes": 6270
+    },
+    {
+      "path": "src/__tests__/recovery.test.ts",
+      "modifiedAt": "2026-09-06T18:40:32.237592+00:00",
+      "bytes": 9872
+    },
+    {
+      "path": "src/__tests__/repository-fingerprint.test.ts",
+      "modifiedAt": "2026-09-06T16:22:26.923553+00:00",
+      "bytes": 7390
+    },
+    {
+      "path": "src/__tests__/review-diff-safety.test.ts",
+      "modifiedAt": "2026-09-06T18:27:06.832229+00:00",
+      "bytes": 2488
+    },
+    {
+      "path": "src/__tests__/review-git-runtime.test.ts",
+      "modifiedAt": "2026-09-06T18:28:37.496087+00:00",
+      "bytes": 4026
+    },
+    {
+      "path": "src/__tests__/review-identity.test.ts",
+      "modifiedAt": "2026-09-06T03:18:51.495567+00:00",
+      "bytes": 5637
+    },
+    {
+      "path": "src/__tests__/review-runtime-policy.test.ts",
+      "modifiedAt": "2026-09-06T22:19:28.258615+00:00",
+      "bytes": 20738
+    },
+    {
+      "path": "src/__tests__/root-shell-runtime.test.ts",
+      "modifiedAt": "2026-09-06T17:24:49.784047+00:00",
+      "bytes": 5272
+    },
+    {
+      "path": "src/__tests__/run-manifest.test.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 10785
+    },
+    {
+      "path": "src/__tests__/runs-command.test.ts",
+      "modifiedAt": "2026-09-06T18:40:32.237592+00:00",
+      "bytes": 4172
+    },
+    {
+      "path": "src/__tests__/runtime-contracts.test.ts",
+      "modifiedAt": "2026-09-06T21:59:41.308319+00:00",
+      "bytes": 11572
+    },
+    {
+      "path": "src/__tests__/sandbox-mode.test.ts",
+      "modifiedAt": "2026-09-06T13:49:57.155571+00:00",
+      "bytes": 2707
+    },
+    {
+      "path": "src/__tests__/schema-command.test.ts",
+      "modifiedAt": "2026-09-06T16:01:53.076767+00:00",
+      "bytes": 8102
+    },
+    {
+      "path": "src/__tests__/scoped-process.test.ts",
+      "modifiedAt": "2026-09-06T14:04:19.248792+00:00",
+      "bytes": 12454
+    },
+    {
+      "path": "src/__tests__/scripted-model.test.ts",
+      "modifiedAt": "2026-09-06T21:25:46.676625+00:00",
+      "bytes": 3655
+    },
+    {
+      "path": "src/__tests__/session.test.ts",
+      "modifiedAt": "2026-09-06T22:41:56.576205+00:00",
+      "bytes": 10797
+    },
+    {
+      "path": "src/__tests__/slash-commands.test.ts",
+      "modifiedAt": "2026-09-06T17:50:09.768372+00:00",
+      "bytes": 79816
+    },
+    {
+      "path": "src/__tests__/stats-command.test.ts",
+      "modifiedAt": "2026-09-06T22:45:04.515486+00:00",
+      "bytes": 13906
+    },
+    {
+      "path": "src/__tests__/sub-agent-runtime.test.ts",
+      "modifiedAt": "2026-09-06T21:22:19.483928+00:00",
+      "bytes": 16260
+    },
+    {
+      "path": "src/__tests__/sub-agent.test.ts",
+      "modifiedAt": "2026-09-06T22:32:44.750051+00:00",
+      "bytes": 19348
+    },
+    {
+      "path": "src/__tests__/system-prompt.test.ts",
+      "modifiedAt": "2026-09-06T18:31:39.204044+00:00",
+      "bytes": 8824
+    },
+    {
+      "path": "src/__tests__/ticket-tool.test.ts",
+      "modifiedAt": "2026-09-06T17:38:07.184058+00:00",
+      "bytes": 2603
+    },
+    {
+      "path": "src/__tests__/tool-executor.test.ts",
+      "modifiedAt": "2026-09-06T14:27:07.151691+00:00",
+      "bytes": 7661
+    },
+    {
+      "path": "src/__tests__/tool-policy.test.ts",
+      "modifiedAt": "2026-09-06T03:18:37.029376+00:00",
+      "bytes": 4324
+    },
+    {
+      "path": "src/__tests__/useAgent-permission.test.ts",
+      "modifiedAt": "2026-09-06T15:01:34.129832+00:00",
+      "bytes": 4158
+    },
+    {
+      "path": "src/__tests__/useAgent-runtime.test.ts",
+      "modifiedAt": "2026-09-06T22:41:56.576205+00:00",
+      "bytes": 23596
+    },
+    {
+      "path": "src/__tests__/useAgent.test.ts",
+      "modifiedAt": "2026-09-06T21:22:19.483928+00:00",
+      "bytes": 2411
+    },
+    {
+      "path": "src/__tests__/useOrchestrator-runtime.test.ts",
+      "modifiedAt": "2026-09-06T22:45:04.515486+00:00",
+      "bytes": 8592
+    },
+    {
+      "path": "src/__tests__/useOrchestrator.test.ts",
+      "modifiedAt": "2026-09-06T21:22:19.483928+00:00",
+      "bytes": 639
+    },
+    {
+      "path": "src/__tests__/verify.test.ts",
+      "modifiedAt": "2026-09-06T03:55:31.047102+00:00",
+      "bytes": 1499
+    },
+    {
+      "path": "src/__tests__/worker-git-lifecycle.test.ts",
+      "modifiedAt": "2026-09-06T22:18:08.158641+00:00",
+      "bytes": 4396
+    },
+    {
+      "path": "src/__tests__/worker-runtime-policy.test.ts",
+      "modifiedAt": "2026-09-06T22:19:28.258615+00:00",
+      "bytes": 11225
+    },
+    {
+      "path": "src/browser.ts",
+      "modifiedAt": "2026-09-06T20:19:09.823933+00:00",
+      "bytes": 29861
+    },
+    {
+      "path": "src/compaction.ts",
+      "modifiedAt": "2026-09-06T21:10:42.630218+00:00",
+      "bytes": 15696
+    },
+    {
+      "path": "src/config.ts",
+      "modifiedAt": "2026-09-06T16:01:53.076767+00:00",
+      "bytes": 18935
+    },
+    {
+      "path": "src/cost-tracker.ts",
+      "modifiedAt": "2026-09-06T22:41:56.576205+00:00",
+      "bytes": 12784
+    },
+    {
+      "path": "src/engine/http-request.ts",
+      "modifiedAt": "2026-09-06T18:05:03.471955+00:00",
+      "bytes": 3887
+    },
+    {
+      "path": "src/engine/model-usage.ts",
+      "modifiedAt": "2026-09-06T21:59:12.165428+00:00",
+      "bytes": 3047
+    },
+    {
+      "path": "src/engine/path-policy.ts",
+      "modifiedAt": "2026-09-06T13:49:57.168771+00:00",
+      "bytes": 5954
+    },
+    {
+      "path": "src/engine/process-runner.ts",
+      "modifiedAt": "2026-09-06T14:44:23.682895+00:00",
+      "bytes": 12757
+    },
+    {
+      "path": "src/engine/run-resources.ts",
+      "modifiedAt": "2026-09-06T17:46:49.939991+00:00",
+      "bytes": 2155
+    },
+    {
+      "path": "src/engine/scoped-process.ts",
+      "modifiedAt": "2026-09-06T14:04:19.147592+00:00",
+      "bytes": 9839
+    },
+    {
+      "path": "src/engine/tool-executor.ts",
+      "modifiedAt": "2026-09-06T14:27:07.046091+00:00",
+      "bytes": 8250
+    },
+    {
+      "path": "src/engine/tool-policy.ts",
+      "modifiedAt": "2026-09-06T03:18:37.029376+00:00",
+      "bytes": 7808
+    },
+    {
+      "path": "src/engine/tools/bash-background.ts",
+      "modifiedAt": "2026-09-06T14:10:40.899447+00:00",
+      "bytes": 8772
+    },
+    {
+      "path": "src/engine/tools/bash-kill.ts",
+      "modifiedAt": "2026-09-06T14:07:07.467320+00:00",
+      "bytes": 1335
+    },
+    {
+      "path": "src/engine/tools/bash-output.ts",
+      "modifiedAt": "2026-09-06T14:10:40.899447+00:00",
+      "bytes": 2541
+    },
+    {
+      "path": "src/engine/tools/bash.ts",
+      "modifiedAt": "2026-09-06T14:10:40.899447+00:00",
+      "bytes": 8734
+    },
+    {
+      "path": "src/engine/tools/download-file.ts",
+      "modifiedAt": "2026-09-06T17:37:30.004083+00:00",
+      "bytes": 5320
+    },
+    {
+      "path": "src/engine/tools/fetch.ts",
+      "modifiedAt": "2026-09-06T17:36:43.964050+00:00",
+      "bytes": 2940
+    },
+    {
+      "path": "src/engine/tools/git.ts",
+      "modifiedAt": "2026-09-06T14:23:34.017588+00:00",
+      "bytes": 4846
+    },
+    {
+      "path": "src/engine/tools/index.ts",
+      "modifiedAt": "2026-09-06T17:44:30.367997+00:00",
+      "bytes": 41215
+    },
+    {
+      "path": "src/engine/tools/lsp.ts",
+      "modifiedAt": "2026-09-06T18:07:46.352746+00:00",
+      "bytes": 62913
+    },
+    {
+      "path": "src/engine/tools/patch.ts",
+      "modifiedAt": "2026-09-06T02:30:58.363271+00:00",
+      "bytes": 9167
+    },
+    {
+      "path": "src/engine/tools/sub-agent.ts",
+      "modifiedAt": "2026-09-06T22:32:44.750051+00:00",
+      "bytes": 24848
+    },
+    {
+      "path": "src/engine/tools/ticket.ts",
+      "modifiedAt": "2026-09-06T17:38:07.096057+00:00",
+      "bytes": 6049
+    },
+    {
+      "path": "src/engine/tools/verify.ts",
+      "modifiedAt": "2026-09-06T03:55:31.047102+00:00",
+      "bytes": 9148
+    },
+    {
+      "path": "src/engine/tools/web-search.ts",
+      "modifiedAt": "2026-09-06T17:36:43.880051+00:00",
+      "bytes": 2476
+    },
+    {
+      "path": "src/gate-runner.ts",
+      "modifiedAt": "2026-09-06T16:02:16.084367+00:00",
+      "bytes": 7777
+    },
+    {
+      "path": "src/git-ops.ts",
+      "modifiedAt": "2026-09-06T18:40:32.221595+00:00",
+      "bytes": 5455
+    },
+    {
+      "path": "src/image-support.ts",
+      "modifiedAt": "2026-09-06T17:43:14.624014+00:00",
+      "bytes": 9436
+    },
+    {
+      "path": "src/index.ts",
+      "modifiedAt": "2026-09-06T14:47:52.932726+00:00",
+      "bytes": 25739
+    },
+    {
+      "path": "src/mcp-client.ts",
+      "modifiedAt": "2026-09-06T18:40:32.221595+00:00",
+      "bytes": 28096
+    },
+    {
+      "path": "src/orchestrator.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 50984
+    },
+    {
+      "path": "src/orchestrator/candidate.ts",
+      "modifiedAt": "2026-09-06T17:07:35.120251+00:00",
+      "bytes": 2863
+    },
+    {
+      "path": "src/orchestrator/completion.ts",
+      "modifiedAt": "2026-09-06T18:14:03.152076+00:00",
+      "bytes": 19970
+    },
+    {
+      "path": "src/orchestrator/execution.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 77519
+    },
+    {
+      "path": "src/orchestrator/gates.ts",
+      "modifiedAt": "2026-09-06T17:53:45.588154+00:00",
+      "bytes": 11144
+    },
+    {
+      "path": "src/orchestrator/git-context.ts",
+      "modifiedAt": "2026-09-06T18:28:37.688080+00:00",
+      "bytes": 4712
+    },
+    {
+      "path": "src/orchestrator/planning.ts",
+      "modifiedAt": "2026-09-06T22:07:31.481646+00:00",
+      "bytes": 60431
+    },
+    {
+      "path": "src/orchestrator/review.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 85969
+    },
+    {
+      "path": "src/orchestrator/types.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 5649
+    },
+    {
+      "path": "src/orchestrator/utils.ts",
+      "modifiedAt": "2026-09-06T17:44:30.191997+00:00",
+      "bytes": 16807
+    },
+    {
+      "path": "src/program-bootstrap.ts",
+      "modifiedAt": "2026-09-06T22:41:22.494516+00:00",
+      "bytes": 16092
+    },
+    {
+      "path": "src/providers/types.ts",
+      "modifiedAt": "2026-09-06T20:56:59.116894+00:00",
+      "bytes": 2702
+    },
+    {
+      "path": "src/recovery.ts",
+      "modifiedAt": "2026-09-06T18:40:32.229594+00:00",
+      "bytes": 5333
+    },
+    {
+      "path": "src/repository-fingerprint.ts",
+      "modifiedAt": "2026-09-06T16:22:26.923553+00:00",
+      "bytes": 15025
+    },
+    {
+      "path": "src/review-identity.ts",
+      "modifiedAt": "2026-09-06T03:18:51.499904+00:00",
+      "bytes": 10372
+    },
+    {
+      "path": "src/run-command.ts",
+      "modifiedAt": "2026-09-06T22:41:56.576205+00:00",
+      "bytes": 19253
+    },
+    {
+      "path": "src/run-manifest.ts",
+      "modifiedAt": "2026-09-06T22:32:12.334018+00:00",
+      "bytes": 25163
+    },
+    {
+      "path": "src/runs-command.ts",
+      "modifiedAt": "2026-09-06T22:43:49.827520+00:00",
+      "bytes": 7399
+    },
+    {
+      "path": "src/safety.ts",
+      "modifiedAt": "2026-09-06T15:14:21.895788+00:00",
+      "bytes": 10407
+    },
+    {
+      "path": "src/sandbox-mode.ts",
+      "modifiedAt": "2026-09-06T13:49:57.159971+00:00",
+      "bytes": 2928
+    },
+    {
+      "path": "src/session.ts",
+      "modifiedAt": "2026-09-06T22:43:03.325106+00:00",
+      "bytes": 11775
+    },
+    {
+      "path": "src/ship-state.ts",
+      "modifiedAt": "2026-09-06T19:10:58.873194+00:00",
+      "bytes": 3457
+    },
+    {
+      "path": "src/stats-command.ts",
+      "modifiedAt": "2026-09-06T22:43:03.325106+00:00",
+      "bytes": 18216
+    },
+    {
+      "path": "src/ticket-ops.ts",
+      "modifiedAt": "2026-09-06T17:38:07.008057+00:00",
+      "bytes": 35608
+    },
+    {
+      "path": "src/ui/Root.tsx",
+      "modifiedAt": "2026-09-06T22:41:56.576205+00:00",
+      "bytes": 15459
+    },
+    {
+      "path": "src/ui/agent/types.ts",
+      "modifiedAt": "2026-09-06T22:41:56.580319+00:00",
+      "bytes": 4265
+    },
+    {
+      "path": "src/ui/agent/utils.ts",
+      "modifiedAt": "2026-09-06T15:14:21.996988+00:00",
+      "bytes": 11601
+    },
+    {
+      "path": "src/ui/commands/project.ts",
+      "modifiedAt": "2026-09-06T16:53:53.685555+00:00",
+      "bytes": 17952
+    },
+    {
+      "path": "src/ui/commands/session.ts",
+      "modifiedAt": "2026-09-06T22:41:56.580319+00:00",
+      "bytes": 15402
+    },
+    {
+      "path": "src/ui/commands/settings.ts",
+      "modifiedAt": "2026-09-06T03:18:51.499904+00:00",
+      "bytes": 20437
+    },
+    {
+      "path": "src/ui/slash-commands.ts",
+      "modifiedAt": "2026-09-06T22:41:56.580319+00:00",
+      "bytes": 41349
+    },
+    {
+      "path": "src/ui/system-prompt.ts",
+      "modifiedAt": "2026-09-06T16:54:31.375075+00:00",
+      "bytes": 9215
+    },
+    {
+      "path": "src/ui/useAgent.ts",
+      "modifiedAt": "2026-09-06T22:41:56.580319+00:00",
+      "bytes": 73775
+    },
+    {
+      "path": "src/ui/useOrchestrator.ts",
+      "modifiedAt": "2026-09-06T22:45:04.515486+00:00",
+      "bytes": 60849
+    },
+    {
+      "path": "vitest.config.ts",
+      "modifiedAt": "2026-09-06T22:03:12.975787+00:00",
+      "bytes": 412
+    },
+    {
+      "path": "vitest.package-os.config.ts",
+      "modifiedAt": "2026-09-06T22:03:48.650226+00:00",
+      "bytes": 539
+    }
   ],
   "worktrees": [
     {
       "worktree": "/home/user/github/workermill",
-      "HEAD": "a901e2b83560caf04a22210da9709efc8888d16a",
-      "branch": "refs/heads/reliability/core"
+      "HEAD": "67e19c20e1f282c2df200c1ccda66bb15578ae00",
+      "branch": "refs/heads/reliability/core",
+      "status": [
+        "M CHANGELOG.md",
+        " M HANDOFF.md",
+        " M docs/recovery/2026-09-06-retrospective.md",
+        " M docs/recovery/r24-qualification.md",
+        " M docs/reliability-queue.json"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-qualification-cont",
-      "HEAD": "38917ed6222e493897013c7110a02427486a2f0f",
-      "branch": "refs/heads/reliability/qualification-cont"
+      "HEAD": "67e19c20e1f282c2df200c1ccda66bb15578ae00",
+      "branch": "refs/heads/reliability/qualification-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r01",
       "HEAD": "e0c2115047288442592fe3f2a16081d86329056a",
-      "branch": "refs/heads/reliability/r01"
+      "branch": "refs/heads/reliability/r01",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r02",
       "HEAD": "143bd38058fc28bb062e9095fdfc9592d3147191",
-      "branch": "refs/heads/reliability/r02"
+      "branch": "refs/heads/reliability/r02",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r03",
       "HEAD": "d42ac877004b00290177e4e56f2bc69c4b2b7097",
-      "branch": "refs/heads/reliability/r03"
+      "branch": "refs/heads/reliability/r03",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r04",
       "HEAD": "e6ad4c59c963049d35d5dafd920c4e6045af3984",
-      "branch": "refs/heads/reliability/r04"
+      "branch": "refs/heads/reliability/r04",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r05a",
       "HEAD": "5be8bf0e54733ac81e391feb71adc0518d428bd0",
-      "branch": "refs/heads/reliability/r05a"
+      "branch": "refs/heads/reliability/r05a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r05b",
       "HEAD": "11a50219f9a8db79dcc95334059b62898a114a8e",
-      "branch": "refs/heads/reliability/r05b"
+      "branch": "refs/heads/reliability/r05b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r05c",
       "HEAD": "d4a01c67717778846e5249551815d6a9de11ad0c",
-      "branch": "refs/heads/reliability/r05c"
+      "branch": "refs/heads/reliability/r05c",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r06",
       "HEAD": "3179d651820fbe4cf5a008ee13786624111934d1",
-      "branch": "refs/heads/reliability/r06"
+      "branch": "refs/heads/reliability/r06",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r07",
       "HEAD": "061ddcaebdd07edde8d753992c5fb6bcae0905b8",
-      "branch": "refs/heads/reliability/r07"
+      "branch": "refs/heads/reliability/r07",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r08",
       "HEAD": "85f2362f468b710273c998d0c8f6da14d684dec9",
-      "branch": "refs/heads/reliability/r08"
+      "branch": "refs/heads/reliability/r08",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r09a",
       "HEAD": "17bbad39d199fdd5512bce25902e2acc5461c53f",
-      "branch": "refs/heads/reliability/r09a"
+      "branch": "refs/heads/reliability/r09a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r09b",
       "HEAD": "3adcb1160bc9ce65227fabef9ed5aafc2999f7a4",
-      "branch": "refs/heads/reliability/r09b"
+      "branch": "refs/heads/reliability/r09b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r10",
       "HEAD": "878d5c51dac603c69538be070690113c5a5fc151",
-      "branch": "refs/heads/reliability/r10"
+      "branch": "refs/heads/reliability/r10",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r10q",
       "HEAD": "70c35243efe6cbddee757748377337e2660e166e",
-      "branch": "refs/heads/reliability/r10q"
+      "branch": "refs/heads/reliability/r10q",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11a",
       "HEAD": "1b2c4c42d75fbc101549ed38eb74e22b7d5ccbb8",
-      "branch": "refs/heads/reliability/r11a"
+      "branch": "refs/heads/reliability/r11a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11b",
       "HEAD": "21049fb49cfc62445e03b8a4ce7fdd4115d8d714",
-      "branch": "refs/heads/reliability/r11b"
+      "branch": "refs/heads/reliability/r11b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11childfix",
       "HEAD": "764a95b51e4af26723a64f89647584f8021ce4ca",
-      "branch": "refs/heads/reliability/r11childfix"
+      "branch": "refs/heads/reliability/r11childfix",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11git",
       "HEAD": "bb1ad85541cddf5e8b3849e3aa3464de0c762e6e",
-      "branch": "refs/heads/reliability/r11git"
+      "branch": "refs/heads/reliability/r11git",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11pub",
       "HEAD": "0bff35ca3223c8310beb9d6cb6d19234b45b10fa",
-      "branch": "refs/heads/reliability/r11pub"
+      "branch": "refs/heads/reliability/r11pub",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11r",
       "HEAD": "c95838b215a58f69795924f591ace88c1525124f",
-      "branch": "refs/heads/reliability/r11r"
+      "branch": "refs/heads/reliability/r11r",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11s",
       "HEAD": "8ce2fdc44008dc768b0a2587926a02ce4d784ea2",
-      "branch": "refs/heads/reliability/r11s"
+      "branch": "refs/heads/reliability/r11s",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11startup",
       "HEAD": "fc45773761b47b8f5ba76fe16cbf44eee0195193",
-      "branch": "refs/heads/reliability/r11startup"
+      "branch": "refs/heads/reliability/r11startup",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11startupfinal",
       "HEAD": "2245fc82c5aa93ec542749ddbd766984013f4a7a",
-      "branch": "refs/heads/reliability/r11startupfinal"
+      "branch": "refs/heads/reliability/r11startupfinal",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r11t",
       "HEAD": "801e17a317ec7f76d12c8b94503a77a6fb354aed",
-      "branch": "refs/heads/reliability/r11t"
+      "branch": "refs/heads/reliability/r11t",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r12",
       "HEAD": "29297e340c82b10679751b811dfc484f65e2cae2",
-      "branch": "refs/heads/reliability/r12"
+      "branch": "refs/heads/reliability/r12",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r13a",
       "HEAD": "635db240fe793daa0673b590fe5bacab5dc4d56d",
-      "branch": "refs/heads/reliability/r13a"
+      "branch": "refs/heads/reliability/r13a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r13b",
       "HEAD": "d248635cec3ea7905a282ec42db9a251a27ad52c",
-      "branch": "refs/heads/reliability/r13b"
+      "branch": "refs/heads/reliability/r13b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r13c",
       "HEAD": "1c74b002a83bdb0043effcf6b8c325fa817e40c6",
-      "branch": "refs/heads/reliability/r13c"
+      "branch": "refs/heads/reliability/r13c",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r14",
       "HEAD": "64199e3d5c824a609b9d5decc7997a1879e10d34",
-      "branch": "refs/heads/reliability/r14"
+      "branch": "refs/heads/reliability/r14",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r15a",
       "HEAD": "80ba3362416ebad60fdd90a37923b58222d73237",
-      "branch": "refs/heads/reliability/r15a"
+      "branch": "refs/heads/reliability/r15a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r15b",
       "HEAD": "7aa8e08929293456a21fe687696dbe17a4fc1368",
-      "branch": "refs/heads/reliability/r15b"
+      "branch": "refs/heads/reliability/r15b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r16a-cont",
       "HEAD": "192ef813a4300cfb332b7005c226b272b193ba57",
-      "branch": "refs/heads/reliability/r16a-cont"
+      "branch": "refs/heads/reliability/r16a-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r16b-cont",
       "HEAD": "58e7ecfbc0c450ec86ea4325c7bc9596ea01bc6a",
-      "branch": "refs/heads/reliability/r16b-cont"
+      "branch": "refs/heads/reliability/r16b-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r16c-cont",
       "HEAD": "ed038c9e2760d10b31249eb707949030fa25edc5",
-      "branch": "refs/heads/reliability/r16c-cont"
+      "branch": "refs/heads/reliability/r16c-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r17-cont",
       "HEAD": "fb842354dc9c24c08227ed83c424f679da0b478e",
-      "branch": "refs/heads/reliability/r17-cont"
+      "branch": "refs/heads/reliability/r17-cont",
+      "status": []
     },
     {
       "worktree": "/home/user/github/workermill-r18a-cont",
       "HEAD": "70e1cf263667b7684cde05a84748d9a310ca62a0",
-      "branch": "refs/heads/reliability/r18a-cont"
+      "branch": "refs/heads/reliability/r18a-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r18b1-cont",
       "HEAD": "f637f621162b99629d4abe2ad339da69b84e0d23",
-      "branch": "refs/heads/reliability/r18b1-cont"
+      "branch": "refs/heads/reliability/r18b1-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r18b2-cont",
       "HEAD": "83967db801ce461ddeffe0b2732bb71239fb0761",
-      "branch": "refs/heads/reliability/r18b2-cont"
+      "branch": "refs/heads/reliability/r18b2-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r18b3-cont",
       "HEAD": "f75f0314628aa67944afc08c5f3720aa7945a22b",
-      "branch": "refs/heads/reliability/r18b3-cont"
+      "branch": "refs/heads/reliability/r18b3-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r18c1-cont",
       "HEAD": "8d89e4a3f8b79a5d6c8e3ef9e94ccd7a040fdf4a",
-      "branch": "refs/heads/reliability/r18c1-cont"
+      "branch": "refs/heads/reliability/r18c1-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r18c2-cont",
-      "HEAD": "f98144a20d52c3eb5f010710a74e499529c67cc0",
-      "branch": "refs/heads/reliability/r18c2-cont"
+      "HEAD": "bb51a14770a22408d2fc96f182021119de00192e",
+      "branch": "refs/heads/reliability/r18c2-cont",
+      "status": [
+        "?? node_modules"
+      ]
+    },
+    {
+      "worktree": "/home/user/github/workermill-r18c3a-cont",
+      "HEAD": "7b42332566b4d80ee852ecac0be97f056bd5c549",
+      "branch": "refs/heads/reliability/r18c3a-cont",
+      "status": [
+        "?? node_modules"
+      ]
+    },
+    {
+      "worktree": "/home/user/github/workermill-r18c3b-cont",
+      "HEAD": "202523eb7e1df0bb3d0093bb358a1881eed7aa19",
+      "branch": "refs/heads/reliability/r18c3b-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r20a",
       "HEAD": "7eac477e63b9647fca1964ebc21af41013443b4a",
-      "branch": "refs/heads/reliability/r20a"
+      "branch": "refs/heads/reliability/r20a",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r20b",
       "HEAD": "feb981f7c3436461193083b7819ae9ac1e61c5ab",
-      "branch": "refs/heads/reliability/r20b"
+      "branch": "refs/heads/reliability/r20b",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r20c",
       "HEAD": "5a1aad1c1212473bd5a0b04a4903df5034c636ee",
-      "branch": "refs/heads/reliability/r20c"
+      "branch": "refs/heads/reliability/r20c",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r20d",
       "HEAD": "746a2e555dc54eb59b797514355e2c6e6bc91933",
-      "branch": "refs/heads/reliability/r20d"
+      "branch": "refs/heads/reliability/r20d",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r20e",
       "HEAD": "c3eb129cf4c13ba5b174416466627a6725e84b3f",
-      "branch": "refs/heads/reliability/r20e"
+      "branch": "refs/heads/reliability/r20e",
+      "status": [
+        "?? node_modules"
+      ]
+    },
+    {
+      "worktree": "/home/user/github/workermill-r22-cont",
+      "HEAD": "f5a70abc8f8639ee7e5aa58f39a048bde15d4561",
+      "branch": "refs/heads/reliability/r22-cont",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-r23",
       "HEAD": "8b279527b28baca1447a05a076de7dbcddb6468e",
-      "branch": "refs/heads/reliability/r23"
+      "branch": "refs/heads/reliability/r23",
+      "status": [
+        "?? node_modules"
+      ]
     },
     {
       "worktree": "/home/user/github/workermill-recovery-browser",
       "HEAD": "cd42e38e000c2a4ebfc98f6077ecc0498b449f2b",
-      "branch": "refs/heads/recovery/browser"
+      "branch": "refs/heads/recovery/browser",
+      "status": [
+        "?? node_modules"
+      ]
     }
   ]
 }

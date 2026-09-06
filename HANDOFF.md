@@ -1,18 +1,33 @@
 # WorkerMill recovery handoff
 
-Checkpoint: 2026-09-06 22:46 UTC. Branch `reliability/core`. Latest qualified implementation **d85284de: 1,614 passed, zero failed, one existing skip, 111 files; typecheck and build passed**. Full suite took 32.85 seconds on Linux/Node 22.22.2 with exact package-lock dependencies.
+**Current state: first-release reliability work is locally complete.** Checkpoint: 2026-09-06 22:53 UTC. Repository `/home/user/github/workermill`, branch `reliability/core`. Qualified candidate **67e19c20**: **1,614 tests passed, zero failed, one existing skip, 111 files; four installed-package/PTY tests passed; typecheck and build passed**. Exact commands, limitations and reviewed contracts: [qualification report](docs/recovery/r24-qualification.md). Final evidence-only edits follow that candidate; production code/tests are unchanged.
 
-All R18 accounting dispatches are integrated and qualified. Run manifests validate/allowlist ledger snapshots and match result/output totals. Shared session application preserves history, model/role buckets, and first-observation identity across replayed progress callbacks. Root added stats JSON limitations and mounted orchestration forwarding. Program summary labels its last-build usage separately from cumulative session totals. Bootstrap decomposition remains outside run-ledger billing.
+## Resume here
 
-Final review found program cancellation gaps. d85284de sends the parent signal to ticket lookup, decomposition, generated-issue requests and scoped program gates. Issue HTTP requests have a 60-second bound. Cancelled advisory gates cannot start the next gate or report program completion. New tests use mocked external requests; no external writes occurred.
+1. Read this current section, [AGENTS.md](AGENTS.md), [qualification report](docs/recovery/r24-qualification.md), and [queue](docs/reliability-queue.json). Then inspect branch/status. Historical failures below describe repaired snapshots, not current readiness.
+2. No implementation worker remains active; all accepted candidates are integrated. No required local implementation item remains. R01–R18 and R22–R24 are complete; R20 offline fixtures are complete. Optional R19 budgets and R21 comparison harness/live measurements are explicitly deferred.
+3. The next release-related check is the configured Linux/macOS × Node 22.12.0/22.22.2 remote CI matrix. It was not run here. Do not claim untested platforms passed. No push, PR, publication, tag, release, paid evaluation or worktree cleanup has been performed or newly authorized by this checkpoint.
+4. If the user requests additional implementation, record the specific bounded task before editing. Do not restart completed packages or replay old worker branches wholesale. Preserve current user changes and the saved worktrees.
 
-Next: R22 updates existing reference/migration docs, then R24 final combined qualification and package/PTY checks. Root owns docs/recovery/r24-qualification.md and final retrospective/inventory/handoff. Documentation worker owns README, CHANGELOG, SECURITY, selected existing reference docs and changed AGENTS command guidance only. Optional R19 budgets and R21 comparison harness/live measurements are deferred from first release. R20 offline fixtures are complete, not comparative evidence.
+## Delivered behavior
 
-Qualification worktree `/home/user/github/workermill-qualification-cont`, branch `reliability/qualification-cont`, fast-forward core before checks. Its node_modules links to `/home/user/github/workermill-r17-cont/node_modules`, independently npm-ci installed with cache `/tmp/workermill-qualification-npm-cache`; original core dependencies preserved and differ from lockfile. Final package command after build: `npm_config_cache=/tmp/workermill-qualification-npm-cache npm run test:package-os`. Four package/PTY cases previously passed at a9b0976e. Linux/macOS × Node 22.12.0/22.22.2 CI configured; remote jobs unexecuted. Existing skip is obsolete useCritic config test; actual Linux OS cases passed in latest full run.
+Shared tool permission/file/process boundaries and owned cleanup are exercised by actual runtime tests. Required gates and candidate freshness block inappropriate completion; terminal records reflect success, failure, cancellation and blocked delivery. Reviewer identity preflight respects existing routing. Per-call accounting includes run roles, children, retries, failed calls and compaction, with unknown/missing/partial metadata; session progress is deduplicated and cumulative history retained. Program-level gates, decomposition and issue requests now receive parent cancellation. Reference docs and migration examples match these contracts.
 
-No paid models, publication, pushes, PRs, releases, or cleanup of preserved worktrees. Workers never escalate (host hangs); root handles sandbox-required qualification. Checkpoint before dispatch/integration, after failures, and every 15 minutes. Current source review/evidence map: docs/recovery/r24-qualification.md. Final update must refresh retrospective and continuation inventory. Historical snapshots follow.
+The program summary labels last-build usage; session totals include all recorded builds. Program decomposition is outside build-ledger accounting. Legacy history is preserved without fabricated call detail. Local API cost excludes hardware; estimates are not invoices. Cancellation cannot reverse a remote request already accepted. See the report for remaining boundary limits.
 
-R22 candidate f5a70abc integrated; worker documentation checks 78 passed and typecheck passed. Root corrected the architecture's /cost breakdown claim and added concise headless/sandbox migration release notes. Final combined source/docs commit will now run typecheck, full suite, build and installed package/PTY suite. No remaining implementation worker is active.
+## Verification environment
+
+Use `/home/user/github/workermill-qualification-cont` (`reliability/qualification-cont`), fast-forwarding from core before future checks. Its `node_modules` links to `/home/user/github/workermill-r17-cont/node_modules`, independently installed with npm ci and cache `/tmp/workermill-qualification-npm-cache`. Original core dependencies are preserved but differ from package-lock.json. Node 22.22.2/Linux was tested; package support begins at Node 22.12.
+
+Commands: `npm run typecheck`; `npm test`; `npm run build`; `npm_config_cache=/tmp/workermill-qualification-npm-cache npm run test:package-os`. Full suite took 32.69 seconds; package suite 10.79 seconds. The one existing skip is the obsolete useCritic config test. Actual Linux OS boundary cases ran. Native tests require ordinary host permissions for Git/process/loopback/PTY operations. Worker escalation stalled in this host: workers must freeze/report sandbox failures and let root run normal approval paths.
+
+## Recovery evidence
+
+[Retrospective](docs/recovery/2026-09-06-retrospective.md), [initial inventory](docs/recovery/2026-09-06-inventory.json), [historical termination evidence](docs/recovery/2026-09-06-evidence.json), and [continuation inventory](docs/recovery/2026-09-06-continuation.json) are durable repository records. The last inventories state their exact snapshots. No raw transcript, secret, or hidden reasoning was copied into them.
+
+The original host event was `misalignment_policy_violation` / “Potentially unintended activity”; its exact trigger is not established. The manifest regression was independently reproduced and repaired. Local session records were recoverable; do not tell a future user the old work was erased without checking. Checkpoint before integration/dispatch, after failure and at least every 15 minutes during new long work. These safeguards support restart; they cannot guarantee the host will never terminate a session.
+
+The sections below preserve initial audit and intermediate history. **Use the current section above for the next action.**
 
 ## Historical audit state (before the repair below)
 

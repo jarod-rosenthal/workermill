@@ -1,6 +1,21 @@
 # Reliability release-candidate qualification
 
-Status: **in progress**. This is the coordinator's local review record, not a published release or evidence that remote CI ran. The current executable checkpoint is in [HANDOFF.md](../../HANDOFF.md). Final commit and checks will be recorded here after session accounting and reference documentation are integrated.
+Status: **locally qualified** at `67e19c20` on `reliability/core`, 2026-09-06 22:53 UTC. All first-release P0/P1 implementation and documentation tasks are complete locally. No open high-severity finding remains in the reviewed boundaries. This is a local candidate; no release, remote CI run, or live comparative evaluation occurred.
+
+## Final checks
+
+All executable checks used commit `67e19c20`, Linux and Node **22.22.2**, and the exact `package-lock.json` dependency graph in `/home/user/github/workermill-qualification-cont`. Subsequent edits record this evidence and correct one documentation link; they do not change production code or tests.
+
+| Command | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, exit 0 |
+| `npm test` | **1,614 passed, 0 failed, 1 existing skip; 111 files**, exit 0, 32.69 seconds |
+| `npm run build` | Passed, exit 0; bundled CLI 1.41 MB |
+| `npm_config_cache=/tmp/workermill-qualification-npm-cache npm run test:package-os` | **4 passed**, exit 0, 10.79 seconds; actual installed artifact and PTY |
+
+The existing skip is the obsolete `useCritic` configuration test in `orchestrator.test.ts`. Actual Linux OS-sandbox cases ran successfully. Docs consistency, hooks, command/schema checks, and 20 offline evaluation fixtures are included in the full suite. Final local Markdown path checks, JSON parsing and `git diff --check` also passed.
+
+For resumption, use [HANDOFF.md](../../HANDOFF.md). [The retrospective](2026-09-06-retrospective.md) explains recovered work and failures; [the continuation inventory](2026-09-06-continuation.json) records commits, changed paths, documentation, recent tracked-file metadata and preserved worktrees at its stated snapshot.
 
 ## Reviewed contracts
 
@@ -27,7 +42,7 @@ Test basenames above mean `<name>.test.ts`. The [R16 coverage map](r16-coverage.
 - Session updates now deduplicate progress/replay observations. Root checks cover mounted forwarding, cumulative historical token preservation, and unknown-price qualifications in stats JSON.
 - The expanded multi-role manifest fixture initially retained an old review token expectation. `0efe4934` aligns it with the actual scripted observation; the full suite passed afterward.
 
-## Practical limits and remaining qualification
+## Practical limits and deferred checks
 
 - Local qualification uses Linux, Node 22.22.2 and the exact `package-lock.json` graph in the dedicated qualification worktree. Linux/macOS × Node 22.12.0/22.22.2 CI is configured; other matrix jobs have not run here. Native Windows shell support is excluded; WSL depends on its Linux kernel/runtime capabilities.
 - OS tests explicitly skip missing dependencies or an unsupported kernel. A skip is not containment evidence. The Linux checkpoint at `0efe4934` had only the pre-existing obsolete `useCritic` test skipped; the actual OS cases ran.

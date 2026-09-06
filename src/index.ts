@@ -15,6 +15,7 @@ import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode
 import { Root } from "./ui/Root.js";
 import { getStateRoot } from "./state-root.js";
 import { checkForUpdate } from "./update-check.js";
+import type { RunResult } from "./run-command.js";
 
 /** Resolve display strings for all 3 roles from the full config. */
 function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
@@ -85,13 +86,14 @@ function addSharedOptions(cmd: Command): Command {
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
+    .option("--json", "Emit structured JSON for a headless prompt")
     .option("--fork", "Fork the resumed session (use with --resume)")
     .option("--live-view", "Enable live browser diff view")
     .option("--no-live-view", "Disable live browser diff view");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
-async function loadCliConfig(options: Record<string, unknown>) {
+async function loadCliConfig(options: Record<string, unknown>, nonInteractive = false) {
   let config;
   let isFirstRun = false;
 
@@ -100,6 +102,7 @@ async function loadCliConfig(options: Record<string, unknown>) {
   } catch {
     const globalConfig = loadConfig();
     if (!globalConfig) {
+      if (nonInteractive) throw new Error("No configuration found. Configure a provider before running headless prompts.");
       await runSetup();
       isFirstRun = true;
       config = resolveMergedConfig();
@@ -133,6 +136,46 @@ async function loadCliConfig(options: Record<string, unknown>) {
   return { config, isFirstRun };
 }
 
+function startupFailure(reason: RunResult["reason"], error: string): RunResult {
+  const cancelled = reason === "cancelled";
+  const exitCode = reason === "invalid_options" ? 2 : reason === "os_sandbox_unavailable" ? 6 : reason === "cancelled" ? 130 : 1;
+  return {
+    status: cancelled ? "cancelled" : "failed", reason, error, exitCode,
+    sessionId: null, model: null, text: "", toolCalls: 0,
+    tokens: { input: 0, output: 0 }, costUsd: 0, durationMs: 0,
+  };
+}
+
+function renderHeadlessResult(result: RunResult, json: boolean): void {
+  if (json) process.stdout.write(JSON.stringify(result) + "\n");
+  else if (result.status === "ok") process.stdout.write((result.text || "(completed with tool calls only)") + "\n");
+  else process.stderr.write("Error: " + (result.error || result.reason || "headless run failed") + "\n");
+  process.exitCode = result.exitCode;
+}
+
+async function executeHeadless(prompt: string | undefined, options: Record<string, unknown>, singlePrompt: boolean): Promise<void> {
+  const json = options.json === true;
+  if (!prompt) return renderHeadlessResult(startupFailure("invalid_options", "prompt is required"), json);
+  let config;
+  try {
+    ({ config } = await loadCliConfig(options, true));
+  } catch (error) {
+    return renderHeadlessResult(startupFailure("invalid_options", error instanceof Error ? error.message : String(error)), json);
+  }
+  let sandboxed;
+  try {
+    sandboxed = resolveSandboxMode(config.sandbox, options.fullDisk === true).effective;
+  } catch (error) {
+    return renderHeadlessResult(startupFailure("os_sandbox_unavailable", error instanceof Error ? error.message : String(error)), json);
+  }
+  const { runCommand } = await import("./run-command.js");
+  const result = await runCommand({
+    prompt, json, session: options.session as string | undefined, continue: options.continue === true,
+    model: options.model as string | undefined, maxSteps: options.maxSteps as number | undefined, singlePrompt, sandboxed,
+  }, config, process.cwd());
+  renderHeadlessResult(result, json);
+}
+
 const program = new Command()
   .name("wm")
   .description("WorkerMill — AI coding agent for your terminal")
@@ -149,24 +192,7 @@ program
   .option("--max-steps <n>", "Cap tool/reasoning steps", parseInt)
   .option("--full-disk", "Allow tools to access files outside working directory")
   .action(async (prompt, options) => {
-    if (!prompt || prompt.length === 0) {
-      console.error("Error: prompt is required");
-      process.exit(2);
-    }
-    const { config } = await loadCliConfig(options);
-    const workingDir = process.cwd();
-    const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
-    const runOptions = {
-      prompt: prompt.join(" "),
-      json: options.json || false,
-      session: options.session,
-      continue: options.continue || false,
-      model: options.model,
-      maxSteps: options.maxSteps,
-      sandboxed: sandboxResolution.effective,
-    };
-    const { runCommand } = await import("./run-command.js");
-    await runCommand(runOptions, config, workingDir);
+    await executeHeadless(prompt?.join(" "), options, false);
   });
 
 // ── Default command: interactive chat ──
@@ -176,27 +202,16 @@ const defaultCmd = program
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
   .action(async (options) => {
+    if (options.prompt) {
+      await executeHeadless(options.prompt as string, options, true);
+      return;
+    }
     const { config, isFirstRun } = await loadCliConfig(options);
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
     const workingDir = process.cwd();
     const roleModels = getRoleModelsFromConfig(config);
     const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
     const sandboxed = sandboxResolution.effective;
-
-    if (options.prompt) {
-      // Headless mode — run single prompt, print result, exit
-      if (sandboxResolution.warning) {
-        console.error(`[wm] ${sandboxResolution.warning}`);
-      }
-      const runOptions = {
-        prompt: options.prompt as string,
-        singlePrompt: true,
-        maxSteps: 50, // Default from original
-        sandboxed: sandboxed,
-      };
-      const { runCommand } = await import("./run-command.js");
-      await runCommand(runOptions, config, workingDir);
-    }
 
     await printWelcome(workingDir, isFirstRun);
 

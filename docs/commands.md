@@ -416,7 +416,25 @@ wm run --json "what framework does this project use"
 | `--max-steps <n>` | Cap tool/reasoning steps |
 | `--full-disk` | Allow tools to access files outside working directory |
 
-Useful for scripting, CI pipelines, and automation. The agent has full tool access (subject to permissions) but no interactive prompts.
+Useful for scripting, CI pipelines, and automation. Headless runs never open setup or permission prompts: configure explicit `permissions.allow` rules for tools automation may use. An `ask` rule returns `permission_required` without executing the tool. `--full-disk` widens filesystem scope only; it never grants tool permission.
+
+With `--json`, stdout is exactly one result object. Successful results have `status: "ok"` and exit code 0. Non-success results retain the same fields plus `reason`, `error`, and `exitCode`; diagnostics go to stderr. Stable headless reasons and process exit codes are:
+
+| Reason | Exit code |
+|---|---:|
+| `invalid_options` | 2 |
+| `permission_required` | 3 |
+| `denied` | 4 |
+| `step_limit` | 5 |
+| `os_sandbox_unavailable` | 6 |
+| `provider_error` | 1 |
+| `cancelled` | 130 |
+
+For example, permit a CI verification command explicitly rather than relying on an interactive approval:
+
+```json
+{ "permissions": { "allow": ["bash(npm test:*)"] } }
+```
 
 ### `wm model [provider/model]`
 

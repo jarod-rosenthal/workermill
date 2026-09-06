@@ -41,9 +41,20 @@ interface Hunk {
 interface FilePatch {
   oldFile: string;
   newFile: string;
+  oldHeaderLine: number;
+  newHeaderLine: number;
+  oldHeaderPath: string;
+  newHeaderPath: string;
   hunks: Hunk[];
   isNew: boolean;
   isDelete: boolean;
+}
+
+export interface PatchHeader {
+  oldLine: number;
+  newLine: number;
+  oldPath: string;
+  newPath: string;
 }
 
 interface PatchResult {
@@ -61,19 +72,26 @@ function parsePatch(patchText: string): FilePatch[] {
   let i = 0;
 
   while (i < lines.length) {
+    if (lines[i].startsWith("+++ ")) {
+      throw new Error(`Malformed unified diff: orphan +++ header at line ${i + 1}`);
+    }
     if (!lines[i].startsWith("--- ")) {
       i++;
       continue;
     }
 
-    const oldFile = lines[i].replace(/^--- (a\/)?/, "").replace(/\t[^\n]*$/, "");
+    const oldHeaderLine = i;
+    const oldHeaderPath = lines[i].slice(4).split("\t", 1)[0];
+    const oldFile = oldHeaderPath.replace(/^a\//, "");
     i++;
 
     if (i >= lines.length || !lines[i].startsWith("+++ ")) {
-      continue;
+      throw new Error(`Malformed unified diff: --- header at line ${oldHeaderLine + 1} is not followed by +++`);
     }
 
-    const newFile = lines[i].replace(/^\+\+\+ (b\/)?/, "").replace(/\t[^\n]*$/, "");
+    const newHeaderLine = i;
+    const newHeaderPath = lines[i].slice(4).split("\t", 1)[0];
+    const newFile = newHeaderPath.replace(/^b\//, "");
     i++;
 
     const isNew = oldFile === "/dev/null";
@@ -82,6 +100,10 @@ function parsePatch(patchText: string): FilePatch[] {
     const filePatch: FilePatch = {
       oldFile: isNew ? newFile : oldFile,
       newFile: isDelete ? oldFile : newFile,
+      oldHeaderLine,
+      newHeaderLine,
+      oldHeaderPath,
+      newHeaderPath,
       hunks: [],
       isNew,
       isDelete,
@@ -106,24 +128,40 @@ function parsePatch(patchText: string): FilePatch[] {
 
       i++;
 
-      while (i < lines.length) {
+      let oldRemaining = hunk.oldCount;
+      let newRemaining = hunk.newCount;
+
+      while (i < lines.length && (oldRemaining > 0 || newRemaining > 0)) {
         const line = lines[i];
-        if (line.startsWith("@@") || line.startsWith("--- ") || line.startsWith("diff ")) {
-          break;
-        }
 
         if (line.startsWith("+")) {
           hunk.lines.push({ type: "add", content: line.slice(1) });
+          newRemaining--;
         } else if (line.startsWith("-")) {
           hunk.lines.push({ type: "remove", content: line.slice(1) });
+          oldRemaining--;
         } else if (line.startsWith(" ") || line === "") {
           hunk.lines.push({
             type: "context",
             content: line.startsWith(" ") ? line.slice(1) : line,
           });
+          oldRemaining--;
+          newRemaining--;
+        } else if (line.startsWith("\\")) {
+          // `\\ No newline at end of file` is metadata, not a hunk line.
+          i++;
+          continue;
+        } else {
+          throw new Error(`Malformed unified diff: invalid hunk line at line ${i + 1}`);
         }
         i++;
       }
+
+      if (oldRemaining < 0 || newRemaining < 0 || oldRemaining > 0 || newRemaining > 0) {
+        throw new Error(`Malformed unified diff: hunk at line ${i + 1} has incorrect line counts`);
+      }
+
+      while (i < lines.length && lines[i].startsWith("\\")) i++;
 
       filePatch.hunks.push(hunk);
     }
@@ -134,6 +172,16 @@ function parsePatch(patchText: string): FilePatch[] {
   }
 
   return patches;
+}
+
+/** Header locations produced by the same parser used for patch application. */
+export function parsePatchHeaders(patchText: string): PatchHeader[] {
+  return parsePatch(patchText).map((filePatch) => ({
+    oldLine: filePatch.oldHeaderLine,
+    newLine: filePatch.newHeaderLine,
+    oldPath: filePatch.oldHeaderPath,
+    newPath: filePatch.newHeaderPath,
+  }));
 }
 
 function applyHunks(originalContent: string, hunks: Hunk[]): string | null {

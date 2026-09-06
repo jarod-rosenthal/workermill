@@ -38,10 +38,19 @@ describe("canonical filesystem path policy", () => {
     );
   });
 
+  it("preserves repeated directory basenames while resolving new files", () => {
+    const workspace = tempDir();
+    const scope = createPathScope(workspace);
+    expect(resolvePath(scope, "new/new/file.txt", "read_write")).toBe(
+      path.join(workspace, "new", "new", "file.txt"),
+    );
+  });
+
   it("rejects traversal and sibling-prefix escapes", () => {
     const workspace = tempDir();
     const sibling = `${workspace}-sibling`;
     fs.mkdirSync(sibling);
+    tempDirs.push(sibling);
     const scope = createPathScope(workspace);
     expect(() => resolvePath(scope, "../outside.txt", "read")).toThrow();
     expect(() => resolvePath(scope, sibling, "read")).toThrow();
@@ -95,11 +104,19 @@ describe("canonical filesystem path policy", () => {
     const approved = tempDir();
     const imagePath = path.join(approved, "image.bin");
     fs.writeFileSync(imagePath, Buffer.from("not an image"));
+    const pngPath = path.join(approved, "image.png");
+    fs.writeFileSync(pngPath, Buffer.from(
+      "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489" +
+      "0000000a49444154789c6260000000020001e221bc330000000049454e44ae426082",
+      "hex",
+    ));
     const tools = createToolDefinitions(workspace, undefined, true, {
       extraPathGrants: [{ root: approved, access: "read" }],
     }) as Record<string, { execute: (input: unknown) => Promise<unknown> }>;
 
     await expect(tools.read_file.execute({ path: imagePath })).resolves.toBe("not an image");
+    await expect(tools.view_image.execute({ path: pngPath })).resolves.toMatchObject({ content: expect.any(Array) });
+    await expect(tools.view_image.execute({ path: path.join(tempDir(), "outside.png") })).rejects.toThrow();
     await expect(tools.read_file.execute({ path: path.join(tempDir(), "nope") })).rejects.toThrow();
   });
 
@@ -134,5 +151,59 @@ describe("canonical filesystem path policy", () => {
 
     await expect(tools.patch.execute({ patch_text: patch })).rejects.toThrow();
     expect(fs.readFileSync(file, "utf8")).toBe("safe\n");
+  });
+
+  it("applies timestamped multi-file patches, additions, deletions, and marker-like hunk text", async () => {
+    const workspace = tempDir();
+    const safe = path.join(workspace, "safe.txt");
+    const deleted = path.join(workspace, "deleted.txt");
+    fs.writeFileSync(safe, "old\n--- remove\n+++ add\n");
+    fs.writeFileSync(deleted, "gone\n");
+    const tools = createToolDefinitions(workspace) as Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+    const patch = [
+      "--- a/safe.txt\t2024-01-01",
+      "+++ b/safe.txt\t2024-01-01",
+      "@@ -1,3 +1,3 @@",
+      " old",
+      "---- remove",
+      "+--- changed",
+      " +++ add",
+      "--- a/deleted.txt",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-gone",
+      "--- /dev/null",
+      "+++ b/created.txt",
+      "@@ -0,0 +1 @@",
+      "+created",
+      "",
+    ].join("\n");
+
+    await expect(tools.patch.execute({ patch_text: patch })).resolves.toContain("Patch applied successfully");
+    expect(fs.readFileSync(safe, "utf8")).toBe("old\n--- changed\n+++ add\n");
+    expect(fs.existsSync(deleted)).toBe(false);
+    expect(fs.readFileSync(path.join(workspace, "created.txt"), "utf8")).toBe("created\n");
+  });
+
+  it("continues through no-newline metadata to validate and apply later hunks", async () => {
+    const workspace = tempDir();
+    const file = path.join(workspace, "two-hunks.txt");
+    fs.writeFileSync(file, "one\ntwo\nthree\n");
+    const tools = createToolDefinitions(workspace) as Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+    const patch = [
+      "--- a/two-hunks.txt",
+      "+++ b/two-hunks.txt",
+      "@@ -1 +1 @@",
+      "-one",
+      "+ONE",
+      "\\ No newline at end of file",
+      "@@ -3 +3 @@",
+      "-three",
+      "+THREE",
+      "",
+    ].join("\n");
+
+    await expect(tools.patch.execute({ patch_text: patch })).resolves.toContain("Patch applied successfully");
+    expect(fs.readFileSync(file, "utf8")).toBe("ONE\ntwo\nTHREE\n");
   });
 });

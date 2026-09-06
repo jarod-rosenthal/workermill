@@ -43,31 +43,25 @@ export interface ToolDefinitionOptions {
   extraPathGrants?: readonly PathGrant[];
 }
 
-function patchTargetPaths(patchText: string): string[] {
-  const targets: string[] = [];
+function rewritePatchPaths(
+  patchText: string,
+  resolveToolPath: (inputPath: string, access: PathAccess) => string,
+): string {
+  const headers = patchTool.parsePatchHeaders(patchText);
   const lines = patchText.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].startsWith("--- ") || i + 1 >= lines.length || !lines[i + 1].startsWith("+++ ")) continue;
-    const oldFile = lines[i].slice(4).split("\t", 1)[0].replace(/^a\//, "");
-    const newFile = lines[i + 1].slice(4).split("\t", 1)[0].replace(/^b\//, "");
-    if (oldFile !== "/dev/null") targets.push(oldFile);
-    if (newFile !== "/dev/null") targets.push(newFile);
-    i++;
+  const rewrite = (lineIndex: number, headerPath: string, prefix: "a/" | "b/"): void => {
+    if (headerPath === "/dev/null") return;
+    const rawPath = headerPath.replace(new RegExp(`^${prefix}`), "");
+    const resolved = resolveToolPath(rawPath, "read_write");
+    const marker = lines[lineIndex].slice(0, 4);
+    const suffix = lines[lineIndex].slice(4 + headerPath.length);
+    lines[lineIndex] = `${marker}${resolved}${suffix}`;
+  };
+  for (const header of headers) {
+    rewrite(header.oldLine, header.oldPath, "a/");
+    rewrite(header.newLine, header.newPath, "b/");
   }
-  return targets;
-}
-
-function rewritePatchPaths(patchText: string, resolvedPaths: readonly string[]): string {
-  let next = 0;
-  return patchText.split("\n").map((line) => {
-    if (!line.startsWith("--- ") && !line.startsWith("+++ ")) return line;
-    const marker = line.slice(0, 4);
-    const raw = line.slice(4).split("\t", 1)[0];
-    if (raw === "/dev/null") return line;
-    const resolved = resolvedPaths[next++];
-    const suffix = line.slice(4 + raw.length);
-    return `${marker}${resolved}${suffix}`;
-  }).join("\n");
+  return lines.join("\n");
 }
 
 /** Recursively list all files in a directory. */
@@ -121,7 +115,7 @@ export function createToolDefinitions(
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        const canonicalCwd = resolveToolPath(resolvedCwd, "read");
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
         const result = await bashTool.execute({
           command,
           cwd: canonicalCwd,
@@ -164,7 +158,7 @@ export function createToolDefinitions(
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        const canonicalCwd = resolveToolPath(resolvedCwd, "read");
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
         const result = await bashBackgroundTool.execute({
           command,
           cwd: canonicalCwd,
@@ -582,9 +576,9 @@ export function createToolDefinitions(
       execute: async ({ patch_text }) => {
         // Unified diffs may contain several targets; canonicalize and
         // authorize every header before the patch implementation can mutate.
-        const patchTargets = patchTargetPaths(patch_text);
-        const resolvedTargets = patchTargets.map((target) => resolveToolPath(target, "read_write"));
-        const result = await patchTool.execute({ patch_text: rewritePatchPaths(patch_text, resolvedTargets) });
+        const result = await patchTool.execute({
+          patch_text: rewritePatchPaths(patch_text, resolveToolPath),
+        });
         if (result.success) {
           const parts: string[] = ["Patch applied successfully:"];
           if (result.filesCreated.length > 0) parts.push(`  Created: ${result.filesCreated.join(", ")}`);
@@ -653,7 +647,7 @@ export function createToolDefinitions(
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        const canonicalCwd = resolveToolPath(resolvedCwd, "read");
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
         const result = await verifyTool.execute({
           command,
           cwd: canonicalCwd,

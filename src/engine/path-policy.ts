@@ -32,24 +32,22 @@ function nearestExistingParent(filePath: string): { parent: string; missing: str
   let current = path.resolve(filePath);
   while (true) {
     try {
-      // lstat keeps dangling links in the walk; realpath then determines
-      // whether this is a usable canonical parent.
       fs.lstatSync(current);
-      try {
-        return { parent: realpath(current), missing };
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-        missing.unshift(path.basename(current));
-      }
     } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) {
+        throw new Error(`Unable to resolve path: ${filePath}`);
+      }
+      missing.unshift(path.basename(current));
+      current = parent;
+      continue;
     }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      throw new Error(`Unable to resolve path: ${filePath}`);
-    }
-    if (missing[0] !== path.basename(current)) missing.unshift(path.basename(current));
-    current = parent;
+    // Keep dangling links fail-closed: realpath errors are not treated as a
+    // missing ordinary component once lstat found an entry.
+    return { parent: realpath(current), missing };
   }
 }
 
@@ -67,8 +65,8 @@ function rejectSymlinkComponents(parent: string, missing: string[]): void {
       if (error instanceof Error && error.message.startsWith("Path contains a symbolic link:")) {
         throw error;
       }
-      // This component is genuinely absent; later components are absent too.
-      break;
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") break;
+      throw error;
     }
   }
 }

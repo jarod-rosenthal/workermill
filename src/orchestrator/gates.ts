@@ -18,13 +18,16 @@ export async function runPostExecutionQualityGates(args: {
   completedStoryIds: string[];
   workingDir: string;
   output: OrchestrationOutput;
+  /** Forward the active orchestration lifecycle to required commands. */
+  abortSignal?: AbortSignal;
+  runId?: string;
   getStoryDefinitionOfDone: (story: Story) => {
     requiredFiles: string[];
     requiredTests: string[];
     requiredCommands: string[];
   };
 }): Promise<PostExecutionQualityGateResult> {
-  const { config, stories, completedStoryIds, workingDir, output, getStoryDefinitionOfDone } = args;
+  const { config, stories, completedStoryIds, workingDir, output, getStoryDefinitionOfDone, abortSignal, runId } = args;
   const verifyEnabled = config.review?.verifyEnabled !== false;
   const staticGates: QualityGateCommand[] = config.qualityGates ?? [];
   const requiredCommandGates = stories
@@ -44,7 +47,7 @@ export async function runPostExecutionQualityGates(args: {
 
   output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
   output.status(`Running quality gates (${allGates.length})...`);
-  const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir)));
+  const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, { signal: abortSignal, runId })));
   output.statusDone();
 
   const failed = gateResults.filter((result) => !result.passed);
@@ -91,8 +94,10 @@ export async function runQualityGates(args: {
   completedStoryIds: string[];
   context: SharedContext;
   workingDir: string;
+  abortSignal?: AbortSignal;
+  runId?: string;
 }): Promise<QualityGatesResult> {
-  const { config, output, sorted, completedStoryIds, context, workingDir } = args;
+  const { config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId } = args;
 
   let gateResultsSection = "";
   const verifyEnabled = config.review?.verifyEnabled !== false;
@@ -112,7 +117,7 @@ export async function runQualityGates(args: {
   if (allGates.length > 0 && completedStoryIds.length > 0) {
     output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
     output.status(`Running quality gates (${allGates.length})...`);
-    const gateResults = await Promise.all(allGates.map(g => runGate(g, workingDir)));
+    const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, { signal: abortSignal, runId })));
     output.statusDone();
 
     const failed = gateResults.filter(r => !r.passed);

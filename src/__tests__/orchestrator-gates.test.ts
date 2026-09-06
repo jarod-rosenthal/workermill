@@ -100,4 +100,28 @@ describe("runPostExecutionQualityGates", () => {
     expect(result.gateResultsSection).toContain("## Quality Gate Results — ALL PASSED");
     expect(result.gateResultsSection).toContain("verify: Add wm stats");
   });
+
+  it("threads the active run cancellation and ID to required commands", async () => {
+    const output = createOutput();
+    const controller = new AbortController();
+    mockRunGate.mockResolvedValue({ name: "required: Build", passed: false, output: "Command cancelled" });
+
+    const result = await runPostExecutionQualityGates({
+      config: { providers: {}, default: "ollama" },
+      stories: [{ id: "build", title: "Build", persona: "backend_developer", description: "Build", requiredCommands: ["npm run build"] }],
+      completedStoryIds: ["build"],
+      workingDir: process.cwd(),
+      output,
+      abortSignal: controller.signal,
+      runId: "run-r08",
+      getStoryDefinitionOfDone: (story) => ({ requiredFiles: [], requiredTests: [], requiredCommands: story.requiredCommands ?? [] }),
+    });
+
+    expect(mockRunGate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "required: Build" }),
+      process.cwd(),
+      expect.objectContaining({ signal: controller.signal, runId: "run-r08" }),
+    );
+    expect(result.requiredFailures).toHaveLength(1);
+  });
 });

@@ -536,7 +536,7 @@ export async function runOrchestration(
 
   // --- Post-execution quality gates ---
   const gatesResult = await runQualityGates({
-    config, output, sorted, completedStoryIds, context, workingDir,
+    config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId: manifest.id,
   });
   const { gateResultsSection } = gatesResult;
 

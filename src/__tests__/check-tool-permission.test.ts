@@ -273,14 +273,14 @@ describe("checkToolPermission — exhaustive", () => {
       expect(saved.allow).toContain("bash(git status:*)");
     });
 
-    it("mode=always for non-bash saves a durable tool allow rule", async () => {
+    it("mode=always for non-command tools saves a durable tool allow rule", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
 
       await checkToolPermission("write_file", { path: "foo.ts" }, false, sessionAllow, output);
 
-      expect(sessionAllow.has("write_file")).toBe(true);
+      expect(sessionAllow.has("write_file")).toBe(false);
       expect(saveLocalSettings).toHaveBeenCalled();
       const saved = vi.mocked(saveLocalSettings).mock.calls.at(-1)?.[0] as { allow?: string[] };
       expect(saved.allow).toContain("write_file");
@@ -293,6 +293,8 @@ describe("checkToolPermission — exhaustive", () => {
       const sessionAllow = new Set<string>();
 
       await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
+
+      expect(sessionAllow.has("bash")).toBe(false);
 
       // Now the rule is saved — simulate checkPermissionRules matching it
       vi.mocked(checkPermissionRules).mockReturnValue("allow");

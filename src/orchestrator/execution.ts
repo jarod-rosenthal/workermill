@@ -18,9 +18,9 @@ import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
+import { splitCompoundCommand, toolInputToRule } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { isGitRepo, commitStoryChanges } from "../git-ops.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
 import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
 import { getMCPToolDefinitions } from "../mcp-client.js";
@@ -425,7 +425,10 @@ export async function checkToolPermission(
     mode: "default",
     trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
     sessionAllow,
-    rules: permissionRules ?? {},
+    rules: {
+      ...permissionRules,
+      allow: [...(permissionRules?.allow ?? []), ...getSessionPermissionRules(sessionAllow)],
+    },
     readOnlyRole: false,
     workspace,
   };
@@ -435,23 +438,42 @@ export async function checkToolPermission(
   const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, toolInput)}${decision.reason ? ` (${decision.reason})` : ""}`);
   if (typeof result === "object" && result.allowed) {
     if (result.mode === "trust") sessionAllow.add("*");
-    if (result.mode === "always") {
-      sessionAllow.add(toolName);
-      await persistAlwaysPermission(toolName, toolInput);
-    }
+    if (result.mode === "always") await recordAlwaysPermission(sessionAllow, toolName, toolInput);
   }
   return typeof result === "object" ? result.allowed : result;
 }
 
-async function persistAlwaysPermission(toolName: string, input: Record<string, unknown>): Promise<void> {
+const sessionPermissionRules = new WeakMap<Set<string>, string[]>();
+
+function alwaysPermissionRules(toolName: string, input: Record<string, unknown>): string[] {
+  if (["bash", "verify", "bash_background"].includes(toolName) && typeof input.command === "string") {
+    return splitCompoundCommand(input.command)
+      .map((command) => toolInputToRule("bash", { command }))
+      .filter((rule): rule is string => Boolean(rule));
+  }
+  const rule = toolInputToRule(toolName, input);
+  return rule ? [rule] : [];
+}
+
+function addSessionPermissionRules(sessionAllow: Set<string>, rules: readonly string[]): void {
+  if (rules.length === 0) return;
+  const current = sessionPermissionRules.get(sessionAllow) ?? [];
+  for (const rule of rules) if (!current.includes(rule)) current.push(rule);
+  sessionPermissionRules.set(sessionAllow, current);
+}
+
+function getSessionPermissionRules(sessionAllow: Set<string>): readonly string[] {
+  return sessionPermissionRules.get(sessionAllow) ?? [];
+}
+
+async function recordAlwaysPermission(sessionAllow: Set<string>, toolName: string, input: Record<string, unknown>): Promise<void> {
+  const rules = alwaysPermissionRules(toolName, input);
+  addSessionPermissionRules(sessionAllow, rules);
+  if (rules.length === 0) return;
   try {
-    const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
     const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
     const settings = loadLocalSettings() || {};
     settings.allow = settings.allow || [];
-    const rules = toolName === "bash" && input.command
-      ? splitCompoundCommand(String(input.command)).map((command) => toolInputToRule(toolName, { command }))
-      : [toolInputToRule(toolName, input)];
     for (const rule of rules) if (rule && !settings.allow.includes(rule)) settings.allow.push(rule);
     saveLocalSettings(settings);
   } catch { /* retain session approval when persistent settings are unavailable */ }
@@ -846,7 +868,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     recentToolSignatures = [];
     loopAbort = new AbortController();
     const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, loopAbort.signal]) : loopAbort.signal;
-    const scope = createPathScope(workingDir);
+    const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
     const executionContext: ToolExecutionContext = {
       runId: params.runId ?? `story-${story.id}-${revision}`,
       workspace: scope.workspace,
@@ -857,18 +879,22 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         mode: "default",
         trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
         sessionAllow,
-        rules: config.permissions ?? {},
+        rules: {
+          ...config.permissions,
+          allow: [...(config.permissions?.allow ?? []), ...getSessionPermissionRules(sessionAllow)],
+        },
         readOnlyRole: false,
         workspace: scope.workspace,
       }),
+      allowedNetworkDomains: config.sandboxCapabilities?.allowedNetworkDomains,
+      allowLocalBinding: config.sandboxCapabilities?.allowLocalBinding,
+      allowDockerSocket: config.sandboxCapabilities?.allowDockerSocket,
       prompt: async (toolName, input, reason, executingContext) => {
         const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, input)} (${reason})`);
+        if (executingContext.signal.aborted) return false;
         if (typeof result === "object" && result.allowed) {
           if (result.mode === "trust") sessionAllow.add("*");
-          if (result.mode === "always") {
-            sessionAllow.add(toolName);
-            await persistAlwaysPermission(toolName, input);
-          }
+          if (result.mode === "always") await recordAlwaysPermission(sessionAllow, toolName, input);
         }
         // Keep the callback's supplied context authoritative for child contexts.
         return Boolean(typeof result === "object" ? result.allowed : result) && !executingContext.signal.aborted;
@@ -903,7 +929,11 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       event: (event, executingContext) => {
         if (event.phase !== "complete") return;
         const result = event.output;
-        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+        const resultStr = typeof result === "string"
+          ? result
+          : result === undefined
+            ? String(event.error ?? "")
+            : (JSON.stringify(result) ?? String(result));
         const isError = event.error || (typeof result === "string" && result.startsWith("Error:"));
         if (isError) {
           logger.error("Tool error", { persona: story.persona, tool: event.toolName, result: resultStr });
@@ -936,7 +966,10 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       },
     };
 
-    const allTools = createToolDefinitions(workingDir, model, sandboxed, { executionContext });
+    const allTools = createToolDefinitions(workingDir, model, sandboxed, {
+      executionContext,
+      sandboxCapabilities: config.sandboxCapabilities,
+    });
     const personaTools: Record<string, AnyToolDef> = {};
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
@@ -965,11 +998,27 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         try {
           return await executeToolCall(toolName, input, () => original(input), executionContext);
         } catch (error) {
-          if (error instanceof ToolExecutionError) return `Tool execution denied: ${error.message}`;
+          if (error instanceof ToolExecutionError) {
+            if (error.code === "cancelled") {
+              loopAbort.abort();
+              return `Tool execution cancelled: ${error.message}`;
+            }
+            if (error.code === "hook_blocked") return `Tool blocked by pre-hook: ${error.message}`;
+            if (error.code === "denied") {
+              runLifecycleHooks("permission_denied", config.hooks, executionContext.workspace, {
+                WORKERMILL_TOOL: toolName,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+                WORKERMILL_STORY_ID: story.id,
+                WORKERMILL_STORY_PERSONA: story.persona,
+              });
+              return `Tool execution denied: ${error.message}`;
+            }
+            return `Tool execution requires permission: ${error.message}`;
+          }
           throw error;
         }
       };
-      personaTools[toolName] = { ...toolDef, execute: withConcurrencyControl(toolName, execute as never) };
+      personaTools[toolName] = { ...toolDef, execute };
     }
 
     // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts

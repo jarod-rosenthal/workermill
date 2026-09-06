@@ -111,18 +111,19 @@ No configuration is required for dynamic gates — the planner handles it. To di
 ### Without quality gates
 
 ```
-Stories execute → Tech lead reviews → Revision if needed → PR created
+Stories execute → Tech lead reviews → Revision if needed → Publication prompt
 ```
 
-The reviewer is the first to catch acceptance criteria gaps.
+Without configured acceptance checks, the review has no corresponding automated pass/fail evidence.
 
 ### With quality gates enabled
 
 ```
-Stories execute → Gates run → Results injected into review → Tech lead reviews → PR created
+Stories execute → Gates run → Blocking failure? Stop and preserve local work
+                           → Otherwise: tech lead review → Publication prompt
 ```
 
-The reviewer sees a pass/fail summary before reading a single line of diff. Failures are flagged in review and fixed in the normal revision loop.
+Blocking failures stop before review and publication. Otherwise, the reviewer receives the gate summary, including any advisory failures. Review can request revisions, but the existence of an earlier passing gate alone does not prove that later revisions passed it.
 
 ---
 
@@ -355,10 +356,11 @@ Integer 1-10, default `8`. The plan score the critic must reach to approve. Only
 ```
 
 With everything enabled:
+
 1. **Spec check** — you answer 1–3 targeted questions before planning starts
 2. **Planner** runs with your clarified spec, generates stories with `verificationCommands`
 3. **Plan critic** scores the plan and refines it until it passes
 4. **You confirm** the plan, and the feature branch is created
 5. **Stories execute** — experts build and self-verify
-6. **Verification gates** run the output assertions from the planner
-7. **Tech lead reviewer** sees gate results alongside the diff
+6. **Quality gates** run configured checks, required story commands, and the planner's output assertions; blocking failures stop the run
+7. **Tech lead reviewer** sees the gate results alongside the diff if no blocking gate failed

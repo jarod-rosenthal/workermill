@@ -23,10 +23,11 @@ input.on("line", (line) => {
       return reply(request.id, { content: [{ type: "text", text: "x".repeat(8_192) }] });
     }
     if (mode === "orphan-after-start") {
-      spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {}); setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "late"), 500); setInterval(() => {}, 1_000);`], {
-        stdio: "ignore",
+      const child = spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(${JSON.stringify(marker + ".started")}, String(process.pid)); process.send("ready"); setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "late"), 500); setInterval(() => {}, 1_000);`], {
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
       });
-      process.exit(0);
+      child.once("message", () => process.exit(0));
+      return;
     }
     return reply(request.id, { content: [{ type: "text", text: `${process.pid}:pong` }] });
   }

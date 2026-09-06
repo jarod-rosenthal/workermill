@@ -65,6 +65,7 @@ function makeMockProcess(
   const stderr = new EventEmitter();
 
   const stdin = {
+    writable: true,
     write: vi.fn((data: string) => {
       stdinWrites.push(data);
       if (responder) {
@@ -82,7 +83,7 @@ function makeMockProcess(
 }
 
 function buildMockProc(
-  stdin: { write: ReturnType<typeof vi.fn> },
+  stdin: { write: ReturnType<typeof vi.fn>; writable: boolean },
   stdout: EventEmitter,
   stderr: EventEmitter,
 ) {
@@ -930,6 +931,7 @@ describe("mcp-client", () => {
       const stderr = new EventEmitter();
       let writeCallIdx = 0;
       const stdin = {
+        writable: true,
         write: vi.fn((data: string) => {
           let msg: Record<string, unknown>;
           try { msg = JSON.parse(data.trim()); } catch { return; }

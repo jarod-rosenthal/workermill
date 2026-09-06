@@ -140,6 +140,8 @@ The CLI auto-detects MCP servers from:
 
 MCP tools are namespaced as `mcp__<server>__<tool>` and appear alongside built-in tools. Tool schemas are sanitized on registration — the CLI forces `type: "object"` on any schema that omits it (required by Anthropic's API).
 
+For run-scoped adapters, `createMCPRunResources({ runId, workspace, signal })` owns a separate server collection. Register configuration and await `ensureStarted()` for lazy startup, or await `startAll()` directly; get tools from that instance and always await its idempotent `close()` in cleanup. Closing one instance does not stop another instance's same-named server. Startup and requests have deadlines, stdio response buffering is bounded, and close reports teardown failures. The legacy global functions remain for callers awaiting migration; `stopAllMCPServers()` is emergency CLI-exit cleanup, not a run finalizer. MCP server subprocesses are not thereby placed inside the tool OS sandbox.
+
 ## Permission System
 
 Four modes, cycled with `Shift+Tab`:

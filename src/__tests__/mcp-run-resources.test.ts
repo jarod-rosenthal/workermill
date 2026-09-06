@@ -18,12 +18,9 @@ describe("run-owned MCP resources", () => {
     const resources = createMCPRunResources({ runId: "lazy", workspace: process.cwd(), signal: abort.signal, terminationGraceMs: 50 });
     resources.register({ fixture: config() });
     expect(resources.hasServers()).toBe(false);
-    const firstEnsure = resources.ensureStarted();
-    const secondEnsure = resources.ensureStarted();
-    await firstEnsure;
-    expect(resources.getTools()).toHaveLength(1);
-    await secondEnsure;
-    expect(resources.getTools()).toHaveLength(1);
+    const firstEnsure = resources.ensureStarted().then(() => expect(resources.getTools()).toHaveLength(1));
+    const secondEnsure = resources.ensureStarted().then(() => expect(resources.getTools()).toHaveLength(1));
+    await Promise.all([firstEnsure, secondEnsure]);
     await expect(resources.callTool("fixture", "ping", {})).resolves.toMatch(/:pong$/);
     await resources.close();
   });
@@ -101,8 +98,9 @@ describe("run-owned MCP resources", () => {
     await resources.startServer("fixture", config("orphan-after-start", marker));
     const pending = resources.callTool("fixture", "ping", {});
     const pendingResult = expect(pending).rejects.toThrow();
-    await expect(resources.close()).resolves.toBeUndefined();
     await pendingResult;
+    expect(existsSync(marker + ".started")).toBe(true);
+    await expect(resources.close()).resolves.toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve, 650));
     expect(existsSync(marker)).toBe(false);
     await rm(directory, { recursive: true, force: true });

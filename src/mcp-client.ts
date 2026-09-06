@@ -123,9 +123,16 @@ function scopedSignal(parents: readonly (AbortSignal | undefined)[], timeoutMs: 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal, label: string): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error(`${label} cancelled`));
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error(`${label} cancelled`));
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason instanceof Error ? signal.reason : new Error(`${label} cancelled`));
+    };
     signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    promise.then(
+      (result) => { cleanup(); resolve(result); },
+      (error) => { cleanup(); reject(error); },
+    );
   });
 }
 function rejectPending(server: MCPServer, error: Error): void {
@@ -181,7 +188,14 @@ function sendRequest(server: MCPServer, collection: Collection, method: string, 
     const onAbort = () => { if (server.pending.delete(id)) { cleanup(); reject(scoped.signal.reason instanceof Error ? scoped.signal.reason : new Error(`MCP request ${method} cancelled`)); } };
     const cleanup = () => { scoped.cleanup(); scoped.signal.removeEventListener("abort", onAbort); };
     server.pending.set(id, { resolve, reject, cleanup }); scoped.signal.addEventListener("abort", onAbort, { once: true });
-    try { proc.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`); } catch (error) { onAbort(); reject(error instanceof Error ? error : new Error(String(error))); }
+    try {
+      if (!proc.stdin?.writable) throw new Error(`MCP server ${server.name} stdin is closed`);
+      proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    } catch (error) {
+      server.pending.delete(id);
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 function signalProcessGroup(proc: ChildProcess, signal: NodeJS.Signals): void {
@@ -367,7 +381,10 @@ function emergencyStopServer(server: MCPServer): void {
   server.closed = true;
   rejectPending(server, new Error(`MCP server ${server.name} closed during CLI exit`));
   if (server.process) signalProcessGroup(server.process, "SIGKILL");
-  if (server.client) void Promise.resolve(server.client.close()).catch(() => {});
+  if (server.client) {
+    try { void Promise.resolve(server.client.close()).catch(() => {}); }
+    catch { /* Emergency exit must still attempt the other owned resources. */ }
+  }
 }
 /** Global CLI-exit cleanup, deliberately not a run-scoped operation. */
 export function stopAllMCPServers(): void {

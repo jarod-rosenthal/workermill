@@ -12,6 +12,8 @@ R17 package/PTY tests passed four cases at `a9b0976e`; rerun at final production
 
 The retrospective now includes continuation results, and `docs/recovery/2026-09-06-continuation.json` inventories saved commits/paths and 50 preserved worktrees at its stated snapshot. Update it again at final qualification. No paid model calls, publication, pushes, PRs, releases, or worktree cleanup. Worker escalation tools hang: freeze/report sandbox failures and let root run normal escalation. Ignored dependency symlinks may not be visible to root; verify them. Save checkpoints before dispatch/integration, after failures, and at least every 15 minutes. This header is current; historical snapshots below are preserved.
 
+Checkpoint addition: R18c3a integrated as 45b2437f/946f023a; candidate test correction adds the output spy and planner/worker/failed-review/review exact-sum contract. Root review found child usage had not adopted shared zero-placeholder handling; replaced duplicate normalization with model-usage helpers and added positive-step/true-zero regressions. This combined tree is pending qualification; no downstream dispatch until checks pass.
+
 ## Historical audit state (before the repair below)
 
 - Repository: `/home/user/github/workermill`, a single-package TypeScript CLI, npm package `workermill` (commands `wm` / `workermill`). This is not the archived server/frontend project.

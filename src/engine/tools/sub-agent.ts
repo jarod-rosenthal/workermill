@@ -10,6 +10,7 @@ import { runScopedProcess } from "../scoped-process.js";
 import { cleanupScopedBackgroundProcesses } from "./bash-background.js";
 import { shutdownLSPRun } from "./lsp.js";
 import type { PermissionState } from "../tool-policy.js";
+import { addUsage, settleUsage, usageFromSdk } from "../model-usage.js";
 
 export const name = "sub_agent";
 export const description = "Spawn a sub-agent to explore a codebase or work in an isolated git worktree. Non-isolated children are read-only; isolated changes remain on a separate branch for review.";
@@ -44,32 +45,6 @@ export interface SubAgentUsage {
   usageComplete: boolean;
 }
 
-type SDKUsage = {
-  inputTokens?: number;
-  outputTokens?: number;
-  inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
-};
-
-function usageFromSdk(usage: SDKUsage): SubAgentUsage["usage"] | undefined {
-  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens;
-  const cacheCreationTokens = usage.inputTokenDetails?.cacheWriteTokens;
-  if (usage.inputTokens === undefined && usage.outputTokens === undefined && cacheReadTokens === undefined && cacheCreationTokens === undefined) return undefined;
-  return {
-    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
-    ...(cacheCreationTokens === undefined ? {} : { cacheCreationTokens }),
-    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
-  };
-}
-
-function addUsage(previous: SubAgentUsage["usage"], next: NonNullable<SubAgentUsage["usage"]>): SubAgentUsage["usage"] {
-  return {
-    ...(previous?.inputTokens === undefined && next.inputTokens === undefined ? {} : { inputTokens: (previous?.inputTokens ?? 0) + (next.inputTokens ?? 0) }),
-    ...(previous?.outputTokens === undefined && next.outputTokens === undefined ? {} : { outputTokens: (previous?.outputTokens ?? 0) + (next.outputTokens ?? 0) }),
-    ...(previous?.cacheCreationTokens === undefined && next.cacheCreationTokens === undefined ? {} : { cacheCreationTokens: (previous?.cacheCreationTokens ?? 0) + (next.cacheCreationTokens ?? 0) }),
-    ...(previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined ? {} : { cacheReadTokens: (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0) }),
-  };
-}
 export interface SubAgentResult { success: boolean; content: string; turnsUsed: number; error?: string; }
 
 /** Structural SDK-tool type; avoids coupling this security boundary to SDK internals. */
@@ -300,11 +275,7 @@ async function runSubAgent(
     for await (const _chunk of stream.textStream) { /* drives tool execution */ }
     content = await stream.text;
     const usage = await stream.totalUsage;
-    const totalUsage = usage && usageFromSdk(usage);
-    if (totalUsage) {
-      reportedUsage = totalUsage;
-      usageComplete = usage.inputTokens !== undefined && usage.outputTokens !== undefined;
-    }
+    ({ usage: reportedUsage, usageComplete } = settleUsage(reportedUsage, usageFromSdk(usage)));
     if (terminalError) throw terminalError;
     if (context.signal.aborted) throw new Error("Sub-agent cancelled.");
     const finishReason = await stream.finishReason;

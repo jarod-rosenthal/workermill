@@ -201,6 +201,29 @@ describe("isolated sub-agents", () => {
     }));
   });
 
+  it.each([4, 0])("preserves child step usage %i against a zero total without inventing usage", async (inputTokens) => {
+    const workingDir = repo();
+    const onUsage = vi.fn();
+    sdk.streamText.mockImplementationOnce((options: {
+      onStepFinish?: (step: { toolCalls: unknown[]; text: string; usage: { inputTokens: number; outputTokens: number } }) => void;
+    }) => ({
+      textStream: (async function* () {
+        options.onStepFinish?.({ toolCalls: [], text: "done", usage: { inputTokens, outputTokens: 0 } });
+        yield "done";
+      })(),
+      text: Promise.resolve("done"), totalUsage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }), finishReason: Promise.resolve("stop"),
+    }));
+    const executor = createSubAgentExecutor({} as never, workingDir, {}, {
+      executionContext: context(workingDir), createTools: () => ({}), onUsage,
+    });
+    expect((await executor({ prompt: "read", isolated: false })).success).toBe(true);
+    expect(onUsage).toHaveBeenCalledOnce();
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+      inputTokens, outputTokens: 0, usageComplete: inputTokens === 0,
+      usage: { inputTokens, outputTokens: 0 },
+    }));
+  });
+
   it("reports missing usage after a started child call that throws immediately", async () => {
     const workingDir = repo();
     const onUsage = vi.fn();

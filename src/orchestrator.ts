@@ -15,6 +15,7 @@ import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabi
 import { runProcess } from "./engine/process-runner.js";
 import { runScopedProcess } from "./engine/scoped-process.js";
 import { createPathScope } from "./engine/path-policy.js";
+import { ticketEnvironment } from "./ticket-ops.js";
 
 // ── Re-exports from sub-modules ──
 // Types
@@ -59,14 +60,6 @@ function deriveStartupBranch(label: string, prefix: string | undefined, workingD
     .toLowerCase()
     .replace(/-+/g, "-");
   return slug ? `${prefix ?? path.basename(workingDir)}/${slug}` : null;
-}
-
-function startupTicketEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = {};
-  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "LINEAR_API_KEY", "API_BASE_URL", "TASK_ID", "ORG_API_KEY"]) {
-    if (source[key] !== undefined) environment[key] = source[key];
-  }
-  return environment;
 }
 
 export async function runOrchestration(
@@ -129,6 +122,7 @@ export async function runOrchestration(
     timeoutMs = 10_000,
     maxOutputBytes = 1024 * 1024,
   ): Promise<string> => {
+    resourceSignal.throwIfAborted();
     const result = await runProcess({
       runId: manifest.id,
       command: [executable, ...processArgs].map(quoteStartupArgument).join(" "),
@@ -138,14 +132,19 @@ export async function runOrchestration(
       maxOutputBytes,
       terminationGraceMs: 1_000,
     });
-    const combined = `${result.stdout}${result.stderr}`.trim();
+    resourceSignal.throwIfAborted();
     if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
-      throw new Error(combined || `${executable} startup command ${result.reason}`);
+      // In particular, never include gh credential output in diagnostics.
+      throw Object.assign(new Error(`${executable} startup command failed (${result.reason}, exit ${result.exitCode})`), {
+        exitCode: result.exitCode, processReason: result.reason,
+      });
     }
-    return combined;
+    return result.stdout.trim();
   };
+  let startupScope: ReturnType<typeof createPathScope> | undefined;
   const startupMutation = async (processArgs: string[]): Promise<string> => {
-    const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+    resourceSignal.throwIfAborted();
+    const scope = startupScope ??= createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
     const result = await runScopedProcess({
       runId: manifest.id,
       command: ["git", ...processArgs].map(quoteStartupArgument).join(" "),
@@ -155,15 +154,27 @@ export async function runOrchestration(
       maxOutputBytes: 1024 * 1024,
       terminationGraceMs: 1_000,
     }, {
-      sandbox: sandboxed === "os" ? "os" : false,
+      sandbox: sandboxed,
       scope,
       capabilities: config.sandboxCapabilities,
     });
-    const combined = `${result.stdout}${result.stderr}`.trim();
+    resourceSignal.throwIfAborted();
     if (result.reason !== "exited" || result.exitCode !== 0 || result.outputTruncated) {
-      throw new Error(combined || `git startup mutation ${result.reason}`);
+      throw new Error(`git startup mutation failed (${result.reason}, exit ${result.exitCode})`);
     }
-    return combined;
+    return result.stdout.trim();
+  };
+  const branchExists = async (branch: string): Promise<boolean> => {
+    await startupProcess("git", ["check-ref-format", `refs/heads/${branch}`]);
+    try {
+      await startupProcess("git", ["-c", "core.fsmonitor=false", "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+      return true;
+    } catch (error) {
+      resourceSignal.throwIfAborted();
+      if (error && typeof error === "object" && "exitCode" in error && error.exitCode === 1
+        && "processReason" in error && error.processReason === "exited") return false;
+      throw error;
+    }
   };
 
   try {
@@ -191,7 +202,7 @@ export async function runOrchestration(
   }
 
   // Resolve ticket references — fetch from issue tracker if ticketKey is set
-  const ticketEnv = startupTicketEnvironment();
+  const ticketEnv = ticketEnvironment();
   if (config.jira) {
     ticketEnv.JIRA_BASE_URL = config.jira.baseUrl;
     ticketEnv.JIRA_EMAIL = config.jira.email;
@@ -212,7 +223,7 @@ export async function runOrchestration(
         if (!ticketEnv.GITHUB_REPO) {
           try {
             const remote = await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"]);
-            const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+            const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
             if (match) ticketEnv.GITHUB_REPO = match[1].replace(/\.git$/, "");
           } catch { /* not a git repo */ }
         }
@@ -327,15 +338,18 @@ export async function runOrchestration(
     if (currentBranch !== featureBranch) {
       // Verify branch exists
       try {
-        await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "--end-of-options", `refs/heads/${featureBranch}`]);
+        if (!await branchExists(featureBranch)) {
+          output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
+          return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
+        }
       } catch {
-        output.error(`Branch \`${featureBranch}\` no longer exists. Nothing to retry.`);
+        output.error("Could not verify the retry branch. Its saved state is retained.");
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
       }
 
       output.coordinatorLog(`Switching to \`${featureBranch}\`...`);
       try {
-        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "checkout", featureBranch]);
+        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "switch", "--no-guess", "--", featureBranch]);
       } catch {
         output.error(`Could not checkout \`${featureBranch}\` — you have uncommitted changes. Commit or stash them first, then \`/retry\`.`);
         return { stories: retryPlan.stories, completedStoryIds: [...retryPlan.completedStoryIds], featureBranch, userTask };
@@ -486,11 +500,22 @@ export async function runOrchestration(
     } else {
       const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
       branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
+      try {
+        const remote = await startupProcess("git", ["-c", "core.fsmonitor=false", "remote", "get-url", "origin"]);
+        branchPrefix = remote.match(/[/:]([^/]+?)(?:\.git)?$/)?.[1];
+      } catch { resourceSignal.throwIfAborted(); /* no remote: retain directory-name fallback */ }
     }
     // Warn if the branch already exists from a previous run
     const derivedBranch = deriveStartupBranch(branchLabel, branchPrefix, workingDir);
     let branchAlreadyAcknowledged = false;
-    if (derivedBranch && await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "--end-of-options", `refs/heads/${derivedBranch}`]).then(() => true, () => false)) {
+    let continueExistingBranch = false;
+    const inRepository = await startupProcess("git", ["-c", "core.fsmonitor=false", "rev-parse", "--is-inside-work-tree"])
+      .then((value) => value === "true", (error: unknown) => {
+        resourceSignal.throwIfAborted();
+        if (error && typeof error === "object" && "exitCode" in error && error.exitCode === 128) return false;
+        throw error;
+      });
+    if (inRepository && derivedBranch && await branchExists(derivedBranch)) {
       // User will engage with a branch dialog below — no need for a second prompt afterward
       branchAlreadyAcknowledged = true;
       output.log("system", `Branch \`${derivedBranch}\` already exists from a previous run.`);
@@ -515,6 +540,7 @@ export async function runOrchestration(
           output.log("system", "Cancelled. Run `/build` again after resolving the branch.");
           return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
         }
+        continueExistingBranch = true;
       }
     }
 
@@ -533,9 +559,10 @@ export async function runOrchestration(
     }
 
     featureBranch = null;
-    if (derivedBranch) {
+    if (inRepository && derivedBranch) {
       try {
-        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "checkout", "-b", derivedBranch]);
+        await startupMutation(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "switch",
+          ...(continueExistingBranch ? ["--no-guess", "--", derivedBranch] : ["-c", derivedBranch])]);
         featureBranch = derivedBranch;
       } catch {
         featureBranch = null;
@@ -546,7 +573,7 @@ export async function runOrchestration(
       output.updateBranch?.(featureBranch);
       // Yield to let Ink render the branch update
       await new Promise(r => setTimeout(r, 0));
-    } else if (await startupProcess("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--is-inside-work-tree"]).then((value) => value === "true", () => false)) {
+    } else if (inRepository) {
       output.error("Could not create feature branch. You may have uncommitted changes — commit or stash them first.");
       return { stories: sorted, completedStoryIds: [], featureBranch: null, userTask };
     }
@@ -819,7 +846,8 @@ export async function runOrchestration(
   }
 
   // --- Completion: push, PR, ticket updates, cleanup ---
-  return runCompletion({
+  return await runCompletion({
+    runId: manifest.id,
     config, output, sorted, completedStoryIds, featureBranch, mainBranch,
     workingDir, userTask, costTracker, finalReviewText, ticketKey,
     ticketOps, resolvedTicketSystem, liveViewServer,

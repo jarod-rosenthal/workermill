@@ -41,11 +41,13 @@ Also bound to `Ctrl+P`.
 
 Cancel whatever is currently running — a `/build` orchestration or a single-agent turn. Same as pressing `ESC`.
 
-Chat cancellation keeps the interface busy while its dispatched tools and owned processes settle. Wait for the idle prompt before starting another turn. Cancellation also interrupts manual compaction; a late summary does not replace the conversation. Direct `!command` shell commands use the same process cancellation mechanism without granting future model tools permission.
+Chat and `/build` cancellation keep the interface busy while dispatched tools and owned processes settle. Wait for the idle prompt before starting another turn. Cancellation also interrupts manual compaction; a late summary does not replace the conversation. Direct `!command` shell commands use the same process cancellation mechanism without granting future model tools permission.
 
 A cancelled `/build` leaves its state on disk, so `/retry` can pick it back up.
 
 A saved run can also need `/retry` after every story is implemented: final gates, review, or completion may still be pending. Completed stories are retained rather than implemented again.
+
+Retries retain partial edits from earlier attempts, including pre-existing user work. Inspect `git status` and `git diff` before retrying if you want to change that starting point; WorkerMill does not reset the checkout to HEAD automatically.
 
 ### `/orchestrate <#issue>` *(experimental)*
 

@@ -88,7 +88,7 @@ function hasBlockingGateFailure(evidence: CompletionEvidence, strict: boolean): 
  * - Posts PR review comment
  * - Closes ticket for non-GitHub trackers
  * - Posts final completion to ticket
- * - Cleans up temp files, MCP servers, LSP
+ * - Clears retry state only after the final evidence check
  */
 export async function runCompletion(args: {
   config: CliConfig;

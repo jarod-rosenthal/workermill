@@ -72,6 +72,16 @@ Context window is probably full. Run `/compact` to compress history, or `/clear`
 - A zero display is not proof that no billable work occurred. Check the recorded token usage and selected provider/model; missing usage or incomplete pricing can make the estimate incomplete.
 - Local execution can have no per-token API charge while still using paid hardware, electricity, or hosting.
 
+### Cancellation is still showing as busy
+
+Cancellation waits for dispatched tools and their cleanup, not just the model stream. Do not start a competing run in the same checkout while that finalizer is active. If cleanup reports failure, inspect the named resource and retained child worktree before retrying. A cancelled remote request may already have changed the ticket or service; check its current state before repeating a mutation.
+
+### Browser startup or download fails
+
+Browser tools require a native Chrome/Chromium executable. Under WSL, use Linux Chrome rather than a Windows `.exe`; each model turn uses a private profile, separate from explicit `/browser` controls. Startup or cleanup failure is not evidence that browser verification passed.
+
+HTTP tools reject stalled or oversized responses. Fetch text is limited to 512 KiB, search/ticket responses to 1 MiB, and downloads to 100 MiB within two minutes. For larger assets, download them yourself using a command you authorize. A failed tool download leaves an existing destination unchanged.
+
 ### `/build` plan is "0 stories"
 
 The planner wrote text analysis but didn't output a JSON stories block. The CLI attempts a one-shot JSON extraction retry automatically. If that still fails, try:

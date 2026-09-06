@@ -275,10 +275,11 @@ async function runSubAgent(
   // Failed model attempts must stop tools before draining. Successful model
   // attempts keep their signal live until every dispatched tool settles.
   if (!result.success || terminalError) controller.abort(new Error("Sub-agent model attempt failed"));
-  await Promise.allSettled([...pending]);
+  while (pending.size > 0) await Promise.allSettled([...pending]);
   if (result.success && terminalError) {
     result = { success: false, content, turnsUsed, error: `Sub-agent failed: ${terminalError instanceof Error ? terminalError.message : String(terminalError)}` };
   }
+  controller.abort(new Error("Sub-agent model attempt finished"));
   try {
     await onUsage?.({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
   } catch (error) {
@@ -287,9 +288,6 @@ async function runSubAgent(
   if (result.success && outerSignal.aborted) {
     result = { ...result, success: false, error: "Sub-agent cancelled during finalization." };
   }
-  // The model/tool lifetime always closes before returning. Administrative
-  // inspection has a distinct outer signal and remains available below.
-  controller.abort(new Error("Sub-agent model attempt finished"));
   return result;
 }
 
@@ -380,6 +378,9 @@ export function createSubAgentExecutor(
       }
     }
 
+    if (result.success && outerSignal.aborted) {
+      result = { ...result, success: false, error: "Sub-agent cancelled during cleanup." };
+    }
     if (!worktree) return result;
     const identity = `Branch \`${worktree.branchName}\`; worktree \`${worktree.worktreePath}\`.`;
     // Unsuccessful children are always preserved; do not delay cancellation

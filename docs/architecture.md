@@ -122,6 +122,14 @@ Pass `runId`, `signal`, `scope`, and global-user `sandboxCapabilities` in the fo
 
 Background commands use the same process lifecycle in path/full-disk mode, retain at most 100 KiB of output, and have a 15-minute deadline. OS mode rejects background commands because the singleton sandbox configuration must remain leased for the entire command. Retrieve or cancel a background shell with its owning run ID; run cleanup must await `cleanupScopedBackgroundProcesses(runId)`. Global cleanup is reserved for CLI exit. A Git worktree or a background shell ID does not grant additional permissions.
 
+Attempt finalizers must await dispatched tool promises, not just process exit: a tool may still be writing a file or running hooks after its model stream fails. `createAttemptResources` tracks those promises, aborts failed attempts before draining, and attempts every registered cleanup callback. A cleanup failure remains non-success; retry and final verification must not race the previous attempt's tools. Worker retries retain partial and pre-existing edits rather than restoring a HEAD snapshot that cannot distinguish user work.
+
+### Browser and HTTP ownership
+
+`createBrowserRunResources({ runId, workspace, signal })` gives each model turn a private Chrome profile and DevTools endpoint. Await `dispose()` in the owner's finalizer; `close()` alone permits reopening within that turn. Explicit `/browser` controls own a separate session. Parent cancellation rejects pending CDP requests and closes only its own process group. Discovery and CDP responses have deadlines and size bounds. Cleanup failures retain ownership for inspection and are reported by the awaited finalizer. Linux Chrome under WSL uses this Unix lifecycle; Windows `.exe` Chrome is rejected. Browser automation is not OS-sandbox containment.
+
+Network-tool deadlines cover headers and response bodies. `fetch` buffers at most 512 KiB; web search and ticket API responses at most 1 MiB. Downloads stream at most 100 MiB within two minutes, use a private temporary file beside the destination, and publish only after the full response succeeds. Cancellation or failure preserves an existing destination and removes the owned temporary file. Ticket operations use instance-local credential snapshots; cancellation prevents subsequent requests but cannot undo a remote mutation already accepted by a service.
+
 ### Child agents and recovering their work
 
 An isolated `sub_agent` gets a unique branch and checkout beneath `.workermill/worktrees/`. It inherits the parent's permission restrictions and cancellation signal, but has its own run ID and tool closures. A full-disk parent does not give a child full-disk access. Non-isolated children are read-only; children cannot spawn further children. The default child limit is 20 steps (configurable from 1 to 50), with a five-minute deadline.

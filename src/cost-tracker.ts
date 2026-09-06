@@ -178,7 +178,8 @@ export class CostTracker {
     const engine = hasProvider(resolvedProvider) ? getPricingEngine(resolvedProvider) : undefined;
     const modelInfo = engine?.getModelInfo(resolvedModel);
     const pricingState: ApiPricingState = local ? "local" : modelInfo ? "known" : "unknown";
-    const estimatedApiCost = !usage || (usage.inputTokens === undefined && usage.outputTokens === undefined)
+    const estimatedApiCost = !usage || (usage.inputTokens === undefined && usage.outputTokens === undefined
+      && usage.cacheCreationTokens === undefined && usage.cacheReadTokens === undefined)
       ? undefined
       : pricingState === "local"
         ? 0

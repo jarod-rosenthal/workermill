@@ -191,6 +191,14 @@ describe("CostTracker", () => {
     });
   });
 
+  it("includes reported cache charges even when ordinary token totals are missing", () => {
+    tracker.recordCall({ callId: "cache-only", persona: "agent", provider: "anthropic", model: "known-model",
+      usage: { cacheCreationTokens: 200, cacheReadTokens: 300 }, usageComplete: false });
+    expect(tracker.getLedgerSnapshot().calls[0]).toMatchObject({ usageState: "partial", pricingState: "known",
+      estimatedApiCost: expect.closeTo(0.00075, 10) });
+    expect(tracker.getLedgerSnapshot().calls[0].usage?.inputTokens).toBeUndefined();
+  });
+
   it("charges cached input once within SDK input totals", () => {
     tracker.recordCall({
       callId: "cached-api-call",

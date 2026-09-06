@@ -17,7 +17,7 @@ export { resolveWithin } from "./path-policy.mjs";
 const reference = {
   ...base,
   "src/path-policy.mjs": `import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 
 function isWithin(rootPath, candidatePath) {
   const distance = relative(rootPath, candidatePath);
@@ -33,6 +33,9 @@ async function canonicalCandidate(target) {
       return resolve(existing, ...suffix);
     } catch (error) {
       if (error.code !== "ENOENT") return null;
+      // A dangling link is an existing redirect, not a missing path segment.
+      try { if ((await lstat(cursor)).isSymbolicLink()) return null; }
+      catch (statError) { if (statError.code !== "ENOENT") return null; }
       const parent = dirname(cursor);
       if (parent === cursor) return null;
       suffix.unshift(basename(cursor));
@@ -74,7 +77,7 @@ export const fixture = {
   taskId: "r20-security-path-boundary-v1",
   category: "security",
   initialRevision: initialRevision(base),
-  prompt: "Harden the workspace path policy. Make resolveWithin(root, candidate) asynchronous: realpath the existing root, resolve a relative candidate, and canonicalize the candidate itself when it exists or its nearest existing ancestor when it is a new target. Return the canonical in-root path for normal files, new in-root targets, and symlinks that resolve inside; return null for missing roots, absolute paths, traversal/prefix-confusion escapes, symlink escapes, NUL bytes, or Windows separator tricks.",
+  prompt: "Harden the workspace path policy. Make resolveWithin(root, candidate) asynchronous: realpath the existing root, resolve a relative candidate, and canonicalize the candidate itself when it exists or its nearest existing ancestor when it is a new target. Return the canonical in-root path for normal files, new in-root targets, and symlinks that resolve inside; return null for missing roots, absolute paths, traversal/prefix-confusion escapes, symlink escapes, dangling links, NUL bytes, or Windows separator tricks.",
   workspace: {
     files: base,
     writableFiles: ["src/path-policy.mjs", "src/main.mjs"],
@@ -104,6 +107,7 @@ await writeFile(join(inside, "existing.txt"), "inside");
 await writeFile(join(outside, "secret.txt"), "outside");
 await symlink(inside, join(fixtureRoot, "link-inside"));
 await symlink(outside, join(fixtureRoot, "link-outside"));
+await symlink(join(outside, "not-created"), join(fixtureRoot, "dangling-link"));
 const canonicalRoot = await realpath(fixtureRoot);
 const existing = await resolveWithin(fixtureRoot, "inside/existing.txt");
 if (existing !== join(canonicalRoot, "inside", "existing.txt")) process.exit(3);
@@ -115,6 +119,7 @@ const inSymlink = await resolveWithin(fixtureRoot, "link-inside/existing.txt");
 if (inSymlink !== join(canonicalRoot, "inside", "existing.txt")) process.exit(3);
 for (const candidate of [
   "link-outside/secret.txt", "link-outside/new.txt", "../" + basename(fixtureRoot) + "-evil/secret.txt",
+  "dangling-link", "dangling-link/new.txt",
   "src/../../outside", join(outside, "secret.txt"), "safe\\\\..\\\\secret", "safe\\0name",
 ]) if (await resolveWithin(fixtureRoot, candidate) !== null) process.exit(3);
 if (dirname(newTarget) !== join(canonicalRoot, "inside")) process.exit(3);`, timeoutMs);

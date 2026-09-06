@@ -1,9 +1,8 @@
 # Offline evaluation fixtures
 
 This directory contains small, deterministic tickets for future reliability
-qualification. R20 currently contains five bug-fix fixtures, five feature
-fixtures, and four refactor fixtures. The remaining planned inventory is three
-maintenance tasks and three security/validation repairs.
+qualification: 20 fixtures across five bug fixes, five features, four refactors,
+three maintenance tasks, and three security/validation repairs.
 
 Current feature inventory: structured release notes, interrupted webhook-outbox
 recovery, case-insensitive task-tag filtering, an injected-clock expiring cache,
@@ -16,6 +15,13 @@ extraction. These tickets require observable reusable public APIs while keeping
 the legacy wrapper behavior intact. The retry-policy fixture also covers
 recovery after a failed delivery.
 
+Maintenance tickets cover an asynchronous check runner, temporary-workspace
+cleanup after failure, and deterministic result reports. Security tickets cover
+canonical filesystem paths (including symlinks and new targets), a strict job
+schema, and prototype-safe configuration merging. All use original, synthetic
+examples and local temporary data; none require private repositories or live
+services.
+
 ## Fixture protocol
 
 Each task is an ESM module exporting `fixture` with:
@@ -23,7 +29,7 @@ Each task is an ESM module exporting `fixture` with:
 - a stable `taskId`, category, and `initialRevision` (`sha256:` over sorted
   workspace paths and bytes);
 - a model prompt plus an agent-visible workspace template;
-- an explicit writable-file list, `network: false`, timeout, and pinned
+- an explicit writable-file list, `network: false`, timeout, and declared
   toolchain requirement (Node.js 22.12+);
 - a human rubric and a short acceptance description; and
 - reference and intentionally incomplete solutions kept outside the generated
@@ -55,10 +61,14 @@ node evals/tasks/r20-bugfix-batch-config.mjs
 node evals/tasks/r20-bugfix-pagination.mjs
 ```
 
+Run `npm test -- src/__tests__/eval-fixtures.test.ts` to validate the complete
+inventory and its baseline/reference/incomplete variants.
+
 There are no model calls, network services, benchmark copies, or quality claims
-in this protocol. Fixtures use only Node built-ins and pin Node.js 22.12+.
+in this protocol. Fixtures use only Node built-ins and require Node.js 22.12+.
 `referenceFiles` and `incompleteFiles` remain inside the fixture module for
 deterministic validator use, not in materialized agent workspaces. A qualifying
 fixture has a baseline and plausible incomplete variant that both fail held-out
 semantic checks with exit code 3, while its reference exits 0. A later comparison
-harness may consume these fixtures after the set is complete.
+harness must pin the actual Node version and execution environment when making
+comparisons; these fixture checks alone are not a model-quality study.

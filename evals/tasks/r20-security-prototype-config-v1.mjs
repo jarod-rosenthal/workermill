@@ -70,7 +70,7 @@ export const fixture = {
   taskId: "r20-security-prototype-config-v1",
   category: "security",
   initialRevision: initialRevision(base),
-  prompt: "Harden configuration merging against prototype-pollution payloads. Require both top-level inputs to be plain records (ordinary or null-prototype objects; reject primitives, arrays, Date, and custom-prototype roots). Recursively reject __proto__, constructor, and prototype keys inside records and arrays, reject Date/custom-prototype nested values, deep-merge legitimate nested records while replacing arrays, and ensure the returned object shares no mutable aliases with either input.",
+  prompt: "Harden configuration merging against prototype-pollution payloads. Require both top-level inputs to be plain records (ordinary or null-prototype objects; reject primitives, arrays, Date, and custom-prototype roots). Recursively reject __proto__, constructor, and prototype keys inside records and arrays, reject Date/custom-prototype nested values, deep-merge legitimate nested records while replacing arrays, and ensure the returned object shares no mutable aliases with either input. Return null for invalid input.",
   workspace: {
     files: base,
     writableFiles: ["src/config.mjs", "src/main.mjs"],

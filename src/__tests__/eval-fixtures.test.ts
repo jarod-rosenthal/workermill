@@ -26,6 +26,17 @@ import { fixture as pathBoundary, validateFixture as validatePathBoundary } from
 import { fixture as jobSchema, validateFixture as validateJobSchema } from "../../evals/tasks/r20-security-job-schema-v1.mjs";
 import { fixture as prototypeConfig, validateFixture as validatePrototypeConfig } from "../../evals/tasks/r20-security-prototype-config-v1.mjs";
 
+it("keeps the evaluation inventory at 20 unique tasks with the declared category mix", () => {
+  const inventory = [fixture, pagination, deepConfig, queueRecovery, retryBackoff,
+    releaseNotes, webhookRecovery, tagFilter, expiringCache, dailySummary,
+    recipientIndex, retryPolicy, reportProjection, cursorCodec,
+    asyncChecks, tempCleanup, stableReport, pathBoundary, jobSchema, prototypeConfig];
+  expect(new Set(inventory.map((task) => task.taskId)).size).toBe(20);
+  const counts: Record<string, number> = {};
+  for (const task of inventory) counts[task.category] = (counts[task.category] ?? 0) + 1;
+  expect(counts).toEqual({ bugfix: 5, feature: 5, refactor: 4, maintenance: 3, security: 3 });
+});
+
 describe("R20a offline fixture", () => {
   it("distinguishes baseline, reference, and incomplete solutions", async () => {
     const result = await validateFixture();

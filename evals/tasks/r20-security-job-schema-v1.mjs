@@ -63,7 +63,10 @@ async function accepts(root, mainUrl, timeoutMs) {
 const valid = {id:"job-1",command:"echo ok",timeoutMs:1000};
 const before = JSON.stringify(valid);
 const expectValid = (candidate) => {
-  try { if (parseJob(candidate) === null) process.exit(3); } catch { process.exit(3); }
+  const before = JSON.stringify(candidate);
+  try {
+    if (JSON.stringify(parseJob(candidate)) !== before || JSON.stringify(candidate) !== before) process.exit(3);
+  } catch { process.exit(3); }
 };
 const expectNull = (candidate) => {
   try { if (parseJob(candidate) !== null) process.exit(3); } catch { process.exit(3); }

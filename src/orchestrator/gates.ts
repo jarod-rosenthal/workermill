@@ -1,9 +1,27 @@
 import type { CliConfig, QualityGateCommand } from "../config.js";
 import * as logger from "../logger.js";
-import { runGate, type GateResult } from "../gate-runner.js";
+import { runGate, type GateResult, type GateExecutionOptions } from "../gate-runner.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { runScopedProcess } from "../engine/scoped-process.js";
+import type { SandboxSetting } from "../sandbox-mode.js";
 import { runDiagnosticsOnTouchedFiles, emitFailureCode } from "./execution.js";
 import { getStoryDefinitionOfDone as _getStoryDefinitionOfDone } from "./execution.js";
 import type { OrchestrationOutput, Story, SharedContext } from "./types.js";
+
+function gateExecutionOptions(config: CliConfig, workingDir: string, args: {
+  abortSignal?: AbortSignal; runId?: string; sandboxed?: SandboxSetting;
+}): GateExecutionOptions {
+  const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+  return {
+    signal: args.abortSignal,
+    runId: args.runId,
+    runProcess: (request) => runScopedProcess(request, {
+      sandbox: args.sandboxed ?? config.sandbox ?? true,
+      scope,
+      capabilities: config.sandboxCapabilities,
+    }),
+  };
+}
 
 // ── Testable utility (used by orchestrator-gates.test.ts) ──
 
@@ -21,13 +39,14 @@ export async function runPostExecutionQualityGates(args: {
   /** Forward the active orchestration lifecycle to required commands. */
   abortSignal?: AbortSignal;
   runId?: string;
+  sandboxed?: SandboxSetting;
   getStoryDefinitionOfDone: (story: Story) => {
     requiredFiles: string[];
     requiredTests: string[];
     requiredCommands: string[];
   };
 }): Promise<PostExecutionQualityGateResult> {
-  const { config, stories, completedStoryIds, workingDir, output, getStoryDefinitionOfDone, abortSignal, runId } = args;
+  const { config, stories, completedStoryIds, workingDir, output, getStoryDefinitionOfDone } = args;
   const verifyEnabled = config.review?.verifyEnabled !== false;
   const staticGates: QualityGateCommand[] = config.qualityGates ?? [];
   const requiredCommandGates = stories
@@ -47,7 +66,8 @@ export async function runPostExecutionQualityGates(args: {
 
   output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
   output.status(`Running quality gates (${allGates.length})...`);
-  const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, { signal: abortSignal, runId })));
+  const execution = gateExecutionOptions(config, workingDir, args);
+  const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, execution)));
   output.statusDone();
 
   const failed = gateResults.filter((result) => !result.passed);
@@ -96,8 +116,11 @@ export async function runQualityGates(args: {
   workingDir: string;
   abortSignal?: AbortSignal;
   runId?: string;
+  sandboxed?: SandboxSetting;
 }): Promise<QualityGatesResult> {
-  const { config, output, sorted, completedStoryIds, context, workingDir, abortSignal, runId } = args;
+  const { config, output, sorted, completedStoryIds, context, workingDir, abortSignal } = args;
+
+  if (abortSignal?.aborted) return { gateResultsSection: "", earlyExit: true };
 
   let gateResultsSection = "";
   const verifyEnabled = config.review?.verifyEnabled !== false;
@@ -117,8 +140,10 @@ export async function runQualityGates(args: {
   if (allGates.length > 0 && completedStoryIds.length > 0) {
     output.coordinatorLog(`Running ${allGates.length} quality gate${allGates.length !== 1 ? "s" : ""}...`);
     output.status(`Running quality gates (${allGates.length})...`);
-    const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, { signal: abortSignal, runId })));
+    const execution = gateExecutionOptions(config, workingDir, args);
+    const gateResults = await Promise.all(allGates.map((gate) => runGate(gate, workingDir, execution)));
     output.statusDone();
+    if (abortSignal?.aborted) return { gateResultsSection: "Quality gates cancelled.", earlyExit: true };
 
     const failed = gateResults.filter(r => !r.passed);
     const passed = gateResults.filter(r => r.passed);

@@ -214,6 +214,19 @@ export function toolInputToRule(toolName: string, toolInput: Record<string, unkn
   return toolName;
 }
 
+/** Durable command approvals retain both tool-family and command-prefix scope. */
+export function durablePermissionRules(toolName: string, input: Record<string, unknown>): string[] {
+  if (["bash", "verify", "bash_background"].includes(toolName)) {
+    if (typeof input.command !== "string") return [];
+    return splitCompoundCommand(input.command).flatMap((command) => {
+      const rule = toolInputToRule("bash", { command });
+      return rule ? [toolName + rule.slice("bash".length)] : [];
+    });
+  }
+  const rule = toolInputToRule(toolName, input);
+  return rule ? [rule] : [];
+}
+
 /** Match a rule like "bash(npm run:*)" against a tool name and value. */
 function matchesRule(rule: string, toolName: string, value: string): boolean {
   const parenIdx = rule.indexOf("(");

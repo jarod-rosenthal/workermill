@@ -18,7 +18,7 @@ import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
-import { splitCompoundCommand, toolInputToRule } from "../safety.js";
+import { durablePermissionRules } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { isGitRepo, commitStoryChanges } from "../git-ops.js";
 import { CostTracker } from "../cost-tracker.js";
@@ -445,16 +445,6 @@ export async function checkToolPermission(
 
 const sessionPermissionRules = new WeakMap<Set<string>, string[]>();
 
-function alwaysPermissionRules(toolName: string, input: Record<string, unknown>): string[] {
-  if (["bash", "verify", "bash_background"].includes(toolName) && typeof input.command === "string") {
-    return splitCompoundCommand(input.command)
-      .map((command) => toolInputToRule("bash", { command }))
-      .filter((rule): rule is string => Boolean(rule));
-  }
-  const rule = toolInputToRule(toolName, input);
-  return rule ? [rule] : [];
-}
-
 function addSessionPermissionRules(sessionAllow: Set<string>, rules: readonly string[]): void {
   if (rules.length === 0) return;
   const current = sessionPermissionRules.get(sessionAllow) ?? [];
@@ -467,7 +457,7 @@ function getSessionPermissionRules(sessionAllow: Set<string>): readonly string[]
 }
 
 async function recordAlwaysPermission(sessionAllow: Set<string>, toolName: string, input: Record<string, unknown>): Promise<void> {
-  const rules = alwaysPermissionRules(toolName, input);
+  const rules = durablePermissionRules(toolName, input);
   addSessionPermissionRules(sessionAllow, rules);
   if (rules.length === 0) return;
   try {

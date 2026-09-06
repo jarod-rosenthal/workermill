@@ -786,6 +786,18 @@ export interface ReviewOutcome {
   error?: string;
 }
 
+/** Interpret valid reviewer markers without allowing a score to override its decision. */
+export function interpretTechLeadReviewOutput(text: string, approvalThreshold = 9): ReviewOutcome {
+  const { decision, score, approved, feedback } = validateTechLeadReviewOutput(text, approvalThreshold);
+  return {
+    kind: approved ? "approved" : decision === "approved" ? "revision_needed" : decision,
+    approved,
+    decision,
+    score,
+    feedback,
+  };
+}
+
 function reviewOutcomeFromError(error: unknown, timedOut = false, cancelled = false): ReviewOutcome {
   const message = error instanceof Error ? error.message : String(error);
   if (cancelled || /cancelled/i.test(message)) return { kind: "cancelled", approved: false, error: message };
@@ -1146,6 +1158,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
             reviewerFinalText = result.finalText;
             reviewUsage = result.usage;
             lastReviewError = undefined;
+            lastReviewFailure = undefined;
             break;
           } catch (err) {
             lastReviewError = err;
@@ -1182,9 +1195,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Extract review decision — 3-tier system matching WorkerMill worker
         const threshold = config.review?.approvalThreshold ?? 9;
-        const interpretedReview = validateTechLeadReviewOutput(reviewText, threshold);
-        const { decision, score, approved, feedback } = interpretedReview;
-        outcome = { kind: approved ? "approved" : decision, approved, decision, score, feedback };
+        outcome = interpretTechLeadReviewOutput(reviewText, threshold);
+        const decision = outcome.decision!;
+        const score = outcome.score!;
+        const feedback = outcome.feedback!;
+        const { approved } = outcome;
         const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
         if (!approved) {
           const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
@@ -1503,7 +1518,11 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             for await (const _chunk of revStream.textStream) { /* drive */ }
             const revUsage = await revStream.totalUsage;
             if (revisionTimedAbort.signal.aborted) {
-              return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
+              return {
+                finalReviewText: "",
+                aborted: true,
+                outcome: { kind: revisionTimedAbort.didTimeout() ? "timed_out" : "cancelled", approved: false },
+              };
             }
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,

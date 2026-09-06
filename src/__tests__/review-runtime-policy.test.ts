@@ -177,6 +177,7 @@ describe("review runtime policy", () => {
     });
 
     expect(review.aborted).toBe(true);
+    expect(review.outcome).toMatchObject({ kind: "timed_out", approved: false });
     expect(attempts).toEqual(["cancelled"]);
     expect(fs.readFileSync(sentinel, "utf8")).toBe("unchanged");
     expect(runPreHooksWithBlocking).not.toHaveBeenCalled();
@@ -247,6 +248,25 @@ describe("review runtime policy", () => {
       gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
     });
     expect(malformed.outcome).toMatchObject({ kind: "parse_failed", approved: false });
+  });
+
+  it("does not retain a failed retry classification after a later malformed response", async () => {
+    let attempt = 0;
+    vi.mocked(streamText).mockImplementation((() => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("ECONNRESET");
+      return result("REVIEW_DECISION: approved\nCODE_QUALITY_SCORE: invalid\nFEEDBACK: malformed after retry");
+    }) as typeof streamText);
+
+    const review = await runReviewLoop({
+      config: config(), output: output([]), sorted: [], context: { filesCreated: [], filesModified: [], decisions: [], learnings: [] },
+      userTask: "review", featureBranch: null, mainBranch: "main", workingDir: workspace,
+      costTracker: { addUsage: vi.fn(), getTotalCost: () => 0, getUsageSummary: () => ({}) } as never,
+      abortSignal: undefined, trustAll: true, sandboxed: true, sessionAllow: new Set(), ticketOps: null,
+      gateResultsSection: "", waitWhilePaused: async () => false, pauseForBalanceIssue: async () => false, logRetryHint: vi.fn(),
+    });
+    expect(attempt).toBe(2);
+    expect(review.outcome).toMatchObject({ kind: "parse_failed", approved: false });
   });
 
   it("returns approved, revision-exhausted, and cancelled outcomes from real review parsing", async () => {

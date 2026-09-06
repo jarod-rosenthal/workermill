@@ -73,12 +73,26 @@ describe("repository fingerprint", () => {
     expect(fingerprint(nested)).toBe(before);
   });
 
+  it("records nested tracked-directory deletions, including staged git rm", () => {
+    const before = fingerprint(workspace);
+    const head = git(workspace, ["rev-parse", "HEAD"]);
+    git(workspace, ["rm", "-r", "-q", "tracked"]);
+    expect(git(workspace, ["rev-parse", "HEAD"])).toBe(head);
+    const deleted = captureRepositoryFingerprint(workspace);
+    expect(deleted.verified, deleted.verified ? undefined : deleted.reason).toBe(true);
+    if (deleted.verified) expect(deleted.digest).not.toBe(before);
+  });
+
   it("does not execute configured Git filters while collecting evidence", () => {
     const sentinel = path.join(workspace, "filter-ran");
+    fs.writeFileSync(path.join(workspace, ".gitattributes"), "tracked/file.txt filter=inspect\n");
+    fs.writeFileSync(path.join(workspace, "tracked", "file.txt"), "filter candidate\n");
     git(workspace, ["config", "filter.inspect.clean", `sh -c 'printf ran > ${JSON.stringify(sentinel)}; cat'`]);
     git(workspace, ["config", "filter.inspect.smudge", `sh -c 'printf ran > ${JSON.stringify(sentinel)}; cat'`]);
     expect(fingerprint(workspace)).toMatch(/^[a-f0-9]{64}$/);
     expect(fs.existsSync(sentinel)).toBe(false);
+    git(workspace, ["add", "tracked/file.txt"]);
+    expect(fs.existsSync(sentinel)).toBe(true);
   });
 
   it("returns unverified for submodules, symlinked ancestors, and bounded files", () => {

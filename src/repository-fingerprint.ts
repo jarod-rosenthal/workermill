@@ -167,16 +167,22 @@ function sameMetadata(left: GitMetadata, right: GitMetadata): boolean {
     && left.rawUntracked.equals(right.rawUntracked);
 }
 
-function validateAncestors(root: string, relativePath: string): boolean {
+function validateAncestors(root: string, relativePath: string): "valid" | "missing" | "unsafe" {
   // Git path records are slash-separated on every platform.
   const segments = relativePath.split("/");
   let current = root;
   for (const segment of segments.slice(0, -1)) {
     current = path.join(current, segment);
-    const stat = fs.lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return "unsafe";
   }
-  return true;
+  return "valid";
 }
 
 function contentDigest(content: Buffer): string {
@@ -191,7 +197,12 @@ function collectWorkingEntries(root: string, metadata: GitMetadata): WorkingEntr
     const absolutePath = path.resolve(root, relativePath);
     if (absolutePath !== root && !absolutePath.startsWith(root + path.sep)) return unverified("repository path escaped its working directory");
     try {
-      if (!validateAncestors(root, relativePath)) return unverified(`repository path has a non-directory or symlink ancestor: ${relativePath}`);
+      const ancestors = validateAncestors(root, relativePath);
+      if (ancestors === "missing") {
+        entries.push({ path: relativePath, kind: "deleted", mode: 0, contentBytes: 0, contentDigest: contentDigest(Buffer.alloc(0)) });
+        continue;
+      }
+      if (ancestors === "unsafe") return unverified(`repository path has a non-directory or symlink ancestor: ${relativePath}`);
     } catch {
       return unverified(`could not validate ancestors for ${relativePath}`);
     }
@@ -220,7 +231,21 @@ function collectWorkingEntries(root: string, metadata: GitMetadata): WorkingEntr
           if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.mode !== before.mode) {
             return unverified(`repository changed while opening ${relativePath}`);
           }
-          content = fs.readFileSync(descriptor);
+          if (totalBytes + opened.size > MAX_WORKING_TREE_BYTES) {
+            return unverified(`working tree exceeds ${MAX_WORKING_TREE_BYTES} byte fingerprint limit`);
+          }
+          const bounded = Buffer.allocUnsafe(opened.size + 1);
+          let bytesRead = 0;
+          while (bytesRead < bounded.length) {
+            const count = fs.readSync(descriptor, bounded, bytesRead, bounded.length - bytesRead, null);
+            if (count === 0) break;
+            bytesRead += count;
+          }
+          const afterOpen = fs.fstatSync(descriptor);
+          if (afterOpen.dev !== opened.dev || afterOpen.ino !== opened.ino || afterOpen.size !== opened.size || afterOpen.mode !== opened.mode || bytesRead !== opened.size) {
+            return unverified(`repository changed while reading ${relativePath}`);
+          }
+          content = bounded.subarray(0, bytesRead);
         } finally {
           fs.closeSync(descriptor);
         }

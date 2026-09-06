@@ -19,7 +19,6 @@ import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
 import { durablePermissionRules } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
-import { isGitRepo } from "../git-ops.js";
 import { CostTracker } from "../cost-tracker.js";
 import { saveShipRun } from "../ship-state.js";
 import { randomUUID } from "node:crypto";
@@ -1198,6 +1197,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       const text = await stream.text;
       const usage = await stream.totalUsage;
+      combinedSignal.throwIfAborted();
 
       output.statusDone();
 
@@ -1303,18 +1303,21 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // This catches both pure narration and failed/no-op write tool attempts.
       {
         const fileActions = storyActions.filter(a => a.tool === "created" || a.tool === "edited");
-        const canCheckGitChanges = isGitRepo(workingDir);
+        const runGitProbe = (command: string) => runScopedProcess({
+          runId: attemptRunId, command, cwd: scope.workspace, signal: combinedSignal,
+          timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+        }, { sandbox: sandboxed, scope, capabilities: config.sandboxCapabilities });
+        const repository = await runGitProbe("git -c core.fsmonitor=false rev-parse --is-inside-work-tree");
+        combinedSignal.throwIfAborted();
+        const canCheckGitChanges = repository.reason === "exited" && repository.exitCode === 0
+          && !repository.outputTruncated && repository.stdout.trim() === "true";
+        if (!canCheckGitChanges && !(repository.reason === "exited" && repository.exitCode === 128
+          && /not a git repository/i.test(repository.stderr))) {
+          throw new Error(`Unable to establish worker repository state (${repository.reason})`);
+        }
         let hasDiskChanges = false;
         if (canCheckGitChanges) {
           try {
-            const runGitProbe = (command: string) => runScopedProcess({
-              runId: attemptRunId, command, cwd: scope.workspace, signal: combinedSignal,
-              timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
-            }, {
-              sandbox: sandboxed,
-              scope,
-              capabilities: config.sandboxCapabilities,
-            });
             const [diff, untracked] = await Promise.all([
               runGitProbe("git -c core.fsmonitor=false diff HEAD --name-only --no-ext-diff --no-textconv"),
               runGitProbe("git -c core.fsmonitor=false ls-files --others --exclude-standard"),
@@ -1324,6 +1327,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
               hasDiskChanges = diff.stdout.trim().length > 0 || untracked.stdout.trim().length > 0;
             }
           } catch { /* best effort */ }
+          combinedSignal.throwIfAborted();
         }
 
         if (outTokens > 0 && canCheckGitChanges && !hasDiskChanges) {
@@ -1361,7 +1365,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       const diagnosticErrors = diagResult.errorCount;
 
       // Check abort before completing
-      if (abortSignal?.aborted) {
+      if (combinedSignal.aborted) {
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
         return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };

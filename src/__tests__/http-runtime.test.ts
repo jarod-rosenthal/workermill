@@ -8,6 +8,8 @@ import { execute as download, MAX_DOWNLOAD_BYTES } from "../engine/tools/downloa
 import { execute as fetchTool } from "../engine/tools/fetch.js";
 import { TicketOps } from "../ticket-ops.js";
 import { resolveUrlReferences } from "../image-support.js";
+import { createToolDefinitions } from "../engine/tools/index.js";
+import * as configuration from "../config.js";
 
 describe("owned HTTP lifetimes", () => {
   let server: Server;
@@ -84,6 +86,30 @@ describe("owned HTTP lifetimes", () => {
     await ready;
     controller.abort(new Error("cancelled"));
     expect(await result).toMatchObject({ success: false, error: expect.stringContaining("cancelled") });
+  });
+
+  it.each(["fetch", "download_file", "web_search", "ticket"])("binds the registered %s tool to its owning signal", async (name) => {
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    handler = (_request, response) => { response.write("partial"); started(); };
+    // Every remote route is an offline fixture; never resolve local gh credentials.
+    vi.spyOn(configuration, "loadConfig").mockReturnValue({ ticketSystem: "jira",
+      jira: { baseUrl: base, email: "fixture@example.invalid", apiToken: "dummy" } } as never);
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => realFetch(base, init));
+    const controller = new AbortController();
+    const definitions = createToolDefinitions(workspace, undefined, true, {
+      runId: `http-registry-${name}`, signal: controller.signal,
+    }) as unknown as Record<string, { execute(input: Record<string, unknown>): Promise<unknown> }>;
+    const input = name === "download_file" ? { url: base, destination: "download.txt" }
+      : name === "web_search" ? { query: "offline fixture" }
+      : name === "ticket" ? { action: "fetch", ticketKey: "TEST-1" }
+      : { url: base };
+    const result = definitions[name].execute(input);
+    await ready;
+    controller.abort(new Error("registered tool cancelled"));
+    expect(JSON.stringify(await result)).toContain("registered tool cancelled");
+    expect(await readdir(workspace)).toEqual([]);
   });
 
   it("cancels started URL expansion without fetching subsequent references", async () => {

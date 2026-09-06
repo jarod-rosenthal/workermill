@@ -1,6 +1,6 @@
 import { spawn as realSpawn } from "child_process";
 import { EventEmitter } from "events";
-import { mkdir, readFile, readdir, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
 import path from "path";
 import { tmpdir } from "os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -167,11 +167,27 @@ describe("browser resources", () => {
   });
 
   it("bounds slow/oversized discovery and rejects a non-private endpoint", async () => {
+    const cancelled = vi.fn();
     const slow = await fixture(new AbortController().signal, {
       startupTimeoutMs: 100,
-      fetchImpl: vi.fn(async () => ({ ok: true, status: 200, text: () => new Promise<string>(() => undefined) })) as unknown as typeof fetch,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode("{")); },
+        cancel: cancelled,
+      }))) as typeof fetch,
     });
     await expect(slow.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(cancelled).toHaveBeenCalled();
+
+    const oversizedCancelled = vi.fn();
+    const oversized = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array(256 * 1024 + 1)); },
+        cancel: oversizedCancelled,
+      }))) as typeof fetch,
+    });
+    await expect(oversized.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(oversizedCancelled).toHaveBeenCalled();
 
     const malicious = await fixture(new AbortController().signal, {
       fetchImpl: vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/json/version")
@@ -194,11 +210,49 @@ describe("browser resources", () => {
   });
 
   it("returns cleanup failures to the awaited owner", async () => {
-    const { browser } = await fixture(new AbortController().signal, {
-      killProcess: (() => { const error = new Error("permission denied") as NodeJS.ErrnoException; error.code = "EPERM"; throw error; }) as typeof process.kill,
+    let denied = true;
+    const { browser, root } = await fixture(new AbortController().signal, {
+      killProcess: (() => { const error = new Error(denied ? "permission denied" : "already exited") as NodeJS.ErrnoException; error.code = denied ? "EPERM" : "ESRCH"; throw error; }) as typeof process.kill,
     });
     await browser.open();
     await expect(browser.close()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toHaveLength(1);
+    denied = false;
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it("retains automatic abort cleanup failures for the awaited finalizer", async () => {
+    const controller = new AbortController();
+    let denied = true;
+    const killProcess = vi.fn(() => {
+      const error = new Error("fixture cleanup failure") as NodeJS.ErrnoException;
+      error.code = denied ? "EPERM" : "ESRCH";
+      throw error;
+    });
+    const { browser, root } = await fixture(controller.signal, { killProcess });
+    await browser.open();
+    controller.abort();
+    await vi.waitFor(() => expect(killProcess).toHaveBeenCalled());
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toHaveLength(1);
+    denied = false;
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it.skipIf(process.platform !== "linux")("rejects Linux symlinks to Windows Chrome", async () => {
+    const root = path.join(tmpdir(), `workermill-browser-symlink-${crypto.randomUUID()}`);
+    roots.push(root);
+    await mkdir(root);
+    await writeFile(path.join(root, "chrome.exe"), "fixture");
+    await symlink(path.join(root, "chrome.exe"), path.join(root, "chrome"));
+    const spawnProcess = vi.fn();
+    const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root,
+      signal: new AbortController().signal, chromePath: path.join(root, "chrome"), spawnProcess });
+    await expect(browser.open()).resolves.toContain("Windows Chrome via WSL is unsupported");
+    expect(spawnProcess).not.toHaveBeenCalled();
+    await browser.dispose();
   });
 
   it.skipIf(process.platform === "win32")("kills a TERM-ignoring descendant after its browser parent exits", async () => {

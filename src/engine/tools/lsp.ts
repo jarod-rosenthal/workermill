@@ -1,4 +1,4 @@
-import { spawn, execFileSync, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
 import * as logger from "../../logger.js";
@@ -198,12 +198,19 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 function commandExists(cmd: string): boolean {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
+  const extensions = process.platform === "win32"
+    ? ["", ...(process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")]
+    : [""];
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    for (const extension of extensions) {
+      try {
+        const candidate = path.join(directory, cmd + extension);
+        fs.accessSync(candidate, fs.constants.X_OK);
+        if (fs.statSync(candidate).isFile()) return true;
+      } catch { /* try the next executable search path */ }
+    }
   }
+  return false;
 }
 
 function detectLanguage(workingDir: string): LanguageServerConfig | null {

@@ -4,12 +4,13 @@
  * a private DevTools endpoint discovered from that profile.
  */
 import { spawn, type ChildProcess } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import { mkdtemp, readFile, readdir, rm } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import crypto from "crypto";
 import * as logger from "./logger.js";
+import { boundedFetch } from "./engine/http-request.js";
 
 const STARTUP_TIMEOUT_MS = 8_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -124,7 +125,9 @@ function findChrome(): string | null {
 }
 
 function isWindowsExecutable(executable: string): boolean {
-  return process.platform === "linux" && /\.exe$/i.test(executable);
+  let resolved = executable;
+  try { resolved = realpathSync(executable); } catch { /* spawn reports a missing executable */ }
+  return process.platform === "linux" && (/\.exe$/i.test(executable) || /\.exe$/i.test(resolved));
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -148,63 +151,17 @@ function waitForAbortableDelay(milliseconds: number, signal: AbortSignal): Promi
   });
 }
 
-function boundedPromise<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs: number, message: string): Promise<T> {
-  if (signal.aborted) return Promise.reject(abortError(signal));
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (error?: Error, value?: T): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      error ? reject(error) : resolve(value as T);
-    };
-    const timer = setTimeout(() => finish(new Error(message)), timeoutMs);
-    const onAbort = (): void => finish(abortError(signal));
-    signal.addEventListener("abort", onAbort, { once: true });
-    void promise.then((value) => finish(undefined, value), (error: unknown) => {
-      finish(error instanceof Error ? error : new Error(String(error)));
-    });
-  });
-}
-
 async function fetchJson(
   fetchImpl: typeof fetch,
   url: string,
   signal: AbortSignal,
   timeoutMs: number,
 ): Promise<unknown> {
-  const controller = new AbortController();
-  const onAbort = (): void => controller.abort(abortError(signal));
-  signal.addEventListener("abort", onAbort, { once: true });
-  const timeout = setTimeout(
-    () => controller.abort(new Error("Browser discovery request timed out")),
-    timeoutMs,
-  );
-  try {
-    const response = await boundedPromise(
-      fetchImpl(url, { signal: controller.signal }),
-      signal,
-      timeoutMs,
-      "Browser discovery request timed out",
-    );
-    if (!response.ok) throw new Error(`Browser discovery returned HTTP ${response.status}`);
-    // Keep the deadline live through body consumption. A fetch resolving its
-    // headers does not make response.text()/json() safe or bounded.
-    const body = await boundedPromise(
-      response.text(),
-      signal,
-      timeoutMs,
-      "Browser discovery response body timed out",
-    );
-    if (Buffer.byteLength(body) > MAX_DISCOVERY_BYTES) {
-      throw new Error("Browser discovery response exceeded size limit");
-    }
-    return JSON.parse(body) as unknown;
-  } finally {
-    clearTimeout(timeout);
-    signal.removeEventListener("abort", onAbort);
-  }
+  const response = await boundedFetch(url, {}, {
+    signal, timeoutMs, maxResponseBytes: MAX_DISCOVERY_BYTES, fetchImpl,
+  });
+  if (!response.ok) throw new Error(`Browser discovery returned HTTP ${response.status}`);
+  return response.json() as Promise<unknown>;
 }
 
 function privateWebSocketUrl(raw: string, port: string): URL {
@@ -214,7 +171,7 @@ function privateWebSocketUrl(raw: string, port: string): URL {
   } catch {
     throw new EndpointSecurityError("Chrome supplied an invalid DevTools WebSocket URL");
   }
-  if (endpoint.protocol !== "ws:" || !["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname) || endpoint.port !== port) {
+  if (endpoint.protocol !== "ws:" || endpoint.username || endpoint.password || !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname) || endpoint.port !== port) {
     throw new EndpointSecurityError("Chrome DevTools endpoint was not the private loopback endpoint");
   }
   endpoint.hostname = "127.0.0.1";
@@ -234,7 +191,7 @@ async function waitForEndpoint(
     throwIfAborted(signal);
     try {
       const [port, browserPath] = (await readFile(portFile, "utf8")).trim().split(/\r?\n/);
-      if (!port || !/^\d+$/.test(port) || !browserPath?.startsWith("/")) {
+      if (!port || !/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535 || !browserPath?.startsWith("/")) {
         throw new EndpointSecurityError("Chrome wrote an invalid DevToolsActivePort file");
       }
       const remaining = Math.max(1, deadline - Date.now());
@@ -419,6 +376,7 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
   let opening: Promise<string> | null = null;
   let startupController: AbortController | null = null;
   let cleanup: Promise<void> | null = null;
+  let cleanupFailure: Error | undefined;
   let stderr = "";
   let closed = false;
 
@@ -434,21 +392,29 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
       cdp = null;
       const owned = child;
       const ownedProfile = profile;
-      child = null;
-      profile = null;
+      let processStopped = !owned;
       try {
         if (owned?.pid) await stopProcessGroup(owned, killProcess, terminationGraceMs);
+        processStopped = true;
+        if (child === owned) child = null;
       } catch (error) {
         failures.push(error instanceof Error ? error : new Error(String(error)));
       }
-      if (ownedProfile) {
+      // Keep ownership of both the process and its exact profile on failure.
+      // Removing a live browser's profile would make recovery less safe.
+      if (ownedProfile && processStopped) {
         try {
           await rm(ownedProfile, { recursive: true, force: true });
+          if (profile === ownedProfile) profile = null;
         } catch (error) {
           failures.push(error instanceof Error ? error : new Error(String(error)));
         }
       }
-      if (failures.length > 0) throw new AggregateError(failures, "Browser cleanup failed");
+      if (failures.length > 0) {
+        const failure = new AggregateError(failures, "Browser cleanup failed");
+        cleanupFailure ??= failure;
+        throw failure;
+      }
     })();
     try {
       await cleanup;
@@ -460,6 +426,7 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
   const teardown = async (permanent: boolean): Promise<string> => {
     if (permanent) {
       closed = true;
+      options.signal.removeEventListener("abort", onParentAbort);
       controller.abort(new Error("Browser run disposed"));
     }
     startupController?.abort(new Error("Browser startup closed"));
@@ -467,11 +434,12 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
     // final cleanup pass so a late mkdtemp/spawn cannot escape close().
     const inFlightOpen = opening;
     const firstCleanup = cleanupInternal();
-    const settled = await Promise.allSettled([firstCleanup, inFlightOpen ?? Promise.resolve()]);
-    await cleanupInternal();
-    if (permanent) liveResources.delete(resources);
-    const cleanupFailure = settled[0];
-    if (cleanupFailure?.status === "rejected") throw cleanupFailure.reason;
+    await Promise.allSettled([firstCleanup, inFlightOpen ?? Promise.resolve()]);
+    await Promise.allSettled([cleanupInternal()]);
+    if (permanent && !child && !profile) liveResources.delete(resources);
+    // An automatic cancellation cleanup may finish before the awaited owner.
+    // Never turn that earlier failure into an ordinary successful finalizer.
+    if (cleanupFailure) throw cleanupFailure;
     return "Browser closed.";
   };
 
@@ -481,6 +449,7 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
   const dispose = async (): Promise<string> => teardown(true);
 
   const open = async (): Promise<string> => {
+    if (cleanupFailure) throw cleanupFailure;
     if (closed || controller.signal.aborted) return "Browser startup cancelled.";
     if (child && cdp) return "Browser already open.";
     if (opening) return opening;
@@ -528,9 +497,13 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
         throwIfAborted(startup.signal);
         cdp = new CDPClient(controller.signal, requestTimeoutMs);
         await cdp.connect(endpoint);
+        throwIfAborted(startup.signal);
         await cdp.send("Page.enable");
+        throwIfAborted(startup.signal);
         await cdp.send("Runtime.enable");
+        throwIfAborted(startup.signal);
         await cdp.send("Network.enable");
+        throwIfAborted(startup.signal);
         logger.info("Chrome connected via private CDP endpoint", { runId: options.runId });
         return "Browser open (private headless Chrome session).";
       } catch (error) {
@@ -625,7 +598,9 @@ export function createBrowserRunResources(options: BrowserRunOptions): BrowserRu
     isOpen: () => child !== null && cdp !== null && !closed,
   };
   liveResources.add(resources);
-  const onParentAbort = (): void => { void dispose(); };
+  const onParentAbort = (): void => {
+    void dispose().catch(() => logger.warn("Browser cleanup failed; the awaited owner will report the failure", { runId: options.runId }));
+  };
   options.signal.addEventListener("abort", onParentAbort, { once: true });
   if (options.signal.aborted) onParentAbort();
   return resources;
@@ -659,7 +634,7 @@ async function stopProcessGroup(
   // Some launchers can leave a descendant visible while the group leader has
   // already exited. Preserve group signalling as the primary operation, then
   // make the final kill explicit for every remaining live member.
-  for (const memberPid of await liveGroupMembers(-groupPid)) {
+  for (const memberPid of (await liveGroupMembers(-groupPid)) ?? []) {
     try {
       killProcess(memberPid, "SIGKILL");
     } catch (error) {
@@ -702,11 +677,12 @@ async function waitForGroupGone(
 }
 
 async function groupHasLiveMember(groupId: number): Promise<boolean> {
-  return (await liveGroupMembers(groupId)).length > 0;
+  const members = await liveGroupMembers(groupId);
+  return members === null || members.length > 0;
 }
 
-async function liveGroupMembers(groupId: number): Promise<number[]> {
-  if (process.platform !== "linux") return [groupId];
+async function liveGroupMembers(groupId: number): Promise<number[] | null> {
+  if (process.platform !== "linux") return null;
   try {
     const entries = await readdir("/proc");
     const members: number[] = [];
@@ -725,7 +701,7 @@ async function liveGroupMembers(groupId: number): Promise<number[]> {
     return members;
   } catch {
     // Keep the portable conservative behavior when /proc is unavailable.
-    return [groupId];
+    return null;
   }
 }
 

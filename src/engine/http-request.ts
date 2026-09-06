@@ -3,6 +3,8 @@ export interface HttpRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxResponseBytes?: number;
+  /** Transport seam for owned adapters and offline lifecycle tests. */
+  fetchImpl?: typeof fetch;
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -28,7 +30,7 @@ export async function withHttpResponse<T>(
   const timer = setTimeout(() => controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError")), timeoutMs);
   let response: Response | undefined;
   try {
-    const request = globalThis.fetch(url, { ...init, signal: controller.signal });
+    const request = (options.fetchImpl ?? globalThis.fetch)(url, { ...init, signal: controller.signal });
     // A transport that resolves late still must release its response body.
     void request.then((late) => {
       if (controller.signal.aborted && !late.body?.locked) void late.body?.cancel().catch(() => {});

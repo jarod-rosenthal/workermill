@@ -30,6 +30,8 @@ vi.mock("../engine/tools/lsp.js", async (importOriginal) => ({
 import { executeStories } from "../orchestrator/execution.js";
 import { planStories } from "../orchestrator/planning.js";
 import type { OrchestrationOutput } from "../orchestrator/types.js";
+import * as readFileTool from "../engine/tools/read-file.js";
+import { createAttemptResources } from "../engine/run-resources.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -57,7 +59,51 @@ describe("orchestration lifecycle runtime", () => {
     workspace = fs.mkdtempSync(path.join(os.tmpdir(), "wm-lifecycle-"));
     vi.clearAllMocks();
   });
-  afterEach(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  afterEach(() => { vi.restoreAllMocks(); fs.rmSync(workspace, { recursive: true, force: true }); });
+
+  it("waits for an actual planner's non-process tool after provider failure", async () => {
+    const started = deferred();
+    const release = deferred();
+    let modelSignal: AbortSignal | undefined;
+    vi.spyOn(readFileTool, "execute").mockImplementation(async () => {
+      started.resolve();
+      await release.promise;
+      return { success: true, content: "fixture" };
+    });
+    streamText.mockImplementation((options: { abortSignal: AbortSignal; tools: Record<string, { execute(input: Record<string, unknown>): Promise<unknown> }> }) => {
+      modelSignal = options.abortSignal;
+      return {
+        textStream: (async function* () {
+          void options.tools.read_file.execute({ path: "fixture.txt" }).catch(() => {});
+          await started.promise;
+          throw new Error("provider failed while read was pending");
+        })(),
+        text: Promise.resolve("not a plan"), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }),
+      };
+    });
+    let settled = false;
+    const planning = planStories({ providers: { test: { model: "lifecycle-test" } }, default: "test" } as never,
+      "plan", workspace, true, output).finally(() => { settled = true; });
+    await started.promise;
+    await vi.waitFor(() => expect(modelSignal?.aborted).toBe(true));
+    expect(settled).toBe(false);
+    expect(streamText).toHaveBeenCalledTimes(1);
+    release.resolve();
+    expect((await planning).rejected).toBe(true);
+    expect(settled).toBe(true);
+  });
+
+  it("attempts all cleanup callbacks after a synchronous failure and retains it", async () => {
+    const later = vi.fn();
+    const owner = createAttemptResources("fanout-fixture", () => {}, [
+      () => { throw new Error("first cleanup failed"); }, later,
+    ]);
+    await expect(owner.close()).rejects.toThrow("first cleanup failed");
+    expect(later).toHaveBeenCalledOnce();
+    expect(shutdownLSPRun).toHaveBeenCalledWith("fanout-fixture");
+    await expect(owner.close()).rejects.toThrow("first cleanup failed");
+    expect(later).toHaveBeenCalledOnce();
+  });
 
   it("drains a started worker bash before a provider failure can become story success", async () => {
     const started = path.join(workspace, "started");

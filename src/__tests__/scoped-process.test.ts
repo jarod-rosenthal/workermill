@@ -14,6 +14,7 @@ import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { createPathScope } from "../engine/path-policy.js";
 import { createScopedProcessRunner } from "../engine/scoped-process.js";
 import type { ProcessRequest, ProcessResult } from "../engine/process-runner.js";
+import { runProcess } from "../engine/process-runner.js";
 
 const result: ProcessResult = { reason: "exited", exitCode: 0, stdout: "ok", stderr: "", outputTruncated: false };
 const request = (signal = new AbortController().signal): ProcessRequest => ({
@@ -219,5 +220,20 @@ describe("scoped process boundary", () => {
     });
     expect(outcome.reason).toBe("spawn_failed");
     expect(dependencies.runProcess).not.toHaveBeenCalled();
+  });
+
+  it("keeps private temp variables even when the runtime overrides the outer environment", async () => {
+    const dependencies = fakeDependencies(vi.fn(runProcess));
+    dependencies.sandboxManager.wrapWithSandbox.mockImplementation(async (command) =>
+      `TMPDIR=/tmp/runtime-default /bin/sh -c '${command.replaceAll("'", "'\\''")}'`);
+    const runner = createScopedProcessRunner(dependencies);
+    const outcome = await runner({ ...request(), command: 'printf "%s\\n" "$TMPDIR" "$TMP" "$TEMP"' }, {
+      sandbox: "os", scope: createPathScope(process.cwd()),
+    });
+    expect(outcome.reason).toBe("exited");
+    expect(outcome.exitCode).toBe(0);
+    const privateTemp = dependencies.sandboxManager.initialize.mock.calls[0][0].filesystem.allowWrite.at(-1);
+    expect(outcome.stdout.trim().split("\n")).toEqual([privateTemp, privateTemp, privateTemp]);
+    expect(fs.existsSync(privateTemp!)).toBe(false);
   });
 });

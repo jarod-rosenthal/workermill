@@ -209,7 +209,11 @@ export function createScopedProcessRunner(
       if (request.signal.aborted) return cancelled();
       await dependencies.sandboxManager.initialize(runtimeConfig(scope, options.capabilities, tempDir, dependencies.platform));
       if (request.signal.aborted) return cancelled();
-      const command = await dependencies.sandboxManager.wrapWithSandbox(request.command, undefined, undefined, request.signal);
+      // The runtime prefixes its own TMPDIR in the generated shell command,
+      // overriding the child environment. Set ours inside that boundary too.
+      const quotedTempDir = `'${tempDir.replaceAll("'", "'\\''")}'`;
+      const scopedCommand = `export TMPDIR=${quotedTempDir} TMP=${quotedTempDir} TEMP=${quotedTempDir};\n${request.command}`;
+      const command = await dependencies.sandboxManager.wrapWithSandbox(scopedCommand, undefined, undefined, request.signal);
       if (request.signal.aborted) return cancelled();
       phase = "execution";
       return await dependencies.runProcess({

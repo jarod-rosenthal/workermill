@@ -510,8 +510,8 @@ File and bash tool sandboxing.
 
 | Value | Effect |
 |---|---|
-| `true` (default) | Restrict file and bash tools to the working directory |
-| `false` | No restriction — tools can read and write anywhere |
+| `true` (default) | Canonical path checks for explicit file targets and command working directories; not shell containment |
+| `false` | Disable path confinement; permission rules still apply |
 | `"os"` | OS-level sandboxing via `@anthropic-ai/sandbox-runtime`; fails before a command starts when unavailable |
 
 ### Setting from the CLI
@@ -544,10 +544,12 @@ field are ignored, so a repository cannot expand its own host privileges.
 }
 ```
 
-Writes are restricted to the workspace, explicitly granted `read_write`
-paths, and one private per-command temporary directory. There are no implicit
-`.npm`, `.local`, home-cache, or blanket `/tmp` write grants; add a specific
-cache path when a command needs one. The runtime allows host reads by default,
+WorkerMill grants writes to the workspace, explicitly granted `read_write`
+paths, and one private per-command temporary directory. The underlying runtime
+also permits its standard device paths, `/tmp/claude` (and the macOS equivalent),
+`~/.npm/_logs`, and `~/.claude/debug`. These are runtime exceptions, not private
+per-run storage. WorkerMill does not grant the entire home directory, package
+cache, or `/tmp`; add a specific cache path when needed. The runtime allows host reads by default,
 but WorkerMill denies its state root and `~/.ssh`; OS mode therefore does not
 claim to confine every read to the workspace.
 

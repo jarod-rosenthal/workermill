@@ -13,7 +13,7 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
 }));
 
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
-import { commandUsesDocker, execute } from "../engine/tools/bash.js";
+import { commandUsesDocker, execute, killActiveProcess } from "../engine/tools/bash.js";
 
 describe("bash tool docker sandbox handling", () => {
   beforeEach(() => {
@@ -54,5 +54,32 @@ describe("bash tool docker sandbox handling", () => {
     expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("printf ok");
     expect(result.success).toBe(true);
     expect(result.stdout).toBe("ok");
+  });
+
+  it("passes scoped cancellation to the asynchronous process runner", async () => {
+    const controller = new AbortController();
+    const running = execute({
+      command: "sleep 30",
+      cwd: process.cwd(),
+      timeout: 5_000,
+      signal: controller.signal,
+      runId: "bash-scoped-test",
+    });
+    setTimeout(() => controller.abort(), 25);
+
+    const result = await running;
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Command cancelled");
+  });
+
+  it("keeps legacy cancellation isolated from scoped bash calls", async () => {
+    const legacy = execute({ command: "sleep 30", timeout: 5_000 });
+    const scoped = execute({ command: "sleep 0.1; printf scoped", timeout: 5_000, runId: "scoped-test" });
+    setTimeout(() => killActiveProcess(), 25);
+
+    const [legacyResult, scopedResult] = await Promise.all([legacy, scoped]);
+    expect(legacyResult.error).toBe("Command cancelled");
+    expect(scopedResult.success).toBe(true);
+    expect(scopedResult.stdout).toBe("scoped");
   });
 });

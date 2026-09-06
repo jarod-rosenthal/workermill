@@ -230,11 +230,11 @@ Verification: new unit/runtime sub-agent tests; no paid E2E needed. Handoff: wor
 
 Priority P0; integration task; dependencies R06, R07, R08, R09, R10; locks `interactive-runtime`, `headless-runtime`, `worker-runtime`, `review-runtime`, `orchestrator`.
 
-Files: adapter files above, `src/ui/useOrchestrator.ts`, `src/orchestrator.ts`, relevant cancellation tests; modify MCP/LSP stop APIs only if a demonstrated teardown gap requires it.
+Files: adapter files above, `src/ui/Root.tsx` (direct `!command` lifecycle only), `src/ui/useOrchestrator.ts`, `src/orchestrator.ts`, relevant cancellation tests; modify MCP/LSP stop APIs only if a demonstrated teardown gap requires it.
 
 Join run, model, tool, gate, and child cancellation. Dispose combined-signal listeners. Stop the current run only; another context must continue. Ensure failure before a stream is constructed and cancellation during a prompt, retry delay, gate, and child all settle once. Maintain inspectable local state and stop subsequent stories/completion. This is integration of existing interfaces, not another runner rewrite.
 
-Mandatory dispatches: R11a integrates chat/headless cancellation and tests (`useAgent`, `run-command`); R11b integrates orchestration/roles/children, `useOrchestrator`, and stage cancellation tests. R11b depends on the integrated R11a lifecycle contract.
+Mandatory dispatches: R11a integrates chat/headless cancellation and tests (`useAgent`, `run-command`). It also replaces `Root`'s blocking direct `!command` execution with the shared async process lifecycle, preserving explicit user-command authorization and making cancellation/exit settle its process group; do not route direct user commands through an LLM or infer blanket future tool approval. R11b integrates orchestration/roles/children, `useOrchestrator`, and stage cancellation tests. R11b depends on the integrated R11a lifecycle contract.
 
 Acceptance: a deterministic cancel scenario for each stage terminates within the configured grace period, leaves no children/open servers, removes listeners, and emits one terminal result. An independent second run remains active. Add a PTY scenario specification for R17.
 

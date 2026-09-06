@@ -1,18 +1,21 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import type { TestProject } from "vitest/node";
 
-const markerPath = path.join(os.tmpdir(), `wm-test-state-marker-${process.pid}`);
+declare module "vitest" {
+  export interface ProvidedContext {
+    workerMillTestStateRoot: string;
+  }
+}
 
-export default function globalSetup(): () => void {
+export default function globalSetup(project: TestProject): () => void {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "wm-test-state-suite-"));
-  fs.writeFileSync(markerPath, parent, "utf-8");
+  // Vitest transfers provided values to both fork and thread pools. Avoid
+  // assuming a worker's parent PID identifies the test coordinator.
+  project.provide("workerMillTestStateRoot", parent);
 
   return () => {
-    const recorded = fs.existsSync(markerPath) ? fs.readFileSync(markerPath, "utf-8").trim() : "";
-    if (recorded === parent && path.basename(parent).startsWith("wm-test-state-suite-")) {
-      fs.rmSync(parent, { recursive: true, force: true });
-      fs.rmSync(markerPath, { force: true });
-    }
+    fs.rmSync(parent, { recursive: true, force: true });
   };
 }

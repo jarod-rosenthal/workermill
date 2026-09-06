@@ -1,13 +1,11 @@
 import fs from "fs";
-import os from "os";
 import path from "path";
-import { afterAll } from "vitest";
+import { afterAll, inject } from "vitest";
 
 // Keep application state isolated per Vitest worker without changing HOME or
 // CODEX_HOME. The original override is restored before the worker exits.
 const originalStateRoot = process.env.WM_STATE_ROOT;
-const markerPath = path.join(os.tmpdir(), `wm-test-state-marker-${process.ppid}`);
-const suiteRoot = fs.readFileSync(markerPath, "utf-8").trim();
+const suiteRoot = inject("workerMillTestStateRoot");
 if (!path.basename(suiteRoot).startsWith("wm-test-state-suite-") || !fs.statSync(suiteRoot).isDirectory()) {
   throw new Error(`Invalid test state root: ${suiteRoot}`);
 }

@@ -10,6 +10,10 @@ import {
   ensureLmStudioContext,
 } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope, resolvePath } from "../engine/path-policy.js";
+import { executeToolCall, ToolExecutionError, type ToolExecutionContext } from "../engine/tool-executor.js";
+import type { PermissionState } from "../engine/tool-policy.js";
+import { getToolMeta } from "../engine/tools/tool-metadata.js";
 import type { AIProvider } from "../engine/types.js";
 import {
   createSession,
@@ -36,10 +40,9 @@ import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.j
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import fs from "fs";
 import path from "path";
-import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
+import { splitCompoundCommand, toolInputToRule } from "../safety.js";
 import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
 import { isLocalProvider } from "../provider-capabilities.js";
 import { createLiveViewServer, type LiveViewServer } from "../live-view-server.js";
 import { formatLiveViewUrlMessage, getLiveViewUrls } from "../live-view-url.js";
@@ -89,7 +92,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
   // ------- Model & tools (created once) -------- //
   const modelRef = useRef<LanguageModel | null>(null);
-  const toolsRef = useRef<Record<string, AnyToolDef> | null>(null);
   const aiProviderRef = useRef<AIProvider>(options.provider as AIProvider);
   const activeModelNameRef = useRef(options.model);
   const activeContextLengthRef = useRef(options.contextLength);
@@ -129,7 +131,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const sessionRef = useRef<Session>(null as unknown as Session);
   const costTrackerRef = useRef(new CostTracker());
   const sessionAllowRef = useRef(new Set<string>());
+  // Rules chosen with "don't ask again" stay narrow even if settings cannot
+  // be saved. Do not turn a command-family approval into a tool-wide grant.
+  const sessionAllowRulesRef = useRef<string[]>([]);
   const deniedToolsRef = useRef(new Set<string>());
+  const pendingPermissionResolveRef = useRef<(() => void) | null>(null);
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
@@ -242,11 +248,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.host,
       options.contextLength,
       options.apiKey,
-    );
-    toolsRef.current = createToolDefinitions(
-      workingDirRef.current,
-      modelRef.current,
-      options.sandboxed,
     );
 
     // Register MCP servers for lazy start — they won't spawn until first tool use
@@ -378,134 +379,138 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     };
   }, [stopLiveView]);
 
-  // ------- Helpers -------- //
+  // ------- Shared permission/execution adapter -------- //
 
-  /**
-   * Detect dangerous bash patterns. Returns the label of the first match, or
-   * null when the command is safe.
-   */
-  function detectDanger(
+  const permissionState = useCallback((context: ToolExecutionContext): PermissionState => {
+    const configured = permissionRulesRef.current;
+    return {
+      mode: planModeRef.current ? "plan" : permModeRef.current,
+      trustAll: trustAllRef.current,
+      sessionAllow: sessionAllowRef.current,
+      rules: {
+        allow: [...(configured?.allow ?? []), ...sessionAllowRulesRef.current],
+        ask: configured?.ask,
+        // A local deny is explicit and must remain stronger than trust.
+        deny: [...(configured?.deny ?? []), ...deniedToolsRef.current],
+      },
+      readOnlyRole: false,
+      workspace: context.workspace,
+    };
+  }, []);
+
+  const persistAlwaysChoice = useCallback(async (toolName: string, input: Record<string, unknown>): Promise<void> => {
+    const rules = toolName === "bash" && typeof input.command === "string"
+      ? splitCompoundCommand(input.command).map((command) => toolInputToRule(toolName, { command })).filter((rule): rule is string => Boolean(rule))
+      : [toolInputToRule(toolName, input)].filter((rule): rule is string => Boolean(rule));
+    for (const rule of rules) {
+      if (!sessionAllowRulesRef.current.includes(rule)) sessionAllowRulesRef.current.push(rule);
+    }
+    try {
+      const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+      const settings = loadLocalSettings() || {};
+      settings.allow = settings.allow || [];
+      for (const rule of rules) {
+        if (!settings.allow.includes(rule)) settings.allow.push(rule);
+      }
+      saveLocalSettings(settings);
+      permissionRulesRef.current = resolveConfig().permissions;
+    } catch {
+      // The in-memory narrow rules above are still valid for this session.
+    }
+  }, []);
+
+  const promptForPermission = useCallback((
     toolName: string,
-    toolInput: Record<string, unknown>,
-  ): string | null {
-    // Dangerous bash commands
-    if (toolName === "bash") {
-      return isDangerous(String(toolInput.command ?? ""));
-    }
-    // Dangerous file paths for write operations
-    if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
-      const filePath = String(toolInput.path || toolInput.file_path || "");
-      if (filePath) return isDangerousFile(filePath);
-    }
-    return null;
-  }
+    input: Record<string, unknown>,
+    reason: string,
+    context: ToolExecutionContext,
+  ): Promise<boolean> => new Promise((resolve) => {
+    let settled = false;
+    const finish = (allowed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      context.signal.removeEventListener("abort", onAbort);
+      if (pendingPermissionResolveRef.current === cancelPending) pendingPermissionResolveRef.current = null;
+      setPermissionRequest(null);
+      resolve(allowed);
+    };
+    const cancelPending = (): void => finish(false);
+    const onAbort = (): void => finish(false);
+    pendingPermissionResolveRef.current = cancelPending;
+    context.signal.addEventListener("abort", onAbort, { once: true });
+    setPermissionRequest({
+      toolName,
+      toolInput: input,
+      isDangerous: reason.startsWith("dangerous command:") || reason.startsWith("sensitive file:"),
+      dangerLabel: reason,
+      resolve: (allowed, mode) => {
+        void (async () => {
+          if (allowed && mode === "trust") {
+            trustAllRef.current = true;
+            permModeRef.current = "bypassPermissions";
+            setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
+          }
+          if (allowed && mode === "always") await persistAlwaysChoice(toolName, input);
+          finish(allowed);
+        })();
+      },
+    });
+  }), [persistAlwaysChoice]);
 
-  // ------- Permission system -------- //
-
-  /**
-   * Resolve whether a tool call is allowed. For read-only tools or when
-   * trust-all is enabled the promise resolves immediately. Otherwise we
-   * surface a `PermissionRequest` and the UI component (PermissionPrompt)
-   * will call `request.resolve()`.
-   */
-  const checkPermission = useCallback(
-    (
-      toolName: string,
-      toolInput: Record<string, unknown>,
-    ): Promise<{ allowed: boolean; mode?: "always" | "trust" }> => {
-      // Denied tools are always blocked.
-      if (deniedToolsRef.current.has(toolName)) {
-        return Promise.resolve({ allowed: false });
-      }
-
-      const dangerLabel = detectDanger(toolName, toolInput);
-
-      // Dangerous commands always require explicit confirmation.
-      if (dangerLabel) {
-        logger.info("Dangerous prompt shown", { tool: toolName, danger: dangerLabel });
-        return new Promise((resolve) => {
-          setPermissionRequest({
-            toolName,
-            toolInput,
-            isDangerous: true,
-            dangerLabel,
-            resolve: (allowed: boolean, mode?: "always" | "trust") => {
-              logger.info("Dangerous prompt resolved", { tool: toolName, allowed, mode });
-              setPermissionRequest(null);
-              resolve({ allowed, mode });
-            },
+  const createExecutionContext = useCallback((runId: string, signal: AbortSignal): ToolExecutionContext => {
+    const scope = createPathScope(workingDirRef.current);
+    const context: ToolExecutionContext = {
+      runId,
+      workspace: scope.workspace,
+      scope,
+      effectiveSandbox: options.sandboxed === "os" ? "os" : options.sandboxed ? "path" : "none",
+      signal,
+      getPermissionState: () => permissionState(context),
+      prompt: promptForPermission,
+      preHook: (name, input, executingContext) => {
+        const started = Date.now();
+        const result = runPreHooksWithBlocking(name, hooksConfigRef.current, executingContext.workspace, {
+          input: JSON.stringify(input).substring(0, 10000),
+        });
+        traceDispatch("wrapper:prehook_done", {
+          tool: name,
+          blocked: result.blocked,
+          durationMs: Date.now() - started,
+        });
+        return result.blocked ? { blocked: true, reason: result.reason } : undefined;
+      },
+      checkpoint: (name, input, executingContext) => {
+        if (name === "patch") {
+          for (const target of parsePatchTargets(String(input.patch_text || ""), executingContext.workspace)) {
+            checkpoint(resolvePath(executingContext.scope, target.filePath, "read_write"), "patch");
+          }
+        } else if (["write_file", "edit_file", "multi_edit_file"].includes(name) && (input.path || input.file_path)) {
+          checkpoint(resolvePath(executingContext.scope, String(input.path || input.file_path), "read_write"), name);
+        }
+      },
+      postHook: (name, _input, output, error, executingContext) => {
+        if (name === "bash" && !error) onBashCompleteRef.current?.();
+        if (!error) {
+          const outputText = typeof output === "string" ? output : JSON.stringify(output) ?? "";
+          runHooks("post", name, hooksConfigRef.current, executingContext.workspace, {
+            output: outputText.substring(0, 10000),
+            success: true,
           });
-        });
-      }
-
-      // Granular permission rules — deny > ask > allow.
-      const ruleResult = checkPermissionRules(toolName, toolInput, permissionRulesRef.current);
-      if (ruleResult === "deny") {
-        return Promise.resolve({ allowed: false });
-      }
-      if (ruleResult === "ask") {
-        // Force prompt even in acceptEdits/bypassPermissions mode
-        return new Promise((resolve) => {
-          setPermissionRequest({
-            toolName,
-            toolInput,
-            isDangerous: false,
-            resolve: (allowed: boolean, mode?: "always" | "trust") => {
-              setPermissionRequest(null);
-              resolve({ allowed, mode });
-            },
+        }
+      },
+      event: (event, executingContext) => {
+        if (event.phase === "complete" && event.error) {
+          const message = event.error instanceof Error ? event.error.message : String(event.error);
+          runLifecycleHooks("tool_error", hooksConfigRef.current, executingContext.workspace, {
+            WORKERMILL_TOOL: event.toolName,
+            WORKERMILL_TOOL_INPUT: JSON.stringify(event.input).substring(0, 10000),
+            WORKERMILL_TOOL_ERROR: message.substring(0, 10000),
           });
-        });
-      }
-      if (ruleResult === "allow") {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // bypassPermissions mode — auto-approve everything.
-      if (trustAllRef.current || permModeRef.current === "bypassPermissions") {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // dontAsk mode — deny everything not explicitly allowed.
-      if (permModeRef.current === "dontAsk") {
-        return Promise.resolve({ allowed: false });
-      }
-
-      // acceptEdits mode: auto-approve everything except bash.
-      if (permModeRef.current === "acceptEdits" && ACCEPT_EDITS_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // Read-only tools never require permission.
-      if (READ_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // Session-level allow for this tool.
-      if (sessionAllowRef.current.has(toolName) || sessionAllowRef.current.has("*")) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // plan mode — deny write tools (they shouldn't be in the schema, but safety net).
-      if (permModeRef.current === "plan" && !READ_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: false });
-      }
-
-      // Interactive permission prompt via React state.
-      return new Promise((resolve) => {
-        setPermissionRequest({
-          toolName,
-          toolInput,
-          isDangerous: false,
-          resolve: (allowed: boolean, mode?: "always" | "trust") => {
-            setPermissionRequest(null);
-            resolve({ allowed, mode });
-          },
-        });
-      });
-    },
-    [], // trustAllRef and sessionAllowRef are refs -- stable across renders.
-  );
+        }
+      },
+    };
+    return context;
+  }, [options.sandboxed, permissionState, promptForPermission]);
 
   // ------- Wrap tools with permission & state tracking -------- //
 
@@ -516,9 +521,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * 3. The original execute runs.
    * 4. Status is updated to "done" (or "denied").
    */
-  const buildPermissionedTools = useCallback((): Record<string, AnyToolDef> => {
-    const raw = toolsRef.current;
-    if (!raw) return {};
+  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel): Record<string, AnyToolDef> => {
+    // Factory tools are rebuilt for every run context. In particular, bash and
+    // child tools must receive this turn's signal and run ID, not a closure
+    // created during hook initialization.
+    const raw = createToolDefinitions(workingDirRef.current, model, options.sandboxed, {
+      executionContext: context,
+      runId: context.runId,
+      signal: context.signal,
+      scope: context.scope,
+    }) as Record<string, AnyToolDef>;
 
     // Merge MCP tools (dynamically resolved each call so tools from
     // servers that finish starting after init are picked up).
@@ -578,31 +590,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       execute: async () => browserClose(),
     };
 
-    // Wrap tool execute functions with concurrency control without mutating
-    // shared tool definitions (toolsRef/current MCP objects). Mutating in place
-    // re-wraps every turn and can self-deadlock on the non-reentrant mutex.
-    const concurrencyWrappedTools: Record<string, AnyToolDef> = {};
-    for (const [name, td] of Object.entries(allRawTools)) {
-      if (td && typeof td.execute === "function") {
-        const original = td.execute;
-        concurrencyWrappedTools[name] = {
-          ...td,
-          execute: withConcurrencyControl(name, original as any),
-        };
-      } else {
-        concurrencyWrappedTools[name] = td;
-      }
-    }
-
     // Partition tools: core tools get full schemas, MCP tools are deferred
     // to save context window space. Promoted tools (via tool_search) are
     // treated as eager on subsequent calls.
-    const { eager: eagerTools, deferred } = partitionTools(concurrencyWrappedTools, workingDirRef.current);
+    const { eager: eagerTools, deferred } = partitionTools(allRawTools, workingDirRef.current);
 
     // Re-promote any tools the model previously loaded via tool_search
     for (const name of promotedToolsRef.current) {
-      if (concurrencyWrappedTools[name] && !eagerTools[name]) {
-        eagerTools[name] = concurrencyWrappedTools[name];
+      if (allRawTools[name] && !eagerTools[name]) {
+        eagerTools[name] = allRawTools[name];
       }
     }
 
@@ -670,109 +666,29 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const wrapperEnterMs = Date.now();
           traceDispatch("wrapper:enter", { tool: name });
 
-          const permissionStartMs = Date.now();
-          const { allowed, mode } = await checkPermission(name, input);
-          traceDispatch("wrapper:permission_done", {
-            tool: name,
-            allowed,
-            mode,
-            durationMs: Date.now() - permissionStartMs,
-          });
-
-          if (mode === "trust" && allowed) {
-            permModeRef.current = "bypassPermissions";
-            // Defer UI update
-            setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
-            trustAllRef.current = true;
-          }
-
-          if (mode === "always" && allowed) {
-            try {
-              const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
-              const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
-              const lSettings = loadLocalSettings() || {};
-              lSettings.allow = lSettings.allow || [];
-              const rules = name === "bash" && input.command
-                ? splitCompoundCommand(String(input.command)).map((cmd) => toolInputToRule(name, { command: cmd }))
-                : [toolInputToRule(name, input)];
-              for (const rule of rules) {
-                if (rule && !lSettings.allow.includes(rule)) {
-                  lSettings.allow.push(rule);
-                }
-              }
-              saveLocalSettings(lSettings);
-              // Update the merged permissions
-              const config = resolveConfig();
-              permissionRulesRef.current = config.permissions;
-            } catch {
-              sessionAllowRef.current.add(name);
-            }
-            sessionAllowRef.current.add(name);
-          }
-
-          if (!allowed) {
-            traceDispatch("wrapper:denied", {
-              tool: name,
-              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
-            });
-            runLifecycleHooks("permission_denied", hooksConfigRef.current, workingDirRef.current, {
-              WORKERMILL_TOOL: name,
-              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-            });
-            setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
-            setStatus("streaming");
-            return "Tool execution denied by user.";
-          }
-
           try {
             traceDispatch("wrapper:before_tool_call_log", {
               tool: name,
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-            if (name === "patch") {
-              const patchText = String(input.patch_text || "");
-              const targets = parsePatchTargets(patchText, workingDirRef.current);
-              for (const target of targets) {
-                const resolved = path.resolve(workingDirRef.current, target.filePath);
-                checkpoint(resolved, "patch");
-              }
-            } else if ((name === "write_file" || name === "edit_file" || name === "multi_edit_file") && (input.path || input.file_path)) {
-              const filePath = String(input.path || input.file_path);
-              const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
-              checkpoint(resolved, name);
-            }
-            const preHookStartMs = Date.now();
-            const hookResult = runPreHooksWithBlocking(name, hooksConfigRef.current, workingDirRef.current, { input: JSON.stringify(input).substring(0, 10000) });
-            traceDispatch("wrapper:prehook_done", {
-              tool: name,
-              blocked: hookResult.blocked,
-              durationMs: Date.now() - preHookStartMs,
-              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
-            });
-            if (hookResult.blocked) {
-              return `Tool blocked by pre-hook: ${hookResult.reason}`;
-            }
-
-            // ── Execute with ZERO renders blocking the event loop ──
             const executeStartMs = Date.now();
             traceDispatch("wrapper:before_execute", {
               tool: name,
               sinceWrapperEnterMs: executeStartMs - wrapperEnterMs,
             });
-            const result = await td.execute(input);
+            // Policy, prompt, hooks, checkpoints, lifecycle event, and the
+            // workspace mutation mutex live in executeToolCall. This wrapper
+            // only adapts UI state after the real execution has settled.
+            const result = await executeToolCall(name, input, () => td.execute(input), context);
             traceDispatch("wrapper:after_execute", {
               tool: name,
               executeDurationMs: Date.now() - executeStartMs,
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
 
-            if (name === "bash" && onBashCompleteRef.current) {
-              onBashCompleteRef.current();
-            }
-            runHooks("post", name, hooksConfigRef.current, workingDirRef.current, { output: (typeof result === "string" ? result : JSON.stringify(result)).substring(0, 10000), success: true });
             const resultStr =
-              typeof result === "string" ? result : JSON.stringify(result);
+              typeof result === "string" ? result : JSON.stringify(result) ?? "";
             logger.info("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
             const liveViewServer = liveViewServerRef.current;
@@ -811,24 +727,19 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             setStatus("streaming");
             return result;
           } catch (err) {
+            if (err instanceof ToolExecutionError && err.code === "denied") {
+              traceDispatch("wrapper:denied", { tool: name, sinceWrapperEnterMs: Date.now() - wrapperEnterMs });
+              runLifecycleHooks("permission_denied", hooksConfigRef.current, context.workspace, {
+                WORKERMILL_TOOL: name,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+              });
+              setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
+              setStatus("streaming");
+              return "Tool execution denied by user.";
+            }
             const errMsg =
               err instanceof Error ? err.message : String(err);
-            runLifecycleHooks("tool_error", hooksConfigRef.current, workingDirRef.current, {
-              WORKERMILL_TOOL: name,
-              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-              WORKERMILL_TOOL_ERROR: errMsg.substring(0, 10000),
-            });
-            setStreamingToolCalls((prev) =>
-              prev.map((tc) =>
-                tc.id === callId
-                  ? {
-                      ...tc,
-                      status: "done" as const,
-                      result: `Error: ${errMsg}`,
-                    }
-                  : tc,
-              ),
-            );
+            setStreamingToolCalls((prev) => [...prev, { ...info, status: "done" as const, result: `Error: ${errMsg}` }]);
             setStatus("streaming");
             throw err;
           }
@@ -836,24 +747,25 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       };
     }
     return wrapped;
-  }, [checkPermission]);
+  }, [options.sandboxed]);
 
   /**
    * Return the tool set that should be active for this turn, respecting plan
    * mode which restricts to read-only tools.
    * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback(async (): Promise<Record<string, AnyToolDef>> => {
+  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel): Promise<Record<string, AnyToolDef>> => {
     // Lazy-start MCP servers on first prompt submission (not on CLI launch)
     const { ensureMCPStarted } = await import("../mcp-client.js");
     await ensureMCPStarted();
 
-    const all = buildPermissionedTools();
+    const all = buildPermissionedTools(context, model);
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
-      // tool_search is read-only — always available even in plan mode
-      if (READ_TOOLS.has(name) || name === "tool_search") {
+      // Unknown/browser/MCP tools are mutation-capable until their own policy
+      // metadata says otherwise. A plan must never promote sub-agents either.
+      if (name !== "sub_agent" && getToolMeta(name).isReadOnly) {
         filtered[name] = def;
       }
     }
@@ -909,6 +821,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         recentToolSignaturesRef.current = [];
 
         const controller = new AbortController();
+        const executionContext = createExecutionContext(crypto.randomUUID(), controller.signal);
         abortRef.current = controller;
         if (liveViewServerRef.current) {
           liveViewServerRef.current.setAbortController(controller);
@@ -926,7 +839,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         let partialOutputTokens = 0;
         try {
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
-          const activeTools = (await getActiveTools()) as ToolSet;
+          const activeTools = (await getActiveTools(executionContext, turnModel)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
           // text (memories, disk files), which invalidates Ollama's KV cache
           // and forces a full prompt reprocessing (~30s for 30B models).
@@ -1355,12 +1268,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         } // end while
       })();
     },
-    [getActiveTools],
+    [createExecutionContext, getActiveTools],
   );
 
   // ------- cancel() -------- //
 
   const cancel = useCallback(() => {
+    pendingPermissionResolveRef.current?.();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;

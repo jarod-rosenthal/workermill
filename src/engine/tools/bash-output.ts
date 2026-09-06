@@ -1,4 +1,7 @@
-import { activeShells } from "./bash-background.js";
+import {
+  activeShells,
+  BACKGROUND_OUTPUT_TRUNCATION_MARKER,
+} from "./bash-background.js";
 
 export const name = "bash_output";
 
@@ -35,6 +38,12 @@ interface BashOutputResult {
   status: 'running' | 'done' | 'killed' | 'failed_to_start';
 }
 
+function visibleOutput(shell: { buffer: string[]; outputTruncated: boolean }): string {
+  const output = shell.buffer.join("\n");
+  if (!shell.outputTruncated || output.includes(BACKGROUND_OUTPUT_TRUNCATION_MARKER)) return output;
+  return `${output}${output ? "\n" : ""}${BACKGROUND_OUTPUT_TRUNCATION_MARKER}`;
+}
+
 export async function execute({
   shellId,
   wait,
@@ -51,7 +60,7 @@ export async function execute({
   if (shell.done && shell.completionTime && Date.now() - shell.completionTime > 10 * 60 * 1000) {
     activeShells.delete(shellId);
     return {
-      output: shell.buffer.join('\n'),
+      output: visibleOutput(shell),
       done: true,
       exitCode: shell.exitCode,
       status: shell.status,
@@ -73,7 +82,7 @@ export async function execute({
   }
 
   return {
-    output: shell.buffer.join('\n'),
+    output: visibleOutput(shell),
     done: shell.done,
     exitCode: shell.exitCode,
     status: shell.status,

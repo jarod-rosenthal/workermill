@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@anthropic-ai/sandbox-runtime", () => ({
   SandboxManager: {
@@ -15,6 +18,17 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { commandUsesDocker, execute, killActiveProcess } from "../engine/tools/bash.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+
+const temporaryDirectories: string[] = [];
+function temporaryDirectory(): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-bash-tool-"));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+});
 
 describe("bash tool scoped sandbox handling", () => {
   beforeEach(() => {
@@ -40,7 +54,12 @@ describe("bash tool scoped sandbox handling", () => {
       timeout: 5_000,
     });
 
-    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("docker || true", undefined, undefined, expect.any(AbortSignal));
+    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith(
+      expect.stringContaining("docker || true"),
+      undefined,
+      undefined,
+      expect.any(AbortSignal),
+    );
     expect(result.success).toBe(true);
   });
 
@@ -52,7 +71,12 @@ describe("bash tool scoped sandbox handling", () => {
       timeout: 5_000,
     });
 
-    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith("printf ok", undefined, undefined, expect.any(AbortSignal));
+    expect(vi.mocked(SandboxManager.wrapWithSandbox)).toHaveBeenCalledWith(
+      expect.stringContaining("printf ok"),
+      undefined,
+      undefined,
+      expect.any(AbortSignal),
+    );
     expect(result.success).toBe(true);
     expect(result.stdout).toBe("ok");
   });
@@ -102,5 +126,21 @@ describe("bash tool scoped sandbox handling", () => {
     vi.mocked(SandboxManager.reset).mockRejectedValueOnce(new Error("sandbox reset failed"));
     const tools = createToolDefinitions(process.cwd(), undefined, "os") as Record<string, { execute: (input: { command: string }) => Promise<string> }>;
     await expect(tools.verify.execute({ command: "printf ok" })).resolves.toContain("Failed to execute command");
+  });
+
+  it("does not launch registered bash or verify when explicit OS isolation is unavailable", async () => {
+    const workspace = temporaryDirectory();
+    const sentinel = path.join(path.dirname(workspace), `wm-os-unavailable-${Date.now()}`);
+    vi.mocked(SandboxManager.checkDependencies).mockReturnValue({ errors: ["bubblewrap missing"], warnings: [] });
+    const tools = createToolDefinitions(workspace, undefined, "os") as Record<string, { execute: (input: { command: string }) => Promise<string> }>;
+
+    try {
+      await expect(tools.bash.execute({ command: `printf escaped > ${sentinel}` })).resolves.toContain("OS sandbox unavailable");
+      await expect(tools.verify.execute({ command: `printf escaped > ${sentinel}` })).resolves.toContain("OS sandbox unavailable");
+      expect(vi.mocked(SandboxManager.wrapWithSandbox)).not.toHaveBeenCalled();
+      expect(fs.existsSync(sentinel)).toBe(false);
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
   });
 });

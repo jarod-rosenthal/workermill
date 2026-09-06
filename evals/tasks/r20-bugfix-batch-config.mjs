@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
 const baselineFiles = {
@@ -43,7 +44,7 @@ const referenceFiles = {
     if (separator < 1) throw new Error("invalid config line");
     const key = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
-    if (key in result) throw new Error("duplicate config key: " + key);
+    if (Object.hasOwn(result, key)) throw new Error("duplicate config key: " + key);
     result[key] = value;
   }
   return result;
@@ -54,8 +55,8 @@ const referenceFiles = {
 const incompleteFiles = {
   ...baselineFiles,
   "src/config.mjs": baselineFiles["src/config.mjs"].replace(
-    'const key = line.slice(0, separator).trim();',
-    'const key = line.slice(0, separator).trim().toLowerCase();',
+    'const value = line.slice(separator + 1).trim();',
+    'const rawKey = line.slice(0, separator);\n    const key = rawKey.trim();\n    const value = line.slice(separator + 1).trim();\n    if (Object.hasOwn(result, rawKey)) throw new Error("duplicate config key: " + key);',
   ),
 };
 
@@ -104,20 +105,37 @@ function runNode(root, expression) {
     });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    const timer = setTimeout(() => child.kill("SIGTERM"), fixture.workspace.timeoutMs);
-    child.once("error", reject);
+    let outputTruncated = false;
+    let timedOut = false;
+    const append = (current, chunk) => {
+      const next = current + chunk;
+      if (next.length > 16_384) outputTruncated = true;
+      return next.slice(0, 16_384);
+    };
+    child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
+    child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, fixture.workspace.timeoutMs);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      resolve({ code: null, signal: null, stdout, stderr, outputTruncated, timedOut, error: String(error) });
+    });
     child.once("close", (code, signal) => {
       clearTimeout(timer);
-      resolve({ code, signal, stdout, stderr });
+      resolve({ code, signal, stdout, stderr, outputTruncated, timedOut });
     });
   });
 }
 
 async function accepts(root) {
-  const modulePath = join(root, "src/main.mjs");
-  const expression = `import { batchPlan } from ${JSON.stringify(modulePath)};
+  const moduleUrl = pathToFileURL(join(root, "src/main.mjs")).href;
+  const configUrl = pathToFileURL(join(root, "src/config.mjs")).href;
+  const expression = `import { batchPlan } from ${JSON.stringify(moduleUrl)};
+import { parseBatchConfig } from ${JSON.stringify(configUrl)};
+const config = parseBatchConfig("# comment\\n jobs = alpha,beta \\noutputDir = build \\nretries=2\\nlabel=a=b");
+if (JSON.stringify(config) !== JSON.stringify({jobs:"alpha,beta", outputDir:"build", retries:"2", label:"a=b"})) process.exit(2);
 const good = batchPlan("jobs=alpha,beta\\noutputDir=build\\nretries=2\\nlabel=a=b");
 if (JSON.stringify(good) !== JSON.stringify([
   {name:"alpha", output:"build/alpha.json", retries:2},
@@ -125,9 +143,11 @@ if (JSON.stringify(good) !== JSON.stringify([
 ])) process.exit(2);
 let rejected = false;
 try { batchPlan("jobs=alpha\\njobs=beta"); } catch { rejected = true; }
-if (!rejected) process.exit(3);`;
+let whitespaceRejected = false;
+try { batchPlan("jobs=alpha\\n jobs = beta"); } catch { whitespaceRejected = true; }
+if (!rejected || !whitespaceRejected) process.exit(3);`;
   const result = await runNode(root, expression);
-  return { ...result, passed: result.code === 0 && !result.signal };
+  return { ...result, passed: result.code === 0 && !result.signal && !result.timedOut };
 }
 
 export async function validateFixture() {
@@ -152,7 +172,7 @@ export async function validateFixture() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = await validateFixture();
   if (!result.baselineFails || !result.referencePasses || !result.incompleteFails) {
     console.error(JSON.stringify(result, null, 2));

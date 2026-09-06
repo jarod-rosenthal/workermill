@@ -147,14 +147,13 @@ function assertUnchangedScope(scope: PathScope): void {
     }
     if (getPathGrantKind(grant) !== "directory") {
       // File/exact grants deliberately cannot become directory capabilities.
+      let directory = false;
       try {
-        const stat = statSync(grant.root);
-        if (stat.isDirectory()) {
-          throw new Error(`OS sandbox non-directory grant became a directory: ${grant.root}`);
-        }
+        directory = statSync(grant.root).isDirectory();
       } catch (error) {
-        if (error instanceof Error && error.message.startsWith("OS sandbox")) throw error;
+        if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
       }
+      if (directory) throw new Error(`OS sandbox non-directory grant became a directory: ${grant.root}`);
     }
   }
 }
@@ -226,18 +225,25 @@ export function createScopedProcessRunner(
         : failed(`OS sandbox execution failed after command started: ${message}`);
     } finally {
       if (release) {
+        let resetError: unknown;
         try { dependencies.sandboxManager.cleanupAfterCommand(); } catch { /* best effort */ }
         try {
           await dependencies.sandboxManager.reset();
           sandboxLease.markResetComplete();
-        } catch {
+        } catch (error) {
           // Do not initialize a potentially stale singleton profile next time.
           sandboxLease.markResetRequired();
+          resetError = error;
         }
         try {
           if (tempDir) await rm(tempDir, { recursive: true, force: true });
         } finally {
           release();
+        }
+        if (resetError) {
+          // A command may already have run, so do not report a setup failure
+          // or silently return success when its sandbox cannot be torn down.
+          throw new Error("OS sandbox cleanup failed; the runtime must reset before another OS command can start", { cause: resetError });
         }
       }
     }

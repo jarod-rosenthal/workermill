@@ -128,7 +128,7 @@ describe("scoped process boundary", () => {
       .mockRejectedValueOnce(new Error("stale profile remains"))
       .mockResolvedValueOnce(undefined);
     const runner = createScopedProcessRunner(dependencies);
-    await runner(request(), { sandbox: "os", scope: createPathScope(process.cwd()) });
+    await expect(runner(request(), { sandbox: "os", scope: createPathScope(process.cwd()) })).rejects.toThrow("OS sandbox cleanup failed");
     const secondRoot = temporaryDirectory("wm-scoped-second-root-");
     const outcome = await runner({ ...request(), cwd: secondRoot }, {
       sandbox: "os", scope: createPathScope(secondRoot),

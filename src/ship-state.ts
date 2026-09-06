@@ -80,8 +80,12 @@ export function getRetryableRun(workingDir: string): ShipRun | null {
       } catch (error) {
         // Only an explicit missing-ref result proves stale state. Preserve the
         // record on timeouts, Git setup errors, and other inspection failures.
-        if ((error as { status?: number }).status === 1) clearShipRun(run.featureBranch);
-        continue;
+        if ((error as { status?: number }).status === 1) {
+          clearShipRun(run.featureBranch);
+          continue;
+        }
+        // Unknown is still recoverable. The recovery UI reports an
+        // indeterminate probe, and /retry verifies again before checkout.
       }
     }
 

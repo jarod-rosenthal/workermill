@@ -19,6 +19,12 @@ import { fixture as recipientIndex, validateFixture as validateRecipientIndex } 
 import { fixture as retryPolicy, validateFixture as validateRetryPolicy } from "../../evals/tasks/r20-refactor-retry-policy-v1.mjs";
 import { fixture as reportProjection, validateFixture as validateReportProjection } from "../../evals/tasks/r20-refactor-report-projection-v1.mjs";
 import { fixture as cursorCodec, validateFixture as validateCursorCodec } from "../../evals/tasks/r20-refactor-cursor-codec-v1.mjs";
+import { fixture as asyncChecks, validateFixture as validateAsyncChecks } from "../../evals/tasks/r20-maintenance-async-checks-v1.mjs";
+import { fixture as tempCleanup, validateFixture as validateTempCleanup } from "../../evals/tasks/r20-maintenance-temp-cleanup-v1.mjs";
+import { fixture as stableReport, validateFixture as validateStableReport } from "../../evals/tasks/r20-maintenance-stable-report-v1.mjs";
+import { fixture as pathBoundary, validateFixture as validatePathBoundary } from "../../evals/tasks/r20-security-path-boundary-v1.mjs";
+import { fixture as jobSchema, validateFixture as validateJobSchema } from "../../evals/tasks/r20-security-job-schema-v1.mjs";
+import { fixture as prototypeConfig, validateFixture as validatePrototypeConfig } from "../../evals/tasks/r20-security-prototype-config-v1.mjs";
 
 describe("R20a offline fixture", () => {
   it("distinguishes baseline, reference, and incomplete solutions", async () => {
@@ -118,6 +124,36 @@ describe("R20d offline refactor fixtures", () => {
       validateRetryPolicy(),
       validateReportProjection(),
       validateCursorCodec(),
+    ]);
+    for (const result of results) {
+      expect(result.baselineFails).toBe(true);
+      expect(result.referencePasses).toBe(true);
+      expect(result.incompleteFails).toBe(true);
+      expect(result.outcomes.baseline.code).toBe(3);
+      expect(result.outcomes.incomplete.code).toBe(3);
+    }
+  });
+});
+
+describe("R20e offline maintenance and security fixtures", () => {
+  it("has three maintenance and three security tasks with semantic incomplete failures", async () => {
+    const maintenance = [asyncChecks, tempCleanup, stableReport];
+    const security = [pathBoundary, jobSchema, prototypeConfig];
+    const fixtures = [...maintenance, ...security];
+    expect(new Set(fixtures.map((item) => item.taskId)).size).toBe(6);
+    expect(maintenance.every((item) => item.category === "maintenance")).toBe(true);
+    expect(security.every((item) => item.category === "security")).toBe(true);
+    expect(fixtures.every((item) => item.workspace.network === false)).toBe(true);
+    expect(fixtures.every((item) => item.workspace.toolchain.includes("22.12"))).toBe(true);
+    for (const item of fixtures) {
+      const material = Object.entries(item.workspace.files).sort(([a], [b]) => a.localeCompare(b))
+        .map(([filePath, contents]) => `${filePath}\0${contents}`).join("\0");
+      const independentlyComputed = `sha256:${createHash("sha256").update(material).digest("hex")}`;
+      expect(item.initialRevision).toBe(independentlyComputed);
+    }
+    const results = await Promise.all([
+      validateAsyncChecks(), validateTempCleanup(), validateStableReport(),
+      validatePathBoundary(), validateJobSchema(), validatePrototypeConfig(),
     ]);
     for (const result of results) {
       expect(result.baselineFails).toBe(true);

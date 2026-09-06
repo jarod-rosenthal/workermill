@@ -165,6 +165,59 @@ describe("isolated sub-agents", () => {
     expect(result.error).toContain("late tool failure");
   });
 
+  it("reports a partial completed-step usage once when a child stream fails", async () => {
+    const workingDir = repo();
+    const onUsage = vi.fn();
+    sdk.streamText.mockImplementationOnce((options: {
+      onStepFinish?: (step: {
+        toolCalls: unknown[];
+        text: string;
+        usage: { inputTokens: number; outputTokens: number; inputTokenDetails: { cacheReadTokens: number; cacheWriteTokens: number } };
+      }) => void;
+    }) => ({
+      textStream: (async function* () {
+        options.onStepFinish?.({
+          toolCalls: [], text: "partial", usage: {
+            inputTokens: 4, outputTokens: 2,
+            inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 1 },
+          },
+        });
+        throw new Error("transport failed");
+      })(),
+      text: Promise.resolve("partial"), totalUsage: Promise.resolve({ inputTokens: 4, outputTokens: 2 }), finishReason: Promise.resolve("stop"),
+    }));
+    const executor = createSubAgentExecutor({} as never, workingDir, {}, {
+      executionContext: context(workingDir), createTools: () => ({}), onUsage,
+    });
+
+    const result = await executor({ prompt: "fail", isolated: false });
+
+    expect(result.success).toBe(false);
+    expect(onUsage).toHaveBeenCalledOnce();
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+      callId: expect.any(String), inputTokens: 4, outputTokens: 2, totalTokens: 6,
+      cacheReadTokens: 3, cacheCreationTokens: 1, usageComplete: false,
+      usage: { inputTokens: 4, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 1 },
+    }));
+  });
+
+  it("reports missing usage after a started child call that throws immediately", async () => {
+    const workingDir = repo();
+    const onUsage = vi.fn();
+    sdk.streamText.mockImplementationOnce(() => { throw new Error("unavailable"); });
+    const executor = createSubAgentExecutor({} as never, workingDir, {}, {
+      executionContext: context(workingDir), createTools: () => ({}), onUsage,
+    });
+
+    await executor({ prompt: "fail", isolated: false });
+
+    expect(onUsage).toHaveBeenCalledOnce();
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+      inputTokens: 0, outputTokens: 0, totalTokens: 0, usageComplete: false,
+    }));
+    expect(onUsage.mock.calls[0]![0]).not.toHaveProperty("usage");
+  });
+
   it("keeps a successful in-flight read tool alive until it settles, then closes its model signal", async () => {
     const workingDir = repo();
     const rawStarted = deferred<void>();

@@ -247,6 +247,42 @@ describe("compaction", () => {
       );
     });
 
+    it("reports one complete SDK usage observation, including cache dimensions", async () => {
+      mockGenerateText.mockResolvedValue({
+        text: "summary",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 3,
+          inputTokenDetails: { cacheReadTokens: 5, cacheWriteTokens: 2 },
+        },
+      } as any);
+      const onUsage = vi.fn();
+      const msgs = Array.from({ length: 6 }, (_, i) => ({ role: "user" as const, content: `message ${i}` }));
+
+      await compactMessages(fakeModel, msgs, "soft", undefined, undefined, onUsage);
+
+      expect(onUsage).toHaveBeenCalledOnce();
+      expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+        callId: expect.any(String), inputTokens: 12, outputTokens: 3, totalTokens: 15,
+        cacheReadTokens: 5, cacheCreationTokens: 2, usageComplete: true,
+        usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 5, cacheCreationTokens: 2 },
+      }));
+    });
+
+    it("reports missing usage once after a started failed call", async () => {
+      mockGenerateText.mockRejectedValueOnce(new Error("transport failed"));
+      const onUsage = vi.fn();
+      const msgs = Array.from({ length: 6 }, (_, i) => ({ role: "user" as const, content: `message ${i}` }));
+
+      await compactMessages(fakeModel, msgs, "soft", undefined, undefined, onUsage);
+
+      expect(onUsage).toHaveBeenCalledOnce();
+      expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({
+        inputTokens: 0, outputTokens: 0, totalTokens: 0, usageComplete: false,
+      }));
+      expect(onUsage.mock.calls[0]![0]).not.toHaveProperty("usage");
+    });
+
     it("circuit breaker: returns toKeep after MAX_CONSECUTIVE_FAILURES", async () => {
       resetCompactionState();
       mockGenerateText.mockRejectedValue(new Error("fail"));

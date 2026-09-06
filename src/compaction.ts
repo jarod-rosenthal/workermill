@@ -80,6 +80,40 @@ export function shouldCompact(
 
 type Message = { role: "user" | "assistant"; content: string };
 
+/** One attempted compaction SDK invocation. Numeric totals remain for existing consumers. */
+export interface CompactionUsage {
+  callId: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+  };
+  usageComplete: boolean;
+}
+
+function compactionUsageFromSdk(usage: {
+  inputTokens?: number;
+  outputTokens?: number;
+  inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+} | undefined): CompactionUsage["usage"] | undefined {
+  if (!usage) return undefined;
+  const cacheReadTokens = usage?.inputTokenDetails?.cacheReadTokens;
+  const cacheCreationTokens = usage?.inputTokenDetails?.cacheWriteTokens;
+  if (usage?.inputTokens === undefined && usage?.outputTokens === undefined && cacheReadTokens === undefined && cacheCreationTokens === undefined) return undefined;
+  return {
+    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+    ...(cacheCreationTokens === undefined ? {} : { cacheCreationTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+  };
+}
+
 // Patterns that identify tool output blocks (file contents, command output, etc.)
 // Note: avoid [\s\S]+? with trailing literals — can cause catastrophic backtracking.
 // Use [^`] or bounded quantifiers instead.
@@ -259,6 +293,7 @@ export async function compactMessages(
   mode: "soft" | "hard",
   focusInstructions?: string,
   signal?: AbortSignal,
+  onUsage?: (usage: CompactionUsage) => void | Promise<void>,
 ): Promise<Message[]> {
   signal?.throwIfAborted();
   if (messages.length === 0) return messages;
@@ -335,27 +370,50 @@ Preserve:
 
 Do NOT preserve raw file contents, command output, or tool results — just note what was done and the outcome. Be concise but complete.`;
 
+  const callId = crypto.randomUUID();
+  let modelStarted = false;
+  let usageReported = false;
+  let reportedUsage: CompactionUsage["usage"];
+  const reportUsage = async (): Promise<void> => {
+    if (!modelStarted || usageReported) return;
+    usageReported = true;
+    const inputTokens = reportedUsage?.inputTokens ?? 0;
+    const outputTokens = reportedUsage?.outputTokens ?? 0;
+    await onUsage?.({
+      callId, inputTokens, outputTokens, totalTokens: inputTokens + outputTokens,
+      ...(reportedUsage?.cacheCreationTokens === undefined ? {} : { cacheCreationTokens: reportedUsage.cacheCreationTokens }),
+      ...(reportedUsage?.cacheReadTokens === undefined ? {} : { cacheReadTokens: reportedUsage.cacheReadTokens }),
+      ...(reportedUsage === undefined ? {} : { usage: reportedUsage }),
+      usageComplete: reportedUsage?.inputTokens !== undefined && reportedUsage.outputTokens !== undefined,
+    });
+  };
+
+  let result: Awaited<ReturnType<typeof generateText>>;
   try {
-    const result = await generateText({
+    modelStarted = true;
+    result = await generateText({
       model,
       abortSignal: signal,
       system: systemPrompt,
       prompt: summaryText,
     });
-
-    signal?.throwIfAborted();
-    consecutiveFailures = 0;
-
-    return [
-      { role: "user" as const, content: "[Conversation context — summarized from earlier messages]" },
-      { role: "assistant" as const, content: `[Summary of previous conversation]\n${result.text}` },
-      ...toKeep,
-    ];
   } catch {
+    await reportUsage();
     // Cancellation must not replace history with the failure fallback.
     signal?.throwIfAborted();
     consecutiveFailures++;
     // If summarization fails, just keep recent messages
     return toKeep;
   }
+  reportedUsage = compactionUsageFromSdk(result.usage);
+  await reportUsage();
+
+  signal?.throwIfAborted();
+  consecutiveFailures = 0;
+
+  return [
+    { role: "user" as const, content: "[Conversation context — summarized from earlier messages]" },
+    { role: "assistant" as const, content: `[Summary of previous conversation]\n${result.text}` },
+    ...toKeep,
+  ];
 }

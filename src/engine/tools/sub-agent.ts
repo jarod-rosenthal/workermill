@@ -24,7 +24,52 @@ export const parameters = {
 };
 
 export interface SubAgentParams { prompt: string; maxTurns?: number; isolated?: boolean; }
-export interface SubAgentUsage { inputTokens: number; outputTokens: number; totalTokens: number; }
+export interface SubAgentUsage {
+  /** Stable for this one SDK streamText invocation; callers may safely deduplicate it. */
+  callId: string;
+  /** Legacy numeric aggregates. Consult `usage` before treating zero as reported. */
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+  /** Omitted when the SDK did not report any usage for the attempted call. */
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+  };
+  /** False for completed-step observations and calls that ended without totals. */
+  usageComplete: boolean;
+}
+
+type SDKUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+};
+
+function usageFromSdk(usage: SDKUsage): SubAgentUsage["usage"] | undefined {
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens;
+  const cacheCreationTokens = usage.inputTokenDetails?.cacheWriteTokens;
+  if (usage.inputTokens === undefined && usage.outputTokens === undefined && cacheReadTokens === undefined && cacheCreationTokens === undefined) return undefined;
+  return {
+    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+    ...(cacheCreationTokens === undefined ? {} : { cacheCreationTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+  };
+}
+
+function addUsage(previous: SubAgentUsage["usage"], next: NonNullable<SubAgentUsage["usage"]>): SubAgentUsage["usage"] {
+  return {
+    ...(previous?.inputTokens === undefined && next.inputTokens === undefined ? {} : { inputTokens: (previous?.inputTokens ?? 0) + (next.inputTokens ?? 0) }),
+    ...(previous?.outputTokens === undefined && next.outputTokens === undefined ? {} : { outputTokens: (previous?.outputTokens ?? 0) + (next.outputTokens ?? 0) }),
+    ...(previous?.cacheCreationTokens === undefined && next.cacheCreationTokens === undefined ? {} : { cacheCreationTokens: (previous?.cacheCreationTokens ?? 0) + (next.cacheCreationTokens ?? 0) }),
+    ...(previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined ? {} : { cacheReadTokens: (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0) }),
+  };
+}
 export interface SubAgentResult { success: boolean; content: string; turnsUsed: number; error?: string; }
 
 /** Structural SDK-tool type; avoids coupling this security boundary to SDK internals. */
@@ -220,13 +265,15 @@ async function runSubAgent(
   context: ToolExecutionContext,
   controller: AbortController,
   outerSignal: AbortSignal,
+  callId: string,
   onUsage?: SubAgentExecutorOptions["onUsage"],
 ): Promise<SubAgentResult> {
   let turnsUsed = 0;
   let lastToolCount = 0;
   let content = "";
-  let inputTokens = 0;
-  let outputTokens = 0;
+  let reportedUsage: SubAgentUsage["usage"];
+  let usageComplete = false;
+  let modelStarted = false;
   let terminalError: unknown;
   let result: SubAgentResult;
   const pending = new Set<Promise<unknown>>();
@@ -237,6 +284,7 @@ async function runSubAgent(
   try {
     if (context.signal.aborted) throw new Error("Sub-agent cancelled before model startup.");
     // ChildTool is structural because dynamic SDK schemas erase input generics.
+    modelStarted = true;
     const stream = streamText({
       model, system, prompt, tools: tools as unknown as ToolSet,
       stopWhen: stepCountIs(maxTurns),
@@ -244,16 +292,19 @@ async function runSubAgent(
       onStepFinish({ toolCalls, usage, text }) {
         turnsUsed++;
         lastToolCount = toolCalls.length;
-        inputTokens += usage.inputTokens ?? 0;
-        outputTokens += usage.outputTokens ?? 0;
+        const stepUsage = usageFromSdk(usage);
+        if (stepUsage) reportedUsage = addUsage(reportedUsage, stepUsage);
         content += text;
       },
     });
     for await (const _chunk of stream.textStream) { /* drives tool execution */ }
     content = await stream.text;
     const usage = await stream.totalUsage;
-    inputTokens = usage?.inputTokens ?? inputTokens;
-    outputTokens = usage?.outputTokens ?? outputTokens;
+    const totalUsage = usage && usageFromSdk(usage);
+    if (totalUsage) {
+      reportedUsage = totalUsage;
+      usageComplete = usage.inputTokens !== undefined && usage.outputTokens !== undefined;
+    }
     if (terminalError) throw terminalError;
     if (context.signal.aborted) throw new Error("Sub-agent cancelled.");
     const finishReason = await stream.finishReason;
@@ -281,7 +332,17 @@ async function runSubAgent(
   }
   controller.abort(new Error("Sub-agent model attempt finished"));
   try {
-    await onUsage?.({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
+    if (modelStarted) {
+      const inputTokens = reportedUsage?.inputTokens ?? 0;
+      const outputTokens = reportedUsage?.outputTokens ?? 0;
+      await onUsage?.({
+        callId, inputTokens, outputTokens, totalTokens: inputTokens + outputTokens,
+        ...(reportedUsage?.cacheCreationTokens === undefined ? {} : { cacheCreationTokens: reportedUsage.cacheCreationTokens }),
+        ...(reportedUsage?.cacheReadTokens === undefined ? {} : { cacheReadTokens: reportedUsage.cacheReadTokens }),
+        ...(reportedUsage === undefined ? {} : { usage: reportedUsage }),
+        usageComplete,
+      });
+    }
   } catch (error) {
     result = { ...result, success: false, error: `Unable to record child usage: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -305,6 +366,7 @@ export function createSubAgentExecutor(
     const lifetime = childAbortController(parent?.signal);
     const outerSignal = lifetime.controller.signal;
     const modelController = new AbortController();
+    const callId = crypto.randomUUID();
     const modelSignal = AbortSignal.any([outerSignal, modelController.signal]);
     let context: ToolExecutionContext | undefined;
     let worktree: WorktreeInfo | undefined;
@@ -338,7 +400,7 @@ export function createSubAgentExecutor(
           model, options.createTools(worktree.worktreePath, worktree.scope, context),
           prompt, maxTurns,
           `Work only in isolated checkout ${worktree.worktreePath}. Changes remain on your branch for review. Do not spawn children. Path checks are not arbitrary-shell containment.`,
-          context, modelController, outerSignal, options.onUsage,
+          context, modelController, outerSignal, callId, options.onUsage,
         );
       } else {
         const scope = parent?.scope ?? createPathScope(workingDir);
@@ -351,7 +413,7 @@ export function createSubAgentExecutor(
         result = await runSubAgent(
           model, tools, prompt, maxTurns,
           "Explore the codebase using read-only tools. Do not modify files or spawn children. Provide specific findings.",
-          context, modelController, outerSignal, options.onUsage,
+          context, modelController, outerSignal, callId, options.onUsage,
         );
       }
     } catch (error) {

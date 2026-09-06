@@ -31,9 +31,18 @@ describe("Custom Skills (loadCustomCommands)", () => {
   async function loadCommands() {
     vi.spyOn(process, "cwd").mockReturnValue(tempProject);
     vi.spyOn(os, "homedir").mockReturnValue(tempHome);
+    const originalStateRoot = process.env.WM_STATE_ROOT;
+    // This fixture supplies its own mocked user home; point the state-root
+    // resolver there explicitly instead of relying on the worker root.
+    process.env.WM_STATE_ROOT = path.join(tempHome, ".workermill");
     // Re-import to pick up mocked cwd/homedir
-    const mod = await import("../custom-commands.js");
-    return mod.loadCustomCommands();
+    try {
+      const mod = await import("../custom-commands.js");
+      return mod.loadCustomCommands();
+    } finally {
+      if (originalStateRoot === undefined) delete process.env.WM_STATE_ROOT;
+      else process.env.WM_STATE_ROOT = originalStateRoot;
+    }
   }
 
   it("parses all frontmatter fields correctly", async () => {

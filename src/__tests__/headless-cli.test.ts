@@ -52,18 +52,16 @@ describe("headless CLI terminal results", () => {
     expect(result.stderr).not.toContain("Welcome");
   });
 
-  it("rejects malformed and fractional max steps before any model call", async () => {
+  it.each(["1junk", "1.5"])("rejects invalid max steps %s before any model call", async (maxSteps) => {
     const cwd = await temporaryRoot();
     const stateRoot = path.join(cwd, "state");
     await writeConfig(stateRoot);
 
-    for (const maxSteps of ["1junk", "1.5"]) {
-      const result = invokeCli(cwd, stateRoot, ["--max-steps", maxSteps, "offline"]);
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(2);
-      expect(oneJson(result.stdout)).toMatchObject({ reason: "invalid_options", exitCode: 2 });
-      expect(result.stderr).not.toContain("Welcome");
-    }
+    const result = invokeCli(cwd, stateRoot, ["--max-steps", maxSteps, "offline"]);
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(2);
+    expect(oneJson(result.stdout)).toMatchObject({ reason: "invalid_options", exitCode: 2 });
+    expect(result.stderr).not.toContain("Welcome");
   });
 
   it("reports missing configuration as one JSON startup result", async () => {

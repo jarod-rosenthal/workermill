@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## Authorized PR and merge — 2026-09-07T02:26:04.088287+00:00
+
+User explicitly authorized creating a PR with a description and merging into main, paused to ask about Ubuntu24.04, then confirmed "proceed" after accepting the documented limitation. This supersedes older no-merge instructions below; publication, tags and worktree deletion remain out of scope. Base/HEAD `bd2577ff2f96626aef307705c622ae8303c27d33`, clean core matching origin. No existing open core PR. Coordinator owns this documentation checkpoint and PR/merge operation; no workers or implementation changes. Next: push checkpoint, create reliability/core → main PR, inspect all PR checks (including security workflows beyond the six-job CI), merge the exact checked head using a merge commit to retain recovery history, and verify the resulting main checks. Do not bypass failing checks.
+
 **Current state: qualified Ubuntu24.04 diagnostic follow-up integrated into reliability/core.** Checkpoint: 2026-09-07T02:08:03.737002+00:00. Exact tested implementation **4ec7e142e13956efebeecbb7d83353530b94da1b**, branch `reliability/ubuntu2404`, worktree `/home/user/github/workermill-ubuntu2404`. [CI34075005883](https://github.com/jarod-rosenthal/workermill/actions/runs/34075005883) passed all six jobs with no retry:
 
 | Host | Node versions | Results per version |

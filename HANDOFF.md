@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## PR110 merged — 2026-09-07 03:27:59 UTC
+
+PR110 merged as31bfd209197921553865a50536926f5ed91a5318 after every check passed on6df3247482351201ae6aa41985787263ab2f0c90; GitHub mergeStateStatus CLEAN. PR description records scope, original Docker test timeout, its strengthened wrapper-output correction, validation and native-Windows review disposition. Main CI34079735396 and CodeQL34079735109 are running; audit34079735362, Gitleaks34079735376 and Trivy34079735358 already passed. Next: verify post-merge main workflows; final outcomes will also be recorded in PR110 description. This handoff-only follow-up is saved on the preserved refactor branch; no further code changes or release. Local main should be fast-forwarded to31bfd209, then cut a new branch from updated main before any next implementation.
+
 ## PR110 qualification correction
 
 PR110 https://github.com/jarod-rosenthal/workermill/pull/110, head673865f7. CI34079267530 Ubuntu22.22 failed existing bash-tool docker-wrapper test: real runner Docker command exceeded the shared five-second deadline;1631 passed/one failed/one skip. Security scans passed. Bounded test-only correction: return a harmless marker command from the existing mocked sandbox wrapper and assert its output, preserving the Docker-input wrapper assertion while removing dependence on installed Docker. No production or containment-policy change. Local full1632 passed/one existing skip,113 files,32.49s; typecheck/diff-check exit0. Next push correction and qualify all PR checks before merge.

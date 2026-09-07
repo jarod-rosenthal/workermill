@@ -1,6 +1,10 @@
 # WorkerMill recovery handoff
 
-## Session resume feature — active
+## Session resume PR/merge — authorized
+
+User approved local feature and explicitly authorized a PR description, green checks and merge. Clean branch feat/session-resume at cb0db3e2, implementation1d34b440, base main31bfd209. Coordinator only. Next create PR, verify all CI/security checks on exact head, merge only when green, then verify main workflows. No release or unrelated implementation. This supersedes prior no-merge wording.
+
+## Session resume feature — implemented
 
 User prioritized dedicated session resume before further monolith work. Checked out/refreshed main31bfd209, created feat/session-resume. Coordinator only. Scope: wm resume picker, --last, explicit ID/unique prefix and --fork in current working-directory session scope; reuse interactive startup and hydration, preserve permissions and current provider configuration, reject missing/ambiguous sessions before startup instead of silently creating one. Existing --resume remains. Improve corrupt-entry isolation and atomic session saves as bounded storage support. Resume restores saved conversation/usage; it does not restart in-flight tools/builds. Implemented command/resolver/picker, selected-session hydration, docs and atomic saves; uncommitted on base31bfd209. Focused check failed with a logger ENOENT after temporary test-home removal (45 other tests passed); correcting the new fixture to mock logging. Next verify focused tests and installed CLI/PTY resume before full qualification. No automatic merge/release or unrelated refactors.
 

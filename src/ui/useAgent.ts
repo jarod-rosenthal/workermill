@@ -308,8 +308,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     }
 
     // Session: resume or create fresh.
-    if (options.resume) {
-      const loaded = loadLatestSession();
+    if (options.resume || options.resumeSession) {
+      const loaded = options.resumeSession ?? loadLatestSession();
       if (loaded) {
         // Fork: copy session with new ID, leaving original untouched
         const session = options.fork ? forkSession(loaded) : loaded;
@@ -319,6 +319,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         } else {
           logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
         }
+        delete session.finishedAt;
         // Run micro-compaction on resumed sessions to trim stale tool output
         // before it hits the model on the first prompt.
         const plainMessages = session.messages.map((m) => ({

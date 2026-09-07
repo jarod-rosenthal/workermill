@@ -22,6 +22,8 @@ export interface UseAgentOptions {
   planMode: boolean;
   sandboxed: boolean | "os";
   resume: boolean;
+  /** Explicit CLI selection, already resolved before interactive startup. */
+  resumeSession?: Session;
   fork: boolean;
   maxTokens?: number;
   /** Called after every bash tool execution (e.g. to refresh git branch). */

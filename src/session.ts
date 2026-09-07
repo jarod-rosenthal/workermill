@@ -209,7 +209,15 @@ export function saveSession(session: Session): void {
   ensureSessionsDir();
   session.updatedAt = new Date().toISOString();
   const filePath = path.join(SESSIONS_DIR, `${session.id}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), "utf-8");
+  const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(session, null, 2), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+    fs.renameSync(temporary, filePath);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") logger.error("Failed to remove temporary session file");
+    }
+  }
 }
 
 export function loadLatestSession(): Session | null {
@@ -261,21 +269,26 @@ export function listSessions(max: number = 20): SessionSummary[] {
       files = files.slice(0, max);
     }
 
-    return files.map(f => {
-      const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f.name), "utf-8")) as Partial<Session>;
-      const firstUserMsg = content.messages?.find(m => m.role === "user");
-      // Use updatedAt if present, otherwise fall back to startedAt for backwards compatibility
-      const startedAt = content.startedAt || new Date().toISOString();
-      const updatedAt = content.updatedAt || startedAt;
-      return {
-        id: content.id || "",
-        name: content.name,
-        startedAt: startedAt,
-        updatedAt: updatedAt,
-        messageCount: content.messages?.length || 0,
-        totalTokens: content.totalTokens || 0,
-        preview: firstUserMsg ? firstUserMsg.content.slice(0, 50) : "(empty)",
-      };
+    return files.flatMap(f => {
+      try {
+        const content = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f.name), "utf-8")) as Partial<Session>;
+        const firstUserMsg = content.messages?.find(m => m.role === "user");
+        // Use updatedAt if present, otherwise fall back to startedAt for backwards compatibility
+        const startedAt = content.startedAt || new Date().toISOString();
+        const updatedAt = content.updatedAt || startedAt;
+        return {
+          id: content.id || "",
+          name: content.name,
+          startedAt: startedAt,
+          updatedAt: updatedAt,
+          messageCount: content.messages?.length || 0,
+          totalTokens: content.totalTokens || 0,
+          preview: firstUserMsg ? firstUserMsg.content.slice(0, 50) : "(empty)",
+        };
+      } catch {
+        logger.warn("Skipping unreadable session", { file: f.name });
+        return [];
+      }
     });
   } catch (err) {
     logger.error("Failed to list sessions", { error: err instanceof Error ? err.message : String(err) });

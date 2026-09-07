@@ -23,6 +23,7 @@ let server: Server;
 let baseUrl = "";
 let requests = 0;
 let holdResponse = false;
+const requestBodies: string[] = [];
 let closedModelRequests = 0;
 
 function command(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
@@ -126,6 +127,9 @@ beforeAll(async () => {
     if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
       response.writeHead(404); response.end(); return;
     }
+    let body = "";
+    request.on("data", chunk => { body += chunk; });
+    request.on("end", () => { requestBodies.push(body); });
     requests += 1;
     response.on("close", () => { closedModelRequests += 1; });
     if (!holdResponse) jsonResponse(response);
@@ -188,7 +192,7 @@ describe("installed package and supported OS runtime", () => {
     }
   });
 
-  it("keeps the installed interactive UI responsive in a PTY and cancels without provider credentials", async (test) => {
+  it.each([false, true])("keeps the installed UI responsive and cancels (resume picker: %s)", async (resume, test) => {
     if (process.platform === "win32") {
       // Native Windows shells are outside R17 support; WSL is covered by Linux.
       test.skip("Native Windows shell support is outside the supported matrix; use WSL.");
@@ -207,9 +211,19 @@ describe("installed package and supported OS runtime", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "wm-pack-pty-"));
     roots.push(root);
     const env = await writeConfig(root);
+    if (resume) {
+      const seeded = await run(["run", "--json", "saved resume context"], root, env);
+      expect(seeded.code).toBe(0);
+      const missing = await run(["resume", "missing-session"], root, env);
+      expect(missing.code).toBe(1);
+      expect(missing.stderr).toContain("not found");
+      const nonterminal = await run(["resume", "--last"], root, env);
+      expect(nonterminal.code).toBe(1);
+      expect(nonterminal.stderr).toContain("requires a terminal");
+    }
     holdResponse = true;
     const requestCountBefore = requests;
-    const terminal = pty.spawn(process.execPath, [path.join(installRoot, "node_modules", "workermill", "dist", "index.js")], {
+    const terminal = pty.spawn(process.execPath, [path.join(installRoot, "node_modules", "workermill", "dist", "index.js"), ...(resume ? ["resume"] : [])], {
       cwd: root,
       name: "xterm-256color",
       cols: 120,
@@ -222,11 +236,18 @@ describe("installed package and supported OS runtime", () => {
     terminal.onData((data) => { output += data; });
     const exited = new Promise<number>((resolve) => terminal.onExit(({ exitCode }) => resolve(exitCode)));
     try {
+      if (resume) {
+        await waitUntil(() => output.includes("Resume a conversation"), "Resume picker did not render");
+        terminal.write("\r");
+      }
       await waitUntil(() => output.includes("\u001b[?2004h"), `PTY did not render its startup heartbeat: ${output.slice(-1500)}`);
       terminal.write("wait for cancellation");
       await waitUntil(() => output.includes("wait for cancellation"), "PTY did not accept prompt input");
       terminal.write("\r");
       await waitUntil(() => requests > requestCountBefore, "PTY prompt did not reach offline fixture");
+      if (resume) {
+        await waitUntil(() => requestBodies.some(body => body.includes("saved resume context") && body.includes("wait for cancellation")), "Resumed turn did not include saved history");
+      }
       const closedBefore = closedModelRequests;
       terminal.write("\u001b");
       await waitUntil(() => closedModelRequests > closedBefore, "PTY cancellation did not close the active model request");

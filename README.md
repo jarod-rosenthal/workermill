@@ -197,7 +197,7 @@ Choose models for the task and your operating constraints. Local inference can a
 | **Custom Commands** | `.workermill/skills/` for project-specific slash commands |
 | **Agent Memory** | Persistent `memory` tool — agents save and recall project patterns, corrections, preferences across sessions. Works with all providers |
 | **Project Memory** | `/remember` saves user-facing context — corrections, preferences, learnings |
-| **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
+| **Session History** | Per-directory session storage, `wm resume` to search and continue, `--last` or an ID to select directly |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
 | **Run Manifests** | Inspect saved build records with `wm runs`; a completed story count alone does not establish passing final verification |
 | **Retry Recovery** | Failed runs preserve state and edits for inspection and `/retry`; WorkerMill does not reset the checkout to HEAD automatically. |
@@ -258,7 +258,7 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 | `/model planner` / `/model reviewer` | Switch planner or reviewer model specifically |
 | `/compact [focus]` | Compress conversation — optionally preserve specific context |
 | `/cost` | Session cost estimate and token usage |
-| `/sessions` | List past conversations (resume with `--resume <id>` on next launch) |
+| `/sessions` | List past conversations (continue with `wm resume <id>`) |
 | `/status` | Current session info |
 | `/clear` | Reset the conversation |
 | `/edit` | Open `$EDITOR` for longer input |
@@ -329,6 +329,7 @@ Run outside the interactive session from a normal terminal prompt.
 
 | Command | What it does |
 |---------|-------------|
+| `wm resume [id]` | Search and resume saved conversations; `--last` continues the latest |
 | `wm run <prompt>` | Headless prompt execution — runs a single prompt and exits |
 | `wm models [filter]` | List available AI models with live provider discovery |
 | `wm models update` | Refresh the model catalog from its remote source |

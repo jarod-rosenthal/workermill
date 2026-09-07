@@ -139,7 +139,7 @@ describe("mounted chat execution adapter", () => {
     expect(runPreHooksWithBlocking).not.toHaveBeenCalled();
   });
 
-  it("sends the persisted session conversation in the first resumed turn", async () => {
+  it.each([false, true])("sends saved context in the first resumed turn (explicit selection: %s)", async (explicit) => {
     const restored = {
       id: "restored-session",
       provider: "previous-provider",
@@ -155,7 +155,8 @@ describe("mounted chat execution adapter", () => {
     };
     storedSession.loadLatestSession.mockReturnValue(restored);
 
-    await mount({ resume: true });
+    await mount({ resume: true, ...(explicit ? { resumeSession: restored } : {}) });
+    if (explicit) expect(storedSession.loadLatestSession).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(agent.messages.map(message => message.content)).toEqual([
       "keep this request", "keep this answer",

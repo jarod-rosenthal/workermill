@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## Session resume — merged PR111
+
+PR111 merged as 56487f65b13faa95311b8d189d6bfabf3ce7bc84 after all PR checks passed on 2eb6d51221899a11ffd7ab4350e58f8cdd5675cf. Description includes behavior, limits, review disposition and validation. Local main fast-forwarded to origin/main. Coordinator only; no workers, publication or branch deletion. Post-merge CI34156307955 and security workflows are running; next verify completion and preserve final evidence on feat/session-resume. Earlier active/next-step wording below is historical.
+
 ## Session resume PR/merge — authorized
 
 User approved local feature and explicitly authorized a PR description, green checks and merge. Clean branch feat/session-resume at cb0db3e2, implementation1d34b440, base main31bfd209. Coordinator only. Next create PR, verify all CI/security checks on exact head, merge only when green, then verify main workflows. No release or unrelated implementation. This supersedes prior no-merge wording.

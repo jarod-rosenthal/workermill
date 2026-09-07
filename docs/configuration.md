@@ -537,7 +537,7 @@ OS-mode qualification covers Ubuntu 22.04 and macOS with Node 22.12.0 and
 22.22.2. Ubuntu 24.04 with its default user-namespace restrictions remains
 incompatible with the installed sandbox runtime: command startup can fail
 with a namespace permission error. Installing bubblewrap alone does not
-resolve this limitation. `wm doctor` and OS-mode startup now execute a harmless
+resolve this limitation. With OS mode selected, `wm doctor` and startup execute a harmless
 command through the complete sandbox, including its nested isolation setup.
 Explicit OS mode stops before model work when that probe fails. The optional
 `/build` upgrade instead reports that it continues with path-only restrictions. Use a qualified host for OS mode; see the

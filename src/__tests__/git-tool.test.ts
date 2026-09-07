@@ -29,7 +29,8 @@ describe("git tool process boundary", () => {
   it("keeps shell syntax inert inside a commit message", async () => {
     await expect(execute({ action: "add", cwd: workspace })).resolves.toMatchObject({ success: true });
     const message = "literal 'quote' $(touch escaped) `touch escaped-too`";
-    await expect(execute({ action: "commit", args: message, cwd: workspace })).resolves.toMatchObject({ success: true });
+    const committed = await execute({ action: "commit", args: message, cwd: workspace });
+    expect(committed, JSON.stringify(committed)).toMatchObject({ success: true });
     const actual = execFileSync("git", ["log", "-1", "--format=%s"], { cwd: workspace, encoding: "utf8" }).trim();
     expect(actual).toBe(message);
     expect(fs.existsSync(path.join(workspace, "escaped"))).toBe(false);

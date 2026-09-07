@@ -963,7 +963,7 @@ Done.`;
 
       await runOrchestration(config as any, "Implement a ticketed change", true, false, output, undefined, undefined, "#123");
 
-      expect(mockTicketPostComment).toHaveBeenCalledWith(
+      expect(mockTicketPostComment, JSON.stringify({ errors: output.errors, logs: output.logs })).toHaveBeenCalledWith(
         expect.stringContaining("### backend_developer (ollama/test-model) — Set up API endpoint (1/1)"),
       );
     });

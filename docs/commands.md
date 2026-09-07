@@ -401,6 +401,21 @@ These run outside the interactive session — from a normal terminal prompt.
 
 The interactive session. Running `wm` with no subcommand runs `wm chat` — you never need to type it. Its flags are the [CLI launch flags](#cli-launch-flags) below.
 
+### `wm resume [sessionId]`
+
+Continue a saved conversation from the current working directory:
+
+```bash
+wm resume                 # Searchable picker: arrows and Enter; Esc cancels
+wm resume --last          # Most recently saved conversation
+wm resume a1b2c3          # Full session ID or unique prefix
+wm resume a1b2c3 --fork   # Continue a copy; keep the original
+```
+
+The picker searches names, first-message previews and IDs, ordered by most recently saved. Invalid or ambiguous IDs fail before interactive startup; missing history does not silently start a new conversation. Resume requires a terminal. For scripts use `wm run --session <id> <prompt>`.
+
+Saved messages and cumulative usage are restored. Current provider configuration and launch flags apply, including explicit model overrides; old permission approvals are not restored. Existing micro-compaction may trim stale tool output. Run this from the same directory used for the original conversation (sessions are scoped by canonical working-directory path). It resumes saved conversation state, not an interrupted process, pending tool call or automatic build; use `/retry` for recoverable build work. `wm --resume` remains available for the latest conversation.
+
 ### `wm run [prompt...]`
 
 Headless (non-interactive) prompt execution. Runs a single prompt through the agent and exits.

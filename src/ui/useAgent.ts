@@ -308,13 +308,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     }
 
     // Session: resume or create fresh.
-    if (options.resume) {
-      const loaded = loadLatestSession();
+    if (options.resume || options.resumeSession) {
+      const loaded = options.resumeSession ?? loadLatestSession();
       if (loaded) {
         // Fork: copy session with new ID, leaving original untouched
         const session = options.fork ? forkSession(loaded) : loaded;
+        delete session.finishedAt;
+        saveSession(session);
         if (options.fork) {
-          saveSession(session);
           logger.info("Forked session", { originalId: loaded.id, forkId: session.id });
         } else {
           logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
@@ -362,7 +363,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       WORKERMILL_SESSION_ID: sessionRef.current?.id || "",
       WORKERMILL_PROVIDER: options.provider,
       WORKERMILL_MODEL: options.model,
-      WORKERMILL_RESUMED: options.resume ? "true" : "false",
+      WORKERMILL_RESUMED: (options.resume || options.resumeSession) ? "true" : "false",
     });
 
   }

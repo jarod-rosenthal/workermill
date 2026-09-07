@@ -87,7 +87,7 @@ function addSharedOptions(cmd: Command): Command {
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit")
     .option("--json", "Emit structured JSON for a headless prompt")
-    .option("--fork", "Fork the resumed session (use with --resume)")
+    .option("--fork", "Fork the resumed session (resume command or --resume)")
     .option("--live-view", "Enable live browser diff view")
     .option("--no-live-view", "Disable live browser diff view");
 }
@@ -205,82 +205,114 @@ program
     await executeHeadless(prompt?.join(" "), options, false);
   });
 
+async function launchInteractiveChat(options: Record<string, unknown>, resumeSession?: import("./session.js").Session): Promise<void> {
+  if (options.prompt !== undefined) {
+    await executeHeadless(options.prompt as string, options, true);
+    return;
+  }
+  const { config, isFirstRun } = await loadCliConfig(options);
+  const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
+  const workingDir = process.cwd();
+  const roleModels = getRoleModelsFromConfig(config);
+  const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
+  const sandboxed = sandboxResolution.effective;
+  if (sandboxed === "os") await assertOSSandboxReady(workingDir, config.sandboxCapabilities);
+
+  await printWelcome(workingDir, isFirstRun);
+
+  // Check for interrupted builds and show recovery prompt
+  try {
+    const { detectInterruptedBuild, printRecoveryPrompt } = await import("./recovery.js");
+    const recovery = detectInterruptedBuild(workingDir);
+    if (recovery) {
+      printRecoveryPrompt(recovery);
+    }
+  } catch { /* non-fatal */ }
+
+  if (sandboxResolution.warning) {
+    console.log(chalk.yellow(`  ⚠ ${sandboxResolution.warning}`));
+    console.log();
+  }
+
+  // Enable synchronized output (DEC mode 2026) to prevent terminal tearing.
+  // Wraps each stdout.write in begin/end synchronized update sequences so the
+  // terminal renders each frame atomically instead of showing partial redraws.
+  if (process.stdout.isTTY) {
+    const BSU = "\x1b[?2026h";  // Begin Synchronized Update
+    const ESU = "\x1b[?2026l";  // End Synchronized Update
+    const origWrite = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array, encoding?: BufferEncoding, cb?: (err?: Error | null) => void) => boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (process.stdout as any).write = function (chunk: string | Uint8Array, encodingOrCb?: BufferEncoding | ((err?: Error | null) => void), cb?: (err?: Error | null) => void): boolean {
+      const str = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      if (str.includes("\x1b[") && str.length > 20) {
+        if (typeof encodingOrCb === "function") return origWrite(BSU + str + ESU, undefined, encodingOrCb);
+        return origWrite(BSU + str + ESU, encodingOrCb, cb);
+      }
+      if (typeof encodingOrCb === "function") return origWrite(chunk, undefined, encodingOrCb);
+      return origWrite(chunk, encodingOrCb, cb);
+    };
+  }
+
+  const { waitUntilExit } = render(
+    React.createElement(Root, {
+      provider,
+      model,
+      apiKey,
+      host,
+      contextLength,
+      trustAll: options.trust === true,
+      planMode: options.plan === true,
+      sandboxed,
+      resume: options.resume === true || !!resumeSession,
+      resumeSession,
+      fork: options.fork === true,
+      maxTokens: options.maxTokens as number | undefined,
+      workingDir,
+      roleModels,
+      cliConfig: config,
+    }),
+  );
+
+  await waitUntilExit();
+}
+
 // ── Default command: interactive chat ──
 const defaultCmd = program
   .command("chat", { isDefault: true })
   .description("Interactive AI coding agent (default)")
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
-  .action(async (options) => {
-    if (options.prompt !== undefined) {
-      await executeHeadless(options.prompt as string, options, true);
-      return;
-    }
-    const { config, isFirstRun } = await loadCliConfig(options);
-    const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
-    const workingDir = process.cwd();
-    const roleModels = getRoleModelsFromConfig(config);
-    const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
-    const sandboxed = sandboxResolution.effective;
-    if (sandboxed === "os") await assertOSSandboxReady(workingDir, config.sandboxCapabilities);
-
-    await printWelcome(workingDir, isFirstRun);
-
-    // Check for interrupted builds and show recovery prompt
-    try {
-      const { detectInterruptedBuild, printRecoveryPrompt } = await import("./recovery.js");
-      const recovery = detectInterruptedBuild(workingDir);
-      if (recovery) {
-        printRecoveryPrompt(recovery);
-      }
-    } catch { /* non-fatal */ }
-
-    if (sandboxResolution.warning) {
-      console.log(chalk.yellow(`  ⚠ ${sandboxResolution.warning}`));
-      console.log();
-    }
-
-    // Enable synchronized output (DEC mode 2026) to prevent terminal tearing.
-    // Wraps each stdout.write in begin/end synchronized update sequences so the
-    // terminal renders each frame atomically instead of showing partial redraws.
-    if (process.stdout.isTTY) {
-      const BSU = "\x1b[?2026h";  // Begin Synchronized Update
-      const ESU = "\x1b[?2026l";  // End Synchronized Update
-      const origWrite = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array, encoding?: BufferEncoding, cb?: (err?: Error | null) => void) => boolean;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (process.stdout as any).write = function (chunk: string | Uint8Array, encodingOrCb?: BufferEncoding | ((err?: Error | null) => void), cb?: (err?: Error | null) => void): boolean {
-        const str = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-        if (str.includes("\x1b[") && str.length > 20) {
-          if (typeof encodingOrCb === "function") return origWrite(BSU + str + ESU, undefined, encodingOrCb);
-          return origWrite(BSU + str + ESU, encodingOrCb, cb);
-        }
-        if (typeof encodingOrCb === "function") return origWrite(chunk, undefined, encodingOrCb);
-        return origWrite(chunk, encodingOrCb, cb);
-      };
-    }
-
-    const { waitUntilExit } = render(
-      React.createElement(Root, {
-        provider,
-        model,
-        apiKey,
-        host,
-        contextLength,
-        trustAll: options.trust || false,
-        planMode: options.plan || false,
-        sandboxed,
-        resume: options.resume || false,
-        fork: options.fork || false,
-        maxTokens: options.maxTokens,
-        workingDir,
-        roleModels,
-        cliConfig: config,
-      }),
-    );
-
-    await waitUntilExit();
-  });
+  .action(async (options) => launchInteractiveChat(options));
 addSharedOptions(defaultCmd);
+
+const resumeCmd = program
+  .command("resume [sessionId]")
+  .description("Choose and resume a saved conversation in this directory")
+  .option("--last", "Resume the most recently saved conversation")
+  .option("--plan", "Start in plan mode (read-only tools)")
+  .action(async (sessionId, options) => {
+    try {
+      if (options.prompt !== undefined || options.json) throw new Error("Use `wm run --session <id> --json <prompt>` for headless continuation.");
+      const { resolveResumeSession, resumableSessions } = await import("./resume-command.js");
+      let selected = sessionId as string | undefined;
+      if (!selected && !options.last) {
+        const sessions = resumableSessions();
+        if (!sessions.length) throw new Error("No saved conversations in this directory.");
+        if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Session selection requires a terminal. Use `wm resume --last` or `wm resume <id>`.");
+        const { pickResumeSession } = await import("./ui/ResumePicker.js");
+        selected = await pickResumeSession(sessions);
+        if (!selected) return;
+      }
+      const session = resolveResumeSession(selected, options.last === true);
+      if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Interactive resume requires a terminal. Use `wm run --session <id> <prompt>` for headless continuation.");
+      await launchInteractiveChat({ ...options, resume: true }, session);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
+  });
+addSharedOptions(resumeCmd);
+
 
 // ── Doctor command: check setup health ──
 program

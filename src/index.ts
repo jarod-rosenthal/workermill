@@ -274,6 +274,7 @@ async function launchInteractiveChat(options: Record<string, unknown>, resumeSes
   );
 
   await waitUntilExit();
+  process.stdout.write("\nTo continue a saved conversation, run: wm restore\n");
 }
 
 // ── Default command: interactive chat ──
@@ -287,6 +288,7 @@ addSharedOptions(defaultCmd);
 
 const resumeCmd = program
   .command("resume [sessionId]")
+  .alias("restore")
   .description("Choose and resume a saved conversation in this directory")
   .option("--last", "Resume the most recently saved conversation")
   .option("--plan", "Start in plan mode (read-only tools)")

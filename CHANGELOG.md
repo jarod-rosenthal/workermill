@@ -6,7 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-07
+
 ### Added
+- **Session resume** — `wm resume` provides a searchable session picker, `--last`, direct IDs or unique prefixes, and `--fork`. `wm restore` is an alias and appears in the interactive exit hint. Saved conversation history and usage are restored with current configuration and fresh permission decisions.
 - **Reliability contracts** — required static gates now default to blocking, while planner verification and explicitly advisory gates remain advisory outside strict mode. Strict mode requires valid review approval when review is enabled and verifies gates, review, and completion against the same candidate fingerprint.
 - **Run usage ledger** — records observed calls across roles, children, compaction, failed calls, and retries without double counting. Unknown pricing and incomplete usage are labelled; run totals are per-run and session totals are cumulative.
 - **Explicit OS-sandbox behavior** — explicit `sandbox: "os"` fails closed when unavailable. `/build` may visibly continue with path mode only after its optional automatic upgrade fails. Worktrees remain change isolation, not a sandbox.
@@ -20,6 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Qualification** — deterministic tests cover actual adapters, installed-package startup, headless JSON and PTY cancellation. Platform and live-evaluation limits are recorded in the [qualification report](docs/recovery/r24-qualification.md).
 
 ### Fixed
+- **Session persistence** — atomic saves preserve the previous file on failed replacement; unreadable entries no longer hide valid history, and resumed sessions clear their saved completion timestamp.
 - **Interrupted work** — active/terminal run records, failed-call accounting and owned cleanup now agree across adapters. `/orchestrate` propagates cancellation into decomposition, issue requests and program gates.
 - **Planner could assign stories to a persona that doesn't exist** — the JSON-extraction retry prompt listed `fullstack_developer`, which has no persona file. Replaced with the real persona list.
 - **`editor` config setting had no effect** — `/edit` read only `$EDITOR`/`$VISUAL` and ignored the configured value. It now honors `editor` (`vim`/`nano`/`auto`), falling back to `$EDITOR`, `$VISUAL`, then `vi`.

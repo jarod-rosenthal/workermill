@@ -223,7 +223,7 @@ describe("installed package and supported OS runtime", () => {
     }
     holdResponse = true;
     const requestCountBefore = requests;
-    const terminal = pty.spawn(process.execPath, [path.join(installRoot, "node_modules", "workermill", "dist", "index.js"), ...(resume ? ["resume"] : [])], {
+    const terminal = pty.spawn(process.execPath, [path.join(installRoot, "node_modules", "workermill", "dist", "index.js"), ...(resume ? ["restore"] : [])], {
       cwd: root,
       name: "xterm-256color",
       cols: 120,
@@ -257,6 +257,7 @@ describe("installed package and supported OS runtime", () => {
       await waitUntil(() => output.includes("Session Status"), `PTY did not become idle after cancellation: ${output.slice(-1500)}`);
       terminal.write("\u0003");
       expect(await exited).toBe(0);
+      expect(output).toContain("To continue a saved conversation, run: wm restore");
     } catch (error) {
       throw new Error(String(error) + "\nPTY output:\n" + output.slice(-6000));
     } finally {

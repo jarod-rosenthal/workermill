@@ -70,18 +70,18 @@ describe("process runner", () => {
     expect(result.exitCode).not.toBe(0);
   });
 
-  it("cleans a background descendant when the shell exits before inherited pipes close", async () => {
+  it.each([0, 7])("preserves foreground exit %s while cleaning a background descendant", async (exitCode) => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "wm-r02-descendant-"));
     const pidFile = path.join(fixture, "child.pid");
     try {
       const result = await runProcess(request({
-        command: `sleep 30 & printf '%s' "$!" > ${pidFile}; printf parent`,
+        command: `sleep 30 & printf '%s' "$!" > ${pidFile}; printf parent; exit ${exitCode}`,
         timeoutMs: 2_000,
         terminationGraceMs: 100,
       }));
       const childPid = Number(fs.readFileSync(pidFile, "utf8"));
 
-      expect(result.reason).toBe("cancelled");
+      expect(result).toMatchObject({ reason: "exited", exitCode });
       expect(result.stdout).toContain("parent");
       expect(Number.isInteger(childPid)).toBe(true);
       let childRunning = true;

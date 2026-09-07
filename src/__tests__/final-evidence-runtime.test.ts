@@ -273,6 +273,7 @@ describe("final evidence runtime", () => {
     }, "Implement fixture", true, false, runOutput);
 
     expect(result.featureBranch).toBeTruthy();
+    expect(fs.existsSync(path.join(dir, "generated-by-gate.txt")), JSON.stringify({ result, errors: runOutput.errors, logs: runOutput.logs })).toBe(true);
     expect(fs.readFileSync(path.join(dir, "generated-by-gate.txt"), "utf8")).toBe("xx");
     expect(runOutput.logs.filter((line) => line.includes("Running 1 quality gate"))).toHaveLength(2);
     expect(runOutput.errors).toContain("Quality gates changed the candidate repeatedly; publication is blocked with local work preserved.");

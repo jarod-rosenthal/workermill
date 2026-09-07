@@ -147,7 +147,7 @@ function checkAfterParentExit(process: ActiveProcess): void {
   if (groupExists(process.pid)) {
     // The shell can exit while a background descendant still owns stdout or
     // stderr. Start cleanup now; waiting for `close` would wait on that pipe.
-    requestTermination(process, "cancelled");
+    requestTermination(process, null);
   }
 }
 
@@ -160,7 +160,7 @@ function pollForGroupExit(process: ActiveProcess): void {
   process.pollTimer = setTimeout(() => pollForGroupExit(process), 15);
 }
 
-function requestTermination(process: ActiveProcess, reason: "cancelled" | "timed_out"): void {
+function requestTermination(process: ActiveProcess, reason: "cancelled" | "timed_out" | null): void {
   if (process.settled) return;
   if (!process.terminationReason) process.terminationReason = reason;
   if (process.terminationTimer || process.killSent) return;
@@ -182,12 +182,9 @@ function requestTermination(process: ActiveProcess, reason: "cancelled" | "timed
 function checkAfterClose(process: ActiveProcess): void {
   if (!process.parentClosed || process.settled) return;
   if (groupExists(process.pid)) {
-    if (!process.terminationReason) {
-      // A shell can exit while a background descendant remains. Contain that
-      // descendant before reporting success so no child escapes this run.
-      process.terminationReason = "cancelled";
-    }
-    requestTermination(process, process.terminationReason);
+    // Contain remaining descendants without relabeling the foreground exit
+    // as user cancellation. Explicit cancellation and deadlines still win.
+    requestTermination(process, null);
     return;
   }
   finish(process);

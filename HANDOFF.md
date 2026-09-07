@@ -1,17 +1,18 @@
 # WorkerMill recovery handoff
 
-**Current state: pushed and qualified on the supported CI matrix.** Checkpoint: 2026-09-07 00:43 UTC. Repository `/home/user/github/workermill`, branch `reliability/core`. Exact tested commit **b67160f8393370fc99019b3a5bcff305570e381f**. [CI run 34069973409](https://github.com/jarod-rosenthal/workermill/actions/runs/34069973409) completed successfully across all four jobs (including a same-SHA retry after a runner DNS failure):
+**Current state: qualified Ubuntu24.04 diagnostic follow-up, ready for core fast-forward and push.** Checkpoint: 2026-09-07T02:08:03.737002+00:00. Exact tested implementation **4ec7e142e13956efebeecbb7d83353530b94da1b**, branch `reliability/ubuntu2404`, worktree `/home/user/github/workermill-ubuntu2404`. [CI34075005883](https://github.com/jarod-rosenthal/workermill/actions/runs/34075005883) passed all six jobs with no retry:
 
-| Host | Node versions | Unit results per version | Package / PTY results |
-| --- | --- | --- | --- |
-| Ubuntu22.04 | 22.12.0, 22.22.2 | 1,614 passed, zero failed, one existing skip; 111 files | Four passed per version |
-| macOS26 arm64 | 22.12.0, 22.22.2 | 1,613 passed, zero failed, two expected skips; 111 files | Four passed per version |
+| Host | Node versions | Results per version |
+| --- | --- | --- |
+| Ubuntu22.04 | 22.12.0,22.22.2 | 1,625 unit passes, one existing skip,112 files; four installed-package/PTY passes |
+| macOS26 arm64 | 22.12.0,22.22.2 | 1,624 unit passes, two expected skips,112 files; four installed-package/PTY passes |
+| Ubuntu24.04 | 22.12.0,22.22.2 | Early OS rejection before model calls, truthful doctor diagnostics, explicit path-mode success, runtime0.0.75 incompatibility reproduced |
 
-All four typecheck and build steps passed. Evidence-only documentation commits follow the tested candidate. [Qualification report](docs/recovery/r24-qualification.md) records exact revisions, prior failed CI runs, corrections, supported-host scope, and test limits. No merge or release was performed or authorized.
+All four supported-host typecheck/build steps passed. Ubuntu24.04 jobs are startup diagnostics, **not OS containment qualification**. Both pinned0.0.46 and isolated0.0.75 fail nested seccomp setup under its user-namespace policy. Dependency and host-wide security policy remain unchanged. Shared startup probes now prevent starting model work with an unusable explicit OS sandbox. Automatic build upgrade retains its existing visible path-mode fallback. A qualification-discovered process bug is also fixed: normal descendant cleanup no longer mislabels a completed command as cancelled; explicit cancellation, deadlines and child termination remain intact.
 
-**Open platform limitation:** Ubuntu24.04's default user-namespace policy blocks the installed runtime's nested seccomp setup. Its failed qualification remains documented; it is not covered by the successful Ubuntu22.04 results. No host protection or containment assertion was disabled. Qualification of a compatible Ubuntu24.04 runtime/host policy remains a follow-up. User-facing configuration docs disclose this limitation.
+The prior supported baseline was b67160f8, recorded by documentation HEADa2547299 and CI34069973409. This follow-up supersedes its readiness counts, not its historical evidence. [Qualification report](docs/recovery/r24-qualification.md) retains every failed candidate run and the bounded corrections. Optional R19 budgets and R21 comparison/live measurements remain deferred. No active workers; no main merge, publication, tag, paid evaluation or worktree deletion.
 
-No implementation workers remain active. Optional R19 budgets and R21 comparison harness/live measurements remain deferred. Next action: report successful push/CI and this platform limitation; await a separately scoped follow-up or integration authorization. Do not replay old work or restart completed packages.
+Next: commit these evidence-only updates, remove only the coordinator-owned pointer paragraph in core's HANDOFF.md, fast-forward `reliability/core` from the qualified follow-up, push both branches, rebuild the core CLI, and verify clean tracked state. No implementation replay or additional feature work is needed.
 
 **Approval continuity:** the user requested fewer interruptions. Existing saved prefixes cover pushes, tests, workflow dispatch/monitoring/retry, and `gh api --method GET`. Reuse them. Avoid shell redirects in new escalated commands: they caused exact per-log approvals and one nine-minute wait. Read logs through the reusable GET command and save summaries separately. The host's managed permission profile remains restricted; no host policy was changed. Network access can be enabled through supported user settings, but approval=never alone does not grant access.
 
@@ -27,7 +28,7 @@ Latest run34074511419 on76c4640e passed both Ubuntu24 diagnostics and two suppor
 
 1. Read this current section, [AGENTS.md](AGENTS.md), [qualification report](docs/recovery/r24-qualification.md), and [queue](docs/reliability-queue.json). Then inspect branch/status. Historical failures below describe repaired snapshots, not current readiness.
 2. No implementation worker remains active; all accepted candidates are integrated. No required local implementation item remains. R01–R18 and R22–R24 are complete; R20 offline fixtures are complete. Optional R19 budgets and R21 comparison harness/live measurements are explicitly deferred.
-3. The authorized branch push and supported-host CI qualification are complete. Do not merge, publish, tag, release, run paid evaluation or delete worktrees without separate authorization. For further implementation, the concrete remaining platform issue is Ubuntu24.04 compatibility; optional R19/R21 remain deferred.
+3. The Ubuntu24.04 diagnostic implementation and supported-host qualification are complete. Finish the recorded core fast-forward/push if still pending. Do not merge into main, publish, tag, release, run paid evaluation or delete worktrees without separate authorization. Full Ubuntu24.04 OS containment remains blocked; optional R19/R21 remain deferred.
 4. If the user requests additional implementation, record the specific bounded task before editing. Do not restart completed packages or replay old worker branches wholesale. Preserve current user changes and the saved worktrees.
 
 ## Delivered behavior

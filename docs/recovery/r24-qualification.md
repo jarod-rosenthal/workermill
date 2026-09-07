@@ -1,6 +1,6 @@
 # Reliability release-candidate qualification
 
-Status: **qualified on the supported CI matrix** at `b67160f8393370fc99019b3a5bcff305570e381f`, 2026-09-07. Ubuntu22.04 and macOS26 arm64 passed on Node22.12.0/22.22.2. Ubuntu24.04 remains an explicit open compatibility limitation. The original local qualification and failed remote attempts are retained below. No release or live comparative evaluation occurred.
+Status: **qualified on the supported CI matrix plus Ubuntu24.04 startup diagnostics** at `4ec7e142e13956efebeecbb7d83353530b94da1b`, 2026-09-07. See the final follow-up section for current counts; earlier sections are historical snapshots. Ubuntu22.04 and macOS26 arm64 passed on Node22.12.0/22.22.2. Ubuntu24.04 remains an explicit open compatibility limitation. The original local qualification and failed remote attempts are retained below. No release or live comparative evaluation occurred.
 
 ## Final checks
 
@@ -80,10 +80,24 @@ Test basenames above mean `<name>.test.ts`. The [R16 coverage map](r16-coverage.
 - Branch pushes and remote CI were subsequently authorized. No publication, tag, PR, remote merge, paid evaluation, or deletion of preserved worktrees is part of this qualification.
 
 
-## Ubuntu24.04 diagnostic follow-up — candidate
+## Ubuntu24.04 diagnostic follow-up — qualified
 
 Authorized after the supported-host qualification. Isolated branch reliability/ubuntu2404, base a2547299. A shared complete runtime probe now checks harmless command execution through the real scoped runner (five-second command timeout, cancellation propagation and owned cleanup), not just dependency installation. Headless/chat startup and build preflight use it; doctor reports failure instead of claiming dependency presence establishes runtime health. Explicit OS requests stop before model work. Only the existing optional build upgrade can fall back, visibly, to path mode. Cleanup failures propagate rather than authorize fallback.
 
 The released0.0.75 README and wrapper retain the same nested-namespace requirement. The dependency remains pinned to0.0.46 pending evidence; the Ubuntu24.04 CI diagnostic compares0.0.75 in a separate installation. The added Ubuntu24.04 jobs qualify truthful startup rejection and usable path mode, not OS containment. They retain the host userns restriction and use Ubuntu's packaged bwrap policy.
 
-Local candidate: typecheck/build passed; full suite1623 passed, zero failed, one existing skip,112 files,32.90 seconds. This local environment reports Ubuntu24.04 userspace but lacks the AppArmor userns restriction sysctl, so local success is not evidence for stock Ubuntu24.04. Remote and package results pending.
+Local candidate: typecheck/build passed; full suite1623 passed, zero failed, one existing skip,112 files,32.90 seconds. This local environment reports Ubuntu24.04 userspace but lacks the AppArmor userns restriction sysctl, so local success is not evidence for stock Ubuntu24.04. Installed-package/PTY checks passed all four cases. Subsequent evidence follows.
+
+### Follow-up qualification and bounded correction
+
+The released runtime0.0.75 also fails on the actual Ubuntu24.04 runners with `apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide CAP_SYS_ADMIN): Permission denied`. Both Node versions pass the diagnostic contract: explicit OS mode rejects before any model request, doctor reports failure, and explicitly selected path mode completes against a local scripted provider. This is not OS containment support; no dependency upgrade or host-wide policy relaxation was adopted.
+
+Prior follow-up CI runs remain part of the evidence:
+
+- [34073901156](https://github.com/jarod-rosenthal/workermill/actions/runs/34073901156),6a3912dc: both Ubuntu24 diagnostics passed; supported jobs had intermittent Git commit and worker-ticket assertion failures. Retrying failed jobs reproduced the Git failure. Assertions were augmented with underlying results without relaxing expectations.
+- [34074317744](https://github.com/jarod-rosenthal/workermill/actions/runs/34074317744),ce59a4ba: five jobs passed; Ubuntu22.12 timed out in a test launching two source CLIs under one five-second test deadline. Parameterized the two argument cases, retaining each child deadline and every assertion.
+- [34074511419](https://github.com/jarod-rosenthal/workermill/actions/runs/34074511419),76c4640e: four jobs passed; Ubuntu22.22 failed a gate fixture with its generated file absent, and macOS22.22 showed a successful Git commit mislabeled `cancelled`. The process runner explicitly marked routine post-exit descendant cleanup as cancellation. The gate/earlier worker failures' common cause is not independently established.
+
+Correction4ec7e142 separates internal descendant cleanup from explicit cancellation and timeout reasons. TERM/KILL and bounded cleanup remain; regression coverage checks foreground exit0 and exit7 while verifying the leftover child is dead. The old cleanup test's cancelled expectation was corrected to the foreground-result contract; its containment assertion remains. The gate fixture now includes underlying output if it fails again.
+
+On4ec7e142's implementation diff, Node22.22.2 local full suite passed **1625 tests, zero failures, one existing skip,112 files,33.78s**; typecheck/build passed; installed-package/PTY **four passed,11.37s**. Focused process/Git/final-evidence **25 passed**. The initial restricted focused invocation had three Git spawn EPERM failures; normal approved execution passed. [CI34075005883](https://github.com/jarod-rosenthal/workermill/actions/runs/34075005883) qualifies the exact pushed4ec7e142e13956efebeecbb7d83353530b94da1b; all six jobs passed without retry. Ubuntu22.04 each:1625 unit passes/one existing skip,112 files; macOS26 arm64 each:1624 unit passes/two expected skips,112 files. Four package/PTY cases passed in every supported job; all four typecheck/build steps passed. Both Ubuntu24 diagnostic jobs passed. This qualifies the follow-up for integration into reliability/core; full Ubuntu24 OS containment remains unsupported.

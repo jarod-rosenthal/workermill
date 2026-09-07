@@ -40,6 +40,8 @@ describe("resume selection", () => {
   it("keeps valid sessions discoverable beside a corrupt save", async () => {
     const api = await setup();
     fs.writeFileSync(path.join(api.directory, "broken.json"), "{broken");
+    fs.writeFileSync(path.join(api.directory, "invalid-id.json"), JSON.stringify({ ...api.second, id: 123 }));
+    expect(api.listSessions(1).map(session => session.id)).toEqual([api.second.id]);
     expect(api.resumableSessions().map(session => session.id)).toEqual([api.second.id, api.first.id]);
     expect(api.resolveResumeSession(undefined, true).id).toBe(api.second.id);
   });

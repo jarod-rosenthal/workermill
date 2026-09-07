@@ -313,13 +313,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       if (loaded) {
         // Fork: copy session with new ID, leaving original untouched
         const session = options.fork ? forkSession(loaded) : loaded;
+        delete session.finishedAt;
+        saveSession(session);
         if (options.fork) {
-          saveSession(session);
           logger.info("Forked session", { originalId: loaded.id, forkId: session.id });
         } else {
           logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
         }
-        delete session.finishedAt;
         // Run micro-compaction on resumed sessions to trim stale tool output
         // before it hits the model on the first prompt.
         const plainMessages = session.messages.map((m) => ({
@@ -363,7 +363,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       WORKERMILL_SESSION_ID: sessionRef.current?.id || "",
       WORKERMILL_PROVIDER: options.provider,
       WORKERMILL_MODEL: options.model,
-      WORKERMILL_RESUMED: options.resume ? "true" : "false",
+      WORKERMILL_RESUMED: (options.resume || options.resumeSession) ? "true" : "false",
     });
 
   }

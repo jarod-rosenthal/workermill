@@ -48,7 +48,7 @@ vi.mock("../engine/tools/bash-background.js", async (original) => {
 
 import { streamText, generateText } from "ai";
 import { resolveConfig, saveLocalSettings, type CliConfig } from "../config.js";
-import { runHooks, runPreHooksWithBlocking } from "../hooks.js";
+import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
 import { clearCheckpoints, getChangedFiles } from "../checkpoints.js";
 import { useAgent, type UseAgentReturn } from "../ui/useAgent.js";
 import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
@@ -70,6 +70,7 @@ describe("mounted chat execution adapter", () => {
     configured = { providers: { test: { model: "test-model" } }, default: "test", liveView: false };
     vi.mocked(resolveConfig).mockImplementation(() => configured);
     vi.mocked(runHooks).mockClear();
+    vi.mocked(runLifecycleHooks).mockClear();
     vi.mocked(runPreHooksWithBlocking).mockClear();
     vi.mocked(saveLocalSettings).mockClear();
     ensureRunMcp.mockReset();
@@ -139,9 +140,11 @@ describe("mounted chat execution adapter", () => {
     expect(runPreHooksWithBlocking).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("sends saved context in the first resumed turn (explicit selection: %s)", async (explicit) => {
+  it.each(["legacy", "explicit", "fork"])("sends saved context in the first resumed turn (%s)", async (mode) => {
+    const explicit = mode !== "legacy";
     const restored = {
       id: "restored-session",
+      finishedAt: "2026-01-01T00:01:00.000Z",
       provider: "previous-provider",
       model: "previous-model",
       startedAt: "2026-01-01T00:00:00.000Z",
@@ -155,13 +158,19 @@ describe("mounted chat execution adapter", () => {
     };
     storedSession.loadLatestSession.mockReturnValue(restored);
 
-    await mount({ resume: true, ...(explicit ? { resumeSession: restored } : {}) });
+    await mount({ resume: !explicit, fork: mode === "fork", ...(explicit ? { resumeSession: restored } : {}) });
     if (explicit) expect(storedSession.loadLatestSession).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(agent.messages.map(message => message.content)).toEqual([
       "keep this request", "keep this answer",
     ]));
-    expect(agent.session).toBe(restored);
+    if (mode === "fork") {
+      expect(agent.session.id).not.toBe(restored.id);
+      expect(restored.finishedAt).toBe("2026-01-01T00:01:00.000Z");
+    } else expect(agent.session).toBe(restored);
+    expect(agent.session.finishedAt).toBeUndefined();
+    expect(storedSession.saveSession).toHaveBeenCalledWith(expect.objectContaining({ id: agent.session.id }));
+    expect(runLifecycleHooks).toHaveBeenCalledWith("session_start", undefined, workspace, expect.objectContaining({ WORKERMILL_RESUMED: "true" }));
     await vi.waitFor(() => expect(agent.cost).toBe(0.125));
     script(async () => {});
     agent.submit("continue from the saved answer");

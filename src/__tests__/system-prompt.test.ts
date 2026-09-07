@@ -25,11 +25,6 @@ vi.mock("../project-context.js", () => ({
 
 vi.mock("../mcp-client.js", () => ({
   getMCPTools: vi.fn(() => []),
-  getMCPToolDefinitions: vi.fn(() => ({})),
-  stopAllMCPServers: vi.fn(),
-  autoDetectMCPServers: vi.fn(() => ({})),
-  registerMCPServers: vi.fn(),
-  hasMCPRegistered: vi.fn(() => false),
 }));
 
 import { buildSystemPrompt } from "../ui/system-prompt.js";

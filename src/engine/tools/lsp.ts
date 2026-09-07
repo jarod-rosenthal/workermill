@@ -106,7 +106,7 @@ interface ServerState {
   process: ChildProcess;
   language: string;
   requestId: number;
-  responseBuffer: string;
+  responseBuffer: Buffer;
   pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
   openFiles: Map<string, number>; // uri -> version
   publishedDiagnostics: Map<string, DiagnosticItem[]>; // uri -> diagnostics from push notifications
@@ -115,10 +115,69 @@ interface ServerState {
     pullDiagnostics: boolean;       // textDocument/diagnostic
     workspaceDiagnostics: boolean;  // workspace/diagnostic
   };
+  maxResponseBytes: number;
+  closed: boolean;
+  closePromise?: Promise<void>;
+  stdoutListener?: (data: Buffer) => void;
+  stderrListener?: () => void;
+  exitListener?: (code: number | null) => void;
+  errorListener?: (error: Error) => void;
 }
 
-let server: ServerState | null = null;
-let initPromise: Promise<void> | null = null;
+const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
+const DEFAULT_TERMINATION_GRACE_MS = 500;
+
+interface LanguageServerOverride {
+  language: string;
+  command: string;
+  args?: string[];
+}
+
+export interface LSPRunResourcesOptions {
+  runId: string;
+  workspace: string;
+  signal: AbortSignal;
+  startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  maxResponseBytes?: number;
+  terminationGraceMs?: number;
+  /** Test-only/custom embedding override. Ordinary calls retain auto-detection. */
+  server?: LanguageServerOverride;
+}
+
+export interface LSPRunResources {
+  readonly runId: string;
+  readonly workspace: string;
+  execute(params: LspParams): Promise<LspResult>;
+  close(): Promise<void>;
+  isRunning(): boolean;
+  getServerLanguage(): string | null;
+}
+
+interface ResourceCollection {
+  readonly runId: string;
+  readonly workspace: string;
+  readonly signal: AbortSignal;
+  readonly controller: AbortController;
+  readonly parentSignal: AbortSignal;
+  readonly parentAbortListener: () => void;
+  runAbortListener?: () => void;
+  readonly startupTimeoutMs: number;
+  readonly requestTimeoutMs: number;
+  readonly maxResponseBytes: number;
+  readonly terminationGraceMs: number;
+  readonly override?: LanguageServerOverride;
+  server?: ServerState;
+  starting?: Promise<ServerState>;
+  ownedServers: Set<ServerState>;
+  closed: boolean;
+  closePromise?: Promise<void>;
+}
+
+const legacyCollections = new Map<string, ResourceCollection>();
+const runCollections = new Set<ResourceCollection>();
 
 // ---------------------------------------------------------------------------
 // Language detection
@@ -139,13 +198,19 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 function commandExists(cmd: string): boolean {
-  try {
-    const { execSync } = require("child_process");
-    execSync(`which ${cmd}`, { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
+  const extensions = process.platform === "win32"
+    ? ["", ...(process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")]
+    : [""];
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    for (const extension of extensions) {
+      try {
+        const candidate = path.join(directory, cmd + extension);
+        fs.accessSync(candidate, fs.constants.X_OK);
+        if (fs.statSync(candidate).isFile()) return true;
+      } catch { /* try the next executable search path */ }
+    }
   }
+  return false;
 }
 
 function detectLanguage(workingDir: string): LanguageServerConfig | null {
@@ -210,31 +275,64 @@ function detectLanguage(workingDir: string): LanguageServerConfig | null {
 // ---------------------------------------------------------------------------
 
 function sendMessage(s: ServerState, msg: JsonRpcMessage): void {
+  if (s.closed) return;
   if (!s.process.stdin?.writable) return;
   const body = JSON.stringify(msg);
   const header = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`;
   s.process.stdin.write(header + body);
 }
 
-function sendRequest(s: ServerState, method: string, params: unknown): Promise<unknown> {
+function sendRequest(
+  s: ServerState,
+  method: string,
+  params: unknown,
+  signal?: AbortSignal,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<unknown> {
+  if (s.closed) return Promise.reject(new Error("LSP server shut down"));
   const id = s.requestId++;
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onAbort = () => {
       s.pendingRequests.delete(id);
-      reject(new Error(`LSP request timed out after 30s: ${method}`));
-    }, 30000);
+      settle(() => reject(abortError(signal!, `LSP request ${method}`)));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    timeout = setTimeout(() => {
+      s.pendingRequests.delete(id);
+      settle(() => reject(new Error(`LSP request timed out after ${timeoutMs}ms: ${method}`)));
+    }, timeoutMs);
 
     s.pendingRequests.set(id, {
       resolve: (v) => {
-        clearTimeout(timeout);
-        resolve(v);
+        settle(() => resolve(v));
       },
       reject: (e) => {
-        clearTimeout(timeout);
-        reject(e);
+        settle(() => reject(e));
       },
     });
-    sendMessage(s, { jsonrpc: "2.0", id, method, params });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      if (!s.process.stdin?.writable) throw new Error("LSP server stdin is closed");
+      sendMessage(s, { jsonrpc: "2.0", id, method, params });
+    } catch (error) {
+      s.pendingRequests.delete(id);
+      settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+    }
   });
 }
 
@@ -243,13 +341,19 @@ function sendNotification(s: ServerState, method: string, params: unknown): void
 }
 
 function handleData(s: ServerState, data: Buffer): void {
-  s.responseBuffer += data.toString();
+  if (s.closed) return;
+  s.responseBuffer = Buffer.concat([s.responseBuffer, data]);
+  if (s.responseBuffer.length > s.maxResponseBytes) {
+    s.responseBuffer = Buffer.alloc(0);
+    rejectPending(s, new Error(`LSP response buffer exceeded ${s.maxResponseBytes} bytes`));
+    return;
+  }
 
   while (true) {
     const headerEnd = s.responseBuffer.indexOf("\r\n\r\n");
     if (headerEnd === -1) break;
 
-    const header = s.responseBuffer.slice(0, headerEnd);
+    const header = s.responseBuffer.subarray(0, headerEnd).toString("ascii");
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) {
       s.responseBuffer = s.responseBuffer.slice(headerEnd + 4);
@@ -257,10 +361,16 @@ function handleData(s: ServerState, data: Buffer): void {
     }
 
     const contentLength = parseInt(match[1], 10);
+    if (!Number.isSafeInteger(contentLength) || contentLength > s.maxResponseBytes) {
+      s.responseBuffer = Buffer.alloc(0);
+      rejectPending(s, new Error(`LSP response buffer exceeded ${s.maxResponseBytes} bytes`));
+      return;
+    }
     const bodyStart = headerEnd + 4;
     if (s.responseBuffer.length < bodyStart + contentLength) break;
 
-    const body = s.responseBuffer.slice(bodyStart, bodyStart + contentLength);
+    // LSP Content-Length counts UTF-8 bytes, not JavaScript characters.
+    const body = s.responseBuffer.subarray(bodyStart, bodyStart + contentLength).toString("utf8");
     s.responseBuffer = s.responseBuffer.slice(bodyStart + contentLength);
 
     try {
@@ -290,58 +400,138 @@ function handleData(s: ServerState, data: Buffer): void {
 }
 
 // ---------------------------------------------------------------------------
-// Server lifecycle
+// Server lifecycle. A collection is owned by a run; legacy callers are held
+// separately only until the remaining adapters migrate to run resources.
 // ---------------------------------------------------------------------------
 
-function destroyServer(): void {
-  // Always clear initPromise — even if server never started (e.g. failed detection)
-  initPromise = null;
-
-  if (!server) return;
-  const s = server;
-  server = null;
-
-  // Reject all pending requests
-  for (const [, pending] of s.pendingRequests) {
-    pending.reject(new Error("LSP server shut down"));
-  }
-  s.pendingRequests.clear();
-
-  // Best-effort graceful shutdown
+function canonicalWorkspace(workingDir: string): string {
   try {
-    sendRequest(s, "shutdown", null).catch(() => {});
-    sendNotification(s, "exit", null);
+    return fs.realpathSync(workingDir);
   } catch {
-    // ignore
+    return path.resolve(workingDir);
   }
-  setTimeout(() => {
-    try {
-      s.process.kill();
-    } catch {
-      // already dead
-    }
-  }, 2000);
 }
 
-async function ensureServer(workingDir: string): Promise<ServerState> {
-  // If server exists and is still alive, reuse it
-  if (server?.ready && server.process.exitCode === null) {
-    return server;
+function validateLimit(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new Error(`${name} must be a finite non-negative integer no greater than 2147483647`);
   }
+  return value;
+}
 
-  // Server died — clean up stale state
-  if (server) {
-    destroyServer();
+function abortError(signal: AbortSignal, label: string): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error(`${label} cancelled`);
+}
+
+function sleepWithSignal(milliseconds: number, signal: AbortSignal, label: string): Promise<void> {
+  if (signal.aborted) return Promise.reject(abortError(signal, label));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(abortError(signal, label));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function rejectPending(s: ServerState, error: Error): void {
+  for (const pending of s.pendingRequests.values()) pending.reject(error);
+  s.pendingRequests.clear();
+}
+
+function signalProcessGroup(proc: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, signal);
+    else proc.kill(signal);
+  } catch {
+    try { proc.kill(signal); } catch { /* Already stopped. */ }
   }
+}
 
-  if (initPromise) {
-    await initPromise;
-    if (!server) throw new Error("LSP server initialization failed");
-    return server;
+function processGroupExists(pid: number | undefined): boolean {
+  if (!pid || process.platform === "win32") return false;
+  try { process.kill(-pid, 0); return true; } catch { return false; }
+}
+
+function stopProcessGroup(proc: ChildProcess, graceMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = () => {
+      if (settled || processGroupExists(proc.pid)) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearTimeout(failTimer);
+      clearInterval(pollTimer);
+      proc.removeListener("close", finish);
+      proc.removeListener("exit", finish);
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearInterval(pollTimer);
+      proc.removeListener("close", finish);
+      proc.removeListener("exit", finish);
+      reject(new Error(`LSP subprocess ${proc.pid ?? "unknown"} did not stop after SIGTERM/SIGKILL`));
+    };
+    const killTimer = setTimeout(() => signalProcessGroup(proc, "SIGKILL"), graceMs);
+    const failTimer = setTimeout(fail, Math.max(1_000, graceMs * 4));
+    const pollTimer = setInterval(finish, 20);
+    proc.once("close", finish);
+    proc.once("exit", finish);
+    signalProcessGroup(proc, "SIGTERM");
+    finish();
+  });
+}
+
+function detachListeners(s: ServerState): void {
+  if (s.stdoutListener) s.process.stdout?.removeListener("data", s.stdoutListener);
+  if (s.stderrListener) s.process.stderr?.removeListener("data", s.stderrListener);
+  if (s.exitListener) s.process.removeListener("exit", s.exitListener);
+  if (s.errorListener) s.process.removeListener("error", s.errorListener);
+}
+
+async function closeServer(collection: ResourceCollection, s: ServerState): Promise<void> {
+  if (s.closePromise) return s.closePromise;
+  s.closePromise = (async () => {
+    s.closed = true;
+    rejectPending(s, new Error("LSP server shut down"));
+    try {
+      if (s.process.stdin?.writable) {
+        sendNotification(s, "exit", {});
+      }
+    } catch { /* Process teardown below is authoritative. */ }
+    await stopProcessGroup(s.process, collection.terminationGraceMs);
+    detachListeners(s);
+    if (collection.server === s) collection.server = undefined;
+    collection.ownedServers.delete(s);
+  })();
+  try {
+    await s.closePromise;
+  } catch (error) {
+    // Retain this owned instance for a later close/shutdown attempt. A failed
+    // parent process can still have living descendants in its process group.
+    s.closePromise = undefined;
+    throw error;
   }
+}
 
-  const doInit = async () => {
-    const detected = detectLanguage(workingDir);
+async function ensureServer(collection: ResourceCollection): Promise<ServerState> {
+  if (collection.closed || collection.signal.aborted) throw abortError(collection.signal, `LSP run ${collection.runId}`);
+  if (collection.server?.ready && !collection.server.closed && collection.server.process.exitCode === null) {
+    return collection.server;
+  }
+  if (collection.starting) return collection.starting;
+
+  const start = async (): Promise<ServerState> => {
+    const workingDir = collection.workspace;
+    const detected = collection.override ?? detectLanguage(workingDir);
     if (!detected) {
       const projectFiles = [
         "tsconfig.json", "package.json", "pyproject.toml",
@@ -357,45 +547,44 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
       );
     }
 
+    if (collection.signal.aborted || collection.closed) throw abortError(collection.signal, `LSP run ${collection.runId}`);
     const s: ServerState = {
       process: spawn(detected.command, detected.args, {
         cwd: workingDir,
         stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       }),
       language: detected.language,
       requestId: 1,
-      responseBuffer: "",
+      responseBuffer: Buffer.alloc(0),
       pendingRequests: new Map(),
       openFiles: new Map(),
       publishedDiagnostics: new Map(),
       ready: false,
       capabilities: { pullDiagnostics: false, workspaceDiagnostics: false },
+      maxResponseBytes: collection.maxResponseBytes,
+      closed: false,
     };
+    collection.ownedServers.add(s);
 
-    s.process.stdout!.on("data", (data: Buffer) => handleData(s, data));
-    s.process.stderr!.on("data", () => {
+    s.stdoutListener = (data: Buffer) => handleData(s, data);
+    s.stderrListener = () => {
       // Absorb stderr — language servers are noisy
-    });
+    };
+    s.process.stdout!.on("data", s.stdoutListener);
+    s.process.stderr!.on("data", s.stderrListener);
 
-    // Crash recovery: clean up state when server exits unexpectedly
-    s.process.on("exit", (code) => {
-      if (server === s) {
-        server = null;
-        initPromise = null;
-      }
-    });
-
-    s.process.on("error", (err) => {
-      // Spawn failure — reject all pending and clean up
-      for (const [, pending] of s.pendingRequests) {
-        pending.reject(new Error(`LSP server failed to start: ${err.message}`));
-      }
-      s.pendingRequests.clear();
-      if (server === s) {
-        server = null;
-        initPromise = null;
-      }
-    });
+    s.exitListener = () => {
+      rejectPending(s, new Error("LSP server exited"));
+      // The parent can exit while a descendant still owns its process group.
+      // Keep this instance owned until closeServer verifies that cleanup.
+      void closeServer(collection, s).catch((error) => logger.error(`LSP teardown failed: ${error instanceof Error ? error.message : String(error)}`));
+    };
+    s.errorListener = (error) => {
+      rejectPending(s, new Error(`LSP server failed to start: ${error.message}`));
+    };
+    s.process.on("exit", s.exitListener);
+    s.process.on("error", s.errorListener);
 
     // LSP initialize handshake
     const initResult = await sendRequest(s, "initialize", {
@@ -419,7 +608,7 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
           diagnostics: { refreshSupport: true },  // workspace/diagnostic (3.17+)
         },
       },
-    }) as { capabilities?: {
+    }, collection.signal, collection.startupTimeoutMs) as { capabilities?: {
       diagnosticProvider?: { workspaceDiagnostics?: boolean } | boolean;
     } } | null;
 
@@ -436,19 +625,22 @@ async function ensureServer(workingDir: string): Promise<ServerState> {
     });
 
     sendNotification(s, "initialized", {});
+    if (collection.signal.aborted || collection.closed) throw abortError(collection.signal, `LSP run ${collection.runId}`);
     s.ready = true;
-    server = s;
+    collection.server = s;
+    return s;
   };
 
-  initPromise = doInit().catch((err) => {
-    // Clear initPromise on failure so the next call can retry
-    initPromise = null;
-    throw err;
-  });
-
-  await initPromise;
-  if (!server) throw new Error("LSP server initialization failed");
-  return server;
+  collection.starting = start();
+  try {
+    return await collection.starting;
+  } catch (error) {
+    const partial = [...collection.ownedServers].find((candidate) => candidate !== collection.server);
+    if (partial) await closeServer(collection, partial);
+    throw error;
+  } finally {
+    collection.starting = undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -565,12 +757,12 @@ function collectFiles(dirPath: string, workingDir?: string): string[] {
   return files;
 }
 
-async function getDirectoryDiagnostics(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all", format: "json" | "text"): Promise<LspResult> {
+async function getDirectoryDiagnostics(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all", format: "json" | "text", collection: ResourceCollection): Promise<LspResult> {
   if (format === "json") {
-    return await getDirectoryDiagnosticsJson(dirPath, workingDir, severity);
+    return await getDirectoryDiagnosticsJson(dirPath, workingDir, severity, collection);
   } else {
     // For text format, fall back to legacy behavior for each file
-    return await getDirectoryDiagnosticsText(dirPath, workingDir, severity);
+    return await getDirectoryDiagnosticsText(dirPath, workingDir, severity, collection);
   }
 }
 
@@ -618,12 +810,13 @@ async function tryWorkspaceDiagnostics(
   s: ServerState,
   workingDir: string,
   severity: "error" | "warning" | "hint" | "all",
+  collection: ResourceCollection,
 ): Promise<{ diagnostics: DiagnosticEntry[]; summary: { errors: number; warnings: number; hints: number } } | null> {
   if (!s.capabilities.workspaceDiagnostics) return null;
   try {
     const result = await sendRequest(s, "workspace/diagnostic", {
       previousResultIds: [],
-    }) as { items?: Array<{
+    }, collection.signal, collection.requestTimeoutMs) as { items?: Array<{
       uri: string;
       kind: "full" | "unchanged";
       items?: DiagnosticItem[];
@@ -661,6 +854,7 @@ async function batchPullDiagnostics(
   files: string[],
   workingDir: string,
   severity: "error" | "warning" | "hint" | "all",
+  collection: ResourceCollection,
 ): Promise<{ diagnostics: DiagnosticEntry[]; summary: { errors: number; warnings: number; hints: number } }> {
   const diagnostics: DiagnosticEntry[] = [];
   const summary = { errors: 0, warnings: 0, hints: 0 };
@@ -684,11 +878,11 @@ async function batchPullDiagnostics(
         if (s.capabilities.pullDiagnostics) {
           const result = await sendRequest(s, "textDocument/diagnostic", {
             textDocument: { uri },
-          }) as { items?: DiagnosticItem[] } | null;
+          }, collection.signal, collection.requestTimeoutMs) as { items?: DiagnosticItem[] } | null;
           return { resolvedPath, items: result?.items || [] };
         }
         // Push diagnostics — wait briefly for the server to process
-        await new Promise((r) => setTimeout(r, 2000));
+        await sleepWithSignal(2000, collection.signal, "LSP diagnostics");
         return { resolvedPath, items: s.publishedDiagnostics.get(uri) || [] };
       }),
     );
@@ -706,12 +900,12 @@ async function batchPullDiagnostics(
   return { diagnostics, summary };
 }
 
-async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
+async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all", collection: ResourceCollection): Promise<LspResult> {
   try {
-    const s = await ensureServer(workingDir);
+    const s = await ensureServer(collection);
 
     // 1. Try workspace/diagnostic — single request, no file walking needed
-    const wsResult = await tryWorkspaceDiagnostics(s, workingDir, severity);
+    const wsResult = await tryWorkspaceDiagnostics(s, workingDir, severity, collection);
     if (wsResult) {
       return { success: true, content: JSON.stringify({ lsp_available: true, ...wsResult }) };
     }
@@ -719,7 +913,7 @@ async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, 
     // 2. Fall back to file-by-file with parallel batching
     const files = collectFiles(dirPath, workingDir);
     logger.debug("LSP directory diagnostics", { fileCount: files.length, dirPath });
-    const result = await batchPullDiagnostics(s, files, workingDir, severity);
+    const result = await batchPullDiagnostics(s, files, workingDir, severity, collection);
 
     // Deduplicate — the same diagnostic can appear via both pull and push
     const seen = new Set<string>();
@@ -748,9 +942,9 @@ async function getDirectoryDiagnosticsJson(dirPath: string, workingDir: string, 
   }
 }
 
-async function getDirectoryDiagnosticsText(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all"): Promise<LspResult> {
+async function getDirectoryDiagnosticsText(dirPath: string, workingDir: string, severity: "error" | "warning" | "hint" | "all", collection: ResourceCollection): Promise<LspResult> {
   // Use the JSON path and convert to text — same parallel batching, one code path
-  const jsonResult = await getDirectoryDiagnosticsJson(dirPath, workingDir, severity);
+  const jsonResult = await getDirectoryDiagnosticsJson(dirPath, workingDir, severity, collection);
   if (!jsonResult.success || !jsonResult.content) return jsonResult;
 
   try {
@@ -816,9 +1010,9 @@ function getSeverityString(severity: number | undefined): "error" | "warning" | 
 // Tool actions
 // ---------------------------------------------------------------------------
 
-async function getDiagnostics(filePath: string, workingDir: string, format: "json" | "text" = "json"): Promise<string> {
+async function getDiagnostics(filePath: string, workingDir: string, format: "json" | "text" = "json", collection: ResourceCollection): Promise<string> {
   try {
-    const s = await ensureServer(workingDir);
+    const s = await ensureServer(collection);
     const uri = fileUri(path.resolve(filePath));
 
     // Clear any stale push diagnostics for this file
@@ -831,7 +1025,7 @@ async function getDiagnostics(filePath: string, workingDir: string, format: "jso
     try {
       const result = await sendRequest(s, "textDocument/diagnostic", {
         textDocument: { uri },
-      }) as { items?: DiagnosticItem[] } | null;
+      }, collection.signal, collection.requestTimeoutMs) as { items?: DiagnosticItem[] } | null;
 
       const items = result?.items || [];
       if (items.length === 0) {
@@ -861,7 +1055,7 @@ async function getDiagnostics(filePath: string, workingDir: string, format: "jso
     } catch {
       // Server doesn't support pull diagnostics — wait for push diagnostics
       // Give the server a moment to publish diagnostics after our didOpen/didChange
-      await new Promise((r) => setTimeout(r, 1500));
+      await sleepWithSignal(1500, collection.signal, "LSP diagnostics");
 
       const pushed = s.publishedDiagnostics.get(uri);
       if (pushed && pushed.length > 0) {
@@ -893,7 +1087,7 @@ async function getDiagnostics(filePath: string, workingDir: string, format: "jso
       }
 
       // Server hasn't responded at all — wait a bit more for large projects
-      await new Promise((r) => setTimeout(r, 2000));
+      await sleepWithSignal(2000, collection.signal, "LSP diagnostics");
       const delayedPushed = s.publishedDiagnostics.get(uri);
       if (delayedPushed && delayedPushed.length > 0) {
         if (format === "json") {
@@ -957,14 +1151,14 @@ function formatDiagnostics(items: DiagnosticItem[], filePath: string): string {
   return lines.join("\n");
 }
 
-async function getDefinition(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
+async function getDefinition(filePath: string, line: number, character: number, workingDir: string, collection: ResourceCollection): Promise<string> {
+  const s = await ensureServer(collection);
   syncFile(s, filePath);
 
   const result = (await sendRequest(s, "textDocument/definition", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
-  })) as LocationResult[] | LocationResult | null;
+  }, collection.signal, collection.requestTimeoutMs)) as LocationResult[] | LocationResult | null;
 
   if (!result) return "No definition found.";
 
@@ -980,15 +1174,15 @@ async function getDefinition(filePath: string, line: number, character: number, 
   return `Definition(s):\n${lines.join("\n")}`;
 }
 
-async function getReferences(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
+async function getReferences(filePath: string, line: number, character: number, workingDir: string, collection: ResourceCollection): Promise<string> {
+  const s = await ensureServer(collection);
   syncFile(s, filePath);
 
   const result = (await sendRequest(s, "textDocument/references", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
     context: { includeDeclaration: true },
-  })) as LocationResult[] | null;
+  }, collection.signal, collection.requestTimeoutMs)) as LocationResult[] | null;
 
   if (!result || result.length === 0) return "No references found.";
 
@@ -1001,14 +1195,14 @@ async function getReferences(filePath: string, line: number, character: number, 
   return lines.join("\n");
 }
 
-async function getHover(filePath: string, line: number, character: number, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
+async function getHover(filePath: string, line: number, character: number, workingDir: string, collection: ResourceCollection): Promise<string> {
+  const s = await ensureServer(collection);
   syncFile(s, filePath);
 
   const result = (await sendRequest(s, "textDocument/hover", {
     textDocument: { uri: fileUri(filePath) },
     position: { line: line - 1, character: character - 1 },
-  })) as { contents: string | { value: string; kind?: string } | Array<string | { value: string }> } | null;
+  }, collection.signal, collection.requestTimeoutMs)) as { contents: string | { value: string; kind?: string } | Array<string | { value: string }> } | null;
 
   if (!result) return "No hover info available.";
 
@@ -1020,13 +1214,13 @@ async function getHover(filePath: string, line: number, character: number, worki
   return contents.value || "No hover info available.";
 }
 
-async function getSymbols(filePath: string, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
+async function getSymbols(filePath: string, workingDir: string, collection: ResourceCollection): Promise<string> {
+  const s = await ensureServer(collection);
   syncFile(s, filePath);
 
   const result = (await sendRequest(s, "textDocument/documentSymbol", {
     textDocument: { uri: fileUri(filePath) },
-  })) as Array<Record<string, unknown>> | null;
+  }, collection.signal, collection.requestTimeoutMs)) as Array<Record<string, unknown>> | null;
 
   if (!result || result.length === 0) return "No symbols found.";
 
@@ -1069,14 +1263,14 @@ async function getSymbols(filePath: string, workingDir: string): Promise<string>
   return lines.join("\n");
 }
 
-async function getSymbolReferences(symbol: string, targetPath: string | undefined, includeDeclaration: boolean, workingDir: string): Promise<string> {
-  const s = await ensureServer(workingDir);
+async function getSymbolReferences(symbol: string, targetPath: string | undefined, includeDeclaration: boolean, workingDir: string, collection: ResourceCollection): Promise<string> {
+  const s = await ensureServer(collection);
 
   try {
     // Send workspace/symbol request to find the symbol
     const symbolResult = (await sendRequest(s, "workspace/symbol", {
       query: symbol,
-    })) as Array<Record<string, unknown>> | null;
+    }, collection.signal, collection.requestTimeoutMs)) as Array<Record<string, unknown>> | null;
 
     if (!symbolResult || symbolResult.length === 0) {
       // No matching symbol found
@@ -1136,7 +1330,7 @@ async function getSymbolReferences(symbol: string, targetPath: string | undefine
       textDocument: { uri: location.uri },
       position: { line: location.range.start.line, character: location.range.start.character },
       context: { includeDeclaration: false },
-    })) as LocationResult[] | null;
+    }, collection.signal, collection.requestTimeoutMs)) as LocationResult[] | null;
 
     // Build the response
     const response: {
@@ -1221,7 +1415,11 @@ interface LspResult {
   error?: string;
 }
 
-export async function execute(params: LspParams, workingDir: string): Promise<LspResult> {
+async function executeWithCollection(params: LspParams, collection: ResourceCollection): Promise<LspResult> {
+  const workingDir = collection.workspace;
+  if (collection.signal.aborted || collection.closed) {
+    return { success: false, error: `LSP ${params.action} failed: ${abortError(collection.signal, `LSP run ${collection.runId}`).message}` };
+  }
   const { action, file, line, character, path: targetPath, severity = "error", format = "json", symbol, include_declaration = false } = params;
 
   // If path is provided, we're handling directory diagnostics
@@ -1233,7 +1431,7 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
       const stat = fs.statSync(resolvedPath);
       if (stat.isDirectory()) {
         // Handle directory diagnostics aggregation
-        return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
+        return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format, collection);
       }
     } catch {
       // If path doesn't exist, continue with file processing
@@ -1259,36 +1457,30 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
       let content: string;
       switch (action) {
         case "diagnostics":
-          content = await getDiagnostics(resolvedFile, workingDir, format);
+          content = await getDiagnostics(resolvedFile, workingDir, format, collection);
           break;
         case "definition":
-          content = await getDefinition(resolvedFile, line!, character!, workingDir);
+          content = await getDefinition(resolvedFile, line!, character!, workingDir, collection);
           break;
         case "references":
-          content = await getReferences(resolvedFile, line!, character!, workingDir);
+          content = await getReferences(resolvedFile, line!, character!, workingDir, collection);
           break;
         case "hover":
-          content = await getHover(resolvedFile, line!, character!, workingDir);
+          content = await getHover(resolvedFile, line!, character!, workingDir, collection);
           break;
         case "symbols":
-          content = await getSymbols(resolvedFile, workingDir);
+          content = await getSymbols(resolvedFile, workingDir, collection);
           break;
         case "symbol_references":
           if (!symbol) {
             throw new Error("symbol_references requires symbol parameter.");
           }
-          content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir);
+          content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir, collection);
           break;
       }
       return { success: true, content };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-
-      // If the server crashed, clean up so next call will try to restart
-      if (server && server.process.exitCode !== null) {
-        server = null;
-        initPromise = null;
-      }
 
       return { success: false, error: `LSP ${action} failed: ${message}` };
     }
@@ -1299,7 +1491,7 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
         return { success: false, error: `symbol_references requires symbol parameter.` };
       }
       try {
-        const content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir);
+        const content = await getSymbolReferences(symbol, targetPath, include_declaration, workingDir, collection);
         return { success: true, content };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1312,7 +1504,7 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
         try {
           const stat = fs.statSync(resolvedPath);
           if (stat.isDirectory()) {
-            return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format);
+            return await getDirectoryDiagnostics(resolvedPath, workingDir, severity, format, collection);
           }
         } catch {
           return { success: false, error: `Path not found or not a directory: ${targetPath}` };
@@ -1326,23 +1518,132 @@ export async function execute(params: LspParams, workingDir: string): Promise<Ls
   }
 }
 
+function makeCollection(options: LSPRunResourcesOptions): ResourceCollection {
+  const startupTimeoutMs = validateLimit("LSP startupTimeoutMs", options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS);
+  const requestTimeoutMs = validateLimit("LSP requestTimeoutMs", options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const maxResponseBytes = validateLimit("LSP maxResponseBytes", options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES);
+  const terminationGraceMs = validateLimit("LSP terminationGraceMs", options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
+  const workspace = canonicalWorkspace(options.workspace);
+  const controller = new AbortController();
+  const parentAbortListener = () => controller.abort(options.signal.reason);
+  if (options.signal.aborted) parentAbortListener();
+  else options.signal.addEventListener("abort", parentAbortListener, { once: true });
+  return {
+    runId: options.runId,
+    workspace,
+    signal: controller.signal,
+    controller,
+    parentSignal: options.signal,
+    parentAbortListener,
+    startupTimeoutMs,
+    requestTimeoutMs,
+    maxResponseBytes,
+    terminationGraceMs,
+    override: options.server,
+    ownedServers: new Set(),
+    closed: false,
+  };
+}
+
+function closeCollection(collection: ResourceCollection): Promise<void> {
+  if (collection.closePromise) return collection.closePromise;
+  collection.closed = true;
+  collection.controller.abort(new Error(`LSP run ${collection.runId} closed`));
+  collection.closePromise = (async () => {
+    const servers = [...collection.ownedServers];
+    const results = await Promise.allSettled(servers.map((server) => closeServer(collection, server)));
+    await Promise.allSettled(collection.starting ? [collection.starting] : []);
+    collection.parentSignal.removeEventListener("abort", collection.parentAbortListener);
+    if (collection.runAbortListener) collection.parentSignal.removeEventListener("abort", collection.runAbortListener);
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (errors.length > 0) throw new AggregateError(errors, `LSP run ${collection.runId} cleanup failed`);
+    runCollections.delete(collection);
+    for (const [workspace, candidate] of legacyCollections) {
+      if (candidate === collection) legacyCollections.delete(workspace);
+    }
+  })();
+  return collection.closePromise.catch((error: unknown) => {
+    // Keep failed ownership visible and make a subsequent awaited close retry.
+    collection.closePromise = undefined;
+    throw error;
+  });
+}
+
+/** Create a cancellable, run-owned LSP lifetime. Call close() during run teardown. */
+export function createLSPRunResources(options: LSPRunResourcesOptions): LSPRunResources {
+  const collection = makeCollection(options);
+  runCollections.add(collection);
+  const onAbort = () => {
+    void closeCollection(collection).catch((error) => {
+      logger.error(`LSP run ${options.runId} cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
+  collection.runAbortListener = onAbort;
+  if (options.signal.aborted) onAbort();
+  else options.signal.addEventListener("abort", onAbort, { once: true });
+
+  return {
+    runId: collection.runId,
+    workspace: collection.workspace,
+    execute: (params) => executeWithCollection(params, collection),
+    close: () => closeCollection(collection),
+    isRunning: () => Boolean(collection.server?.ready && !collection.server.closed && collection.server.process.exitCode === null),
+    getServerLanguage: () => collection.server?.language ?? null,
+  };
+}
+
+function legacyCollection(workingDir: string): ResourceCollection {
+  const workspace = canonicalWorkspace(workingDir);
+  const existing = legacyCollections.get(workspace);
+  if (existing && !existing.closed) return existing;
+  const signal = new AbortController();
+  const collection = makeCollection({ runId: `legacy:${workspace}`, workspace, signal: signal.signal });
+  legacyCollections.set(workspace, collection);
+  return collection;
+}
+
+/** Compatibility entry point for callers not yet migrated to a run resource. */
+export async function execute(params: LspParams, workingDir: string): Promise<LspResult> {
+  return executeWithCollection(params, legacyCollection(workingDir));
+}
+
+/** Await teardown for every resource owned by a run, including lazy registry resources. */
+export async function shutdownLSPRun(runId: string): Promise<void> {
+  const collections = [...runCollections].filter((collection) => collection.runId === runId);
+  const results = await Promise.allSettled(collections.map((collection) => closeCollection(collection)));
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  if (errors.length > 0) throw new AggregateError(errors, `LSP run ${runId} cleanup failed`);
+}
+
 /**
  * Shut down the language server process. Call on CLI exit.
  */
 export function shutdown(): void {
-  destroyServer();
+  for (const collection of [...legacyCollections.values(), ...runCollections]) {
+    for (const server of collection.ownedServers) signalProcessGroup(server.process, "SIGKILL");
+    void closeCollection(collection).catch((error) => {
+      logger.error(`LSP emergency shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+  legacyCollections.clear();
 }
 
 /**
  * Check if a language server is currently running.
  */
 export function isRunning(): boolean {
-  return server !== null && server.ready && server.process.exitCode === null;
+  return [...legacyCollections.values()].some((collection) =>
+    Boolean(collection.server?.ready && !collection.server.closed && collection.server.process.exitCode === null),
+  );
 }
 
 /**
  * Get the current server's language, or null if no server is running.
  */
 export function getServerLanguage(): string | null {
-  return server?.language ?? null;
+  return [...legacyCollections.values()].find((collection) => collection.server?.ready)?.server?.language ?? null;
 }

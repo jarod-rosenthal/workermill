@@ -10,6 +10,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { getStateRoot } from "../state-root.js";
+import type { LedgerSnapshot } from "../cost-tracker.js";
 import {
   loadConfig,
   resolveConfig,
@@ -292,6 +293,8 @@ export interface SlashCommandContext {
     name?: string;
     provider: string;
     model: string;
+    usageLedger?: LedgerSnapshot;
+    usageLedgerHistoryIncomplete?: boolean;
   };
   cost: number;
   tokens: number;
@@ -748,7 +751,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       shutdownLSP();
       cleanupStaleWorktrees(ctx.workingDir);
       clearCheckpoints();
-      void import("../browser.js").then(m => m.browserClose());
+      // CLI exit is the sole broad cleanup boundary. Interactive turns close
+      // only their own resource in useAgent's awaited finally block.
+      void import("../browser.js").then(m => m.closeAllBrowserResources());
       printSessionGoodbye(ctx);
       ctx.exit?.();
       // Force process exit — Ink's exit() only stops rendering but

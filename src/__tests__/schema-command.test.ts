@@ -172,6 +172,15 @@ describe("schema command", () => {
       expect(result.success).toBe(true);
     });
 
+    it("accepts the explicit advisory quality-gate migration field", () => {
+      const result = CliConfigSchema.safeParse({
+        providers: { ollama: { model: "test" } },
+        default: "ollama",
+        qualityGates: [{ name: "legacy advisory", commands: ["false"], required: false }],
+      });
+      expect(result.success).toBe(true);
+    });
+
     it("rejects a config without required fields", () => {
       const invalidConfig = {
         default: "ollama",

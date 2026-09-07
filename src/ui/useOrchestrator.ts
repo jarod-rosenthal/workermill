@@ -15,7 +15,7 @@ import { resolveConfig, loadConfig, saveConfig, type CliConfig } from "../config
 import { getRetryableRun } from "../ship-state.js";
 import { notifyIfEnabled } from "../notify.js";
 import { shouldCommitStatusUpdate } from "./orchestrator-status.js";
-import { createEmptyUsageSummary, type UsageSummary } from "../cost-tracker.js";
+import { createEmptyUsageSummary, formatUsageLedgerLimitation, type LedgerSnapshot, type UsageSummary } from "../cost-tracker.js";
 import { execSync } from "child_process";
 import { TicketOps } from "../ticket-ops.js";
 import { parseProgramEpicsFromIssueBody } from "../program-queue.js";
@@ -23,7 +23,9 @@ import { getProgramRun, saveProgramRun, clearProgramRun } from "../program-state
 import { execGh, getCurrentBranch } from "../git-ops.js";
 import { formatLiveViewUrlMessage } from "../live-view-url.js";
 import { runGateCommand } from "../gate-runner.js";
-import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { runScopedProcess } from "../engine/scoped-process.js";
+import { randomUUID } from "node:crypto";
 import type { ToolCallInfo } from "./types.js";
 
 const PREVIEW_THROTTLE_MS = 120;
@@ -327,6 +329,8 @@ export function useOrchestrator(
   setGitBranch?: (branch: string) => void,
   /** Update tokens-per-second for a model in the status bar. */
   setTokPerSec?: (providerModel: string, tokPerSec: number) => void,
+  /** Persist cumulative orchestration observations in the active chat session. */
+  applyExternalUsageLedger?: (ledger: LedgerSnapshot) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -355,6 +359,7 @@ export function useOrchestrator(
   const abortRef = useRef<AbortController | null>(null);
   const retryPlanRef = useRef<RetryPlan | null>(null);
   const usageSummaryRef = useRef<UsageSummary>(createEmptyUsageSummary());
+  const usageLedgerRef = useRef<LedgerSnapshot | undefined>(undefined);
 
   const releasePauseWaiters = useCallback(() => {
     if (pauseWaitersRef.current.length === 0) return;
@@ -390,6 +395,7 @@ export function useOrchestrator(
 
   const resetUsageSummary = useCallback(() => {
     usageSummaryRef.current = createEmptyUsageSummary();
+    usageLedgerRef.current = undefined;
   }, []);
 
   const commitUsageSummary = useCallback((summary: UsageSummary) => {
@@ -436,19 +442,16 @@ export function useOrchestrator(
     commitPreviewLine("");
   }, [commitPreviewLine]);
 
-  useEffect(() => () => {
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-  }, []);
-
   // ------------------------------------------------------------------
   // cancel()
   // ------------------------------------------------------------------
 
   const cancel = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
+    const controller = abortRef.current;
+    // An idle cancel is intentionally a no-op: it must not leave a stale
+    // "Cancelling" status after a completed run.
+    if (!controller) return;
+    controller.abort();
     // If orchestration is waiting on a confirm/prompt promise, resolve it so
     // the async run can unwind instead of keeping the UI in a stale "running" state.
     setConfirmRequest((req) => {
@@ -459,13 +462,29 @@ export function useOrchestrator(
       if (req) req.resolve("");
       return null;
     });
-    setRunning(false);
-    setStatusMessage("");
-    clearPreviewLine();
-    cleanupAllBackgroundProcesses();
+    // Keep the UI busy until the orchestration finalizer drains its owned
+    // resources.  Global cleanup here would also kill an independent run.
+    setStatusMessage("Cancelling — waiting for active work to stop...");
     setPausedState(false);
     releasePauseWaiters();
-  }, [clearPreviewLine, releasePauseWaiters, setPausedState, setStatusMessage]);
+  }, [releasePauseWaiters, setPausedState, setStatusMessage]);
+
+  useEffect(() => () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    const controller = abortRef.current;
+    if (!controller) return;
+    controller.abort();
+    setConfirmRequest((request) => {
+      request?.resolve(false);
+      return null;
+    });
+    setPromptRequest((request) => {
+      request?.resolve("");
+      return null;
+    });
+    setPausedState(false);
+    releasePauseWaiters();
+  }, [releasePauseWaiters, setPausedState]);
 
   // ------------------------------------------------------------------
   // start()
@@ -479,8 +498,9 @@ export function useOrchestrator(
       ticketKey?: string,
       options?: OrchestratorStartOptions,
     ) => {
-      // Abort any previous run
-      if (abortRef.current) abortRef.current.abort();
+      // Claim synchronously. React state has not necessarily rendered yet,
+      // so `running` cannot prevent two same-tick starts from overlapping.
+      if (abortRef.current) return;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -595,10 +615,12 @@ export function useOrchestrator(
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
               // Always show user decision prompts — bypass mode only applies
               // to tool permissions, not orchestrator decisions like revisions.
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve(false);
               return new Promise((resolve) => {
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     if (mode) {
                       resolve({ allowed: yes, mode });
@@ -611,11 +633,13 @@ export function useOrchestrator(
             },
 
             askText(question: string, suggestion: string): Promise<string> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve("");
               return new Promise((resolve) => {
                 setPromptRequest({
                   question,
                   suggestion,
                   resolve: (answer: string) => {
+                    if (abortRef.current !== controller) return;
                     setPromptRequest(null);
                     resolve(answer || suggestion);
                   },
@@ -652,7 +676,12 @@ export function useOrchestrator(
             },
 
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
 
             updateUsageSummary(summary: UsageSummary): void {
@@ -691,14 +720,8 @@ export function useOrchestrator(
             liveViewServer,
           );
           completion = {
-            success:
-              result.stories.length > 0 &&
-              result.completedStoryIds.length === result.stories.length,
-            error:
-              result.stories.length > 0 &&
-              result.completedStoryIds.length !== result.stories.length
-                ? "build_incomplete"
-                : undefined,
+            success: result.outcome === "success",
+            error: result.outcome === "success" ? undefined : result.terminalReason ?? "build_incomplete",
           };
 
           flushLine();
@@ -716,6 +739,8 @@ export function useOrchestrator(
           if (modelBreakdown) {
             addMessage(modelBreakdown);
           }
+          const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+          if (usageNote) addMessage(usageNote);
           notifyIfEnabled(config.bell, "WorkerMill", "Ship complete");
         } catch (err: unknown) {
           flushLine();
@@ -729,6 +754,8 @@ export function useOrchestrator(
             notifyIfEnabled(config?.bell, "WorkerMill", "Ship failed");
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");
@@ -743,7 +770,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
@@ -752,8 +779,9 @@ export function useOrchestrator(
 
   const startProgram = useCallback(
     (parentIssueRef: string, trustAll: boolean | (() => boolean), sandboxed: boolean | "os") => {
-      if (abortRef.current) abortRef.current.abort();
+      if (abortRef.current) return;
       const controller = new AbortController();
+      const programRunId = `program-${randomUUID()}`;
       abortRef.current = controller;
 
       setRunning(true);
@@ -800,13 +828,14 @@ export function useOrchestrator(
           }
 
           ensureGithubEnv();
-          const parentOps = new TicketOps(normalizedParent, "github");
+          const parentOps = new TicketOps(normalizedParent, "github", { signal: controller.signal });
           if (!parentOps.isAvailable()) {
             addMessage("GitHub auth/repo not available. Run `gh auth login` and ensure git remote points to GitHub.");
             return;
           }
 
           const parent = await parentOps.fetchTicket();
+          controller.signal.throwIfAborted();
           if (!parent) {
             addMessage(`Could not fetch parent issue ${normalizedParent}.`);
             return;
@@ -826,6 +855,7 @@ export function useOrchestrator(
               config,
               parent,
               (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
+              controller.signal,
             );
 
             const decomposedCount = decomposition.cards.length;
@@ -839,6 +869,7 @@ export function useOrchestrator(
               parent,
               (msg) => emitLine(`[${getEmoji("system")} system] ${msg}`),
               decomposition,
+              controller.signal,
             );
             epics = generated.epics;
             if (epics.length === 0) {
@@ -868,6 +899,7 @@ export function useOrchestrator(
               }
             } else {
               emitLine(`[${getEmoji("system")} system] Existing program state did not match current plan; resetting saved state.`);
+              controller.signal.throwIfAborted();
               clearProgramRun(workingDir, normalizedParent);
             }
           }
@@ -914,10 +946,12 @@ export function useOrchestrator(
               setStatusMessage("");
             },
             confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve(false);
               return new Promise((resolve) => {
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean, mode?: "always" | "trust") => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     if (mode) resolve({ allowed: yes, mode });
                     else resolve(yes);
@@ -926,11 +960,13 @@ export function useOrchestrator(
               });
             },
             askText(question: string, suggestion: string): Promise<string> {
+              if (controller.signal.aborted || abortRef.current !== controller) return Promise.resolve("");
               return new Promise((resolve) => {
                 setPromptRequest({
                   question,
                   suggestion,
                   resolve: (answer: string) => {
+                    if (abortRef.current !== controller) return;
                     setPromptRequest(null);
                     resolve(answer || suggestion);
                   },
@@ -947,7 +983,11 @@ export function useOrchestrator(
               setGitBranch?.(branch);
             },
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
             updateUsageSummary(summary: UsageSummary): void {
               commitUsageSummary(summary);
@@ -991,9 +1031,16 @@ export function useOrchestrator(
             emitLine(`[${getEmoji("system")} system] Running program gates after epic "${epicTitle}" (${gateMode})...`);
             for (const gate of programGates) {
               try {
-                await runGateCommand(gate, workingDir, 300_000);
+                controller.signal.throwIfAborted();
+                const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+                await runGateCommand(gate, workingDir, {
+                  timeoutMs: 300_000, signal: controller.signal, runId: programRunId,
+                  runProcess: request => runScopedProcess(request, { sandbox: sandboxed, scope, capabilities: config.sandboxCapabilities }),
+                });
+                controller.signal.throwIfAborted();
                 emitLine(`[${getEmoji("system")} system] Gate passed: \`${gate}\``);
               } catch (error: unknown) {
+                controller.signal.throwIfAborted();
                 const raw = error as { stdout?: string; stderr?: string; message?: string };
                 const detail = [raw.stdout, raw.stderr, raw.message].filter(Boolean).join("\n").trim();
                 const condensed = detail ? detail.slice(0, 280) : "no output";
@@ -1037,9 +1084,7 @@ export function useOrchestrator(
                 issueKey,
               );
 
-              const isComplete = () =>
-                result.stories.length > 0 &&
-                result.completedStoryIds.length === result.stories.length;
+              const isComplete = () => result.outcome === "success";
 
               // Program retry delegates to /build's retry path via RetryPlan.
               let retryAttempt = 0;
@@ -1055,6 +1100,7 @@ export function useOrchestrator(
                   completedStoryIds: [...result.completedStoryIds],
                   featureBranch: result.featureBranch,
                   mainBranch: result.mainBranch,
+                  priorRunId: result.runId,
                 };
                 emitLine(`[${getEmoji("system")} system] Program auto-retry ${retryAttempt}/${maxAutoRetries}: ${issueKey}`);
                 result = await runOrchestration(
@@ -1107,6 +1153,7 @@ export function useOrchestrator(
             }
           }
 
+          controller.signal.throwIfAborted();
           clearProgramRun(workingDir, normalizedParent);
 
           flushLine();
@@ -1122,7 +1169,9 @@ export function useOrchestrator(
           addSessionSummaryDivider(addMessage, hasOperationalOutput);
           addMessage(`**Program complete.** ${parts.join(" · ")}`);
           const usageSummaryMessage = formatModelBreakdown(usageSummaryRef.current);
-          if (usageSummaryMessage) addMessage(usageSummaryMessage);
+          if (usageSummaryMessage) addMessage(`Last build usage (session totals include all builds):\n${usageSummaryMessage}`);
+          const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+          if (usageNote) addMessage(usageNote);
           notifyIfEnabled(config.bell, "WorkerMill", "Program complete");
         } catch (err: unknown) {
           flushLine();
@@ -1151,6 +1200,8 @@ export function useOrchestrator(
             addMessage(`**Program failed:** ${msg}`);
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");
@@ -1160,7 +1211,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, setCost, setGitBranch, setPausedState, setPreviewLineThrottled, setStatusMessage, setTokPerSec, waitIfPaused],
   );
 
   // ------------------------------------------------------------------
@@ -1177,6 +1228,7 @@ export function useOrchestrator(
         completedStoryIds: [...run.completedStoryIds],
         featureBranch: run.featureBranch,
         mainBranch: run.mainBranch,
+        priorRunId: run.runId,
       };
 
       // Reuse start() — pass retryPlan via the task string (parsed in the async body)
@@ -1194,7 +1246,7 @@ export function useOrchestrator(
 
   const review = useCallback(
     (trustAll: boolean | (() => boolean), sandboxed: boolean | "os", target?: string) => {
-      if (running) return;
+      if (abortRef.current) return;
       setRunning(true);
       setPausedState(false);
       setStatusMessage("Reviewing...");
@@ -1275,10 +1327,12 @@ export function useOrchestrator(
             status(msg: string): void { setStatusMessage(msg); },
             statusDone(): void { setStatusMessage(""); },
             confirm: async (prompt: string) => {
+              if (controller.signal.aborted || abortRef.current !== controller) return false;
               return new Promise<boolean>((resolve) => {
                 setConfirmRequest({
                   prompt,
                   resolve: (yes: boolean) => {
+                    if (abortRef.current !== controller) return;
                     setConfirmRequest(null);
                     resolve(yes);
                   },
@@ -1286,7 +1340,11 @@ export function useOrchestrator(
               });
             },
             updateCost(cost: number): void {
-              setCost?.(cost);
+              if (!applyExternalUsageLedger) setCost?.(cost);
+            },
+            updateUsageLedger(ledger: LedgerSnapshot): void {
+              usageLedgerRef.current = ledger;
+              applyExternalUsageLedger?.(ledger);
             },
             updateUsageSummary(summary: UsageSummary): void {
               commitUsageSummary(summary);
@@ -1390,6 +1448,8 @@ export function useOrchestrator(
             if (usageSummaryMessage) {
               addMessage(usageSummaryMessage);
             }
+            const usageNote = formatUsageLedgerLimitation(usageLedgerRef.current);
+            if (usageNote) addMessage(usageNote);
           }
         } catch (err: unknown) {
           flushLine();
@@ -1400,6 +1460,8 @@ export function useOrchestrator(
             addMessage(`**Review failed:** ${msg}`);
           }
         } finally {
+          if (abortRef.current !== controller) return;
+          abortRef.current = null;
           setRunning(false);
           setPausedState(false);
           setStatusMessage("");
@@ -1409,7 +1471,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
+    [addMessage, applyExternalUsageLedger, clearPreviewLine, cliConfig, commitUsageSummary, incrementToolCount, pause, releasePauseWaiters, resetUsageSummary, running, setPausedState, setPreviewLineThrottled, setStatusMessage, setCost, setTokPerSec, start, waitIfPaused],
   );
 
   // ------------------------------------------------------------------

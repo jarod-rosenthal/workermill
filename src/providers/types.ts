@@ -19,6 +19,13 @@ export interface TokenUsage {
 }
 
 /**
+ * Whether an API-price estimate can be made for a recorded model call.
+ * Local means the provider has no API token charge; it does not estimate
+ * hardware, electricity, or hosted-local compute costs.
+ */
+export type ApiPricingState = "known" | "unknown" | "local";
+
+/**
  * Information about a specific AI model
  */
 export interface ModelInfo {

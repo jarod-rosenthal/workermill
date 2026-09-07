@@ -1,4 +1,6 @@
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { randomUUID } from "node:crypto";
+import type { SandboxCapabilities } from "./config.js";
 
 export type SandboxSetting = boolean | "os";
 
@@ -14,6 +16,16 @@ export interface OSSandboxDependencyStatus {
   warnings: string[];
 }
 
+/** An explicit OS sandbox request cannot be silently weakened to path mode. */
+export class OSSandboxUnavailableError extends Error {
+  readonly code = "os_sandbox_unavailable";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "OSSandboxUnavailableError";
+  }
+}
+
 export function getOSSandboxDependencyStatus(): OSSandboxDependencyStatus {
   if (!SandboxManager.isSupportedPlatform()) {
     return {
@@ -24,11 +36,7 @@ export function getOSSandboxDependencyStatus(): OSSandboxDependencyStatus {
   }
   try {
     const deps = SandboxManager.checkDependencies();
-    return {
-      supported: true,
-      errors: deps.errors ?? [],
-      warnings: deps.warnings ?? [],
-    };
+    return { supported: true, errors: deps.errors ?? [], warnings: deps.warnings ?? [] };
   } catch (err) {
     return {
       supported: true,
@@ -38,38 +46,77 @@ export function getOSSandboxDependencyStatus(): OSSandboxDependencyStatus {
   }
 }
 
+function unavailableMessage(status: OSSandboxDependencyStatus): string {
+  return `OS sandbox requested but unavailable: ${status.errors.join(", ")}. Install the required runtime dependencies or select sandbox: true for path-only restrictions.`;
+}
+
+/** Resolve a user-selected mode. An explicit `"os"` request fails closed. */
 export function resolveSandboxMode(
   requestedInput: SandboxSetting | undefined,
   fullDisk = false,
 ): SandboxResolution {
   if (fullDisk) return { requested: false, effective: false };
-
-  const requested: SandboxSetting = requestedInput ?? true;
+  const requested = requestedInput ?? true;
   if (requested !== "os") return { requested, effective: requested };
 
   const status = getOSSandboxDependencyStatus();
-  if (!status.supported) {
-    return {
-      requested,
-      effective: true,
-      warning: "OS sandbox requested but unsupported on this platform. Falling back to path sandbox.",
-    };
+  if (!status.supported || status.errors.length > 0) {
+    throw new OSSandboxUnavailableError(unavailableMessage(status));
   }
-  if (status.errors.length > 0) {
-    return {
-      requested,
-      effective: true,
-      warning: `OS sandbox requested but dependencies are missing (${status.errors.join(", ")}). Falling back to path sandbox.`,
-    };
-  }
-  if (status.warnings.length > 0) {
-    return {
-      requested,
-      effective: "os",
-      warning: `OS sandbox enabled with warnings: ${status.warnings.join(", ")}`,
-    };
-  }
-
-  return { requested, effective: "os" };
+  return {
+    requested,
+    effective: "os",
+    warning: status.warnings.length > 0
+      ? `OS sandbox enabled with warnings: ${status.warnings.join(", ")}`
+      : undefined,
+  };
 }
 
+/**
+ * `/build` may opportunistically upgrade its default path mode. This is the
+ * only fallback policy: callers must surface the returned warning to users.
+ */
+export function resolveAutomaticSandboxUpgrade(): SandboxResolution {
+  const status = getOSSandboxDependencyStatus();
+  if (!status.supported || status.errors.length > 0) {
+    return {
+      requested: "os",
+      effective: true,
+      warning: `OS sandbox automatic upgrade unavailable (${status.errors.join(", ")}); continuing with path-only restrictions.`,
+    };
+  }
+  return {
+    requested: "os",
+    effective: "os",
+    warning: status.warnings.length > 0
+      ? `OS sandbox enabled with warnings: ${status.warnings.join(", ")}`
+      : undefined,
+  };
+}
+
+/** Exercise the complete wrapper, including nested seccomp setup, before model work. */
+export async function assertOSSandboxReady(
+  workingDir: string,
+  capabilities?: SandboxCapabilities,
+  signal: AbortSignal = new AbortController().signal,
+): Promise<void> {
+  signal.throwIfAborted();
+  resolveSandboxMode("os");
+  // Dynamic import avoids the scoped runner's dependency-status import cycle.
+  const { runScopedProcess } = await import("./engine/scoped-process.js");
+  const { createPathScope } = await import("./engine/path-policy.js");
+  const marker = `workermill-sandbox-ready-${randomUUID()}`;
+  const result = await runScopedProcess({
+    runId: marker, command: `printf '%s' '${marker}'`, cwd: workingDir, signal,
+    timeoutMs: 5_000, maxOutputBytes: 4096, terminationGraceMs: 250,
+  }, { sandbox: "os", scope: createPathScope(workingDir, capabilities?.extraPathGrants ?? []), capabilities });
+  signal.throwIfAborted();
+  if (result.reason === "exited" && result.exitCode === 0 && result.stdout === marker && !result.outputTruncated) return;
+  const detail = result.stderr.trim() || `probe ${result.reason} (exit ${result.exitCode ?? "none"})`;
+  const namespaceFailure = /bwrap:|apply-seccomp:|userns|user namespace/i.test(detail);
+  throw new OSSandboxUnavailableError(
+    `OS sandbox runtime startup failed before model work: ${detail}. `
+    + (namespaceFailure ? "The host may restrict user namespaces (including Ubuntu 24.04 AppArmor); installed dependencies alone do not establish sandbox support. " : "")
+    + "Use a qualified OS-sandbox host or explicitly choose sandbox: true for path-only restrictions. See docs/configuration.md. No task command was executed by this probe.",
+  );
+}

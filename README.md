@@ -2,19 +2,19 @@
 
 # WorkerMill
 
-### Free local models write the code. Smart models plan and review. You pay pennies instead of dollars.
+### Plan, build, and review code with a configurable team of local and cloud models.
 
 <br>
 
-Most AI coding tools run every token through an expensive cloud model. WorkerMill flips that. A team of specialist AI personas — each routable to a different provider — handles the heavy lifting on local models or affordable cloud APIs. You only burn premium tokens on planning and review. Same quality, fraction of the cost.
+WorkerMill routes specialist AI personas to the providers you choose. Use local models for execution, cloud models for planning and review, or one provider for every role. Routing gives you control over the tradeoff; cost and accepted-code quality depend on the models, task, retries, and your hardware. Comparative savings and quality parity have not been established by a controlled evaluation.
 
-Point it at a ticket. Get a pull request — planned, built by experts, and independently reviewed.
+Start from a ticket or specification, inspect the plan and code changes, and use the review and verification stages before deciding whether to publish a pull request. A separate reviewer role does not necessarily use a different underlying model.
 
 <br>
 
 [![npm version](https://img.shields.io/npm/v/workermill?color=blue)](https://www.npmjs.com/package/workermill)
 [![npm downloads](https://img.shields.io/npm/dw/workermill?color=blue)](https://www.npmjs.com/package/workermill)
-![Node.js](https://img.shields.io/badge/Node.js_20+-339933?style=flat&logo=node.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js_22.12+-339933?style=flat&logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
 [![GitHub stars](https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social)](https://github.com/jarod-rosenthal/workermill/stargazers)
 [![License](https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue)](https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE)
@@ -51,7 +51,7 @@ wm doctor
 
 No server, no Docker, no account. First run walks you through provider setup — pick a model, add a key (or point at Ollama), and you're building.
 
-**Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
+**Requirements:** Node.js 22.12+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
 
 ---
 
@@ -59,7 +59,7 @@ No server, no Docker, no account. First run walks you through provider setup —
 
 ### Point at a ticket. Get a pull request.
 
-Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs your tests, reviews with a separate model, and opens a PR.
+Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the work, assigns specialist AI personas — backend, frontend, devops, security — writes the code, runs configured checks, and invokes the configured reviewer. Passing the completion policy allows you to publish a PR; the reviewer can use the same provider/model as the workers.
 
 ```
 > /build #42
@@ -86,10 +86,10 @@ Point WorkerMill at your GitHub Issues, Jira, or Linear tickets. It plans the wo
 
  system  Branch: workermill/add-product-export (4 commits)
          Push and open PR? (y/n)
-         Cost: ~$2.50 (planner + reviewer only — workers ran locally for free)
+         Cost: estimated from recorded provider usage
 ```
 
-The reviewer caught a real N+1 database query. The workers fixed it. The re-review passed. No human intervention. That's the difference between one model approving its own work and a team with independent review.
+The example illustrates the review-and-revision workflow. Review quality depends on the selected models and verification coverage; a separate review invocation is not proof of independent model judgment.
 
 Works with **GitHub Issues** (`/build #42`), **Jira** (`/build PROJ-123`), **Linear** (`/build TEAM-42`), spec files (`/build spec.md`), or just a description (`/build add dark mode`).
 
@@ -150,13 +150,13 @@ Ask it to fix a bug, explain a function, or refactor a module. It reads your cod
 
 ## How It Works
 
-Unlike single-model tools, WorkerMill never lets the same model review its own code.
+WorkerMill can route planning, execution, and review separately. Routing remains your choice: a reviewer can use the same provider and model as a worker unless you enable `review.requireDifferentModel`.
 
 1. **A planner** reads your codebase and decomposes the task into scoped stories with specific files and implementation guidance.
-2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk — refining it until it passes or 3 rounds are spent. Bad plans get caught before a single line of code is written.
+2. **A critic** (optional, `review.critic`) scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk. Outside strict mode this is advisory; strict mode can stop an unapproved plan.
 3. **Specialist workers** build one story at a time — a backend expert writes the API, a frontend expert wires the UI. Workers run on local models, affordable cloud APIs, or any provider you choose.
-4. **Quality gates** run after each story — your tests, linter, LSP diagnostics. Failures get injected into the reviewer's context.
-5. **A reviewer** on a different model reads the actual diffs against the original spec. It rejects bad work with specific feedback — including real code examples — until the code meets the standard.
+4. **Quality gates** run on the prepared candidate. Required static gates block; planner-generated verification is reviewer context outside strict mode.
+5. **A reviewer** reads the actual diffs against the original spec and can request revisions with specific feedback. Its model follows your routing configuration and may be the same as a worker's. Revisions are bounded by the configured limit, and a review score is not proof of correctness.
 
 ```json
 {
@@ -173,7 +173,7 @@ Unlike single-model tools, WorkerMill never lets the same model review its own c
 }
 ```
 
-Use expensive models for judgment. Free local models for volume.
+Choose models for the task and your operating constraints. Local inference can avoid a hosted API charge, but hardware and electricity still cost resources.
 
 ---
 
@@ -182,13 +182,13 @@ Use expensive models for judgment. Free local models for volume.
 | Feature | Description |
 |---------|-------------|
 | **Multi-Expert Orchestration** | `/build` decomposes tasks into stories and assigns specialist personas — backend, frontend, devops, security, QA |
-| **Independent Code Review** | Reviewer runs on a separate model. Never approves its own code. Rejects with specific feedback and code examples |
+| **Code Review** | Reviewer evaluates the candidate and can request revisions. It follows routing; `review.requireDifferentModel` is optional and checks configured identity, not independent training. |
 | **11 Built-in Personas** | architect, backend, frontend, mobile, devops, security, QA, data/ML, tech writer, planner, tech lead |
-| **Definition of Done** | Planner emits required files, tests, and commands per story — orchestrator enforces them before review |
-| **Quality Gates** | Tests, linter, and LSP diagnostics run after each story — failures block review |
+| **Definition of Done** | Required story commands block completion; required-file/test checks provide final-story evidence. |
+| **Quality Gates** | Configured static gates are required by default; planner verification and explicit advisory gates are non-blocking outside strict mode. |
 | **LSP Integration** | Language server diagnostics, go-to-definition, find-references, hover info, workspace symbols — semantic code intelligence |
 | **Ticket Integration** | GitHub Issues, Jira, Linear — fetch specs, post comments, transition status |
-| **Model Routing** | Different provider per role — expensive models for planning/review, free local models for coding |
+| **Model Routing** | Choose a provider per role, including local models with no hosted API charge |
 | **12 Providers** | Anthropic, OpenAI, Google, xAI, Ollama, LM Studio, OpenRouter, Groq, DeepSeek, Mistral, AWS Bedrock, Azure |
 | **Hot-Swap Models** | `/model provider/model [context]` mid-session — e.g. `/model ollama/qwen3-coder:30b 256k` |
 | **MCP Support** | Connect external tools via Model Context Protocol — auto-detects Docker Desktop |
@@ -199,10 +199,10 @@ Use expensive models for judgment. Free local models for volume.
 | **Project Memory** | `/remember` saves user-facing context — corrections, preferences, learnings |
 | **Session History** | Per-project session storage, resume with `--resume`, `/sessions` to browse |
 | **Checkpoint Undo** | `/undo` rolls back per-file, per-step, or everything — tracked independently from git |
-| **Run Manifests** | Every `/build` saves a JSON manifest with full run state — stories, outcomes, cost, review. Inspectable after the fact |
-| **Retry Rollback** | Failed story retries start from a clean workspace snapshot, not half-broken state |
-| **Sub-Agents** | Spawn isolated workers in git worktrees for parallel research or implementation |
-| **Permission System** | Granular tool allow/deny rules, `/trust` for session-wide approval |
+| **Run Manifests** | Inspect saved build records with `wm runs`; a completed story count alone does not establish passing final verification |
+| **Retry Recovery** | Failed runs preserve state and edits for inspection and `/retry`; WorkerMill does not reset the checkout to HEAD automatically. |
+| **Sub-Agents** | Spawn child workers in git worktrees for parallel research or implementation; a worktree is not a security sandbox. |
+| **Permission System** | Granular allow/ask/deny rules; session trust cannot override explicit deny/ask or safety checks |
 
 ---
 
@@ -291,7 +291,7 @@ Any provider with an OpenAI-compatible API also works — just add a `host` fiel
 | `/changed` | Show files changed in this session |
 | `/git` | Branch and status |
 | `/permissions` | Manage tool allow/deny rules |
-| `/trust` | Auto-approve all tools for this session |
+| `/trust` | Approve ordinary tools for this session; deny/ask and safety rules still apply |
 
 </details>
 
@@ -379,7 +379,7 @@ The slash command shorthand and the config value represent the same setting for 
 
 ## Built-in Personas
 
-WorkerMill ships with 11 specialist personas. Each has its own system prompt, tool restrictions, and domain expertise — and each can be routed to a different provider via the `routing` config — run workers on Ollama for free, on affordable cloud models like Groq or DeepSeek, or on any provider you prefer.
+WorkerMill ships with 11 specialist personas. Each has its own system prompt, tool restrictions, and domain focus. Route each persona to a provider using `routing`: local Ollama, a hosted provider, or one shared provider for all roles. Local execution still uses your hardware and electricity.
 
 | Persona | Role |
 |---------|------|
@@ -412,14 +412,14 @@ WorkerMill gives its agents 23 tools — file operations, shell, search, git, we
 | `glob` | Find files by pattern |
 | `grep` | Search file contents with regex |
 | `ls` | Directory listing |
-| `bash` | Shell command execution (sandboxed) |
-| `bash_background` / `bash_output` / `bash_kill` | Long-running processes |
+| `bash` | Bounded, cancellable shell commands; arbitrary-shell containment requires OS mode |
+| `bash_background` / `bash_output` / `bash_kill` | Run-owned background commands with bounded output and a 15-minute deadline; unavailable in OS sandbox mode |
 | `git` | Branch, commit, diff, log operations |
 | `lsp` | Language server — diagnostics, definitions, references, hover, symbols |
 | `web_search` | Search the web |
 | `fetch` | HTTP requests |
 | `download_file` | Download files with checksum verification |
-| `sub_agent` | Spawn isolated workers in git worktrees |
+| `sub_agent` | Scoped child workers; preserve changed worktrees for review ([isolation and recovery](docs/architecture.md#child-agents-and-recovering-their-work)) |
 | `view_image` | Send images to vision models |
 | `todo` | Track tasks within a session |
 | `verify` | Run quality gate commands |
@@ -437,11 +437,9 @@ Connect external tools via the [Model Context Protocol](https://modelcontextprot
 ```json
 {
   "mcp": {
-    "servers": {
-      "my-server": {
-        "command": "npx",
-        "args": ["-y", "my-mcp-server"]
-      }
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "my-mcp-server"]
     }
   }
 }

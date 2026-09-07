@@ -1,0 +1,3487 @@
+{
+  "schemaVersion": 1,
+  "capturedAtUtc": "2026-09-06T18:53:05.812142+00:00",
+  "windowStartUtc": "2026-09-05T18:53:05.812142+00:00",
+  "repo": "/home/user/github/workermill",
+  "baselineCommit": "9e3174882b97165e5f6c00399ddd31d4e5a75eb0",
+  "coreHead": "22ba7d7c0d12dd9bed85586fcbf6f966030245c7",
+  "mainHead": "9e3174882b97165e5f6c00399ddd31d4e5a75eb0",
+  "cachedOriginMainHead": "9e3174882b97165e5f6c00399ddd31d4e5a75eb0",
+  "remoteRefsRefreshed": false,
+  "scope": "All registered WorkerMill worktrees, all reachable refs in the 24-hour window, all tracked Markdown documentation; node_modules and generated output are not attributed as authored source. Clean worktree comparison detects uncommitted source. Git author dates can survive cherry-picks; committedAt is integration time. This is a saved-state inventory, not a line-by-line correctness certification.",
+  "counts": {
+    "worktrees": 38,
+    "coreCommitsSinceBaseline": 146,
+    "coreChangedPaths": 163,
+    "coreAddedLines": 17514,
+    "coreDeletedLines": 6757,
+    "allRecentReachableCommits": 230,
+    "allRecentChangedPaths": 164,
+    "trackedMarkdownFiles": 32
+  },
+  "coreChanges": [
+    {
+      "path": "AGENTS.md",
+      "status": "M",
+      "addedLines": 1,
+      "deletedLines": 1,
+      "sha256": "3ec665dcdaa780e076e452fadbac538967bc2ca8905ced281076ac5aaff38deb"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "status": "M",
+      "addedLines": 1,
+      "deletedLines": 1,
+      "sha256": "d8b118f55869d70167e6b5c3e2678455a0e4d6170ff2a57e5110eb3052806c28"
+    },
+    {
+      "path": "README.md",
+      "status": "M",
+      "addedLines": 20,
+      "deletedLines": 22,
+      "sha256": "309c7baad32561739efaf348c7ed9ac16f726cb76f169216c997e744f437fece"
+    },
+    {
+      "path": "SECURITY.md",
+      "status": "M",
+      "addedLines": 17,
+      "deletedLines": 10,
+      "sha256": "3b38ff19cfc48d95092382e2a56e90d45e7a6f46633a41f860d0d16b8395c83e"
+    },
+    {
+      "path": "docs/architecture.md",
+      "status": "M",
+      "addedLines": 66,
+      "deletedLines": 13,
+      "sha256": "cc319bd6197dc359058fd86f3a426e19670c37080e039b02db32d10307a5c80d"
+    },
+    {
+      "path": "docs/commands.md",
+      "status": "M",
+      "addedLines": 29,
+      "deletedLines": 3,
+      "sha256": "c788fb1802d950753221f5e9409f0f1d435b1723870b6c3e5dab061aa3be6821"
+    },
+    {
+      "path": "docs/configuration.md",
+      "status": "M",
+      "addedLines": 57,
+      "deletedLines": 7,
+      "sha256": "cd0c1294ac73b954e8b6a733d2fd671c5d30042211f34096ce1c82be02166959"
+    },
+    {
+      "path": "docs/contributing.md",
+      "status": "M",
+      "addedLines": 5,
+      "deletedLines": 1,
+      "sha256": "372ddbcfa1bec82a48c145fdbfa8f9fbd479642eeafe4b559078c780b9466ebd"
+    },
+    {
+      "path": "docs/quality-gates.md",
+      "status": "M",
+      "addedLines": 44,
+      "deletedLines": 16,
+      "sha256": "e2b2b5c8258f185b57fbf30f993878c065d05e598e817f6a4f6713808212bf47"
+    },
+    {
+      "path": "docs/recipes.md",
+      "status": "M",
+      "addedLines": 21,
+      "deletedLines": 31,
+      "sha256": "8a155aef60da4630e92fe71c07619f75c37cb3eb3cc4771bf9e07b8a39ae9144"
+    },
+    {
+      "path": "docs/reliability-plan.md",
+      "status": "A",
+      "addedLines": 462,
+      "deletedLines": 0,
+      "sha256": "0e2703a84548bac222ebc82d4a0456a916d7c5ded218a5e5fe7d82daa1d92ee1"
+    },
+    {
+      "path": "docs/reliability-queue.json",
+      "status": "A",
+      "addedLines": 36,
+      "deletedLines": 0,
+      "sha256": "1987cef791f7493e1d919a4cebfcde941edda580c09fc11f1e439ed838a0c793"
+    },
+    {
+      "path": "docs/troubleshooting.md",
+      "status": "M",
+      "addedLines": 17,
+      "deletedLines": 6,
+      "sha256": "3f2501d5323ac11357fe40e3b4f3c6dfc3b26010a7a63ae929c44a720d2095ee"
+    },
+    {
+      "path": "evals/README.md",
+      "status": "A",
+      "addedLines": 74,
+      "deletedLines": 0,
+      "sha256": "76dcb3e2bbed93ef765c4db9691fd13af41380eac70396324b1670544750cfbd"
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-batch-config.mjs",
+      "status": "A",
+      "addedLines": 127,
+      "deletedLines": 0,
+      "sha256": "8dc1f0cda8314b902b0c2503082dd23b0f727409e100f1c769faa67987b260d6"
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-deep-config.mjs",
+      "status": "A",
+      "addedLines": 43,
+      "deletedLines": 0,
+      "sha256": "c00f83d5e128bd445bf55e1695b777acac7e44e7d14b0dd0ec6886cbe81fe1f9"
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-pagination.mjs",
+      "status": "A",
+      "addedLines": 40,
+      "deletedLines": 0,
+      "sha256": "520e49aa7a0c96819baf9571f4e682361728e74af763bbdcef295a5cf2969c8b"
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-queue-recovery.mjs",
+      "status": "A",
+      "addedLines": 50,
+      "deletedLines": 0,
+      "sha256": "0beb79df88a44b2461f0d4376aec25a0f72827271c8de38442604ec6b13284f5"
+    },
+    {
+      "path": "evals/tasks/r20-bugfix-retry-backoff.mjs",
+      "status": "A",
+      "addedLines": 31,
+      "deletedLines": 0,
+      "sha256": "ebec96c03271fa1b69084fc7192008ea1ff256f87e63978c8a6675fe6f9734c3"
+    },
+    {
+      "path": "evals/tasks/r20-feature-daily-summary-v1.mjs",
+      "status": "A",
+      "addedLines": 37,
+      "deletedLines": 0,
+      "sha256": "99d590c677fd38b791a460d57eb4e191c9df725d6a1a43e8fcab58522c809e0a"
+    },
+    {
+      "path": "evals/tasks/r20-feature-expiring-cache-v1.mjs",
+      "status": "A",
+      "addedLines": 37,
+      "deletedLines": 0,
+      "sha256": "58a8663e4c1a6327693f3be41413569664595c03e6173fe9d5554c7b65c5d4b4"
+    },
+    {
+      "path": "evals/tasks/r20-feature-release-notes-v1.mjs",
+      "status": "A",
+      "addedLines": 29,
+      "deletedLines": 0,
+      "sha256": "44ab38355bd22cc4c756b09711ccb37186ced6e9fa68407e1077591968971019"
+    },
+    {
+      "path": "evals/tasks/r20-feature-tag-filter-v1.mjs",
+      "status": "A",
+      "addedLines": 33,
+      "deletedLines": 0,
+      "sha256": "11946f6383340cafbee8c4b6c963466054b3c57c8c9d03031ef6900a5b5332e3"
+    },
+    {
+      "path": "evals/tasks/r20-feature-webhook-recovery-v1.mjs",
+      "status": "A",
+      "addedLines": 35,
+      "deletedLines": 0,
+      "sha256": "c7d4fe9d0481e01ded94998022ec96e9a3daa82c9d75fc49cd04c87688e2847d"
+    },
+    {
+      "path": "evals/tasks/r20-helper.mjs",
+      "status": "A",
+      "addedLines": 94,
+      "deletedLines": 0,
+      "sha256": "3608b77936dd764529bbc583b032c6bac1cffeb4455cfad62b10a67a5235214f"
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-async-checks-v1.mjs",
+      "status": "A",
+      "addedLines": 91,
+      "deletedLines": 0,
+      "sha256": "f7623d8f206a162dca5c99fc8dc72aa92ce27ce8ebe78638df519fed25ce4523"
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-stable-report-v1.mjs",
+      "status": "A",
+      "addedLines": 76,
+      "deletedLines": 0,
+      "sha256": "dfc277afce8910c96348c1dcdaf175b3a287253ffa4b52cbe0557581d0fdfde1"
+    },
+    {
+      "path": "evals/tasks/r20-maintenance-temp-cleanup-v1.mjs",
+      "status": "A",
+      "addedLines": 93,
+      "deletedLines": 0,
+      "sha256": "9764005e076f344796a64aa2704c9bba3d3eb5fef36d5278cc7dce1046744625"
+    },
+    {
+      "path": "evals/tasks/r20-refactor-cursor-codec-v1.mjs",
+      "status": "A",
+      "addedLines": 84,
+      "deletedLines": 0,
+      "sha256": "c4d692765a899646c6419eb5dd5263ac36cd0a1ec3dbd8a0c69978527d405734"
+    },
+    {
+      "path": "evals/tasks/r20-refactor-recipient-index-v1.mjs",
+      "status": "A",
+      "addedLines": 85,
+      "deletedLines": 0,
+      "sha256": "2f01a25ea165b5805c84408b80c81ed7c48aaa5549a8f08fbf8d9f9592dfeeb7"
+    },
+    {
+      "path": "evals/tasks/r20-refactor-report-projection-v1.mjs",
+      "status": "A",
+      "addedLines": 81,
+      "deletedLines": 0,
+      "sha256": "d70f53ac8e0f92e8d56987eea2ba0c63b62baadcf6e51dc30b325e336e2574a7"
+    },
+    {
+      "path": "evals/tasks/r20-refactor-retry-policy-v1.mjs",
+      "status": "A",
+      "addedLines": 88,
+      "deletedLines": 0,
+      "sha256": "72622285e49b52f9ad7fb05a45ba7986759a88952e488eae399402d07fa49f48"
+    },
+    {
+      "path": "evals/tasks/r20-security-job-schema-v1.mjs",
+      "status": "A",
+      "addedLines": 102,
+      "deletedLines": 0,
+      "sha256": "c769f56c78fbedfd67712eca144ee1324fb024eb2b85de8ff8cf5a3a763b4713"
+    },
+    {
+      "path": "evals/tasks/r20-security-path-boundary-v1.mjs",
+      "status": "A",
+      "addedLines": 132,
+      "deletedLines": 0,
+      "sha256": "637f8dfc9e5b806347ea577143e6868207ca4c0bef20a211dfa77beaebc6eac6"
+    },
+    {
+      "path": "evals/tasks/r20-security-prototype-config-v1.mjs",
+      "status": "A",
+      "addedLines": 122,
+      "deletedLines": 0,
+      "sha256": "502094d15cc246a2b8fa8292c1d2d00d3cfc4b39635afa31c95626a3ba3836fd"
+    },
+    {
+      "path": "evals/tasks/schema.json",
+      "status": "A",
+      "addedLines": 27,
+      "deletedLines": 0,
+      "sha256": "4b9299f019a519fa7107a7094c6347dc5657dbcd20370f3ecacde008dbf215d4"
+    },
+    {
+      "path": "package-lock.json",
+      "status": "M",
+      "addedLines": 3,
+      "deletedLines": 3,
+      "sha256": "76f29fff11201b3d7ff762adad85efde7be123fb565074d2a34e2dbdafa4e32a"
+    },
+    {
+      "path": "package.json",
+      "status": "M",
+      "addedLines": 1,
+      "deletedLines": 1,
+      "sha256": "7ffff4a6db01a2a8472583d25308aa9b8440c58d0edbaf22945555ea40347c2e"
+    },
+    {
+      "path": "src/__tests__/bash-background.test.ts",
+      "status": "A",
+      "addedLines": 165,
+      "deletedLines": 0,
+      "sha256": "81506f1fa313d23e104545e6c5d4a0ccf8adbf959d2ab00fbaf56b8b7b977f5a"
+    },
+    {
+      "path": "src/__tests__/bash-tool.test.ts",
+      "status": "M",
+      "addedLines": 94,
+      "deletedLines": 6,
+      "sha256": "d84ce39ad658e5a30f93206bca14776c0c0a309de250f07845d4e745562c3cba"
+    },
+    {
+      "path": "src/__tests__/browser.test.ts",
+      "status": "M",
+      "addedLines": 265,
+      "deletedLines": 219,
+      "sha256": "d6726ca4d47dd9aedbda63848c4df1e2f35cf9834f3c4061a2d10c88cb8ec0a8"
+    },
+    {
+      "path": "src/__tests__/candidate-runtime.test.ts",
+      "status": "A",
+      "addedLines": 59,
+      "deletedLines": 0,
+      "sha256": "e0bca38c9be2fd2d716243e80dcf1b3fca5c3b911d800380c31d1e30ba6aec15"
+    },
+    {
+      "path": "src/__tests__/check-tool-permission.test.ts",
+      "status": "M",
+      "addedLines": 24,
+      "deletedLines": 4,
+      "sha256": "9c2cabc99dcc651e42e04a1c3e119a0ef594b133d198a0962deb1a22fd88ccd2"
+    },
+    {
+      "path": "src/__tests__/compaction.test.ts",
+      "status": "M",
+      "addedLines": 24,
+      "deletedLines": 0,
+      "sha256": "60cedae8f7453a65999ab1ebb2e3d34901d2160fb00cbf21c660cdff8d76072e"
+    },
+    {
+      "path": "src/__tests__/config.test.ts",
+      "status": "M",
+      "addedLines": 34,
+      "deletedLines": 1,
+      "sha256": "7c2a3b3b65e4e394bb3d6f82438d3ff4386d6d739819d61da65e2f4ef3853e73"
+    },
+    {
+      "path": "src/__tests__/eval-fixtures.test.ts",
+      "status": "A",
+      "addedLines": 177,
+      "deletedLines": 0,
+      "sha256": "fdf07d29acc6c1f191c899b94ecbae7077be0a044adfd2b57b46166dec88ee80"
+    },
+    {
+      "path": "src/__tests__/final-evidence-runtime.test.ts",
+      "status": "A",
+      "addedLines": 316,
+      "deletedLines": 0,
+      "sha256": "2d805cdb4c5d7d4c1ad7b6c7abed52881c458459498467e65e9a721c4f3c3142"
+    },
+    {
+      "path": "src/__tests__/fixtures/lsp-jsonrpc-server.mjs",
+      "status": "A",
+      "addedLines": 91,
+      "deletedLines": 0,
+      "sha256": "d7f0245fab78ef73bc9ea1b3a345de1fae524360409004d0eefac413c677d8c2"
+    },
+    {
+      "path": "src/__tests__/fixtures/mcp-jsonrpc-server.mjs",
+      "status": "A",
+      "addedLines": 51,
+      "deletedLines": 0,
+      "sha256": "1e7b39c96eec20d3f8e3f39273080300b34025c117285af22f32115b63f5d12d"
+    },
+    {
+      "path": "src/__tests__/gate-runner.test.ts",
+      "status": "M",
+      "addedLines": 95,
+      "deletedLines": 1,
+      "sha256": "9c9503ef6716250400436c1008e190e26487bb489cbaa529692a76174181c007"
+    },
+    {
+      "path": "src/__tests__/git-ops.test.ts",
+      "status": "M",
+      "addedLines": 0,
+      "deletedLines": 64,
+      "sha256": "54e3d43b2b693c1aaaac994d60aead0c8ea291417e8b1964b403622654c6867e"
+    },
+    {
+      "path": "src/__tests__/git-tool.test.ts",
+      "status": "A",
+      "addedLines": 71,
+      "deletedLines": 0,
+      "sha256": "d680a5dd98c4d43152525cfb1e19118bd41533af8057a3d692908ee64e0192f4"
+    },
+    {
+      "path": "src/__tests__/headless-cli.test.ts",
+      "status": "A",
+      "addedLines": 78,
+      "deletedLines": 0,
+      "sha256": "0fa0a9466b74cd33bdfd615cde28e999573b54a062b7370b47ba2f8ef94f1da0"
+    },
+    {
+      "path": "src/__tests__/headless-runtime.test.ts",
+      "status": "A",
+      "addedLines": 420,
+      "deletedLines": 0,
+      "sha256": "120145eb42e2a1e55cce18b3c5d8570c5aa915e6c830cf99a6648680b520e8e7"
+    },
+    {
+      "path": "src/__tests__/helpers/global-state.ts",
+      "status": "A",
+      "addedLines": 21,
+      "deletedLines": 0,
+      "sha256": "9e66f0c3224429a46d3ba9e1dcd9230d74cb8c3d37c34046c7fe03585b9fed1a"
+    },
+    {
+      "path": "src/__tests__/helpers/setup-state.ts",
+      "status": "A",
+      "addedLines": 24,
+      "deletedLines": 0,
+      "sha256": "17232d09958731312a41ae22f08fb58c27fa94ade4627513720774cf73279558"
+    },
+    {
+      "path": "src/__tests__/helpers/temp-workermill-home.ts",
+      "status": "M",
+      "addedLines": 2,
+      "deletedLines": 3,
+      "sha256": "ba81d3fb85f397663361d2bb9bd60a8c576865c750e1b0e210396278f1b3ce13"
+    },
+    {
+      "path": "src/__tests__/http-runtime.test.ts",
+      "status": "A",
+      "addedLines": 181,
+      "deletedLines": 0,
+      "sha256": "52026acccb9fa7b7cc33f10c5ccb87c1bb8028c37b881b02ea5f33120e039349"
+    },
+    {
+      "path": "src/__tests__/image-support.test.ts",
+      "status": "M",
+      "addedLines": 31,
+      "deletedLines": 29,
+      "sha256": "1e17036e8c5d1b03c5500b659d2908f5ce4e2b45a86fbef7b8ae16e091320043"
+    },
+    {
+      "path": "src/__tests__/logs-command.test.ts",
+      "status": "M",
+      "addedLines": 4,
+      "deletedLines": 3,
+      "sha256": "200858e1e78a42823f87df9451cd1ac35617f8767bb5c455d9a561b651b62b2d"
+    },
+    {
+      "path": "src/__tests__/lsp-run-resources.test.ts",
+      "status": "A",
+      "addedLines": 195,
+      "deletedLines": 0,
+      "sha256": "29b99f19104d593ebcb917631131863723c6a9e7cf2703883b514780ed184bf2"
+    },
+    {
+      "path": "src/__tests__/maturity-features.test.ts",
+      "status": "M",
+      "addedLines": 11,
+      "deletedLines": 66,
+      "sha256": "6493d4e28a2fad4ce57c05dea62aa37dbe92dd4e4fae16e1ecbfc8f659123b83"
+    },
+    {
+      "path": "src/__tests__/mcp-client.test.ts",
+      "status": "M",
+      "addedLines": 90,
+      "deletedLines": 1082,
+      "sha256": "905a1b8dadb367d57866e1d24bae6b3db47aaab4db191b182eb6f017329d3858"
+    },
+    {
+      "path": "src/__tests__/mcp-discovery.test.ts",
+      "status": "A",
+      "addedLines": 62,
+      "deletedLines": 0,
+      "sha256": "8425b4a5751e84cd83274bc97074e44d577e4d19c9d8f63651c6784e5f70e9ee"
+    },
+    {
+      "path": "src/__tests__/mcp-run-resources.test.ts",
+      "status": "A",
+      "addedLines": 108,
+      "deletedLines": 0,
+      "sha256": "c15ea04a592cb07e410701a3aba14f8bcac76836b5ea80148da9b49ae7edbe5d"
+    },
+    {
+      "path": "src/__tests__/orchestration-lifecycle-runtime.test.ts",
+      "status": "A",
+      "addedLines": 163,
+      "deletedLines": 0,
+      "sha256": "c0dbf0cc5b6b516e1feba0e2ffa52addcd6a89cfb8f8ff2fadb2e8657f9977fa"
+    },
+    {
+      "path": "src/__tests__/orchestration-startup-runtime.test.ts",
+      "status": "A",
+      "addedLines": 187,
+      "deletedLines": 0,
+      "sha256": "739761b79d22f930dc23fc3ec3a51f2512b4815b9fcfba031363987118ff4055"
+    },
+    {
+      "path": "src/__tests__/orchestrator-gates-cancellation.test.ts",
+      "status": "A",
+      "addedLines": 87,
+      "deletedLines": 0,
+      "sha256": "f5d2d350f441aee6d54174b18d83fa1c8254ff9b9fe2ee8a2fd377a5719d53c4"
+    },
+    {
+      "path": "src/__tests__/orchestrator-gates.test.ts",
+      "status": "M",
+      "addedLines": 178,
+      "deletedLines": 6,
+      "sha256": "cbd32a4462ee2e5560df94e59a3a0c955c911200e0a28b165c48e238cfe48460"
+    },
+    {
+      "path": "src/__tests__/orchestrator.test.ts",
+      "status": "M",
+      "addedLines": 284,
+      "deletedLines": 51,
+      "sha256": "eb885c434030d7d68dabd5237baba1b9facead7a1abc73a500f805a69f2a7ad2"
+    },
+    {
+      "path": "src/__tests__/path-policy.test.ts",
+      "status": "A",
+      "addedLines": 209,
+      "deletedLines": 0,
+      "sha256": "b40d64b1750be2454123a9636474d23914a48379bff4ad9c1cf31b7d46ecf6df"
+    },
+    {
+      "path": "src/__tests__/permissions.test.ts",
+      "status": "D",
+      "addedLines": 0,
+      "deletedLines": 476,
+      "sha256": null
+    },
+    {
+      "path": "src/__tests__/plan-critic.test.ts",
+      "status": "M",
+      "addedLines": 19,
+      "deletedLines": 0,
+      "sha256": "9493321e131472ffe3b420c0cde3776ee3b6623efbe9d369a56c566cfe3d0834"
+    },
+    {
+      "path": "src/__tests__/planner-runtime-policy.test.ts",
+      "status": "A",
+      "addedLines": 170,
+      "deletedLines": 0,
+      "sha256": "b878f53a89343ec8a9057b0f9025cc30c2bba6252f0bbd8f5b66b19fb13a52f2"
+    },
+    {
+      "path": "src/__tests__/process-runner.test.ts",
+      "status": "A",
+      "addedLines": 138,
+      "deletedLines": 0,
+      "sha256": "028e81b61884816712de042ce08b9ba453106c0efd5a867a352cdf11ca2e6099"
+    },
+    {
+      "path": "src/__tests__/provider-registry.test.ts",
+      "status": "M",
+      "addedLines": 17,
+      "deletedLines": 1,
+      "sha256": "374a3286cf8bfd1f47e42047212f9c3bd166446b9f05c8b58eb25f1644fcc443"
+    },
+    {
+      "path": "src/__tests__/publication-lifecycle.test.ts",
+      "status": "A",
+      "addedLines": 164,
+      "deletedLines": 0,
+      "sha256": "90fc70c0c4b89462436a345f648df10643c3a92c75bd3c04ad980f9a187a2876"
+    },
+    {
+      "path": "src/__tests__/recovery.test.ts",
+      "status": "M",
+      "addedLines": 82,
+      "deletedLines": 1,
+      "sha256": "34b29652ac024f04c0a5e907d6da7c3ffdfbb337f773beffb20d03685332e038"
+    },
+    {
+      "path": "src/__tests__/repository-fingerprint.test.ts",
+      "status": "A",
+      "addedLines": 149,
+      "deletedLines": 0,
+      "sha256": "9d9d95c2025b6faaffc025c31997173326584bcc1a7db87515ac28198de4ba26"
+    },
+    {
+      "path": "src/__tests__/review-diff-safety.test.ts",
+      "status": "A",
+      "addedLines": 49,
+      "deletedLines": 0,
+      "sha256": "7c5d60af786e48079128fd40536a91007652595e42ffe0a47dafe3803bdf2bde"
+    },
+    {
+      "path": "src/__tests__/review-git-runtime.test.ts",
+      "status": "A",
+      "addedLines": 73,
+      "deletedLines": 0,
+      "sha256": "61bb028ec07b204dbbfb53b270ad6bfb936f576153610425b2511435f314a61b"
+    },
+    {
+      "path": "src/__tests__/review-identity.test.ts",
+      "status": "A",
+      "addedLines": 135,
+      "deletedLines": 0,
+      "sha256": "876fff9d95d7590f409455312336700e9d984de4325d6bebfaed3d644533e9f5"
+    },
+    {
+      "path": "src/__tests__/review-runtime-policy.test.ts",
+      "status": "A",
+      "addedLines": 342,
+      "deletedLines": 0,
+      "sha256": "79722a7d9fe0c92966668492b73e4b04aa4ecc6e533188ee41ffa89b3b9c8287"
+    },
+    {
+      "path": "src/__tests__/root-shell-runtime.test.ts",
+      "status": "A",
+      "addedLines": 92,
+      "deletedLines": 0,
+      "sha256": "81da761a9ca77770243dcf0bf720fee0b7a392759c4e608e685592bb60ce9550"
+    },
+    {
+      "path": "src/__tests__/run-manifest.test.ts",
+      "status": "A",
+      "addedLines": 150,
+      "deletedLines": 0,
+      "sha256": "2e7c3e6607810cfe5faa5efd76801f016e4c213e30e8a8b47756d46515adcd18"
+    },
+    {
+      "path": "src/__tests__/runs-command.test.ts",
+      "status": "M",
+      "addedLines": 19,
+      "deletedLines": 0,
+      "sha256": "46369d5f41463fd99cd1ea55ec4ee63c84a2d144e9a7a95db5718ee4c439a688"
+    },
+    {
+      "path": "src/__tests__/sandbox-mode.test.ts",
+      "status": "M",
+      "addedLines": 19,
+      "deletedLines": 9,
+      "sha256": "2b88acafcc19d9597aa52f2dd6b891e5b3cc3f73eff85505708f9d426f4ac2ab"
+    },
+    {
+      "path": "src/__tests__/schema-command.test.ts",
+      "status": "M",
+      "addedLines": 9,
+      "deletedLines": 0,
+      "sha256": "f3550b8086a802cea2f83a920b6149d68703094d217a11f9126a9cae6112e3f4"
+    },
+    {
+      "path": "src/__tests__/scoped-process.test.ts",
+      "status": "A",
+      "addedLines": 239,
+      "deletedLines": 0,
+      "sha256": "fa5663ce79ab203956b0eb7ad9276db93a6442a06f91feb78a0391c10e7c48a7"
+    },
+    {
+      "path": "src/__tests__/slash-commands.test.ts",
+      "status": "M",
+      "addedLines": 27,
+      "deletedLines": 0,
+      "sha256": "25ccd97da5847ed3abb587e133a146fb1a096456b22741d653adf75278a75dcf"
+    },
+    {
+      "path": "src/__tests__/sub-agent-runtime.test.ts",
+      "status": "A",
+      "addedLines": 265,
+      "deletedLines": 0,
+      "sha256": "4d17d19ee650643e86349b0e77999e806f4e9d3e24e7caec8bd95b12d84b8ced"
+    },
+    {
+      "path": "src/__tests__/sub-agent.test.ts",
+      "status": "A",
+      "addedLines": 323,
+      "deletedLines": 0,
+      "sha256": "b53e475ff3c368f490805e3ec6363b7ae58fe3a7311b157d42974290093a9ca8"
+    },
+    {
+      "path": "src/__tests__/system-prompt.test.ts",
+      "status": "M",
+      "addedLines": 0,
+      "deletedLines": 5,
+      "sha256": "bcbdc97f3fa869719d11eb3a005919b08d9f93b4a714759ec5d83a19677e63e7"
+    },
+    {
+      "path": "src/__tests__/ticket-tool.test.ts",
+      "status": "M",
+      "addedLines": 6,
+      "deletedLines": 2,
+      "sha256": "234e2d0a027e4e8423baa6fd23e80acebb70e21b39d5f5ca7c848233fdecb472"
+    },
+    {
+      "path": "src/__tests__/tool-executor.test.ts",
+      "status": "A",
+      "addedLines": 151,
+      "deletedLines": 0,
+      "sha256": "b5c64ed8e921750d62161cf9d53673aaacd69eb1c22cff09924084299323bb3e"
+    },
+    {
+      "path": "src/__tests__/tool-policy.test.ts",
+      "status": "A",
+      "addedLines": 81,
+      "deletedLines": 0,
+      "sha256": "be251b9253fce8ed50144cbfaf7ae29409606ce92f9184a3d2baf4830bcf70df"
+    },
+    {
+      "path": "src/__tests__/useAgent-permission.test.ts",
+      "status": "M",
+      "addedLines": 74,
+      "deletedLines": 420,
+      "sha256": "50cc9a445ea765b5b2365ef546114e7d80c0c3af3df87ff6df7f7518bbda6125"
+    },
+    {
+      "path": "src/__tests__/useAgent-runtime.test.ts",
+      "status": "A",
+      "addedLines": 327,
+      "deletedLines": 0,
+      "sha256": "14da92afb14681da89fed96bf11c7722bca01a98e10de169e0b9271e9198e233"
+    },
+    {
+      "path": "src/__tests__/useOrchestrator-runtime.test.ts",
+      "status": "A",
+      "addedLines": 109,
+      "deletedLines": 0,
+      "sha256": "1d4096b34b29ba49020fb4ee3ac8627ac779f49790ee62124e8c6038976d6eb1"
+    },
+    {
+      "path": "src/__tests__/verify.test.ts",
+      "status": "A",
+      "addedLines": 39,
+      "deletedLines": 0,
+      "sha256": "901c4909190eff7b18bc7c6825f9662b3a522c7f8dda10fa18f82d8407ad9eae"
+    },
+    {
+      "path": "src/__tests__/worker-git-lifecycle.test.ts",
+      "status": "A",
+      "addedLines": 69,
+      "deletedLines": 0,
+      "sha256": "5f011a65ba87eb1ddcd2bfdb6c824be731a4892c032c1584846fd8f5a1241d00"
+    },
+    {
+      "path": "src/__tests__/worker-runtime-policy.test.ts",
+      "status": "A",
+      "addedLines": 129,
+      "deletedLines": 0,
+      "sha256": "5d0fbdbdb47099da2bf7354fe562e3dbb99e318ac80e9468a63a597bb0cd9760"
+    },
+    {
+      "path": "src/browser.ts",
+      "status": "M",
+      "addedLines": 667,
+      "deletedLines": 310,
+      "sha256": "b2ddd4ff2d16956b34ba3c888b366e3f1409f513286c0ea1f184eca3b6888d52"
+    },
+    {
+      "path": "src/compaction.ts",
+      "status": "M",
+      "addedLines": 6,
+      "deletedLines": 0,
+      "sha256": "e78f6b4ff05755b261400db65e2a9ab167536aafd1c918b782b3eb43668f6a9b"
+    },
+    {
+      "path": "src/config.ts",
+      "status": "M",
+      "addedLines": 48,
+      "deletedLines": 1,
+      "sha256": "35caf2cdc6eb867b96cd8f476d0182380ad77192eebf191925cd5a44eb93370e"
+    },
+    {
+      "path": "src/engine/http-request.ts",
+      "status": "A",
+      "addedLines": 82,
+      "deletedLines": 0,
+      "sha256": "5201922cf897b8569c62ead7950d1aa5515ea7bf8637e61dce289e45423fda85"
+    },
+    {
+      "path": "src/engine/path-policy.ts",
+      "status": "A",
+      "addedLines": 169,
+      "deletedLines": 0,
+      "sha256": "f962ce59f4a63c725576cf5c7b85b4786d692c1470aa9046a10a7ef0595f0f14"
+    },
+    {
+      "path": "src/engine/process-runner.ts",
+      "status": "A",
+      "addedLines": 378,
+      "deletedLines": 0,
+      "sha256": "b6238bb5ec5a9547d500cc5bcad822760430c3ec08d6dcb6fcf89cab0200dee4"
+    },
+    {
+      "path": "src/engine/run-resources.ts",
+      "status": "A",
+      "addedLines": 50,
+      "deletedLines": 0,
+      "sha256": "385ccd6cb0a39da76f9462ed7a364560aada88c4d7bff1e424bf7dd39a671bd4"
+    },
+    {
+      "path": "src/engine/scoped-process.ts",
+      "status": "A",
+      "addedLines": 257,
+      "deletedLines": 0,
+      "sha256": "b6d45fd00fc2e548931eadfa832f1871e39da1dc83f4ac375ce0f41dcc58de68"
+    },
+    {
+      "path": "src/engine/tool-executor.ts",
+      "status": "A",
+      "addedLines": 199,
+      "deletedLines": 0,
+      "sha256": "1c1c81f994c405661610d6acec3b6e0b4bbeef705b695e34fdfd0eb96ee10c70"
+    },
+    {
+      "path": "src/engine/tool-policy.ts",
+      "status": "A",
+      "addedLines": 165,
+      "deletedLines": 0,
+      "sha256": "c8f796b80f40deadd7bc0037bc7ef81b1da003984f0c5204706d2b9df0d839d1"
+    },
+    {
+      "path": "src/engine/tools/bash-background.ts",
+      "status": "M",
+      "addedLines": 161,
+      "deletedLines": 125,
+      "sha256": "7bacceb28ce7b951c804eddb2d844097bcd25eecdb1ca2f2891ff162fa6e491e"
+    },
+    {
+      "path": "src/engine/tools/bash-kill.ts",
+      "status": "M",
+      "addedLines": 9,
+      "deletedLines": 13,
+      "sha256": "f769f8ad7e25d1f4bc04d6265d4bf8e05a5254b56762a3aedc98a27fb50cec0d"
+    },
+    {
+      "path": "src/engine/tools/bash-output.ts",
+      "status": "M",
+      "addedLines": 29,
+      "deletedLines": 13,
+      "sha256": "7e103a73492e9271fbb95caec1f67f4689cf3a60768c311b2ab40bee65946ee6"
+    },
+    {
+      "path": "src/engine/tools/bash.ts",
+      "status": "M",
+      "addedLines": 104,
+      "deletedLines": 312,
+      "sha256": "ada4bdf99531a5591990a202b21fa8e094766b378e71910c4ed9b2ec40fbed22"
+    },
+    {
+      "path": "src/engine/tools/download-file.ts",
+      "status": "M",
+      "addedLines": 39,
+      "deletedLines": 53,
+      "sha256": "d7fdc2996e344bf9925ec50885458417c73a2b5d9f73cff54304eed7b7fc8bf4"
+    },
+    {
+      "path": "src/engine/tools/fetch.ts",
+      "status": "M",
+      "addedLines": 6,
+      "deletedLines": 22,
+      "sha256": "1ed6d98520719bec79b2f732cff3dafba55970ed0b615a0f961d470090a2121e"
+    },
+    {
+      "path": "src/engine/tools/git.ts",
+      "status": "M",
+      "addedLines": 32,
+      "deletedLines": 10,
+      "sha256": "43cca7582f277cb880b0d7fd7493b9e8259251e20f7a7054a6226f88b812f481"
+    },
+    {
+      "path": "src/engine/tools/index.ts",
+      "status": "M",
+      "addedLines": 199,
+      "deletedLines": 160,
+      "sha256": "70d18041109cc835ab7b45f837f9777bc7ac6ea19ce42f1001ee25ba161575ea"
+    },
+    {
+      "path": "src/engine/tools/lsp.ts",
+      "status": "M",
+      "addedLines": 445,
+      "deletedLines": 144,
+      "sha256": "484788f72946507d610314ba32dcce5f52ea9380184345afa6ea584875e3e5cf"
+    },
+    {
+      "path": "src/engine/tools/patch.ts",
+      "status": "M",
+      "addedLines": 55,
+      "deletedLines": 7,
+      "sha256": "95ff97772f831b50bd6131a3e6980d285d8d26c6141e6c7d28af48fae216e5d1"
+    },
+    {
+      "path": "src/engine/tools/sub-agent.ts",
+      "status": "M",
+      "addedLines": 373,
+      "deletedLines": 242,
+      "sha256": "6ee163ce7b8f95d099306f659ac21505b59837c3089fc53bb029b4e4ec644492"
+    },
+    {
+      "path": "src/engine/tools/ticket.ts",
+      "status": "M",
+      "addedLines": 41,
+      "deletedLines": 24,
+      "sha256": "caadce6c9c4149cd3adcac5765989580306a7c1c606291563db1596912e886c0"
+    },
+    {
+      "path": "src/engine/tools/verify.ts",
+      "status": "M",
+      "addedLines": 78,
+      "deletedLines": 111,
+      "sha256": "df3d456ed59d8e97ae888054d18b3bdda3765d8f2c60b23b700b00f3b89b726f"
+    },
+    {
+      "path": "src/engine/tools/web-search.ts",
+      "status": "M",
+      "addedLines": 5,
+      "deletedLines": 4,
+      "sha256": "8c223c29cfa13410c9c70e3dfc937da65baced6aa42f32cc2634131bf5f06da7"
+    },
+    {
+      "path": "src/gate-runner.ts",
+      "status": "M",
+      "addedLines": 186,
+      "deletedLines": 64,
+      "sha256": "ae1ab86f2abe16e5ec1bf278a375a4b73a3209781ece040ccba649d3bebe1425"
+    },
+    {
+      "path": "src/git-ops.ts",
+      "status": "M",
+      "addedLines": 0,
+      "deletedLines": 292,
+      "sha256": "bb76bc6cf114ddeaf77b176cca9385e4dac1b716ca39a78900c1d49f8eb54fb2"
+    },
+    {
+      "path": "src/image-support.ts",
+      "status": "M",
+      "addedLines": 10,
+      "deletedLines": 8,
+      "sha256": "476dd1e0e7674543593bb7afd6c6c1d902b103208a7b05a82db753feb7d0c82e"
+    },
+    {
+      "path": "src/index.ts",
+      "status": "M",
+      "addedLines": 63,
+      "deletedLines": 38,
+      "sha256": "05f28a4388812d959d1f756658bc5232cc1c71304221d6c29a00c96ebede3e79"
+    },
+    {
+      "path": "src/mcp-client.ts",
+      "status": "M",
+      "addedLines": 372,
+      "deletedLines": 472,
+      "sha256": "47272253de2f32812893180204a89350d3240c26d22d0457ac31a71490ee0a1f"
+    },
+    {
+      "path": "src/orchestrator.ts",
+      "status": "M",
+      "addedLines": 311,
+      "deletedLines": 58,
+      "sha256": "8b60aa18d4d37c610633faec3eaccc86e9e9b697137575e435eaf2dba1e5cafb"
+    },
+    {
+      "path": "src/orchestrator/candidate.ts",
+      "status": "A",
+      "addedLines": 55,
+      "deletedLines": 0,
+      "sha256": "658f54fa2a306b6d460ae328b4ced71f71d918a9ae856c06eee8a53160b8b0f2"
+    },
+    {
+      "path": "src/orchestrator/completion.ts",
+      "status": "M",
+      "addedLines": 173,
+      "deletedLines": 72,
+      "sha256": "bc7b136f30a27bd2dba83f49f56220181fca7830b76a2d77230de8bf873e1fa9"
+    },
+    {
+      "path": "src/orchestrator/execution.ts",
+      "status": "M",
+      "addedLines": 315,
+      "deletedLines": 286,
+      "sha256": "c38af34ac1a14106398e017b87033f9677016ecd0ce986f907dd476700fdbe56"
+    },
+    {
+      "path": "src/orchestrator/gates.ts",
+      "status": "M",
+      "addedLines": 215,
+      "deletedLines": 117,
+      "sha256": "9024a66acdf2e0c94320653c523f74b4826e54d2906709c3bbe2c18e3376a85b"
+    },
+    {
+      "path": "src/orchestrator/git-context.ts",
+      "status": "A",
+      "addedLines": 89,
+      "deletedLines": 0,
+      "sha256": "2a1bbeb57b25bfbbba233e272f0f006c73f348f626e3806f5aa4e3717530e69b"
+    },
+    {
+      "path": "src/orchestrator/planning.ts",
+      "status": "M",
+      "addedLines": 133,
+      "deletedLines": 11,
+      "sha256": "8fa011e9f6e85654ef8e597b3aff651a7ef8c6889b253c42caec5d6c70438e5e"
+    },
+    {
+      "path": "src/orchestrator/review.ts",
+      "status": "M",
+      "addedLines": 423,
+      "deletedLines": 158,
+      "sha256": "62fd88e380d549407e641db8fa63f4a637c87c4db81a3cd5ef7fa36726c33db0"
+    },
+    {
+      "path": "src/orchestrator/types.ts",
+      "status": "M",
+      "addedLines": 19,
+      "deletedLines": 0,
+      "sha256": "74cc30fdfbaef161eb8c6ca3315606454c3e6a751fcaf725564b75e902d1e77b"
+    },
+    {
+      "path": "src/orchestrator/utils.ts",
+      "status": "M",
+      "addedLines": 23,
+      "deletedLines": 2,
+      "sha256": "1ce6b3766084298e004bbc823c366a9aa0a6a5911a94c3f8c93ce12ae5fbdc06"
+    },
+    {
+      "path": "src/permissions.ts",
+      "status": "D",
+      "addedLines": 0,
+      "deletedLines": 137,
+      "sha256": null
+    },
+    {
+      "path": "src/recovery.ts",
+      "status": "M",
+      "addedLines": 34,
+      "deletedLines": 18,
+      "sha256": "5cf84f3265e28dbe82cad4197c29c6a8ca5fbb866b581cc2d0fb5d3bab90df9d"
+    },
+    {
+      "path": "src/repository-fingerprint.ts",
+      "status": "A",
+      "addedLines": 350,
+      "deletedLines": 0,
+      "sha256": "1d33b3ed4563a15e6232fad7b190fdc49fdecd79cee2b7dcde7a78ee74ecc01c"
+    },
+    {
+      "path": "src/review-identity.ts",
+      "status": "A",
+      "addedLines": 255,
+      "deletedLines": 0,
+      "sha256": "78cefc396d9160fccc2f52f609683db0be2eb300210fdcc530c4e9c2065b3892"
+    },
+    {
+      "path": "src/run-command.ts",
+      "status": "M",
+      "addedLines": 312,
+      "deletedLines": 223,
+      "sha256": "bc615d64def783681781880fbf8306c241c65a6dec3b02c571f787607c5edc46"
+    },
+    {
+      "path": "src/run-manifest.ts",
+      "status": "M",
+      "addedLines": 178,
+      "deletedLines": 99,
+      "sha256": "91a4314aa7dae00085aee5e1aac27b0808fdd3d11904609c659d20bb3fbc6290"
+    },
+    {
+      "path": "src/runs-command.ts",
+      "status": "M",
+      "addedLines": 19,
+      "deletedLines": 5,
+      "sha256": "6731a4515b6d6a7968b73b4bb5288f03a8b338183b5e8999024f2a7450a19063"
+    },
+    {
+      "path": "src/safety.ts",
+      "status": "M",
+      "addedLines": 13,
+      "deletedLines": 0,
+      "sha256": "4ca1af933f04fa0c952996fa992cf98afb3f7930964931575417a3359cd8e4f8"
+    },
+    {
+      "path": "src/sandbox-mode.ts",
+      "status": "M",
+      "addedLines": 44,
+      "deletedLines": 26,
+      "sha256": "8af35c64062fa9459def439b3435c52b6e1d5e9df18bf4245666a1dd0c4af5f7"
+    },
+    {
+      "path": "src/ship-state.ts",
+      "status": "M",
+      "addedLines": 16,
+      "deletedLines": 11,
+      "sha256": "4dceb31fa4474297ed7258dddde3fb580699f191c38ba8222c36a868aa5536f5"
+    },
+    {
+      "path": "src/ticket-ops.ts",
+      "status": "M",
+      "addedLines": 126,
+      "deletedLines": 77,
+      "sha256": "b68c38b79e6a34f14ca14bb4dbdc1ae5fe0d19045f378b831f190c9ad046198d"
+    },
+    {
+      "path": "src/tool-concurrency.ts",
+      "status": "D",
+      "addedLines": 0,
+      "deletedLines": 75,
+      "sha256": null
+    },
+    {
+      "path": "src/ui/Root.tsx",
+      "status": "M",
+      "addedLines": 56,
+      "deletedLines": 29,
+      "sha256": "785c791fb8e9009638e7d94cb44d243c2c2552c030f9fcbc936452108401f9d1"
+    },
+    {
+      "path": "src/ui/agent/utils.ts",
+      "status": "M",
+      "addedLines": 1,
+      "deletedLines": 0,
+      "sha256": "dd09691747cc07cba6309e2398711e0423a648c92606c1fcc9f5cf05b64f853a"
+    },
+    {
+      "path": "src/ui/commands/project.ts",
+      "status": "M",
+      "addedLines": 9,
+      "deletedLines": 0,
+      "sha256": "ba443e94afda235c4d8df840c53655951396d721f36300d3d426b7576b9595d9"
+    },
+    {
+      "path": "src/ui/commands/session.ts",
+      "status": "M",
+      "addedLines": 4,
+      "deletedLines": 0,
+      "sha256": "7699c7404f8417f864565d004eb7d17305848225fc268246e715b78b8d85d89c"
+    },
+    {
+      "path": "src/ui/commands/settings.ts",
+      "status": "M",
+      "addedLines": 8,
+      "deletedLines": 1,
+      "sha256": "d044b93186f67e96f1ec5dbbe57648f1d0540ab5b36ca2d2fbb50ff08fc7130f"
+    },
+    {
+      "path": "src/ui/slash-commands.ts",
+      "status": "M",
+      "addedLines": 3,
+      "deletedLines": 1,
+      "sha256": "fff2fc0f3779233c66f10a7a505e81ee5a079b4e69cf8da9d0d6bfb9e3ece874"
+    },
+    {
+      "path": "src/ui/system-prompt.ts",
+      "status": "M",
+      "addedLines": 7,
+      "deletedLines": 2,
+      "sha256": "5c96cde2835e499df00b3798dc15a8e67c0cfde814f33f0e4f4c79b4a73f10e8"
+    },
+    {
+      "path": "src/ui/useAgent.ts",
+      "status": "M",
+      "addedLines": 388,
+      "deletedLines": 342,
+      "sha256": "25bf15d0d98cb67889e593e238760c08f0cf441ab0fa69ef2b19ecad6ff991ab"
+    },
+    {
+      "path": "src/ui/useOrchestrator.ts",
+      "status": "M",
+      "addedLines": 47,
+      "deletedLines": 18,
+      "sha256": "5faf9b1056db556df337251f1fe725b5121e5aef78e6020b8d128ea2a7ce3f4a"
+    },
+    {
+      "path": "vitest.config.ts",
+      "status": "M",
+      "addedLines": 2,
+      "deletedLines": 0,
+      "sha256": "7796b1b353a6be16b400aa7cd21360b34a1c79ad65c0758bdb9e35b7a1a17cf2"
+    }
+  ],
+  "allRecentChangedPaths": [
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "SECURITY.md",
+    "docs/architecture.md",
+    "docs/commands.md",
+    "docs/configuration.md",
+    "docs/contributing.md",
+    "docs/quality-gates.md",
+    "docs/recipes.md",
+    "docs/reliability-plan.md",
+    "docs/reliability-queue.json",
+    "docs/troubleshooting.md",
+    "evals/README.md",
+    "evals/tasks/r20-bugfix-batch-config.mjs",
+    "evals/tasks/r20-bugfix-deep-config.mjs",
+    "evals/tasks/r20-bugfix-pagination.mjs",
+    "evals/tasks/r20-bugfix-queue-recovery.mjs",
+    "evals/tasks/r20-bugfix-retry-backoff.mjs",
+    "evals/tasks/r20-feature-daily-summary-v1.mjs",
+    "evals/tasks/r20-feature-expiring-cache-v1.mjs",
+    "evals/tasks/r20-feature-release-notes-v1.mjs",
+    "evals/tasks/r20-feature-tag-filter-v1.mjs",
+    "evals/tasks/r20-feature-webhook-recovery-v1.mjs",
+    "evals/tasks/r20-helper.mjs",
+    "evals/tasks/r20-maintenance-async-checks-v1.mjs",
+    "evals/tasks/r20-maintenance-stable-report-v1.mjs",
+    "evals/tasks/r20-maintenance-temp-cleanup-v1.mjs",
+    "evals/tasks/r20-refactor-cursor-codec-v1.mjs",
+    "evals/tasks/r20-refactor-recipient-index-v1.mjs",
+    "evals/tasks/r20-refactor-report-projection-v1.mjs",
+    "evals/tasks/r20-refactor-retry-policy-v1.mjs",
+    "evals/tasks/r20-security-job-schema-v1.mjs",
+    "evals/tasks/r20-security-path-boundary-v1.mjs",
+    "evals/tasks/r20-security-prototype-config-v1.mjs",
+    "evals/tasks/schema.json",
+    "package-lock.json",
+    "package.json",
+    "src/__tests__/bash-background.test.ts",
+    "src/__tests__/bash-tool.test.ts",
+    "src/__tests__/browser.test.ts",
+    "src/__tests__/candidate-runtime.test.ts",
+    "src/__tests__/check-tool-permission.test.ts",
+    "src/__tests__/compaction.test.ts",
+    "src/__tests__/config.test.ts",
+    "src/__tests__/e2e/lsp-tool.test.ts",
+    "src/__tests__/eval-fixtures.test.ts",
+    "src/__tests__/final-evidence-runtime.test.ts",
+    "src/__tests__/fixtures/lsp-jsonrpc-server.mjs",
+    "src/__tests__/fixtures/mcp-jsonrpc-server.mjs",
+    "src/__tests__/gate-runner.test.ts",
+    "src/__tests__/git-ops.test.ts",
+    "src/__tests__/git-tool.test.ts",
+    "src/__tests__/headless-cli.test.ts",
+    "src/__tests__/headless-runtime.test.ts",
+    "src/__tests__/helpers/global-state.ts",
+    "src/__tests__/helpers/setup-state.ts",
+    "src/__tests__/helpers/temp-workermill-home.ts",
+    "src/__tests__/http-runtime.test.ts",
+    "src/__tests__/image-support.test.ts",
+    "src/__tests__/logs-command.test.ts",
+    "src/__tests__/lsp-run-resources.test.ts",
+    "src/__tests__/maturity-features.test.ts",
+    "src/__tests__/mcp-client.test.ts",
+    "src/__tests__/mcp-discovery.test.ts",
+    "src/__tests__/mcp-run-resources.test.ts",
+    "src/__tests__/orchestration-lifecycle-runtime.test.ts",
+    "src/__tests__/orchestration-startup-runtime.test.ts",
+    "src/__tests__/orchestrator-gates-cancellation.test.ts",
+    "src/__tests__/orchestrator-gates.test.ts",
+    "src/__tests__/orchestrator.test.ts",
+    "src/__tests__/path-policy.test.ts",
+    "src/__tests__/permissions.test.ts",
+    "src/__tests__/plan-critic.test.ts",
+    "src/__tests__/planner-runtime-policy.test.ts",
+    "src/__tests__/process-runner.test.ts",
+    "src/__tests__/provider-registry.test.ts",
+    "src/__tests__/publication-lifecycle.test.ts",
+    "src/__tests__/recovery.test.ts",
+    "src/__tests__/repository-fingerprint.test.ts",
+    "src/__tests__/review-diff-safety.test.ts",
+    "src/__tests__/review-git-runtime.test.ts",
+    "src/__tests__/review-identity.test.ts",
+    "src/__tests__/review-runtime-policy.test.ts",
+    "src/__tests__/root-shell-runtime.test.ts",
+    "src/__tests__/run-manifest.test.ts",
+    "src/__tests__/runs-command.test.ts",
+    "src/__tests__/sandbox-mode.test.ts",
+    "src/__tests__/schema-command.test.ts",
+    "src/__tests__/scoped-process.test.ts",
+    "src/__tests__/slash-commands.test.ts",
+    "src/__tests__/sub-agent-runtime.test.ts",
+    "src/__tests__/sub-agent.test.ts",
+    "src/__tests__/system-prompt.test.ts",
+    "src/__tests__/ticket-tool.test.ts",
+    "src/__tests__/tool-executor.test.ts",
+    "src/__tests__/tool-policy.test.ts",
+    "src/__tests__/useAgent-permission.test.ts",
+    "src/__tests__/useAgent-runtime.test.ts",
+    "src/__tests__/useOrchestrator-runtime.test.ts",
+    "src/__tests__/verify.test.ts",
+    "src/__tests__/worker-git-lifecycle.test.ts",
+    "src/__tests__/worker-runtime-policy.test.ts",
+    "src/browser.ts",
+    "src/compaction.ts",
+    "src/config.ts",
+    "src/engine/http-request.ts",
+    "src/engine/path-policy.ts",
+    "src/engine/process-runner.ts",
+    "src/engine/run-resources.ts",
+    "src/engine/scoped-process.ts",
+    "src/engine/tool-executor.ts",
+    "src/engine/tool-policy.ts",
+    "src/engine/tools/bash-background.ts",
+    "src/engine/tools/bash-kill.ts",
+    "src/engine/tools/bash-output.ts",
+    "src/engine/tools/bash.ts",
+    "src/engine/tools/download-file.ts",
+    "src/engine/tools/fetch.ts",
+    "src/engine/tools/git.ts",
+    "src/engine/tools/index.ts",
+    "src/engine/tools/lsp.ts",
+    "src/engine/tools/patch.ts",
+    "src/engine/tools/sub-agent.ts",
+    "src/engine/tools/ticket.ts",
+    "src/engine/tools/verify.ts",
+    "src/engine/tools/web-search.ts",
+    "src/gate-runner.ts",
+    "src/git-ops.ts",
+    "src/image-support.ts",
+    "src/index.ts",
+    "src/mcp-client.ts",
+    "src/orchestrator.ts",
+    "src/orchestrator/candidate.ts",
+    "src/orchestrator/completion.ts",
+    "src/orchestrator/execution.ts",
+    "src/orchestrator/gates.ts",
+    "src/orchestrator/git-context.ts",
+    "src/orchestrator/planning.ts",
+    "src/orchestrator/review.ts",
+    "src/orchestrator/types.ts",
+    "src/orchestrator/utils.ts",
+    "src/permissions.ts",
+    "src/recovery.ts",
+    "src/repository-fingerprint.ts",
+    "src/review-identity.ts",
+    "src/run-command.ts",
+    "src/run-manifest.ts",
+    "src/runs-command.ts",
+    "src/safety.ts",
+    "src/sandbox-mode.ts",
+    "src/ship-state.ts",
+    "src/ticket-ops.ts",
+    "src/tool-concurrency.ts",
+    "src/ui/Root.tsx",
+    "src/ui/agent/utils.ts",
+    "src/ui/commands/project.ts",
+    "src/ui/commands/session.ts",
+    "src/ui/commands/settings.ts",
+    "src/ui/slash-commands.ts",
+    "src/ui/system-prompt.ts",
+    "src/ui/useAgent.ts",
+    "src/ui/useOrchestrator.ts",
+    "vitest.config.ts"
+  ],
+  "documents": [
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "changedFromBaseline": false,
+      "lines": 36,
+      "sha256": "70ae764ca30f2c7fe20f78725bf00a065cfc5a256df6e36d6975e7f5cc8bf51b"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "changedFromBaseline": false,
+      "lines": 19,
+      "sha256": "95bc23500503c0fd3aa89603fa3ac97b4bf60e2c2f7182623ee1985389422de9"
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "changedFromBaseline": false,
+      "lines": 18,
+      "sha256": "5d2f5200e7236b6725b1c3f4290396223f6b44e32bdcf89736b3f4a365d14982"
+    },
+    {
+      "path": "AGENTS.md",
+      "changedFromBaseline": true,
+      "lines": 82,
+      "sha256": "3ec665dcdaa780e076e452fadbac538967bc2ca8905ced281076ac5aaff38deb"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "changedFromBaseline": false,
+      "lines": 708,
+      "sha256": "6a14b92179ed92bd8acfc777c4bbda782a8f8d9e335235edf14b9a02a28a3e92"
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "changedFromBaseline": false,
+      "lines": 20,
+      "sha256": "9fd2585a09771b16f2c949fae7d6e3113422362ce2a2fd69ffe9c3ec5b61ba56"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "changedFromBaseline": true,
+      "lines": 59,
+      "sha256": "d8b118f55869d70167e6b5c3e2678455a0e4d6170ff2a57e5110eb3052806c28"
+    },
+    {
+      "path": "README.md",
+      "changedFromBaseline": true,
+      "lines": 513,
+      "sha256": "309c7baad32561739efaf348c7ed9ac16f726cb76f169216c997e744f437fece"
+    },
+    {
+      "path": "SECURITY.md",
+      "changedFromBaseline": true,
+      "lines": 36,
+      "sha256": "3b38ff19cfc48d95092382e2a56e90d45e7a6f46633a41f860d0d16b8395c83e"
+    },
+    {
+      "path": "docs/README.md",
+      "changedFromBaseline": false,
+      "lines": 26,
+      "sha256": "2afb7f58a32efc220d0ae56147d99a39d499d5473ff8511b988849090931604f"
+    },
+    {
+      "path": "docs/architecture.md",
+      "changedFromBaseline": true,
+      "lines": 226,
+      "sha256": "cc319bd6197dc359058fd86f3a426e19670c37080e039b02db32d10307a5c80d"
+    },
+    {
+      "path": "docs/commands.md",
+      "changedFromBaseline": true,
+      "lines": 602,
+      "sha256": "c788fb1802d950753221f5e9409f0f1d435b1723870b6c3e5dab061aa3be6821"
+    },
+    {
+      "path": "docs/configuration.md",
+      "changedFromBaseline": true,
+      "lines": 774,
+      "sha256": "cd0c1294ac73b954e8b6a733d2fd671c5d30042211f34096ce1c82be02166959"
+    },
+    {
+      "path": "docs/contributing.md",
+      "changedFromBaseline": true,
+      "lines": 239,
+      "sha256": "372ddbcfa1bec82a48c145fdbfa8f9fbd479642eeafe4b559078c780b9466ebd"
+    },
+    {
+      "path": "docs/hooks-and-skills.md",
+      "changedFromBaseline": false,
+      "lines": 344,
+      "sha256": "f1871cf0963140b4e0ce6836ef17adbd89f773a043cd9789892689a9c6a7952c"
+    },
+    {
+      "path": "docs/personas.md",
+      "changedFromBaseline": false,
+      "lines": 133,
+      "sha256": "e5056864fb0d96f3bd6ddd7b463f87bf28bc02cbbc4cd7af24bff03e4e181694"
+    },
+    {
+      "path": "docs/quality-gates.md",
+      "changedFromBaseline": true,
+      "lines": 374,
+      "sha256": "e2b2b5c8258f185b57fbf30f993878c065d05e598e817f6a4f6713808212bf47"
+    },
+    {
+      "path": "docs/recipes.md",
+      "changedFromBaseline": true,
+      "lines": 398,
+      "sha256": "8a155aef60da4630e92fe71c07619f75c37cb3eb3cc4771bf9e07b8a39ae9144"
+    },
+    {
+      "path": "docs/reliability-plan.md",
+      "changedFromBaseline": true,
+      "lines": 462,
+      "sha256": "0e2703a84548bac222ebc82d4a0456a916d7c5ded218a5e5fe7d82daa1d92ee1"
+    },
+    {
+      "path": "docs/troubleshooting.md",
+      "changedFromBaseline": true,
+      "lines": 147,
+      "sha256": "3f2501d5323ac11357fe40e3b4f3c6dfc3b26010a7a63ae929c44a720d2095ee"
+    },
+    {
+      "path": "evals/README.md",
+      "changedFromBaseline": true,
+      "lines": 74,
+      "sha256": "76dcb3e2bbed93ef765c4db9691fd13af41380eac70396324b1670544750cfbd"
+    },
+    {
+      "path": "personas/architect.md",
+      "changedFromBaseline": false,
+      "lines": 63,
+      "sha256": "08557a734f09dfc630bdfaa28451a9eb6b01b20432e354f839ef1e7aa8cee169"
+    },
+    {
+      "path": "personas/backend_developer.md",
+      "changedFromBaseline": false,
+      "lines": 61,
+      "sha256": "c944094f3e37805f185403d6aac37aa3898729a35907fe795fd50f955400fb81"
+    },
+    {
+      "path": "personas/data_ml_engineer.md",
+      "changedFromBaseline": false,
+      "lines": 66,
+      "sha256": "688a87a326cdd4150766591b45f59b09b1a3c42d16a2870e05e016efcf0d8038"
+    },
+    {
+      "path": "personas/devops_engineer.md",
+      "changedFromBaseline": false,
+      "lines": 61,
+      "sha256": "0c4d003a17becc596d049d48cd363b6fd7dda12b9f4f00fe871d34783d31dad2"
+    },
+    {
+      "path": "personas/frontend_developer.md",
+      "changedFromBaseline": false,
+      "lines": 61,
+      "sha256": "0f88e9373fdd798163869b448b963a3628a2a9f7585609b8aef7523b991557f3"
+    },
+    {
+      "path": "personas/mobile_developer.md",
+      "changedFromBaseline": false,
+      "lines": 64,
+      "sha256": "a207505b2d141192ba41fad6bf22b1f3723ffc734ae88027e12e8fe7b3c59e61"
+    },
+    {
+      "path": "personas/planner.md",
+      "changedFromBaseline": false,
+      "lines": 98,
+      "sha256": "31b82cb1de7871c1d34ff4309c513785f4979c5d73c8caf149e19aea2598214c"
+    },
+    {
+      "path": "personas/qa_engineer.md",
+      "changedFromBaseline": false,
+      "lines": 65,
+      "sha256": "170514a57b20986f35340b7d72722192eb826e8ad37cc541fda3e41e95e0f77d"
+    },
+    {
+      "path": "personas/security_engineer.md",
+      "changedFromBaseline": false,
+      "lines": 61,
+      "sha256": "86689fd19813c106254b429391b96643ad8291f2400f03387087d77541983359"
+    },
+    {
+      "path": "personas/tech_lead.md",
+      "changedFromBaseline": false,
+      "lines": 125,
+      "sha256": "3bdd31ca5b6b34b93a23306bf6209a59727953f98f22b2a58fe886dcffe5ece0"
+    },
+    {
+      "path": "personas/tech_writer.md",
+      "changedFromBaseline": false,
+      "lines": 63,
+      "sha256": "19494db83f0b172e25fbf138e7de3c9f958884e8d7a8d7bc4389141e676c64f2"
+    }
+  ],
+  "worktrees": [
+    {
+      "path": "/home/user/github/workermill",
+      "head": "22ba7d7c0d12dd9bed85586fcbf6f966030245c7",
+      "status": "",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/core",
+      "nodeModulesSymlinkTarget": null,
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r01",
+      "head": "e0c2115047288442592fe3f2a16081d86329056a",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r01",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r02",
+      "head": "143bd38058fc28bb062e9095fdfc9592d3147191",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r02",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r03",
+      "head": "d42ac877004b00290177e4e56f2bc69c4b2b7097",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r03",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r04",
+      "head": "e6ad4c59c963049d35d5dafd920c4e6045af3984",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r04",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r05a",
+      "head": "5be8bf0e54733ac81e391feb71adc0518d428bd0",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r05a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r05b",
+      "head": "11a50219f9a8db79dcc95334059b62898a114a8e",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r05b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r05c",
+      "head": "d4a01c67717778846e5249551815d6a9de11ad0c",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r05c",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r06",
+      "head": "3179d651820fbe4cf5a008ee13786624111934d1",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r06",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r07",
+      "head": "061ddcaebdd07edde8d753992c5fb6bcae0905b8",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r07",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r08",
+      "head": "85f2362f468b710273c998d0c8f6da14d684dec9",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r08",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r09a",
+      "head": "17bbad39d199fdd5512bce25902e2acc5461c53f",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r09a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r09b",
+      "head": "3adcb1160bc9ce65227fabef9ed5aafc2999f7a4",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r09b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r10",
+      "head": "878d5c51dac603c69538be070690113c5a5fc151",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r10",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r10q",
+      "head": "70c35243efe6cbddee757748377337e2660e166e",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r10q",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11a",
+      "head": "1b2c4c42d75fbc101549ed38eb74e22b7d5ccbb8",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11b",
+      "head": "21049fb49cfc62445e03b8a4ce7fdd4115d8d714",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11childfix",
+      "head": "764a95b51e4af26723a64f89647584f8021ce4ca",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11childfix",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11git",
+      "head": "bb1ad85541cddf5e8b3849e3aa3464de0c762e6e",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11git",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11pub",
+      "head": "0bff35ca3223c8310beb9d6cb6d19234b45b10fa",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11pub",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11r",
+      "head": "c95838b215a58f69795924f591ace88c1525124f",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11r",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11s",
+      "head": "8ce2fdc44008dc768b0a2587926a02ce4d784ea2",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11s",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11startup",
+      "head": "fc45773761b47b8f5ba76fe16cbf44eee0195193",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11startup",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11startupfinal",
+      "head": "2245fc82c5aa93ec542749ddbd766984013f4a7a",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11startupfinal",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r11t",
+      "head": "801e17a317ec7f76d12c8b94503a77a6fb354aed",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r11t",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r12",
+      "head": "29297e340c82b10679751b811dfc484f65e2cae2",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r12",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r13a",
+      "head": "635db240fe793daa0673b590fe5bacab5dc4d56d",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r13a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r13b",
+      "head": "d248635cec3ea7905a282ec42db9a251a27ad52c",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r13b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r13c",
+      "head": "1c74b002a83bdb0043effcf6b8c325fa817e40c6",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r13c",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r14",
+      "head": "64199e3d5c824a609b9d5decc7997a1879e10d34",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r14",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r15a",
+      "head": "80ba3362416ebad60fdd90a37923b58222d73237",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r15a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r15b",
+      "head": "7aa8e08929293456a21fe687696dbe17a4fc1368",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [
+        "+ 7aa8e08929293456a21fe687696dbe17a4fc1368"
+      ],
+      "branch": "reliability/r15b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r20a",
+      "head": "7eac477e63b9647fca1964ebc21af41013443b4a",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r20a",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r20b",
+      "head": "feb981f7c3436461193083b7819ae9ac1e61c5ab",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r20b",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r20c",
+      "head": "5a1aad1c1212473bd5a0b04a4903df5034c636ee",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r20c",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r20d",
+      "head": "746a2e555dc54eb59b797514355e2c6e6bc91933",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r20d",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r20e",
+      "head": "c3eb129cf4c13ba5b174416466627a6725e84b3f",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [],
+      "branch": "reliability/r20e",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    },
+    {
+      "path": "/home/user/github/workermill-r23",
+      "head": "8b279527b28baca1447a05a076de7dbcddb6468e",
+      "status": "?? node_modules\n",
+      "unintegrated_patch_commits": [
+        "+ 8d967c748bbf08ea8db71b17a591e80ca3eb147c",
+        "+ 94dab01f6fa5d898007156ce7ea2f534dd1fe889",
+        "+ 9a78d6bcb06ea6edfc866a590d8ab384aa2fd372"
+      ],
+      "branch": "reliability/r23",
+      "nodeModulesSymlinkTarget": "/home/user/github/workermill/node_modules",
+      "patchComparisonCaveat": "Cherry-picked conflict resolutions can produce different patch IDs; compare actual file trees before replaying."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7aa8e08929293456a21fe687696dbe17a4fc1368",
+      "committedAt": "2026-09-06T14:45:49-04:00",
+      "authoredAt": "2026-09-06T14:45:49-04:00",
+      "subject": "feat(orchestrator): emit truthful R15 attempt events",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "8b279527b28baca1447a05a076de7dbcddb6468e",
+      "committedAt": "2026-09-06T14:42:02-04:00",
+      "authoredAt": "2026-09-06T14:33:07-04:00",
+      "subject": "fix(recovery): keep unverified branch state discoverable",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "0c98ecd76e7e297e5de8a71cd7883d0b8591a45b",
+      "committedAt": "2026-09-06T14:42:02-04:00",
+      "authoredAt": "2026-09-06T14:36:00-04:00",
+      "subject": "fix(runs): harden manifest evidence validation",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "386db7983bc04ada8d4fe15d8a41bcc2bccc09eb",
+      "committedAt": "2026-09-06T14:42:02-04:00",
+      "authoredAt": "2026-09-06T14:28:37-04:00",
+      "subject": "feat(runs): validate atomic run manifest storage",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "22ba7d7c0d12dd9bed85586fcbf6f966030245c7",
+      "committedAt": "2026-09-06T14:40:32-04:00",
+      "authoredAt": "2026-09-06T14:36:00-04:00",
+      "subject": "fix(runs): harden manifest evidence validation",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5aa6a940d342da7677da61810568b3238c26d3d4",
+      "committedAt": "2026-09-06T14:40:32-04:00",
+      "authoredAt": "2026-09-06T14:28:37-04:00",
+      "subject": "feat(runs): validate atomic run manifest storage",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b1fec7febbffb5c78462fffeb4cc407ca96e007b",
+      "committedAt": "2026-09-06T14:40:32-04:00",
+      "authoredAt": "2026-09-06T14:36:35-04:00",
+      "subject": "test(runtime): retain run-owned MCP coverage",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9a78d6bcb06ea6edfc866a590d8ab384aa2fd372",
+      "committedAt": "2026-09-06T14:36:35-04:00",
+      "authoredAt": "2026-09-06T14:36:35-04:00",
+      "subject": "test(runtime): retain run-owned MCP coverage",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "80ba3362416ebad60fdd90a37923b58222d73237",
+      "committedAt": "2026-09-06T14:36:00-04:00",
+      "authoredAt": "2026-09-06T14:36:00-04:00",
+      "subject": "fix(runs): harden manifest evidence validation",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "cc6aa8b8bf343d328ec91d90a9f96a4b02f868b3",
+      "committedAt": "2026-09-06T14:35:25-04:00",
+      "authoredAt": "2026-09-06T14:35:25-04:00",
+      "subject": "docs: describe scoped review evidence and track runtime cleanup",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "94dab01f6fa5d898007156ce7ea2f534dd1fe889",
+      "committedAt": "2026-09-06T14:33:44-04:00",
+      "authoredAt": "2026-09-06T14:31:39-04:00",
+      "subject": "fix(review): scope asynchronous repository context reads",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "52e35ed29af717b2a023212b15fe3b277b6ac175",
+      "committedAt": "2026-09-06T14:33:32-04:00",
+      "authoredAt": "2026-09-06T14:33:07-04:00",
+      "subject": "fix(recovery): keep unverified branch state discoverable",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "c397ad751b329fd99109a47762d0f177b0db5134",
+      "committedAt": "2026-09-06T14:33:07-04:00",
+      "authoredAt": "2026-09-06T14:33:07-04:00",
+      "subject": "fix(recovery): keep unverified branch state discoverable",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "861008d9f204fdfa774237a8d4316b52d4653a33",
+      "committedAt": "2026-09-06T14:32:05-04:00",
+      "authoredAt": "2026-09-06T14:28:52-04:00",
+      "subject": "refactor(runtime): remove superseded legacy adapters",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "0452742acde59f3d14e77125c6b07ef5c2eb69b1",
+      "committedAt": "2026-09-06T14:31:39-04:00",
+      "authoredAt": "2026-09-06T14:31:39-04:00",
+      "subject": "fix(review): scope asynchronous repository context reads",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8d967c748bbf08ea8db71b17a591e80ca3eb147c",
+      "committedAt": "2026-09-06T14:28:52-04:00",
+      "authoredAt": "2026-09-06T14:28:52-04:00",
+      "subject": "refactor(runtime): remove superseded legacy adapters",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "1ad60e60e82dd048a9113bb90f73dec899e5f96b",
+      "committedAt": "2026-09-06T14:28:37-04:00",
+      "authoredAt": "2026-09-06T14:28:37-04:00",
+      "subject": "feat(runs): validate atomic run manifest storage",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "bb271fcf107c5f60f284a7cf2494fe0a0043311c",
+      "committedAt": "2026-09-06T14:19:52-04:00",
+      "authoredAt": "2026-09-06T14:19:30-04:00",
+      "subject": "test(orchestrator): exercise startup branch lifecycle",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "2245fc82c5aa93ec542749ddbd766984013f4a7a",
+      "committedAt": "2026-09-06T14:19:30-04:00",
+      "authoredAt": "2026-09-06T14:19:30-04:00",
+      "subject": "test(orchestrator): exercise startup branch lifecycle",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "ccc7b7c77aefdfa1f1bf7f7562058ff65a8d4c3e",
+      "committedAt": "2026-09-06T14:19:22-04:00",
+      "authoredAt": "2026-09-06T14:19:22-04:00",
+      "subject": "docs: qualify lifecycle contracts and scope manifest storage work",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8a5994b626cbaa19b4d631a3a5fdc40fbcebca0c",
+      "committedAt": "2026-09-06T14:18:01-04:00",
+      "authoredAt": "2026-09-06T14:18:01-04:00",
+      "subject": "fix(ui): reject prompts from cancelled orchestration owners",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "96e97fa3152c01d617d103988abf4f2edcb6ec77",
+      "committedAt": "2026-09-06T14:16:57-04:00",
+      "authoredAt": "2026-09-06T14:16:14-04:00",
+      "subject": "test(orchestrator): stabilize async startup fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "fc45773761b47b8f5ba76fe16cbf44eee0195193",
+      "committedAt": "2026-09-06T14:16:14-04:00",
+      "authoredAt": "2026-09-06T14:16:14-04:00",
+      "subject": "test(orchestrator): stabilize async startup fixtures",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "75180e79794d40692197e611764d4f173cd8d7ac",
+      "committedAt": "2026-09-06T14:15:16-04:00",
+      "authoredAt": "2026-09-06T14:15:16-04:00",
+      "subject": "fix(orchestrator): preserve branch choices and await publication ownership",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "45b1d91639c6dd2b7d335635089f9305a0b421d5",
+      "committedAt": "2026-09-06T14:12:40-04:00",
+      "authoredAt": "2026-09-06T14:11:14-04:00",
+      "subject": "test(orchestrator): cover startup cancellation lifecycle",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "21f0c4f753ffc7603c8436ea652cf99161e58a4b",
+      "committedAt": "2026-09-06T14:12:40-04:00",
+      "authoredAt": "2026-09-06T14:06:15-04:00",
+      "subject": "fix(orchestrator): scope startup probes to run",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "241c11570e6b53d5cd510a2b1622447c9ab5617f",
+      "committedAt": "2026-09-06T14:11:14-04:00",
+      "authoredAt": "2026-09-06T14:11:14-04:00",
+      "subject": "test(orchestrator): cover startup cancellation lifecycle",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "07e169fb43e06e48330af0830a846d0e1b073778",
+      "committedAt": "2026-09-06T14:10:31-04:00",
+      "authoredAt": "2026-09-06T14:10:05-04:00",
+      "subject": "test(sub-agent): prove pending tool drain ordering",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9736d1ccd2210b9df74c5e6572d8fd31572408c2",
+      "committedAt": "2026-09-06T14:10:31-04:00",
+      "authoredAt": "2026-09-06T14:07:35-04:00",
+      "subject": "fix(sub-agent): drain successful tools before abort",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "33bb90e3ae16d307ce3d2136f7ce48aecac2c787",
+      "committedAt": "2026-09-06T14:10:31-04:00",
+      "authoredAt": "2026-09-06T14:05:38-04:00",
+      "subject": "fix(sub-agent): separate model and admin lifetimes",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "626a6ca1be97519d5e9ce64b12bea0d561610c07",
+      "committedAt": "2026-09-06T14:10:31-04:00",
+      "authoredAt": "2026-09-06T14:10:31-04:00",
+      "subject": "fix(runtime): bound browser discovery and qualify owned tool drain",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "764a95b51e4af26723a64f89647584f8021ce4ca",
+      "committedAt": "2026-09-06T14:10:05-04:00",
+      "authoredAt": "2026-09-06T14:10:05-04:00",
+      "subject": "test(sub-agent): prove pending tool drain ordering",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "6fda08a39fb381cf2418a1138eedd8ec4f135eb4",
+      "committedAt": "2026-09-06T14:07:35-04:00",
+      "authoredAt": "2026-09-06T14:07:35-04:00",
+      "subject": "fix(sub-agent): drain successful tools before abort",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "8103b5d91bf74d604045c23af34788174b0aa51a",
+      "committedAt": "2026-09-06T14:07:28-04:00",
+      "authoredAt": "2026-09-06T14:06:15-04:00",
+      "subject": "fix(orchestrator): scope startup probes to run",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "6b6dbb549c91f65511c768ec99fc922675dbb6ad",
+      "committedAt": "2026-09-06T14:05:38-04:00",
+      "authoredAt": "2026-09-06T14:05:38-04:00",
+      "subject": "fix(sub-agent): separate model and admin lifetimes",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "bd002cc9b55ad9b7bfecadaf5b67289d7ada3f76",
+      "committedAt": "2026-09-06T14:03:30-04:00",
+      "authoredAt": "2026-09-06T13:59:45-04:00",
+      "subject": "fix(worker): preserve retry work and scope git lifecycle",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "bb1ad85541cddf5e8b3849e3aa3464de0c762e6e",
+      "committedAt": "2026-09-06T13:59:45-04:00",
+      "authoredAt": "2026-09-06T13:59:45-04:00",
+      "subject": "fix(worker): preserve retry work and scope git lifecycle",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "7e52a8e080932f2dda77cec91350f58496bd2880",
+      "committedAt": "2026-09-06T13:56:59-04:00",
+      "authoredAt": "2026-09-06T13:56:59-04:00",
+      "subject": "fix(orchestrator): drain attempts before retry and fail closed on teardown",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "713cc37b1eff6b20f8509cf89415757271f16e8e",
+      "committedAt": "2026-09-06T13:55:31-04:00",
+      "authoredAt": "2026-09-06T13:54:53-04:00",
+      "subject": "fix(completion): scope publication processes to run",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c8e5aed8c63d5d74f9075d1d009704faf0490aa6",
+      "committedAt": "2026-09-06T13:55:31-04:00",
+      "authoredAt": "2026-09-06T13:54:51-04:00",
+      "subject": "fix(ui): serialize orchestration lifecycle ownership",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "0bff35ca3223c8310beb9d6cb6d19234b45b10fa",
+      "committedAt": "2026-09-06T13:54:53-04:00",
+      "authoredAt": "2026-09-06T13:54:53-04:00",
+      "subject": "fix(completion): scope publication processes to run",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "21049fb49cfc62445e03b8a4ce7fdd4115d8d714",
+      "committedAt": "2026-09-06T13:54:51-04:00",
+      "authoredAt": "2026-09-06T13:54:51-04:00",
+      "subject": "fix(ui): serialize orchestration lifecycle ownership",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "70d5db766c7a814f8618323fa4b0834816a4fe66",
+      "committedAt": "2026-09-06T13:54:40-04:00",
+      "authoredAt": "2026-09-06T13:51:44-04:00",
+      "subject": "fix(sub-agent): cancel bounded worktree administration",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "0c9510be2f91887f02c84976a75acad94d0d2608",
+      "committedAt": "2026-09-06T13:51:44-04:00",
+      "authoredAt": "2026-09-06T13:51:44-04:00",
+      "subject": "fix(sub-agent): cancel bounded worktree administration",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "b8fb96e0084417bdbd3d049a8efca7f9747088bd",
+      "committedAt": "2026-09-06T13:50:09-04:00",
+      "authoredAt": "2026-09-06T13:49:18-04:00",
+      "subject": "fix(browser): harden startup and process cleanup",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "346983784458b1e1055bd153d257ffc7d230ca47",
+      "committedAt": "2026-09-06T13:50:09-04:00",
+      "authoredAt": "2026-09-06T13:35:01-04:00",
+      "subject": "fix(browser): scope Chrome resources to runs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "4afbbb6133753e1132608e1dcd0b7b7eaa86f2f1",
+      "committedAt": "2026-09-06T13:50:09-04:00",
+      "authoredAt": "2026-09-06T13:50:09-04:00",
+      "subject": "fix(tools): bind HTTP operations to the owning run signal",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "f6ced7e55f07520b4b81024e30f9a9b13d072823",
+      "committedAt": "2026-09-06T13:49:40-04:00",
+      "authoredAt": "2026-09-06T13:47:22-04:00",
+      "subject": "test(orchestrator): add lifecycle runtime regression draft",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "801e17a317ec7f76d12c8b94503a77a6fb354aed",
+      "committedAt": "2026-09-06T13:49:18-04:00",
+      "authoredAt": "2026-09-06T13:49:18-04:00",
+      "subject": "fix(browser): harden startup and process cleanup",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "a4a987b41e7dc050034cb44370276f0048531f05",
+      "committedAt": "2026-09-06T13:47:22-04:00",
+      "authoredAt": "2026-09-06T13:47:22-04:00",
+      "subject": "test(orchestrator): add lifecycle runtime regression draft",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "d086f83906bb12a37a17857ae4f4ba0f8b10b940",
+      "committedAt": "2026-09-06T13:45:55-04:00",
+      "authoredAt": "2026-09-06T13:40:37-04:00",
+      "subject": "fix(http): cancel network tools and preserve interrupted downloads",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "e0ffeb766e1cf7f367218b8d6f1ee6aa82468f7d",
+      "committedAt": "2026-09-06T13:44:30-04:00",
+      "authoredAt": "2026-09-06T13:34:33-04:00",
+      "subject": "fix(orchestrator): finalize run-owned resources",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "604a1ad0f72ac1d7b880646c381494f6b8921335",
+      "committedAt": "2026-09-06T13:44:30-04:00",
+      "authoredAt": "2026-09-06T13:33:43-04:00",
+      "subject": "fix(orchestrator): scope role attempts to run lifetimes",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d408dd999348fc78cd074077f0836a6c4320abea",
+      "committedAt": "2026-09-06T13:44:30-04:00",
+      "authoredAt": "2026-09-06T13:44:30-04:00",
+      "subject": "fix(chat): bound URL expansion through response consumption",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "674ab686bbb2eb8a37ec6b3ec3778cd67e24fe61",
+      "committedAt": "2026-09-06T13:40:37-04:00",
+      "authoredAt": "2026-09-06T13:40:37-04:00",
+      "subject": "docs: define HTTP cancellation acceptance",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "899fa4dff03dcaca1a27a58965c69611558bd0f4",
+      "committedAt": "2026-09-06T13:40:37-04:00",
+      "authoredAt": "2026-09-06T13:40:37-04:00",
+      "subject": "fix(http): cancel network tools and preserve interrupted downloads",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "2472a8c755794cc3b89c1d54492f5d7218d098eb",
+      "committedAt": "2026-09-06T13:35:01-04:00",
+      "authoredAt": "2026-09-06T13:35:01-04:00",
+      "subject": "fix(browser): scope Chrome resources to runs",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "01e31f6453cd653ed9672bba96535cc9fed82773",
+      "committedAt": "2026-09-06T13:34:33-04:00",
+      "authoredAt": "2026-09-06T13:34:33-04:00",
+      "subject": "fix(orchestrator): finalize run-owned resources",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "d9a30a2d2c601ecb9db8d704d78cc48fc3264a50",
+      "committedAt": "2026-09-06T13:33:43-04:00",
+      "authoredAt": "2026-09-06T13:33:43-04:00",
+      "subject": "fix(orchestrator): scope role attempts to run lifetimes",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "a4f4e81dc2c2cf9667f2826fbd91affb12e058ae",
+      "committedAt": "2026-09-06T13:33:35-04:00",
+      "authoredAt": "2026-09-06T13:33:18-04:00",
+      "subject": "refactor(http): add bounded signal-aware request lifetime",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "d2fc403c8d623b9c077f68497f2cec299c0653ed",
+      "committedAt": "2026-09-06T13:33:18-04:00",
+      "authoredAt": "2026-09-06T13:33:18-04:00",
+      "subject": "refactor(http): add bounded signal-aware request lifetime",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "97b25e240c9817434f25915015f3764975ba7eea",
+      "committedAt": "2026-09-06T13:30:31-04:00",
+      "authoredAt": "2026-09-06T13:30:31-04:00",
+      "subject": "docs: specify manifest storage and real SDK test contracts",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3c523a1ddea2cd88da87da4998815aa6bb439725",
+      "committedAt": "2026-09-06T13:29:26-04:00",
+      "authoredAt": "2026-09-06T13:29:26-04:00",
+      "subject": "docs: use blocking gate recipes and qualify routing claims",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "913721393603a43728f3e5e197ec1c36184e2dec",
+      "committedAt": "2026-09-06T13:25:40-04:00",
+      "authoredAt": "2026-09-06T13:25:40-04:00",
+      "subject": "docs: explain cancellation and compaction recovery",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "40723a876ec5a1437c75a20a013b953009537d27",
+      "committedAt": "2026-09-06T13:24:49-04:00",
+      "authoredAt": "2026-09-06T13:24:40-04:00",
+      "subject": "fix(runtime): drain cancelled chat tools and preserve compaction history",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "1b2c4c42d75fbc101549ed38eb74e22b7d5ccbb8",
+      "committedAt": "2026-09-06T13:24:40-04:00",
+      "authoredAt": "2026-09-06T13:24:40-04:00",
+      "subject": "fix(runtime): drain cancelled chat tools and preserve compaction history",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "3aa4cc47dbe3f22b82451281c5f882ba08178f56",
+      "committedAt": "2026-09-06T13:09:34-04:00",
+      "authoredAt": "2026-09-06T13:09:34-04:00",
+      "subject": "test(orchestrator): qualify final-state verification and document recovery",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "09c18b8ebe9323cacc82eae44fd9b74c4176da00",
+      "committedAt": "2026-09-06T13:07:35-04:00",
+      "authoredAt": "2026-09-06T13:07:24-04:00",
+      "subject": "fix(orchestrator): bind completion to verified final repository state",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "1c74b002a83bdb0043effcf6b8c325fa817e40c6",
+      "committedAt": "2026-09-06T13:07:24-04:00",
+      "authoredAt": "2026-09-06T13:07:24-04:00",
+      "subject": "fix(orchestrator): bind completion to verified final repository state",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "d9ff5f10b8fa6072f9cee687e2825693d91e8266",
+      "committedAt": "2026-09-06T12:56:27-04:00",
+      "authoredAt": "2026-09-06T12:56:27-04:00",
+      "subject": "docs: define browser resource ownership acceptance",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8d0a945507495a040b6d0c4a5de86a2b4229c052",
+      "committedAt": "2026-09-06T12:54:31-04:00",
+      "authoredAt": "2026-09-06T12:54:01-04:00",
+      "subject": "fix(runtime): scope chat and headless lifecycles to runs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3d02f3ff35320f5a6587c27602b928cdaf292b0f",
+      "committedAt": "2026-09-06T12:54:16-04:00",
+      "authoredAt": "2026-09-06T12:54:16-04:00",
+      "subject": "fix(ui): show configured MCP servers after run resources close",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "6a7b07a97e09551b1f7597caacb6039f536708cd",
+      "committedAt": "2026-09-06T12:54:01-04:00",
+      "authoredAt": "2026-09-06T12:54:01-04:00",
+      "subject": "fix(runtime): scope chat and headless lifecycles to runs",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "f3e00c83eeffbeb258995ebc2bc257e7398f8160",
+      "committedAt": "2026-09-06T12:52:13-04:00",
+      "authoredAt": "2026-09-06T12:51:45-04:00",
+      "subject": "fix(mcp): make active-run server discovery cancellable",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "7d821de9dcd1e9ba8c079e68dcbed7b72199e310",
+      "committedAt": "2026-09-06T12:51:45-04:00",
+      "authoredAt": "2026-09-06T12:51:45-04:00",
+      "subject": "fix(mcp): make active-run server discovery cancellable",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "356b3daeab6183806f9173798ba5bd5dc779a634",
+      "committedAt": "2026-09-06T12:48:36-04:00",
+      "authoredAt": "2026-09-06T12:48:36-04:00",
+      "subject": "fix(recovery): retain final-verification retries and quote Git refs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "384a3fb1ad50326f1ee19c2ac118815529d63c90",
+      "committedAt": "2026-09-06T12:45:34-04:00",
+      "authoredAt": "2026-09-06T12:45:34-04:00",
+      "subject": "docs: replace obsolete server security claims with CLI boundaries",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5b38c278135a4c3e8099d8c66b883b020287e69d",
+      "committedAt": "2026-09-06T12:42:55-04:00",
+      "authoredAt": "2026-09-06T12:42:55-04:00",
+      "subject": "fix(lsp): parse bounded UTF-8 response frames by bytes",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "584eb04926a865973d34736a0610badc480cf9d8",
+      "committedAt": "2026-09-06T12:31:20-04:00",
+      "authoredAt": "2026-09-06T12:30:07-04:00",
+      "subject": "test(lsp): harden lifecycle fixture readiness",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c501afb271c5946ddfdbe892a238be5af1070995",
+      "committedAt": "2026-09-06T12:31:20-04:00",
+      "authoredAt": "2026-09-06T12:24:34-04:00",
+      "subject": "fix(lsp): scope language servers to runs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8ce2fdc44008dc768b0a2587926a02ce4d784ea2",
+      "committedAt": "2026-09-06T12:30:07-04:00",
+      "authoredAt": "2026-09-06T12:30:07-04:00",
+      "subject": "test(lsp): harden lifecycle fixture readiness",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "9dd8693f2c3bcd28157be9144f20227a7449e667",
+      "committedAt": "2026-09-06T12:25:24-04:00",
+      "authoredAt": "2026-09-06T12:25:24-04:00",
+      "subject": "docs(queue): qualify structured review and fingerprint contract",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5ad90b0edd0f13b06f562ebc2aa385928f22369b",
+      "committedAt": "2026-09-06T12:24:34-04:00",
+      "authoredAt": "2026-09-06T12:24:34-04:00",
+      "subject": "fix(lsp): scope language servers to runs",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "bd63db24836baaa5de16bc37fe7ccfd0f42ec19c",
+      "committedAt": "2026-09-06T12:22:26-04:00",
+      "authoredAt": "2026-09-06T12:22:09-04:00",
+      "subject": "fix(fingerprint): make evidence collection cancellable",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d248635cec3ea7905a282ec42db9a251a27ad52c",
+      "committedAt": "2026-09-06T12:22:09-04:00",
+      "authoredAt": "2026-09-06T12:22:09-04:00",
+      "subject": "fix(fingerprint): make evidence collection cancellable",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "35a00f0fe4809b24ddef93cbf9f5830d382a13c2",
+      "committedAt": "2026-09-06T12:22:09-04:00",
+      "authoredAt": "2026-09-06T12:22:09-04:00",
+      "subject": "docs(review): require explicit decision and qualifying score",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e84093e476b37dcdf3169056574690ec4fe065ca",
+      "committedAt": "2026-09-06T12:20:07-04:00",
+      "authoredAt": "2026-09-06T12:20:07-04:00",
+      "subject": "fix(review): stop immediately when revision timeout throws",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "45c4d50e150bee99e0b0fcadf348bb1c2c05ba18",
+      "committedAt": "2026-09-06T12:17:28-04:00",
+      "authoredAt": "2026-09-06T12:17:04-04:00",
+      "subject": "fix(review): harden fingerprints and outcome states",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b2991e9e50ffec33efc5c2d0f146deaef5295ec2",
+      "committedAt": "2026-09-06T12:17:28-04:00",
+      "authoredAt": "2026-09-06T12:12:35-04:00",
+      "subject": "feat(review): add typed outcomes and state fingerprints",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "f39d4dca26dc1ce96e9bd2d1dcf045cd202145fc",
+      "committedAt": "2026-09-06T12:17:06-04:00",
+      "authoredAt": "2026-09-06T12:17:06-04:00",
+      "subject": "docs(plan): define owned review artifact lifetime",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9dcef678d910604dc182ec4cd34a7107a2535c2f",
+      "committedAt": "2026-09-06T12:17:04-04:00",
+      "authoredAt": "2026-09-06T12:17:04-04:00",
+      "subject": "fix(review): harden fingerprints and outcome states",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "393504de78eb583b2286b2d9d6bf911f1b4258c2",
+      "committedAt": "2026-09-06T12:14:24-04:00",
+      "authoredAt": "2026-09-06T12:14:24-04:00",
+      "subject": "test(mcp): prove started descendant cleanup and qualify run ownership",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "60abab4370acf621b91ba283375851788d9605c3",
+      "committedAt": "2026-09-06T12:12:35-04:00",
+      "authoredAt": "2026-09-06T12:12:35-04:00",
+      "subject": "feat(review): add typed outcomes and state fingerprints",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "5ec42ffa84d2cc98de4a74c986f07caa4379fe15",
+      "committedAt": "2026-09-06T12:10:25-04:00",
+      "authoredAt": "2026-09-06T12:09:56-04:00",
+      "subject": "fix(mcp): retain exited server ownership for cleanup",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "51b2b0f580525670361ede1a4298eaeeca037bbf",
+      "committedAt": "2026-09-06T12:10:25-04:00",
+      "authoredAt": "2026-09-06T12:03:02-04:00",
+      "subject": "fix(mcp): scope servers to cancellable runs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c95838b215a58f69795924f591ace88c1525124f",
+      "committedAt": "2026-09-06T12:09:56-04:00",
+      "authoredAt": "2026-09-06T12:09:56-04:00",
+      "subject": "fix(mcp): retain exited server ownership for cleanup",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "2d44e07f9e648a59700360ff305de296e78eced9",
+      "committedAt": "2026-09-06T12:07:53-04:00",
+      "authoredAt": "2026-09-06T12:07:53-04:00",
+      "subject": "docs(gates): explain blocking exits and publication prompts",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d4c0b4aabb7a25ca9fc8cd996a3301f614510c54",
+      "committedAt": "2026-09-06T12:05:44-04:00",
+      "authoredAt": "2026-09-06T12:03:02-04:00",
+      "subject": "fix(mcp): scope servers to cancellable runs",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "8120c4e47a2f9f3273aff9710b962541117864f1",
+      "committedAt": "2026-09-06T12:04:39-04:00",
+      "authoredAt": "2026-09-06T12:04:39-04:00",
+      "subject": "docs: replace unmeasured reviewer claims with practical tradeoffs",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "53e50d4811a3ad701dd9b51bb8b1479109f74e99",
+      "committedAt": "2026-09-06T12:02:49-04:00",
+      "authoredAt": "2026-09-06T12:02:49-04:00",
+      "subject": "fix(gates): cancellation wins over stale command success",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "17f3d0405138c39990c4055dfdb473441597837c",
+      "committedAt": "2026-09-06T12:01:53-04:00",
+      "authoredAt": "2026-09-06T12:01:22-04:00",
+      "subject": "feat(gates): add typed required gate policy",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "635db240fe793daa0673b590fe5bacab5dc4d56d",
+      "committedAt": "2026-09-06T12:01:22-04:00",
+      "authoredAt": "2026-09-06T12:01:22-04:00",
+      "subject": "feat(gates): add typed required gate policy",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "cd856889db5184da77ba0c12a97bb93d4b75c12b",
+      "committedAt": "2026-09-06T12:01:05-04:00",
+      "authoredAt": "2026-09-06T12:01:05-04:00",
+      "subject": "test(review): reject approval delivered after cancellation",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b9e56b7d4761352c22369d80c96217e36b6188ec",
+      "committedAt": "2026-09-06T11:55:14-04:00",
+      "authoredAt": "2026-09-06T11:55:14-04:00",
+      "subject": "test(review): qualify revision writes and document runtime contracts",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "1422bd51fee641577440ad7c16400a094acfa361",
+      "committedAt": "2026-09-06T11:52:34-04:00",
+      "authoredAt": "2026-09-06T11:52:34-04:00",
+      "subject": "test(orchestrator): exercise live approval rules before reviewer teardown",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9eb9c76d5aaafc2b685a505c0f04253c044905e1",
+      "committedAt": "2026-09-06T11:48:13-04:00",
+      "authoredAt": "2026-09-06T11:48:13-04:00",
+      "subject": "test(evals): qualify complete offline fixture inventory",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b925aa35163abc44b987d0e273da421fa755c721",
+      "committedAt": "2026-09-06T11:42:13-04:00",
+      "authoredAt": "2026-09-06T11:41:36-04:00",
+      "subject": "fix(review): route review tools through policy executor",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3adcb1160bc9ce65227fabef9ed5aafc2999f7a4",
+      "committedAt": "2026-09-06T11:41:36-04:00",
+      "authoredAt": "2026-09-06T11:41:36-04:00",
+      "subject": "fix(review): route review tools through policy executor",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "a677a2e3f00532cfd3cb356375a5e62e98b865df",
+      "committedAt": "2026-09-06T11:38:47-04:00",
+      "authoredAt": "2026-09-06T11:37:31-04:00",
+      "subject": "test(evals): harden R20e security acceptance",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "053cb69ad77ff0e2b1b3b8c44ce15e244aefc605",
+      "committedAt": "2026-09-06T11:38:46-04:00",
+      "authoredAt": "2026-09-06T11:30:47-04:00",
+      "subject": "test(evals): add R20e maintenance and security fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9dcc092aaf731ab577675e02a1c49004b141d73c",
+      "committedAt": "2026-09-06T11:38:46-04:00",
+      "authoredAt": "2026-09-06T11:38:46-04:00",
+      "subject": "fix(orchestrator): preflight explicit isolation before retry work",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c3eb129cf4c13ba5b174416466627a6725e84b3f",
+      "committedAt": "2026-09-06T11:37:31-04:00",
+      "authoredAt": "2026-09-06T11:37:31-04:00",
+      "subject": "test(evals): harden R20e security acceptance",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "4b4c5fbe2bb6e6f752d26db9bbaf7691ee5ede71",
+      "committedAt": "2026-09-06T11:35:22-04:00",
+      "authoredAt": "2026-09-06T11:35:22-04:00",
+      "subject": "docs: distinguish process cancellation from tool settlement",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "ab226a3e55838d996c076485c6fda93259765bfb",
+      "committedAt": "2026-09-06T11:30:56-04:00",
+      "authoredAt": "2026-09-06T11:30:56-04:00",
+      "subject": "docs: assign precise locks to independent lifecycle packages",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5405d9cead5f111a1a4419982f00a952e358443f",
+      "committedAt": "2026-09-06T11:30:47-04:00",
+      "authoredAt": "2026-09-06T11:30:47-04:00",
+      "subject": "test(evals): add R20e maintenance and security fixtures",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "96adb3784657aa40a94fedb9a17bf6698cc0705f",
+      "committedAt": "2026-09-06T11:29:50-04:00",
+      "authoredAt": "2026-09-06T11:29:50-04:00",
+      "subject": "docs: record qualified worker and child runtime contracts",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "1e269feb32d25c75a136189b2de3c03a0fb451b7",
+      "committedAt": "2026-09-06T11:28:13-04:00",
+      "authoredAt": "2026-09-06T11:28:13-04:00",
+      "subject": "fix(orchestrator): stop after cancelled plan critique",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "23ae8c152409ffc7058a8e4bcd9f3ef46abe60af",
+      "committedAt": "2026-09-06T11:27:40-04:00",
+      "authoredAt": "2026-09-06T11:27:40-04:00",
+      "subject": "fix(children): await dispatched tools and qualify filter containment",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "6959c60eb01e08f1bb3b3d5133ed11c179e68235",
+      "committedAt": "2026-09-06T11:22:45-04:00",
+      "authoredAt": "2026-09-06T11:21:52-04:00",
+      "subject": "fix(planner): preserve late cancellation outcomes",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e855bd1a2d65d13389d3593db5b825dae4e8f8fe",
+      "committedAt": "2026-09-06T11:22:45-04:00",
+      "authoredAt": "2026-09-06T11:22:11-04:00",
+      "subject": "test(children): harden runtime acceptance probes",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "6bd2887d44888091be5cb5c8f82c0b2ca66f8d74",
+      "committedAt": "2026-09-06T11:22:45-04:00",
+      "authoredAt": "2026-09-06T11:19:03-04:00",
+      "subject": "fix(planner): enforce shared read-only tool policy",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d9fe6afbf4b6b896c21539cbd33abb561ddf081f",
+      "committedAt": "2026-09-06T11:22:45-04:00",
+      "authoredAt": "2026-09-06T11:08:22-04:00",
+      "subject": "test(children): cover isolated runtime boundaries",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "70c35243efe6cbddee757748377337e2660e166e",
+      "committedAt": "2026-09-06T11:22:11-04:00",
+      "authoredAt": "2026-09-06T11:22:11-04:00",
+      "subject": "test(children): harden runtime acceptance probes",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "17bbad39d199fdd5512bce25902e2acc5461c53f",
+      "committedAt": "2026-09-06T11:21:52-04:00",
+      "authoredAt": "2026-09-06T11:21:52-04:00",
+      "subject": "fix(planner): preserve late cancellation outcomes",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "158f71c5ee9f02655807604005f00209c32abf16",
+      "committedAt": "2026-09-06T11:20:38-04:00",
+      "authoredAt": "2026-09-06T11:20:24-04:00",
+      "subject": "fix(children): contain repository filters during final inspection",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "b42fb335a903cdaa90ff4674be89489801cc5c1d",
+      "committedAt": "2026-09-06T11:20:24-04:00",
+      "authoredAt": "2026-09-06T11:20:24-04:00",
+      "subject": "fix(children): contain repository filters during final inspection",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "211282ff84278ca994ffd757162f9c7553bc96fd",
+      "committedAt": "2026-09-06T11:19:03-04:00",
+      "authoredAt": "2026-09-06T11:19:03-04:00",
+      "subject": "fix(planner): enforce shared read-only tool policy",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "aac2d0faf7773127118d431de24eaa5ef6af1b56",
+      "committedAt": "2026-09-06T11:16:40-04:00",
+      "authoredAt": "2026-09-06T11:16:40-04:00",
+      "subject": "fix(runtime): honor authorized full-disk checkpoints",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8347ddd3919197bb1958fe0ed08187a19fb66925",
+      "committedAt": "2026-09-06T11:16:40-04:00",
+      "authoredAt": "2026-09-06T11:16:40-04:00",
+      "subject": "fix(orchestrator): preserve effective gate isolation and narrow approvals",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b361631a56f8268ccde5d4fe031e7576474a8bfb",
+      "committedAt": "2026-09-06T11:13:10-04:00",
+      "authoredAt": "2026-09-06T11:11:55-04:00",
+      "subject": "fix(orchestrator): harden worker execution cancellation",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "07f78a24e1c547653131bdc60d5227c78badc38c",
+      "committedAt": "2026-09-06T11:13:10-04:00",
+      "authoredAt": "2026-09-06T11:05:22-04:00",
+      "subject": "fix(orchestrator): route workers through shared tool policy",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "4ecfff9566c1c92ee9b68a8b77abdcd7d092d4c2",
+      "committedAt": "2026-09-06T11:12:21-04:00",
+      "authoredAt": "2026-09-06T11:12:21-04:00",
+      "subject": "docs: bound server lifecycle migrations by resource owner",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "85f2362f468b710273c998d0c8f6da14d684dec9",
+      "committedAt": "2026-09-06T11:11:55-04:00",
+      "authoredAt": "2026-09-06T11:11:55-04:00",
+      "subject": "fix(orchestrator): harden worker execution cancellation",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "7dfc1105345cfc389ac41ddab7ce84558de8a22d",
+      "committedAt": "2026-09-06T11:10:41-04:00",
+      "authoredAt": "2026-09-06T11:10:41-04:00",
+      "subject": "docs: split planner and review adapter dispatches",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "38223adc1f39efe1e677959ed9d4ff988b848a87",
+      "committedAt": "2026-09-06T11:10:09-04:00",
+      "authoredAt": "2026-09-06T11:10:09-04:00",
+      "subject": "docs: explain child isolation limits and worktree recovery",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "dddef36d9aa8ed87510e2559c19a6b31e7ae0c14",
+      "committedAt": "2026-09-06T11:08:41-04:00",
+      "authoredAt": "2026-09-06T11:08:41-04:00",
+      "subject": "docs: explain current chat and headless permission guarantees",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c6409b0c02bdeab368bf07b2e3e28aa79bd18137",
+      "committedAt": "2026-09-06T11:08:22-04:00",
+      "authoredAt": "2026-09-06T11:08:22-04:00",
+      "subject": "test(children): cover isolated runtime boundaries",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "6ef266831b9260df70e3427a929cecde76004a94",
+      "committedAt": "2026-09-06T11:07:37-04:00",
+      "authoredAt": "2026-09-06T11:07:37-04:00",
+      "subject": "fix(ui): scope approvals and qualify mounted chat adapter",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "038c5aa8e386a536298b1bfc60e34b06790cf7d5",
+      "committedAt": "2026-09-06T11:06:38-04:00",
+      "authoredAt": "2026-09-06T10:51:58-04:00",
+      "subject": "fix(children): bind command closures to child lifetime",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "bdfbb6a0c1cd06f4454b713ba15d3d09a07729d1",
+      "committedAt": "2026-09-06T11:06:33-04:00",
+      "authoredAt": "2026-09-06T10:50:30-04:00",
+      "subject": "fix(children): finalize owned resources and verify terminal state",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "1f77070bd3c1afcbb83472640b84e1efe80463dc",
+      "committedAt": "2026-09-06T11:06:32-04:00",
+      "authoredAt": "2026-09-06T10:44:50-04:00",
+      "subject": "fix(process): expose awaited run-owned cleanup",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "2affb7060dbf15bf13d08f13f54f9d32fee72d8d",
+      "committedAt": "2026-09-06T11:05:22-04:00",
+      "authoredAt": "2026-09-06T11:05:22-04:00",
+      "subject": "fix(orchestrator): route workers through shared tool policy",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "71cbfae64cb2294e1d4add0f83095568122ad601",
+      "committedAt": "2026-09-06T11:02:26-04:00",
+      "authoredAt": "2026-09-06T11:02:26-04:00",
+      "subject": "fix(headless): attempt every cleanup and report hook blocks",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "7e577e6cf0344ef92b5c7cd42cac324744852fa6",
+      "committedAt": "2026-09-06T10:58:51-04:00",
+      "authoredAt": "2026-09-06T10:55:29-04:00",
+      "subject": "refactor(ui): route chat tools through shared policy",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3179d651820fbe4cf5a008ee13786624111934d1",
+      "committedAt": "2026-09-06T10:55:29-04:00",
+      "authoredAt": "2026-09-06T10:55:29-04:00",
+      "subject": "refactor(ui): route chat tools through shared policy",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "b8f16bae2e810e71eca166ec9b27e471909bda81",
+      "committedAt": "2026-09-06T10:51:58-04:00",
+      "authoredAt": "2026-09-06T10:51:58-04:00",
+      "subject": "fix(children): bind command closures to child lifetime",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "af906bc15050fa5a7d850da467f87bbf44ab8992",
+      "committedAt": "2026-09-06T10:50:30-04:00",
+      "authoredAt": "2026-09-06T10:50:30-04:00",
+      "subject": "fix(children): finalize owned resources and verify terminal state",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "01cf1485533d15e17f4b27d5e88e1e9454c58acc",
+      "committedAt": "2026-09-06T10:47:52-04:00",
+      "authoredAt": "2026-09-06T10:46:59-04:00",
+      "subject": "fix(cli): harden headless terminal handling",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "061ddcaebdd07edde8d753992c5fb6bcae0905b8",
+      "committedAt": "2026-09-06T10:46:59-04:00",
+      "authoredAt": "2026-09-06T10:46:59-04:00",
+      "subject": "fix(cli): harden headless terminal handling",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "5603c6f91dfe08481adc5847d98b28767797150f",
+      "committedAt": "2026-09-06T10:45:08-04:00",
+      "authoredAt": "2026-09-06T10:44:50-04:00",
+      "subject": "fix(process): expose awaited run-owned cleanup",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "14318813c67128021643a6ea3b2d735643cd9010",
+      "committedAt": "2026-09-06T10:44:50-04:00",
+      "authoredAt": "2026-09-06T10:44:50-04:00",
+      "subject": "fix(process): expose awaited run-owned cleanup",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "bc6b871c6d600f88e2a17352ce171e353a114a43",
+      "committedAt": "2026-09-06T10:42:45-04:00",
+      "authoredAt": "2026-09-06T10:41:58-04:00",
+      "subject": "fix(tools): clean up child cancellation lifetime",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9ccbc78ccf880396488941210fbbccf9e4532435",
+      "committedAt": "2026-09-06T10:42:45-04:00",
+      "authoredAt": "2026-09-06T10:39:39-04:00",
+      "subject": "fix(tools): constrain isolated sub-agents",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "878d5c51dac603c69538be070690113c5a5fc151",
+      "committedAt": "2026-09-06T10:41:58-04:00",
+      "authoredAt": "2026-09-06T10:41:58-04:00",
+      "subject": "fix(tools): clean up child cancellation lifetime",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "5c981a8a478b9664c08f1e11d4aad5069247efef",
+      "committedAt": "2026-09-06T10:40:23-04:00",
+      "authoredAt": "2026-09-06T10:39:39-04:00",
+      "subject": "fix(tools): constrain isolated sub-agents",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "b969bc9e6db5d86e0f554a7b4c002905be540ce5",
+      "committedAt": "2026-09-06T10:38:42-04:00",
+      "authoredAt": "2026-09-06T10:25:03-04:00",
+      "subject": "fix(cli): govern headless tool execution",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c32a8c17a50b68eab89180a77ff506037b733750",
+      "committedAt": "2026-09-06T10:38:24-04:00",
+      "authoredAt": "2026-09-06T10:27:07-04:00",
+      "subject": "fix(policy): carry child context through completion events",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "4dc6ee0d22a26f95d4e4196381783487675f65b7",
+      "committedAt": "2026-09-06T10:38:21-04:00",
+      "authoredAt": "2026-09-06T10:24:38-04:00",
+      "subject": "fix(git): route tool commands through scoped process adapter",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "8a5856f9753e943b5b294ac17875bf8c46028695",
+      "committedAt": "2026-09-06T10:34:11-04:00",
+      "authoredAt": "2026-09-06T10:34:11-04:00",
+      "subject": "docs: keep cancellation resource ownership explicit",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "ee5d5a6d4864fa8547788b6dac9fdecba7613935",
+      "committedAt": "2026-09-06T10:31:49-04:00",
+      "authoredAt": "2026-09-06T10:31:49-04:00",
+      "subject": "docs: split resource ownership from cancellation caller migration",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9c707aaf82f4c18de9be158c9c6f89cd8e02415f",
+      "committedAt": "2026-09-06T10:29:59-04:00",
+      "authoredAt": "2026-09-06T10:29:59-04:00",
+      "subject": "docs: specify Git tool containment and child metadata limits",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "55c71cd878dc067475107c33a5ee0045593b69fe",
+      "committedAt": "2026-09-06T10:27:24-04:00",
+      "authoredAt": "2026-09-06T10:27:07-04:00",
+      "subject": "fix(policy): carry child context through completion events",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "ace9d466289d750525f70bd998b1c7229cfaec40",
+      "committedAt": "2026-09-06T10:27:07-04:00",
+      "authoredAt": "2026-09-06T10:27:07-04:00",
+      "subject": "fix(policy): carry child context through completion events",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "be759d80f1ed2efa8fab52469f5720af6f7da3f1",
+      "committedAt": "2026-09-06T10:25:03-04:00",
+      "authoredAt": "2026-09-06T10:25:03-04:00",
+      "subject": "fix(cli): govern headless tool execution",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "33d5ef9a1c8dd3864e896b39f487e3fbad867b28",
+      "committedAt": "2026-09-06T10:24:38-04:00",
+      "authoredAt": "2026-09-06T10:24:38-04:00",
+      "subject": "fix(git): route tool commands through scoped process adapter",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e7d86bc4b587bdb90a65ef49cdebe068a0018706",
+      "committedAt": "2026-09-06T10:20:46-04:00",
+      "authoredAt": "2026-09-06T10:20:26-04:00",
+      "subject": "fix(policy): pass execution context to inherited callbacks",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "9933d12e6f601c5f66b7c3d44f0c67de94bc93b3",
+      "committedAt": "2026-09-06T10:20:42-04:00",
+      "authoredAt": "2026-09-06T10:20:26-04:00",
+      "subject": "fix(policy): pass execution context to inherited callbacks",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "abd5bd9f5acd5cdebfcda18019b9925d2b1ae91d",
+      "committedAt": "2026-09-06T10:20:26-04:00",
+      "authoredAt": "2026-09-06T10:20:26-04:00",
+      "subject": "fix(policy): pass execution context to inherited callbacks",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "62bd0f029e8577128f3bf05dacb4e651a4bb70db",
+      "committedAt": "2026-09-06T10:15:52-04:00",
+      "authoredAt": "2026-09-06T10:15:52-04:00",
+      "subject": "docs: include direct shell commands in cancellation acceptance",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "00257f0e54a1221b61dc3cefd0f82935a09caaa6",
+      "committedAt": "2026-09-06T10:14:45-04:00",
+      "authoredAt": "2026-09-06T10:14:45-04:00",
+      "subject": "docs: clarify background command limits",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "24e44fc1e296fb2e5b010faa6ef6204a16270780",
+      "committedAt": "2026-09-06T10:14:12-04:00",
+      "authoredAt": "2026-09-06T10:14:12-04:00",
+      "subject": "test(evals): check extracted modules and document review limits",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3f20ef658d7383756e6a30a751e677c7e3f9d615",
+      "committedAt": "2026-09-06T10:12:37-04:00",
+      "authoredAt": "2026-09-06T10:11:48-04:00",
+      "subject": "test(evals): add R20d refactor fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "746a2e555dc54eb59b797514355e2c6e6bc91933",
+      "committedAt": "2026-09-06T10:11:48-04:00",
+      "authoredAt": "2026-09-06T10:11:48-04:00",
+      "subject": "test(evals): add R20d refactor fixtures",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "d54ad0728d2bba27ccada78b535dd9080fabac82",
+      "committedAt": "2026-09-06T10:11:24-04:00",
+      "authoredAt": "2026-09-06T10:11:24-04:00",
+      "subject": "docs: qualify shared process boundary and dispatch headless policy",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5182243419db8f19a3a2eec342a96daa2827cda8",
+      "committedAt": "2026-09-06T10:10:40-04:00",
+      "authoredAt": "2026-09-06T10:10:21-04:00",
+      "subject": "fix(tools): harden scoped background cleanup",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d4a01c67717778846e5249551815d6a9de11ad0c",
+      "committedAt": "2026-09-06T10:10:21-04:00",
+      "authoredAt": "2026-09-06T10:10:21-04:00",
+      "subject": "fix(tools): harden scoped background cleanup",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "805219c343a31d8aff213b6add6af645d9888048",
+      "committedAt": "2026-09-06T10:08:57-04:00",
+      "authoredAt": "2026-09-06T10:08:57-04:00",
+      "subject": "docs: track validated feature fixtures and next dispatch",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "86d3e9f2fb5083ea4bb8b1e763ed82ee0428325e",
+      "committedAt": "2026-09-06T10:08:20-04:00",
+      "authoredAt": "2026-09-06T10:07:53-04:00",
+      "subject": "test(evals): harden R20c feature fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "05cb197c1541f11f6efd09103799aac0d81505c7",
+      "committedAt": "2026-09-06T10:08:20-04:00",
+      "authoredAt": "2026-09-06T10:05:11-04:00",
+      "subject": "test(evals): add R20c feature fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5a1aad1c1212473bd5a0b04a4903df5034c636ee",
+      "committedAt": "2026-09-06T10:07:53-04:00",
+      "authoredAt": "2026-09-06T10:07:53-04:00",
+      "subject": "test(evals): harden R20c feature fixtures",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "c6bf3d49938db4add859bec43d213fc61ce7c74f",
+      "committedAt": "2026-09-06T10:07:46-04:00",
+      "authoredAt": "2026-09-06T10:07:46-04:00",
+      "subject": "docs: explain scoped command lifecycle and supported runtime",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "33118262f5c244c8f464de1e2b8caf0800e19a0f",
+      "committedAt": "2026-09-06T10:07:07-04:00",
+      "authoredAt": "2026-09-06T10:04:01-04:00",
+      "subject": "fix(tools): scope shell execution to run lifecycle",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "dc21ad686905eaba7111d236c580cd11115f454a",
+      "committedAt": "2026-09-06T10:05:11-04:00",
+      "authoredAt": "2026-09-06T10:05:11-04:00",
+      "subject": "test(evals): add R20c feature fixtures",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "68c10a6861b304df0e44e7dfdd2c01c615dbd81d",
+      "committedAt": "2026-09-06T10:05:10-04:00",
+      "authoredAt": "2026-09-06T10:05:10-04:00",
+      "subject": "fix(sandbox): retain private temp paths inside runtime wrapper",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "039c60dfda589175f9f560ce4ebc6bd442d54319",
+      "committedAt": "2026-09-06T10:04:01-04:00",
+      "authoredAt": "2026-09-06T10:04:01-04:00",
+      "subject": "fix(tools): scope shell execution to run lifecycle",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "5a2c91d4bf2fc0e223338d1fbd723ff287100edd",
+      "committedAt": "2026-09-06T10:02:06-04:00",
+      "authoredAt": "2026-09-06T10:02:06-04:00",
+      "subject": "test(evals): strengthen fixture qualification and record sandbox progress",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "ebff8acf0a91c2029c3287a66e4675b8e189774a",
+      "committedAt": "2026-09-06T09:54:04-04:00",
+      "authoredAt": "2026-09-06T09:54:04-04:00",
+      "subject": "fix: report sandbox teardown failures and reject unreadable grants",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "479bbf9a790aa77922d767c1f24cd050930ef93d",
+      "committedAt": "2026-09-06T09:51:38-04:00",
+      "authoredAt": "2026-09-06T09:51:38-04:00",
+      "subject": "test: add R20b offline bug-fix fixtures",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "9de97c7ecbbd9ba58df024fa2959825c55aba9b8",
+      "committedAt": "2026-09-06T09:49:57-04:00",
+      "authoredAt": "2026-09-06T09:48:41-04:00",
+      "subject": "fix(sandbox): preserve scoped grant identities",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "41c5234feba348740711835402872c186057fdca",
+      "committedAt": "2026-09-06T09:49:57-04:00",
+      "authoredAt": "2026-09-06T09:44:46-04:00",
+      "subject": "feat(sandbox): add fail-closed scoped process boundary",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "11a50219f9a8db79dcc95334059b62898a114a8e",
+      "committedAt": "2026-09-06T09:48:41-04:00",
+      "authoredAt": "2026-09-06T09:48:41-04:00",
+      "subject": "fix(sandbox): preserve scoped grant identities",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "feb981f7c3436461193083b7819ae9ac1e61c5ab",
+      "committedAt": "2026-09-06T09:47:17-04:00",
+      "authoredAt": "2026-09-06T09:47:17-04:00",
+      "subject": "test: qualify command adapters and semantic evaluation fixture",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "8caf7f84814e1a94e5bb1af091e37cc599a2a656",
+      "committedAt": "2026-09-06T09:44:46-04:00",
+      "authoredAt": "2026-09-06T09:44:46-04:00",
+      "subject": "feat(sandbox): add fail-closed scoped process boundary",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "8cb5a2268408f755c02196ff7272946952de5571",
+      "committedAt": "2026-09-05T23:57:40-04:00",
+      "authoredAt": "2026-09-05T23:56:57-04:00",
+      "subject": "test(evals): harden R20a fixture validation",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "0da1e3a38de7df5eb3b0c2e2dbe24d41fde279be",
+      "committedAt": "2026-09-05T23:57:40-04:00",
+      "authoredAt": "2026-09-05T23:54:01-04:00",
+      "subject": "test(evals): add bounded R20a fixture protocol",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "7eac477e63b9647fca1964ebc21af41013443b4a",
+      "committedAt": "2026-09-05T23:56:57-04:00",
+      "authoredAt": "2026-09-05T23:56:57-04:00",
+      "subject": "test(evals): harden R20a fixture validation",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "986b4e95de700716e6b78a22b2a3e1ee129c0966",
+      "committedAt": "2026-09-05T23:55:31-04:00",
+      "authoredAt": "2026-09-05T23:54:23-04:00",
+      "subject": "feat(reliability): route verification and gates through process runner",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "5be8bf0e54733ac81e391feb71adc0518d428bd0",
+      "committedAt": "2026-09-05T23:54:23-04:00",
+      "authoredAt": "2026-09-05T23:54:23-04:00",
+      "subject": "feat(reliability): route verification and gates through process runner",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "f5fc14ef9271057cf9ceb5bae6136f9589a937c7",
+      "committedAt": "2026-09-05T23:54:01-04:00",
+      "authoredAt": "2026-09-05T23:54:01-04:00",
+      "subject": "test(evals): add bounded R20a fixture protocol",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "f2e802c6a73a79688bb467323b6c3b6057931460",
+      "committedAt": "2026-09-05T23:53:43-04:00",
+      "authoredAt": "2026-09-05T23:53:43-04:00",
+      "subject": "fix: align Node support with installed dependency requirements",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "90d7439709ed08b3e0b12ec3ecc5d4998541f7bb",
+      "committedAt": "2026-09-05T23:48:18-04:00",
+      "authoredAt": "2026-09-05T23:48:18-04:00",
+      "subject": "docs: explain shared execution contracts for contributors",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "ee749dafbb0e4f177b6a1b8534fb3b3f1a92f2ec",
+      "committedAt": "2026-09-05T23:46:06-04:00",
+      "authoredAt": "2026-09-05T23:46:06-04:00",
+      "subject": "test: qualify shared permission and identity foundations",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "837a4b41d76f6c0e30568d4a4b8e2b2cd7898662",
+      "committedAt": "2026-09-05T23:18:51-04:00",
+      "authoredAt": "2026-09-05T23:18:17-04:00",
+      "subject": "feat(review): add explicit reviewer identity preflight",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e4f15720537735abfcf8cea0b252b0931a4eabcb",
+      "committedAt": "2026-09-05T23:18:37-04:00",
+      "authoredAt": "2026-09-05T23:18:11-04:00",
+      "subject": "feat(reliability): add shared tool policy and executor",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "64199e3d5c824a609b9d5decc7997a1879e10d34",
+      "committedAt": "2026-09-05T23:18:17-04:00",
+      "authoredAt": "2026-09-05T23:18:17-04:00",
+      "subject": "feat(review): add explicit reviewer identity preflight",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "e6ad4c59c963049d35d5dafd920c4e6045af3984",
+      "committedAt": "2026-09-05T23:18:11-04:00",
+      "authoredAt": "2026-09-05T23:18:11-04:00",
+      "subject": "feat(reliability): add shared tool policy and executor",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "21ab18e96fa7494124e4207f1802e1e3b72ae15f",
+      "committedAt": "2026-09-05T23:09:17-04:00",
+      "authoredAt": "2026-09-05T23:09:17-04:00",
+      "subject": "fix: reject invalid subprocess execution limits",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "b5761d1d2dc3b886c47e18bffd6d403bfa327ace",
+      "committedAt": "2026-09-05T23:05:46-04:00",
+      "authoredAt": "2026-09-05T23:05:46-04:00",
+      "subject": "docs: keep reliability guidance actionable and dispatch policy foundations",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e4031f629fcaed0a413a9b7651f4a3437f8dc858",
+      "committedAt": "2026-09-05T22:47:28-04:00",
+      "authoredAt": "2026-09-05T22:47:28-04:00",
+      "subject": "test: qualify process and filesystem reliability batch",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "80e74959c70cd4d7b9cc9a02162a11aec3ccd2d8",
+      "committedAt": "2026-09-05T22:30:58-04:00",
+      "authoredAt": "2026-09-05T22:10:43-04:00",
+      "subject": "fix: harden canonical path and patch validation",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "f2b05d789bb34645b5896d265ac53416e11f3c8d",
+      "committedAt": "2026-09-05T22:30:58-04:00",
+      "authoredAt": "2026-09-05T22:04:05-04:00",
+      "subject": "feat: enforce canonical tool path scope",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d42ac877004b00290177e4e56f2bc69c4b2b7097",
+      "committedAt": "2026-09-05T22:10:43-04:00",
+      "authoredAt": "2026-09-05T22:10:43-04:00",
+      "subject": "fix: harden canonical path and patch validation",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "9e87d82cc7b7167ed20e190aa4c41066843d3185",
+      "committedAt": "2026-09-05T22:09:57-04:00",
+      "authoredAt": "2026-09-05T22:09:38-04:00",
+      "subject": "fix: harden process cleanup and output reporting",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "cb09b22a685626b9363fb0e9140485cf9130508b",
+      "committedAt": "2026-09-05T22:09:57-04:00",
+      "authoredAt": "2026-09-05T22:04:36-04:00",
+      "subject": "fix: run bash commands asynchronously per run",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "143bd38058fc28bb062e9095fdfc9592d3147191",
+      "committedAt": "2026-09-05T22:09:38-04:00",
+      "authoredAt": "2026-09-05T22:09:38-04:00",
+      "subject": "fix: harden process cleanup and output reporting",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "81a29a811919ddda479bee1b4f032a748964ad59",
+      "committedAt": "2026-09-05T22:04:36-04:00",
+      "authoredAt": "2026-09-05T22:04:36-04:00",
+      "subject": "fix: run bash commands asynchronously per run",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "f0ddb045ed215689460ec61a2303ca116450f3ce",
+      "committedAt": "2026-09-05T22:04:05-04:00",
+      "authoredAt": "2026-09-05T22:04:05-04:00",
+      "subject": "feat: enforce canonical tool path scope",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "e2a2bc643b86f1125b85f76d161f9d9ee92d8357",
+      "committedAt": "2026-09-05T21:58:11-04:00",
+      "authoredAt": "2026-09-05T21:58:11-04:00",
+      "subject": "chore: dispatch process and path reliability tasks",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "3d4f736a91e13a5d7f236931ea1470a412eedc4d",
+      "committedAt": "2026-09-05T21:40:04-04:00",
+      "authoredAt": "2026-09-05T21:40:04-04:00",
+      "subject": "test: verify completion boundary and record first reliability batch",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "df881efd1e27221a5afacb070688296547511f48",
+      "committedAt": "2026-09-05T21:38:00-04:00",
+      "authoredAt": "2026-09-05T21:37:02-04:00",
+      "subject": "test(orchestrator): cover gate exit boundaries",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "d3be4b80763b414e8ec104cb1cc47e8940ff51b5",
+      "committedAt": "2026-09-05T21:38:00-04:00",
+      "authoredAt": "2026-09-05T21:33:11-04:00",
+      "subject": "fix(orchestrator): honor blocking quality gates",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "c09038489196b804c9a1d0f764fc3ad902d6486f",
+      "committedAt": "2026-09-05T21:38:00-04:00",
+      "authoredAt": "2026-09-05T21:38:00-04:00",
+      "subject": "test: transfer isolated state through Vitest context",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "29297e340c82b10679751b811dfc484f65e2cae2",
+      "committedAt": "2026-09-05T21:37:02-04:00",
+      "authoredAt": "2026-09-05T21:37:02-04:00",
+      "subject": "test(orchestrator): cover gate exit boundaries",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "52d80d527c790dbe93d70a52e6cf364ef96cd880",
+      "committedAt": "2026-09-05T21:36:03-04:00",
+      "authoredAt": "2026-09-05T21:35:37-04:00",
+      "subject": "test: move state cleanup to suite teardown",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "824e4d231b793211e9f4d437b74dd6f14aa9e750",
+      "committedAt": "2026-09-05T21:36:03-04:00",
+      "authoredAt": "2026-09-05T21:33:53-04:00",
+      "subject": "test: isolate worker application state",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "e0c2115047288442592fe3f2a16081d86329056a",
+      "committedAt": "2026-09-05T21:35:37-04:00",
+      "authoredAt": "2026-09-05T21:35:37-04:00",
+      "subject": "test: move state cleanup to suite teardown",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "3cbdbccf9eb7f56a00c77a36b0a88736e8cb9d05",
+      "committedAt": "2026-09-05T21:35:07-04:00",
+      "authoredAt": "2026-09-05T21:35:07-04:00",
+      "subject": "chore: start reliability implementation batch",
+      "ancestorOfCore": true
+    },
+    {
+      "sha": "48c9c8607c66664f221b004cc486699e2906416d",
+      "committedAt": "2026-09-05T21:33:53-04:00",
+      "authoredAt": "2026-09-05T21:33:53-04:00",
+      "subject": "test: isolate worker application state",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "3ea8d3625e8fd8e7307ec7a672e8a1f538d4f187",
+      "committedAt": "2026-09-05T21:33:11-04:00",
+      "authoredAt": "2026-09-05T21:33:11-04:00",
+      "subject": "fix(orchestrator): honor blocking quality gates",
+      "ancestorOfCore": false
+    },
+    {
+      "sha": "c2aff776fb198ddb75f03e2c876ae1c508fee494",
+      "committedAt": "2026-09-05T21:30:28-04:00",
+      "authoredAt": "2026-09-05T21:30:28-04:00",
+      "subject": "docs: define reliability implementation backlog",
+      "ancestorOfCore": true
+    }
+  ]
+}

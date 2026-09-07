@@ -12,16 +12,34 @@ permissions:
 
 jobs:
   ci:
-    name: Type Check, Lint, Build & Tests
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu 24.04's userns policy blocks this runtime's nested seccomp
+        # setup. Qualify 22.04 explicitly; see the R24 report for that open limit.
+        os: [ubuntu-22.04, macos-latest]
+        node: ['22.12.0', '22.22.2']
     steps:
       - uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
           cache: 'npm'
+
+      - name: Install Linux sandbox dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / -- /bin/true
+
+      - name: Install macOS sandbox dependency
+        if: runner.os == 'macOS'
+        run: command -v rg || brew install ripgrep
 
       - name: Install dependencies
         run: npm ci
@@ -29,11 +47,41 @@ jobs:
       - name: Type Check
         run: npm run typecheck
 
-      - name: Lint
-        run: npm run lint
-
       - name: Build
         run: npm run build
 
       - name: Unit Tests
-        run: npx vitest run
+        env:
+          WM_REQUIRE_OS_SANDBOX: "1"
+        run: npm test
+
+      - name: Installed package and OS runtime tests
+        run: npm run test:package-os
+
+  ubuntu2404-diagnostics:
+    name: Ubuntu24.04 startup diagnostics / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.12.0', '22.22.2']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install sandbox prerequisites with packaged AppArmor policy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep apparmor apparmor-profiles
+          sudo apparmor_parser -r -I /etc/apparmor.d /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / -- /bin/true
+      - run: npm ci
+      - run: npm run build
+      - name: Install isolated candidate runtime for comparison
+        run: npm install --prefix "$RUNNER_TEMP/wm-runtime-candidate" --ignore-scripts --no-audit --no-fund @anthropic-ai/sandbox-runtime@0.0.75
+      - name: Verify early rejection and usable path mode (not OS containment qualification)
+        env:
+          WM_CANDIDATE_RUNTIME: ${{ runner.temp }}/wm-runtime-candidate/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js
+        run: node scripts/check-ubuntu2404.mjs

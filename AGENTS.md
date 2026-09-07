@@ -2,6 +2,8 @@
 
 Guidance for AI coding agents working in the **WorkerMill CLI** repository.
 
+**Restart entry point:** Read [HANDOFF.md](HANDOFF.md) before resuming the reliability project. It records current authorization, saved branches, failed checks, and the next bounded task. Do not infer current readiness from older passing test counts in the backlog.
+
 This file is loaded automatically as project context by WorkerMill, Claude Code, Cursor, and other agent tools. Keep it accurate — a wrong statement here misleads every agent that reads it.
 
 ## What This Repository Is
@@ -17,7 +19,7 @@ There is **no server, no database, no frontend, and no API package**. Everything
 | LLM layer | [Vercel AI SDK](https://sdk.vercel.ai) v6 |
 | CLI framework | Commander.js |
 | Tests | Vitest |
-| Runtime | Node 20+ |
+| Runtime | Node 22.12+ |
 
 For the source map and architecture, read [docs/contributing.md](docs/contributing.md) and [docs/architecture.md](docs/architecture.md).
 
@@ -33,7 +35,7 @@ npm run build        # tsup → dist/
 ./build.sh           # Clean build + invariant checks (version sync, bundle contents)
 ```
 
-Run `npm run typecheck` and `npm test` before declaring work finished. CI runs typecheck, lint, build, and the unit suite on every PR.
+Run `npm run typecheck` and `npm test` before declaring work finished. `npm run lint` is an alias for typecheck, so do not count it as an independent check. The configured CI matrix covers Ubuntu 22.04/macOS and Node 22.12.0/22.22.2; Ubuntu 24.04 has an open nested-namespace compatibility limitation; see the qualification record for runs actually completed.
 
 ## Non-Negotiables
 
@@ -80,3 +82,18 @@ So documentation is part of the change, not follow-up work. [docs/contributing.m
 ## Reporting
 
 When something fails, say so plainly and include the output. A test suite with three pre-existing failures is worth reporting as three pre-existing failures — don't paper over it, and don't claim a fix you haven't verified.
+
+## Continuity and integration discipline
+
+These instructions reduce lost context and uncontrolled work; they cannot prevent a host outage, safety block, or forced session termination.
+
+- **Establish scope from evidence.** At startup read the handoff, current user direction, applicable task specification, queue, branch, and working-tree status. Record the authorized objective and excluded work in the handoff. Earlier authorization persists unless the user changes it; do not repeatedly ask for it. If the user switches to audit/preservation, finish that work before resuming implementation.
+- **Checkpoint before expanding.** Update `HANDOFF.md` before a batch, after integration or a failed check, before delegating a successor, and at least every 15 minutes during long work. Record UTC time, exact base/HEAD, changed and uncommitted files, worker/worktree ownership, commands with exit codes, unresolved failures, and one concrete next action. Save the checkpoint before beginning the next batch; a promise in chat is not a checkpoint.
+- **Keep communication current.** During active work, give a meaningful progress update at least every 60 seconds when tool execution permits. State the finding, uncertainty, and next check. Do not repeatedly announce work without saving a reviewable result.
+- **Keep batches bounded.** Use one objective and explicit file ownership per dispatch. Follow the reliability plan's dependency/lock rules and limit of two implementation workers when delegation is authorized. If a package materially exceeds the plan's size/scope trigger, split and record it before proceeding. After one implementation attempt and one focused correction, return unresolved blockers to the coordinator; do not loop indefinitely or expand the task silently.
+- **Integrate complete contracts.** A storage/schema/API change must include or be qualified with every affected production caller before the integration branch is considered usable. Independent worker tests do not qualify a combined tree. If an incompatible intermediate commit is necessary, label it explicitly as broken in the handoff and do not dispatch downstream features until it is repaired and checked.
+- **Stop expansion on failure.** A failed integrated check blocks unrelated feature integration. Diagnose the failure, preserve the exact output and revision, and fix only the bounded blocker or report it. Never suppress validation, remove useful tests, loosen assertions, or count timeouts as passes to manufacture a green result.
+- **Bind claims to evidence.** Record command, environment, tested commit (or base plus dirty diff), exit code, pass/fail/skip counts, and limitations. Historical green runs do not apply to later commits. Typecheck/build success does not override failed runtime tests. Deleted tests require a coverage mapping to their replacements or a documented reason they are obsolete.
+- **Reconcile workers before closing a batch.** Record worker commits even if they finish after coordinator interruption. Compare actual trees as well as patch IDs after conflict-resolved cherry-picks. Preserve unintegrated commits and user changes; do not blindly replay, reset, or delete worktrees. On restart, inspect available local history before asking the user to reconstruct it.
+- **Respect host blocks.** Record the exact visible error and known action, distinguish confirmed cause from inference, and use normal approval/support paths. Do not bypass safety controls or claim that these instructions guarantee uninterrupted operation.
+- **Leave portable evidence.** Keep the current handoff and concise validation evidence in the repository, separate from user-facing reference docs. Raw transcripts, credentials, private tool payloads, and hidden reasoning do not belong in repository documentation. `/tmp` logs and host session databases are supplemental evidence, not the only record.

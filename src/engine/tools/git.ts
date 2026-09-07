@@ -1,4 +1,5 @@
-import { execFileSync } from "child_process";
+import { randomUUID } from "node:crypto";
+import { runProcess, type ProcessRequest, type ProcessResult } from "../process-runner.js";
 
 export const name = "git";
 
@@ -21,10 +22,14 @@ export const parameters = {
   required: ["action"] as const,
 };
 
-interface GitParams {
+export interface GitParams {
   action: string;
   args?: string;
   cwd?: string;
+  runId?: string;
+  signal?: AbortSignal;
+  /** Registered tools bind this to their selected sandbox and scope. */
+  runProcess?: (request: ProcessRequest) => Promise<ProcessResult>;
 }
 
 interface GitResult {
@@ -84,7 +89,7 @@ function parseArgs(args: string | undefined): string[] {
   return result;
 }
 
-export async function execute({ action, args, cwd }: GitParams): Promise<GitResult> {
+export async function execute({ action, args, cwd, runId, signal, runProcess: runner = runProcess }: GitParams): Promise<GitResult> {
   const workDir = cwd || process.cwd();
 
   // Block dangerous operations
@@ -130,17 +135,34 @@ export async function execute({ action, args, cwd }: GitParams): Promise<GitResu
   }
 
   try {
-    const output = execFileSync("git", gitArgs, {
+    // The shared runner takes a shell command so it can wrap OS isolation.
+    // Quote each parsed argument separately: model input never becomes shell
+    // syntax, including command substitution inside a commit message.
+    const command = ["git", ...gitArgs].map((argument) => `'${argument.replaceAll("'", "'\\''")}'`).join(" ");
+    const result = await runner({
+      command,
       cwd: workDir,
-      encoding: "utf-8",
-      timeout: 30000,
+      runId: runId ?? `git-${randomUUID()}`,
+      signal: signal ?? new AbortController().signal,
+      timeoutMs: 30_000,
+      maxOutputBytes: 1024 * 1024,
+      terminationGraceMs: 250,
     });
-    return { success: true, output: output.trim() };
-  } catch (err: any) {
+    const marker = result.outputTruncated ? "\n[output truncated: git output exceeded 1 MiB]" : "";
+    const output = result.stdout.trim() + marker;
+    if (result.reason === "exited" && result.exitCode === 0) return { success: true, output };
     return {
       success: false,
-      output: err.stdout?.trim() || "",
-      error: err.stderr?.trim() || err.message,
+      output,
+      error: result.reason === "exited"
+        ? result.stderr.trim() || `Git exited with code ${result.exitCode}`
+        : `Git ${result.reason}: ${result.stderr.trim()}`,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      output: "",
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }

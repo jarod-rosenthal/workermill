@@ -27,22 +27,58 @@ import * as lspTool from "./lsp.js";
 import * as viewImageTool from "./view-image.js";
 import * as memoryTool from "./memory.js";
 import * as ticketTool from "./ticket.js";
+import {
+  createPathScope,
+  resolvePath,
+  type PathAccess,
+  type PathGrant,
+  type PathScope,
+} from "../path-policy.js";
+import type { SandboxCapabilities } from "../../config.js";
+import type { ToolExecutionContext } from "../tool-executor.js";
+import { createScopedCommandRunner } from "./bash.js";
 
 // Re-export all tool modules
 export { bashTool, bashBackgroundTool, bashOutputTool, bashKillTool, readFileTool, writeFileTool, editFileTool, multiEditFileTool, globTool, grepTool, lsTool, fetchTool, downloadFileTool, gitTool, patchTool, subAgentTool, webSearchTool, todoTool, verifyTool, lspTool, viewImageTool, memoryTool, ticketTool };
+export { createScopedCommandRunner };
 
-/**
- * Validate that a resolved path is within the allowed working directory.
- * Returns the path if valid, throws if not.
- */
-function assertPathInBounds(resolvedPath: string, workingDir: string, sandboxed: boolean): string {
-  if (!sandboxed) return resolvedPath;
-  const normalized = path.resolve(resolvedPath);
-  const normalizedWorkDir = path.resolve(workingDir);
-  if (!normalized.startsWith(normalizedWorkDir + path.sep) && normalized !== normalizedWorkDir) {
-    throw new Error(`Path "${resolvedPath}" is outside the working directory. Use --full-disk to allow access outside ${workingDir}`);
+export interface ToolDefinitionOptions {
+  /** Explicit capabilities for attached/approved paths; never inferred from absoluteness. */
+  extraPathGrants?: readonly PathGrant[];
+  /** Immutable run identity and cancellation supplied by a caller context. */
+  runId?: string;
+  signal?: AbortSignal;
+  /** Global-user-config capabilities, never derived from a model tool input. */
+  sandboxCapabilities?: SandboxCapabilities;
+  /** Reuse a caller-authorized canonical scope without re-granting paths. */
+  scope?: PathScope;
+  /** R10 plumbing only; policy wrapping remains the caller's responsibility. */
+  executionContext?: ToolExecutionContext;
+  /** Run-owned LSP lifetime. Callers await close() during their run teardown. */
+  lspResources?: lspTool.LSPRunResources;
+  /** Receives child model usage once, for the future run ledger adapter. */
+  onSubAgentUsage?: (usage: subAgentTool.SubAgentUsage) => void | Promise<void>;
+}
+
+function rewritePatchPaths(
+  patchText: string,
+  resolveToolPath: (inputPath: string, access: PathAccess) => string,
+): string {
+  const headers = patchTool.parsePatchHeaders(patchText);
+  const lines = patchText.split("\n");
+  const rewrite = (lineIndex: number, headerPath: string, prefix: "a/" | "b/"): void => {
+    if (headerPath === "/dev/null") return;
+    const rawPath = headerPath.replace(new RegExp(`^${prefix}`), "");
+    const resolved = resolveToolPath(rawPath, "read_write");
+    const marker = lines[lineIndex].slice(0, 4);
+    const suffix = lines[lineIndex].slice(4 + headerPath.length);
+    lines[lineIndex] = `${marker}${resolved}${suffix}`;
+  };
+  for (const header of headers) {
+    rewrite(header.oldLine, header.oldPath, "a/");
+    rewrite(header.newLine, header.newPath, "b/");
   }
-  return normalized;
+  return lines.join("\n");
 }
 
 /** Recursively list all files in a directory. */
@@ -65,9 +101,56 @@ function listMemoryFiles(dir: string): string[] {
  * All file paths are resolved relative to workingDir.
  * When sandboxed=true (default), all paths are restricted to workingDir.
  */
-export function createToolDefinitions(workingDir: string, model?: LanguageModel, sandboxed: boolean | "os" = true) {
-  const osSandbox = sandboxed === "os";
-  const pathSandboxed = sandboxed === true || sandboxed === "os";
+export function createToolDefinitions(
+  workingDir: string,
+  model?: LanguageModel,
+  sandboxed: boolean | "os" = true,
+  options: ToolDefinitionOptions = {},
+) {
+  const effectiveSandbox = options.executionContext?.effectiveSandbox;
+  const requestedSandbox = effectiveSandbox === "os" ? "os" : effectiveSandbox === "path" ? true : effectiveSandbox === "none" ? false : sandboxed;
+  const osSandbox = requestedSandbox === "os";
+  const pathSandboxed = requestedSandbox === true || requestedSandbox === "os";
+  // Snapshot once: raw capability grants become canonical only here. A reused
+  // scope is already an authorization decision and must not be widened again.
+  const capabilitySource: SandboxCapabilities | undefined = options.sandboxCapabilities ?? (options.executionContext && {
+    allowedNetworkDomains: options.executionContext.allowedNetworkDomains,
+    allowLocalBinding: options.executionContext.allowLocalBinding,
+    allowDockerSocket: options.executionContext.allowDockerSocket,
+  });
+  const sandboxCapabilities = capabilitySource && {
+    extraPathGrants: capabilitySource.extraPathGrants && [...capabilitySource.extraPathGrants],
+    allowedNetworkDomains: capabilitySource.allowedNetworkDomains && [...capabilitySource.allowedNetworkDomains],
+    allowLocalBinding: capabilitySource.allowLocalBinding,
+    allowDockerSocket: capabilitySource.allowDockerSocket,
+  };
+  const pathScope: PathScope = options.scope ?? options.executionContext?.scope ?? createPathScope(workingDir, [
+    ...(sandboxCapabilities?.extraPathGrants ?? []),
+    ...(options.extraPathGrants ?? []),
+  ]);
+  const runId = options.runId ?? options.executionContext?.runId;
+  const signal = options.signal ?? options.executionContext?.signal;
+  // Bind the LSP adapter to the context used to create these definitions.
+  // In particular, child factories receive their child run ID and signal,
+  // rather than a parent closure's lifetime.
+  const providedLspResources = options.lspResources;
+  const suppliedLspResources = providedLspResources && providedLspResources.runId === runId && providedLspResources.workspace === pathScope.workspace
+    ? providedLspResources
+    : undefined;
+  let createdLspResources: lspTool.LSPRunResources | undefined;
+  const getLspResources = (): lspTool.LSPRunResources | undefined => {
+    if (suppliedLspResources) return suppliedLspResources;
+    if (!runId || !signal) return undefined;
+    createdLspResources ??= lspTool.createLSPRunResources({
+      runId,
+      workspace: pathScope.workspace,
+      signal,
+    });
+    return createdLspResources;
+  };
+  const commandRunner = createScopedCommandRunner({ sandbox: requestedSandbox === "os" ? "os" : false, scope: pathScope, capabilities: sandboxCapabilities });
+  const resolveToolPath = (inputPath: string, access: PathAccess = "read"): string =>
+    resolvePath(pathScope, inputPath, access, { enforceScope: pathSandboxed });
   return {
     bash: tool({
       description: bashTool.description,
@@ -88,13 +171,17 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
         const result = await bashTool.execute({
           command,
-          cwd: resolvedCwd,
+          cwd: canonicalCwd,
           timeout,
           osSandbox,
-          sandboxRoot: workingDir,
+          scope: pathScope,
+          sandboxCapabilities,
+          runId,
+          signal,
+          runProcess: commandRunner,
         });
         if (result.success) {
           return result.stdout || "(no output)";
@@ -131,13 +218,16 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
         const result = await bashBackgroundTool.execute({
           command,
-          cwd: resolvedCwd,
+          cwd: canonicalCwd,
           env: env as Record<string, string> | undefined,
-          workspaceRoot: workingDir,
+          workspaceRoot: pathScope.workspace,
           enforceWorkspacePaths: pathSandboxed,
+          runId,
+          signal,
+          runProcess: commandRunner,
         });
         return `Shell started: ${result.shellId}, PID: ${result.pid}`;
       },
@@ -156,6 +246,8 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const result = await bashOutputTool.execute({
           shellId,
           wait,
+          runId,
+          signal,
         });
         if (result.done) {
           return `Process ${result.status} (exit code: ${result.exitCode})\n${result.output}`;
@@ -177,6 +269,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const result = await bashKillTool.execute({
           shellId,
           signal,
+          runId,
         });
         return result.killed ? "Process terminated" : "Process not found or already terminated";
       },
@@ -204,9 +297,9 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const canonicalPath = resolveToolPath(resolvedPath, "read");
         const result = await readFileTool.execute({
-          path: resolvedPath,
+          path: canonicalPath,
           encoding: encoding as BufferEncoding | undefined,
           maxLines,
           startLine,
@@ -226,19 +319,12 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           .describe("Path to the image to read (absolute or relative to cwd)"),
       }),
       execute: async ({ path: filePath }) => {
-        const isAbsolute = path.isAbsolute(filePath);
-        const resolvedPath = isAbsolute
-          ? filePath
-          : path.resolve(workingDir, filePath);
-
-        // Allow explicit absolute image paths (e.g. desktop screenshots),
-        // while keeping relative paths constrained to the workspace.
-        if (!isAbsolute) {
-          assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-        }
+        // Absolute paths require an explicit read grant; there is no implicit
+        // screenshot/desktop exception.
+        const canonicalPath = resolveToolPath(filePath, "read");
 
         const result = await viewImageTool.execute({
-          path: resolvedPath,
+          path: canonicalPath,
         });
         if (result.success) {
           return { content: result.content };
@@ -267,9 +353,9 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const canonicalPath = resolveToolPath(resolvedPath, "read_write");
         const result = await writeFileTool.execute({
-          path: resolvedPath,
+          path: canonicalPath,
           content,
           encoding: encoding as BufferEncoding | undefined,
           append,
@@ -308,9 +394,9 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const canonicalPath = resolveToolPath(resolvedPath, "read_write");
         const result = await editFileTool.execute({
-          path: resolvedPath,
+          path: canonicalPath,
           old_string,
           new_string,
           replaceAll,
@@ -355,9 +441,9 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const canonicalPath = resolveToolPath(resolvedPath, "read_write");
         const result = await multiEditFileTool.execute({
-          file_path: resolvedPath,
+          file_path: canonicalPath,
           edits,
         });
         if (result.success) {
@@ -395,10 +481,10 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read");
         const result = await globTool.execute({
           pattern,
-          cwd: resolvedCwd,
+          cwd: canonicalCwd,
           maxResults,
           includeHidden,
         });
@@ -454,10 +540,10 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? searchPath
             : path.resolve(workingDir, searchPath)
           : workingDir;
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
+        const canonicalPath = resolveToolPath(resolvedPath, "read");
         const result = await grepTool.execute({
           pattern,
-          path: resolvedPath,
+          path: canonicalPath,
           filePattern,
           ignoreCase,
           contextLines,
@@ -491,8 +577,8 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
       }),
       execute: async ({ path: dirPath, ignore, maxDepth, maxFiles }) => {
         const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(workingDir, dirPath);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-        const result = await lsTool.execute({ path: resolvedPath, ignore, maxDepth, maxFiles });
+        const canonicalPath = resolveToolPath(resolvedPath, "read");
+        const result = await lsTool.execute({ path: canonicalPath, ignore, maxDepth, maxFiles });
         if (result.success) {
           return `${result.tree}\n\n${result.totalFiles} files, ${result.totalDirs} directories${result.truncated ? " (truncated)" : ""}`;
         }
@@ -508,7 +594,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         timeout: z.number().optional().describe("Timeout in milliseconds (default: 30000, max: 120000)"),
       }),
       execute: async ({ url, format, timeout }) => {
-        const result = await fetchTool.execute({ url, format, timeout });
+        const result = await fetchTool.execute({ url, format, timeout }, signal);
         if (result.success) {
           return `Content from ${result.url} (${result.contentType || "unknown"}):\n\n${result.content}`;
         }
@@ -527,8 +613,8 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         const resolvedPath = path.isAbsolute(destination)
           ? destination
           : path.resolve(workingDir, destination);
-        assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-        return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
+        const canonicalPath = resolveToolPath(resolvedPath, "read_write");
+        return downloadFileTool.execute({ url, destination: canonicalPath, overwrite }, signal);
       },
     }),
 
@@ -540,7 +626,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         args: z.string().optional().describe("Additional arguments (e.g., file paths, branch name, commit message)"),
       }),
       execute: async ({ action, args }) => {
-        const result = await gitTool.execute({ action, args, cwd: workingDir });
+        const result = await gitTool.execute({ action, args, cwd: pathScope.workspace, runId, signal, runProcess: commandRunner });
         if (result.success) {
           return result.output || "(no output)";
         }
@@ -554,7 +640,11 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         patch_text: z.string().describe("Unified diff patch text with --- and +++ headers and @@ hunk markers"),
       }),
       execute: async ({ patch_text }) => {
-        const result = await patchTool.execute({ patch_text });
+        // Unified diffs may contain several targets; canonicalize and
+        // authorize every header before the patch implementation can mutate.
+        const result = await patchTool.execute({
+          patch_text: rewritePatchPaths(patch_text, resolveToolPath),
+        });
         if (result.success) {
           const parts: string[] = ["Patch applied successfully:"];
           if (result.filesCreated.length > 0) parts.push(`  Created: ${result.filesCreated.join(", ")}`);
@@ -573,7 +663,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         maxResults: z.number().optional().describe("Maximum results to return (default: 8)"),
       }),
       execute: async ({ query, maxResults }) => {
-        const result = await webSearchTool.execute({ query, maxResults });
+        const result = await webSearchTool.execute({ query, maxResults }, signal);
         if (result.success && result.results && result.results.length > 0) {
           return result.results
             .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
@@ -623,12 +713,20 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
-        assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
-        const result = await verifyTool.execute({
-          command,
-          cwd: resolvedCwd,
-          timeout,
-        });
+        const canonicalCwd = resolveToolPath(resolvedCwd, "read_write");
+        let result: Awaited<ReturnType<typeof verifyTool.execute>>;
+        try {
+          result = await verifyTool.execute({
+            command,
+            cwd: canonicalCwd,
+            timeout,
+            runId,
+            signal,
+            runProcess: commandRunner,
+          });
+        } catch (error) {
+          return `Error: Failed to execute command: ${error instanceof Error ? error.message : String(error)}`;
+        }
         if (!result.success) {
           return `Error: ${result.error || result.summary}`;
         }
@@ -665,11 +763,16 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         include_declaration: z.boolean().optional().describe("Include declaration in references (default: false for symbol_references)"),
       }),
       execute: async ({ action, file, line, character, path: targetPath, severity, format, symbol, include_declaration }) => {
-        const resolvedFile = file ? (path.isAbsolute(file) ? file : path.resolve(workingDir, file)) : undefined;
+        let resolvedFile = file ? (path.isAbsolute(file) ? file : path.resolve(workingDir, file)) : undefined;
         if (file) {
-          assertPathInBounds(resolvedFile!, workingDir, pathSandboxed);
+          resolvedFile = resolveToolPath(resolvedFile!, "read");
         }
-        const result = await lspTool.execute({ action, file: resolvedFile, line, character, path: targetPath, severity, format, symbol, include_declaration }, workingDir);
+        const resolvedTargetPath = targetPath ? resolveToolPath(targetPath, "read") : undefined;
+        const input = { action, file: resolvedFile, line, character, path: resolvedTargetPath, severity, format, symbol, include_declaration };
+        const lspResources = getLspResources();
+        const result = lspResources
+          ? await lspResources.execute(input)
+          : await lspTool.execute(input, pathScope.workspace);
         if (result.success) {
           return result.content || "No results.";
         }
@@ -695,107 +798,43 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
                 .describe("Run in an isolated git worktree with full write tools. Changes stay on a separate branch. Default: false."),
             }),
             execute: async ({ prompt, maxTurns, isolated }) => {
-              const readOnlyTools = {
-                read_file: tool({
-                  description: readFileTool.description,
-                  inputSchema: z.object({
-                    path: z.string().describe("Path to the file to read"),
-                    maxLines: z.number().optional().describe("Max lines to read"),
-                    startLine: z.number().optional().describe("Start line (1-indexed)"),
-                  }),
-                  execute: async ({ path: filePath, maxLines, startLine }) => {
-                    const resolvedPath = path.isAbsolute(filePath)
-                      ? filePath
-                      : path.resolve(workingDir, filePath);
-                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-                    const result = await readFileTool.execute({ path: resolvedPath, maxLines, startLine });
-                    return result.success ? result.content || "" : `Error: ${result.error}`;
-                  },
-                }),
-                glob: tool({
-                  description: globTool.description,
-                  inputSchema: z.object({
-                    pattern: z.string().describe("Glob pattern to match files"),
-                    cwd: z.string().optional().describe("Directory to search in"),
-                  }),
-                  execute: async ({ pattern, cwd }) => {
-                    const resolvedCwd = cwd
-                      ? path.isAbsolute(cwd) ? cwd : path.resolve(workingDir, cwd)
-                      : workingDir;
-                    assertPathInBounds(resolvedCwd, workingDir, pathSandboxed);
-                    const result = await globTool.execute({ pattern, cwd: resolvedCwd });
-                    return result.success
-                      ? result.count === 0
-                        ? `No files found matching: ${pattern}`
-                        : `Found ${result.count} file(s):\n${result.matches!.join("\n")}`
-                      : `Error: ${result.error}`;
-                  },
-                }),
-                grep: tool({
-                  description: grepTool.description,
-                  inputSchema: z.object({
-                    pattern: z.string().describe("Regex pattern to search for"),
-                    path: z.string().optional().describe("File or directory to search in"),
-                    filePattern: z.string().optional().describe("Glob to filter files"),
-                  }),
-                  execute: async ({ pattern, path: searchPath, filePattern }) => {
-                    const resolvedPath = searchPath
-                      ? path.isAbsolute(searchPath) ? searchPath : path.resolve(workingDir, searchPath)
-                      : workingDir;
-                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-                    const result = await grepTool.execute({ pattern, path: resolvedPath, filePattern });
-                    if (!result.success) return `Error: ${result.error}`;
-                    if (result.matchCount === 0) return `No matches for: ${pattern}`;
-                    const lines: string[] = [`Found ${result.matchCount} match(es):`];
-                    for (const [file, matches] of Object.entries(result.results!)) {
-                      for (const match of matches) {
-                        lines.push(`${file}:${match.line}: ${match.content}`);
-                      }
-                    }
-                    return lines.join("\n");
-                  },
-                }),
-                ls: tool({
-                  description: lsTool.description,
-                  inputSchema: z.object({
-                    path: z.string().describe("Directory path to list"),
-                    maxDepth: z.number().optional().describe("Max depth (default: 3)"),
-                  }),
-                  execute: async ({ path: dirPath, maxDepth }) => {
-                    const resolvedPath = path.isAbsolute(dirPath)
-                      ? dirPath
-                      : path.resolve(workingDir, dirPath);
-                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-                    const result = await lsTool.execute({ path: resolvedPath, maxDepth });
-                    return result.success ? result.tree : `Error: ${result.error}`;
-                  },
-                }),
-                download_file: tool({
-                  description: downloadFileTool.description,
-                  inputSchema: z.object({
-                    url: z.string().describe("The URL to download from"),
-                    destination: z.string().describe("Path to save the file (absolute or relative to cwd)"),
-                    overwrite: z.boolean().optional().describe("Whether to overwrite existing files (default: false)"),
-                  }),
-                  execute: async ({ url, destination, overwrite }) => {
-                    const resolvedPath = path.isAbsolute(destination)
-                      ? destination
-                      : path.resolve(workingDir, destination);
-                    assertPathInBounds(resolvedPath, workingDir, pathSandboxed);
-                    return downloadFileTool.execute({ url, destination: resolvedPath, overwrite });
-                  },
-                }),
+              /* Legacy ad-hoc child tools retained below only temporarily while
+               * this block is replaced by the scoped registered-tool factory.
+               * It is intentionally disabled; in particular download_file was
+               * a write capability on a supposedly read-only child. */
+              const childToolNames = ["bash", "verify", "read_file", "view_image", "write_file", "edit_file", "multi_edit_file", "glob", "grep", "ls", "git", "patch", "lsp"] as const;
+              const readOnlyChildToolNames = ["read_file", "view_image", "glob", "grep", "ls", "lsp"] as const;
+              const pickChildTools = (all: Record<string, unknown>, names: readonly string[]) => Object.fromEntries(
+                names.flatMap((toolName) => all[toolName] ? [[toolName, all[toolName]]] : []),
+              ) as Record<string, subAgentTool.ChildTool>;
+              const childCapabilities: SandboxCapabilities | undefined = options.executionContext && {
+                allowedNetworkDomains: options.executionContext.allowedNetworkDomains && [...options.executionContext.allowedNetworkDomains],
+                allowLocalBinding: options.executionContext.allowLocalBinding,
+                allowDockerSocket: false,
               };
-
-              // Factory that creates full tool set for an isolated worktree
-              const writeToolsFactory = (worktreePath: string) => {
-                const wtTools = createToolDefinitions(worktreePath, model, false); // not sandboxed within worktree
-                // Remove sub_agent from isolated tools (no nesting)
-                const { sub_agent: _removed, ...safeTools } = wtTools as Record<string, unknown>;
-                return safeTools;
+              const childTools = (childWorkingDir: string, childScope: PathScope, childContext: ToolExecutionContext) => {
+                const childExecutionContext = {
+                  ...childContext, scope: childScope, workspace: childScope.workspace,
+                  effectiveSandbox: childContext.effectiveSandbox === "os" ? "os" as const : "path" as const,
+                };
+                const all = createToolDefinitions(childWorkingDir, undefined, childExecutionContext?.effectiveSandbox === "os" ? "os" : true, {
+                  runId: childExecutionContext.runId,
+                  signal: childExecutionContext.signal,
+                  scope: childScope,
+                  sandboxCapabilities: childCapabilities,
+                  executionContext: childExecutionContext,
+                }) as Record<string, unknown>;
+                return pickChildTools(all, childToolNames);
               };
-
-              const executor = subAgentTool.createSubAgentExecutor(model!, workingDir, readOnlyTools, writeToolsFactory);
+              const readOnlyContext: ToolExecutionContext = options.executionContext
+                ? { ...options.executionContext, scope: pathScope, workspace: pathScope.workspace }
+                : { runId: runId ?? "sub-agent-read-only", workspace: pathScope.workspace, scope: pathScope, effectiveSandbox: "path", signal: signal ?? new AbortController().signal, getPermissionState: () => ({ mode: "default", trustAll: false, sessionAllow: new Set(), rules: {}, readOnlyRole: true, workspace: pathScope.workspace }) };
+              const readOnlyTools = pickChildTools(childTools(pathScope.workspace, pathScope, readOnlyContext), readOnlyChildToolNames);
+              const executor = subAgentTool.createSubAgentExecutor(model!, pathScope.workspace, readOnlyTools, {
+                executionContext: options.executionContext,
+                onUsage: options.onSubAgentUsage,
+                createTools: childTools,
+              });
               const result = await executor({ prompt, maxTurns, isolated });
               if (result.success) {
                 return `Sub-agent completed (${result.turnsUsed} turns):\n\n${result.content}`;
@@ -911,7 +950,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         query: z.string().optional().describe("Search query for the list action"),
       }),
       execute: async (input) => {
-        const result = await ticketTool.execute(input);
+        const result = await ticketTool.execute(input, { signal, runId: options.runId ?? options.executionContext?.runId, workspace: workingDir });
         if (result.success) return result.content || "Done";
         return `Error: ${result.error}`;
       },

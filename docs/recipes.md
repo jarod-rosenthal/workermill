@@ -6,7 +6,7 @@ Concrete workflows that combine WorkerMill features to solve real problems. Use 
 
 ## Mixed-provider team for production PRs
 
-**Goal:** High-quality output for planning and review (Anthropic), cheap high-volume execution (xAI or local Ollama), independent reviewer (OpenAI).
+**Goal:** Select different provider bindings for planning, execution, and review without changing the workflow.
 
 ```
 /settings key anthropic sk-ant-...
@@ -21,15 +21,15 @@ Concrete workflows that combine WorkerMill features to solve real problems. Use 
 /model reviewer openai/gpt-5.4
 ```
 
-Now `/build` uses Opus to plan, Grok Code Fast for workers, and GPT-5.4 for review. Workers run on the cheapest code-tuned model while judgment calls route to stronger models.
+This example routes planning to Opus, workers to Grok Code Fast, and review to GPT-5.4. Use models available in your own provider configuration; these choices are examples, not measured cost or quality rankings.
 
-**Why it works:** Different model families have different strengths and blind spots. Running review on a different family than execution catches a real class of mistakes.
+A different binding gives you another review pass, not proof of independent judgment or better defect detection. Keep acceptance tests and human review for consequential changes.
 
 ---
 
-## Fully local setup (zero API cost)
+## Fully local setup (no hosted API charge)
 
-**Goal:** No API keys, no cost, no network dependency.
+**Goal:** Run model inference locally without a hosted API charge. Model downloads need network access, tools may access external services, and hardware/electricity costs remain.
 
 ```bash
 # Install Ollama, pull a coding model
@@ -43,32 +43,24 @@ ollama pull qwen3-coder:30b
 /settings route tech_lead ollama
 ```
 
-The `131072` sets Ollama's context window to 128K. For quality, use the largest model your hardware can run — `qwen3-coder:30b` or larger if you have the VRAM. LM Studio works the same way with `/model lmstudio/<model>`.
+The `131072` sets Ollama's context window to 128K. Choose a context size and model that fit your hardware. LM Studio also supports local model selection with `/model lmstudio/<model>`.
 
-**Caveats:** Local models are slower and weaker at planning than flagship cloud models. Use `/as` for focused tasks where you can direct the work yourself, rather than `/build` for fully autonomous runs.
+**Check first:** Try a focused `/as` task and inspect its changes and tests before using the same model for a larger `/build`. Latency and accepted-code quality depend on the model, hardware, and task.
 
 ---
 
 ## Enforce project-specific quality gates
 
-**Goal:** Every file write passes typecheck and lint before moving on. If they fail, the agent sees the error and fixes it.
+**Goal:** Block `/build` completion when project checks fail.
 
-Edit `~/.workermill/cli.json`:
+Add gates to the project's `.workermill/config.json` (use commands defined by that project):
 
 ```json
 {
-  "hooks": {
-    "post": [
-      {
-        "command": "npx tsc --noEmit",
-        "tools": ["write_file", "edit_file", "patch"]
-      },
-      {
-        "command": "npx eslint $WORKERMILL_TOOL_INPUT",
-        "tools": ["write_file", "edit_file"]
-      }
-    ]
-  }
+  "qualityGates": [
+    { "name": "Typecheck", "commands": ["npm run typecheck"], "required": true },
+    { "name": "Tests", "commands": ["npm test"], "required": true }
+  ]
 }
 ```
 
@@ -76,31 +68,29 @@ Or for a Python project:
 
 ```json
 {
-  "hooks": {
-    "post": [
-      { "command": "uv run ruff check $WORKERMILL_TOOL_INPUT", "tools": ["write_file", "edit_file"] },
-      { "command": "uv run mypy .", "tools": ["write_file", "edit_file", "patch"] }
-    ]
-  }
+  "qualityGates": [
+    { "name": "Lint", "commands": ["uv run ruff check ."], "required": true },
+    { "name": "Types", "commands": ["uv run mypy ."], "required": true }
+  ]
 }
 ```
 
-**Why it works:** Post-hooks run *after* each write. When a hook exits non-zero, the error goes back to the agent, and the model sees it in the next turn. The agent self-corrects without human intervention.
+These gates run against the prepared candidate and rerun after reviewer revisions change it. A required failure prevents publication and keeps local work available for inspection and `/retry`; `required: false` is advisory outside strict mode. Use finite, non-watch commands. Post-write hooks can provide earlier feedback, but they do not substitute for final blocking verification. See [Quality Gates](quality-gates.md#how-it-works) for source-changing checks.
 
 ---
 
 ## Plan-before-execute for high-risk changes
 
-**Goal:** Don't let the agent write code until a plan has been reviewed and approved by a critic.
+**Goal:** Get a scored critique of the plan before workers start; optionally block on an insufficient score.
 
 ```
 /settings review.critic true
 /settings review.criticThreshold 8
 ```
 
-Now every `/build` runs the planner critic between planning and execution. It scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk. A score below 8 triggers a refinement pass against the critic's specific issues, up to 3 scoring rounds. Workers only start once the plan passes.
+Now every `/build` runs the planner critic between planning and execution. It scores the plan 1-10 on completeness, feasibility, dependencies, scope, and risk. A score below 8 triggers a refinement pass against the critic's specific issues, up to 3 scoring rounds. Outside strict mode, you can still accept a plan that does not reach the threshold.
 
-Route the critic to a stronger model than your workers — it reads a plan, not a codebase, so it's cheap:
+Route the critic separately if useful; the extra calls add usage and latency:
 
 ```
 /settings route critic anthropic
@@ -240,7 +230,7 @@ For a native macOS notification instead:
 
 ## Review someone else's PR before merging
 
-**Goal:** Run an independent review of a PR before you approve it.
+**Goal:** Run an additional review pass on a PR before you approve it.
 
 ```
 /review #42
@@ -248,7 +238,7 @@ For a native macOS notification instead:
 
 This fetches the PR's diff, runs the tech lead persona against it, and scores the code. If it finds issues, the CLI offers to create a GitHub issue from the findings and immediately kick off `/build` to fix them.
 
-**Tip:** Set the reviewer to a different model family than the PR author's toolchain. If the PR was written with Claude, review with GPT-5.4 or Gemini — you'll catch issues a same-family reviewer might rationalize away.
+Choose the reviewer binding deliberately. A different configured model or endpoint can provide another review pass, but its identifier does not prove independent training or better defect detection. Keep automated checks and human review for consequential changes regardless of which reviewer you use.
 
 ```
 /settings route tech_lead openai

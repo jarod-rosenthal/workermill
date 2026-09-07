@@ -5,6 +5,7 @@
 import path from "path";
 import * as logger from "../../logger.js";
 import type { ToolCallInfo } from "../types.js";
+export { durablePermissionRules } from "../../safety.js";
 
 // ---------------------------------------------------------------------------
 // Debug / trace

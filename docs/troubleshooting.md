@@ -2,6 +2,10 @@
 
 ## Setup
 
+### Supported runtime and OS modes
+
+WorkerMill requires Node.js 22.12 or newer. The configured CI matrix covers Linux and macOS on Node 22.12.0 and 22.22.2; local qualification is Linux/Node 22.22.2. Native Windows shell execution is unsupported; use WSL with its Linux runtime. OS sandbox mode requires supported host capabilities and fails closed when explicitly requested. See the [qualification record](recovery/r24-qualification.md) for completed checks and limits.
+
 ### `wm doctor` — start here
 
 Run this first for any setup issue. It checks Node.js version, Git, the config file, provider credentials, and local model availability.
@@ -52,10 +56,10 @@ LM Studio is auto-detected at `http://localhost:1234`. Make sure the local serve
 
 ### Tool call asks for permission on every use
 
-You're in the default permission mode, which prompts before each tool. Options:
+The default permission mode allows ordinary read tools and asks before other actions. Options:
 
 - Press `Shift+Tab` to cycle to `acceptEdits` — auto-approves file edits but still prompts for dangerous commands
-- At any prompt, choose "Yes, don't ask again" to save a permanent allow rule
+- Choose "Yes, don't ask again" to save an allow rule; shell commands use a command-family rule, not blanket shell access. If saving fails, the rule remains session-only
 - View and edit rules with `/permissions`
 
 ### "Permission denied" for a tool you expected to work
@@ -64,12 +68,23 @@ Check your rules with `/permissions`. Deny rules override allow rules. Remove a 
 
 ### Conversation feels slow, responses lag
 
-Context window is probably full. Run `/compact` to compress history, or `/clear` to reset. Micro-compaction runs automatically at ~60% context usage, but you can force it manually.
+Context window is probably full. Run `/compact` to compress history, or `/clear` to reset. Micro-compaction runs automatically at 50% context usage. Manual compaction waits for an idle conversation; cancelling it keeps the original history.
 
 ### Cost shows `<$0.01` or `$0.00`
 
-- `<$0.01` means the cost is real but below one cent — this is normal for cheap models like Grok Code Fast or Claude Haiku
-- `$0.00` means either no usage yet or a local model (Ollama / LM Studio, which are free)
+- These displays summarize estimated cost from recorded usage and pricing, not your provider's invoice.
+- A zero display is not proof that no billable work occurred. Check the recorded token usage and selected provider/model; missing usage or incomplete pricing can make the estimate incomplete.
+- Local execution can have no per-token API charge while still using paid hardware, electricity, or hosting.
+
+### Cancellation is still showing as busy
+
+Cancellation waits for dispatched tools and their cleanup, not just the model stream. Do not start a competing run in the same checkout while that finalizer is active. If cleanup reports failure, inspect the named resource and retained child worktree before retrying. A cancelled remote request may already have changed the ticket or service; check its current state before repeating a mutation.
+
+### Browser startup or download fails
+
+Browser tools require a native Chrome/Chromium executable. Under WSL, use Linux Chrome rather than a Windows `.exe`; each model turn uses a private profile, separate from explicit `/browser` controls. Startup or cleanup failure is not evidence that browser verification passed.
+
+HTTP tools reject stalled or oversized responses. Fetch text is limited to 512 KiB, search/ticket responses to 1 MiB, and downloads to 100 MiB within two minutes. For larger assets, download them yourself using a command you authorize. A failed tool download leaves an existing destination unchanged.
 
 ### `/build` plan is "0 stories"
 
@@ -85,7 +100,7 @@ Check that the provider has an API key set and the model ID matches what the pro
 
 ### MCP tools not loading
 
-`/mcp` shows the current MCP server status. If a server is configured but not connecting, check its stderr in `~/.workermill/logs/`. Docker Desktop's MCP gateway is auto-detected — make sure Docker Desktop is running and has at least one MCP server enabled.
+`/mcp` lists configured servers; configuration alone does not prove a connection is healthy. Run-owned connections close when that run settles. If a server cannot connect during a prompt, check the error and its stderr in `~/.workermill/logs/`. For Docker Desktop's auto-detected MCP gateway, make sure Docker Desktop is running and has at least one MCP server enabled.
 
 ### Anthropic rejects tools with `input_schema.type: Field required`
 
@@ -123,7 +138,7 @@ Shows message count, token usage, current model, cost, permission mode, and work
 
 ### `/cost` — detailed cost breakdown
 
-Per-role, per-provider breakdown of input/output tokens and estimated cost.
+Current-model session token usage and estimated cost. Use `wm stats` for stored cross-session aggregation.
 
 ## Getting Help
 

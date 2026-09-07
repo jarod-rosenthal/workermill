@@ -4,7 +4,7 @@ Thanks for considering a contribution. WorkerMill CLI is Apache 2.0 licensed.
 
 ## Development Setup
 
-**Prerequisites:** Node.js 20+, Git, an LLM provider (Ollama for fully local, or an API key for a cloud provider).
+**Prerequisites:** Node.js 22.12+, Git, an LLM provider (Ollama for fully local, or an API key for a cloud provider). Ink 7 requires Node 22; the current Vite development dependency requires at least 22.12 on that release line.
 
 ```bash
 git clone https://github.com/jarod-rosenthal/workermill.git
@@ -98,6 +98,13 @@ workermill/
 │   ├── schedule.ts            # /schedule cron tasks
 │   ├── engine/                # AI model factory, tools, types
 │   │   ├── model-factory.ts   # Provider → LanguageModel construction
+│   │   ├── model-usage.ts     # Normalize and settle observed SDK usage
+│   │   ├── run-resources.ts   # Attempt-owned cleanup for tools and services
+│   │   ├── process-runner.ts  # Async subprocess lifetime and run-scoped cancellation
+│   │   ├── scoped-process.ts  # OS/path process boundary and capabilities
+│   │   ├── path-policy.ts     # Canonical explicit-file scope and grants
+│   │   ├── tool-policy.ts     # Shared permission decision table
+│   │   ├── tool-executor.ts   # Permission/hook/checkpoint execution ordering
 │   │   └── tools/             # All agent tools + tool-metadata.ts
 │   ├── providers/             # Provider registry and pricing engines
 │   ├── ui/                    # React + Ink UI components

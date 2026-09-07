@@ -1,123 +1,130 @@
-import { spawn, ChildProcess } from "child_process";
-import crypto from "crypto";
+import crypto from "node:crypto";
 
-interface ShellProcess {
-  child: ChildProcess;
+import {
+  killRunProcessGroupsSynchronously,
+  runProcess as runRawProcess,
+  type ProcessResult,
+} from "../process-runner.js";
+import type { CommandRunner } from "./bash.js";
+
+export type BackgroundStatus = "running" | "done" | "killed" | "failed_to_start";
+
+export interface ShellProcess {
+  readonly runId: string;
+  readonly controller: AbortController;
+  readonly completion: Promise<void>;
+  pid: number;
   buffer: string[];
+  bufferBytes: number;
+  outputTruncated: boolean;
   startTime: number;
   completionTime?: number;
   done: boolean;
   exitCode?: number;
-  status: 'running' | 'done' | 'killed' | 'failed_to_start';
+  status: BackgroundStatus;
 }
 
 export const activeShells = new Map<string, ShellProcess>();
+
 const MAX_CONCURRENT_SHELLS = 3;
-const BUFFER_MAX_BYTES = 100 * 1024; // 100KB
-const BUFFER_DROP_RATIO = 0.2; // drop oldest 20%
+/** Captured bytes; UTF-8 replacement while decoding can add at most two bytes. */
+export const BACKGROUND_OUTPUT_MAX_BYTES = 100 * 1024;
+const FINISHED_TTL_MS = 10 * 60 * 1000;
+const MAX_FINISHED_SHELLS = 100;
+/** Finite deadline prevents a background command holding run resources forever. */
+export const DEFAULT_BACKGROUND_TIMEOUT_MS = 15 * 60 * 1000;
+export const BACKGROUND_OUTPUT_TRUNCATION_MARKER = "[output truncated: background output exceeded 100 KiB]";
 
 function generateShellId(): string {
-  return `wm_shell_${crypto.randomBytes(8).toString('hex')}`;
+  return `wm_shell_${crypto.randomBytes(8).toString("hex")}`;
 }
 
 function isDangerous(command: string): string | null {
-  const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/(?!app\b|home\b)/, reason: "rm with absolute root path" },
-    { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+\/\s*$/, reason: "rm -rf /" },
-    { pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\s+\/\s*$/, reason: "rm -fr /" },
-    { pattern: /\bmkfs\b/, reason: "mkfs (format filesystem)" },
-    { pattern: /\bdd\s+.*of=\/dev\//, reason: "dd to device" },
-    { pattern: /\bshutdown\b/, reason: "shutdown" },
-    { pattern: /\breboot\b/, reason: "reboot" },
-    { pattern: /\bchmod\s+(-R\s+)?777\s+\//, reason: "chmod 777 on root paths" },
-    { pattern: /\bgit\s+push\s+.*--force\b/, reason: "git push --force" },
-    { pattern: /\bgit\s+push\s+.*-f\b/, reason: "git push -f" },
-    { pattern: /\bgit\s+reset\s+--hard\b/, reason: "git reset --hard" },
-    { pattern: /\bgit\s+clean\s+.*-f/, reason: "git clean -f" },
-    { pattern: /\bcurl\s+.*\|\s*(?:sudo\s+)?(?:bash|sh)\b/, reason: "curl pipe to shell" },
-    { pattern: /\bwget\s+.*\|\s*(?:sudo\s+)?(?:bash|sh)\b/, reason: "wget pipe to shell" },
-    { pattern: /\bsudo\b/, reason: "sudo" },
+  const patterns: Array<[RegExp, string]> = [
+    [/\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/(?!app\b|home\b)/, "rm with absolute root path"],
+    [/\bmkfs\b/, "mkfs (format filesystem)"],
+    [/\bsudo\b/, "sudo"],
   ];
-
-  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) return reason;
-  }
-  return null;
+  return patterns.find(([pattern]) => pattern.test(command))?.[1] ?? null;
 }
 
 const OUTSIDE_PATHS = ["/tmp", "/var", "/etc", "/opt", "/usr", "/sys", "/proc", "/dev", "/boot", "/root", "/home", "/mnt"];
 
 function referencesOutsidePath(command: string, workspaceRoot: string, cwd?: string): string | null {
-  for (const p of OUTSIDE_PATHS) {
-    const cwdInPath = Boolean(cwd && cwd.startsWith(p + "/"));
-    const rootInPath = workspaceRoot.startsWith(p + "/") || workspaceRoot === p;
-    if (cwdInPath || rootInPath) continue;
-    const regex = new RegExp(`(?:^|\\s|>|"|')${p.replace("/", "\\/")}(?:\\/|\\s|"|'|$)`);
-    if (regex.test(command)) return p;
+  for (const entry of OUTSIDE_PATHS) {
+    if ((cwd && cwd.startsWith(`${entry}/`)) || workspaceRoot === entry || workspaceRoot.startsWith(`${entry}/`)) continue;
+    const pattern = new RegExp(`(?:^|\\s|>|"|')${entry.replace("/", "\\/")}(?:\\/|\\s|"|'|$)`);
+    if (pattern.test(command)) return entry;
   }
   return null;
 }
 
-function addToBuffer(buffer: string[], line: string): void {
-  const timestamped = `${new Date().toISOString()}: ${line}`;
-  buffer.push(timestamped);
-  const totalBytes = buffer.reduce((sum, l) => sum + Buffer.byteLength(l, 'utf8'), 0);
-  if (totalBytes > BUFFER_MAX_BYTES) {
-    const dropCount = Math.floor(buffer.length * BUFFER_DROP_RATIO);
-    buffer.splice(0, dropCount);
+function append(shell: ShellProcess, value: string): void {
+  const line = `${new Date().toISOString()}: ${value}`;
+  shell.buffer.push(line);
+  shell.bufferBytes += Buffer.byteLength(line, "utf8");
+
+  while (shell.bufferBytes > BACKGROUND_OUTPUT_MAX_BYTES && shell.buffer.length > 1) {
+    shell.outputTruncated = true;
+    shell.bufferBytes -= Buffer.byteLength(shell.buffer.shift()!, "utf8");
+  }
+
+  if (shell.bufferBytes > BACKGROUND_OUTPUT_MAX_BYTES) {
+    shell.outputTruncated = true;
+    const retained = Buffer.from(shell.buffer[0], "utf8").subarray(-BACKGROUND_OUTPUT_MAX_BYTES).toString("utf8");
+    shell.buffer[0] = retained;
+    shell.bufferBytes = Buffer.byteLength(retained, "utf8");
   }
 }
 
-function evictStaleShells(): void {
+function prune(): void {
   const now = Date.now();
-  for (const [shellId, shell] of activeShells.entries()) {
-    if (shell.done && shell.completionTime && now - shell.completionTime > 10 * 60 * 1000) {
-      activeShells.delete(shellId);
-    }
+  const finished = [...activeShells.entries()].filter(([, shell]) => shell.done);
+  for (const [id, shell] of finished) {
+    if (shell.completionTime && now - shell.completionTime > FINISHED_TTL_MS) activeShells.delete(id);
   }
+
+  const remaining = [...activeShells.entries()]
+    .filter(([, shell]) => shell.done)
+    .sort((a, b) => (a[1].completionTime ?? 0) - (b[1].completionTime ?? 0));
+  while (remaining.length > MAX_FINISHED_SHELLS) activeShells.delete(remaining.shift()![0]);
 }
 
-function cleanupShell(shellId: string): void {
-  const shell = activeShells.get(shellId);
-  if (shell) {
-    if (!shell.done) {
-      try {
-        process.kill(-shell.child.pid!, 'SIGTERM');
-        shell.status = 'killed';
-        shell.done = true;
-        shell.completionTime = Date.now();
-      } catch (err) {
-        // Process might already be dead
-      }
-    }
-    activeShells.delete(shellId);
-  }
+function finish(shell: ShellProcess, result: ProcessResult): void {
+  if (shell.done) return;
+  shell.done = true;
+  shell.exitCode = result.exitCode ?? undefined;
+  shell.completionTime = Date.now();
+  shell.outputTruncated ||= result.outputTruncated;
+  shell.status = result.reason === "spawn_failed"
+    ? "failed_to_start"
+    : result.reason === "cancelled" || result.reason === "timed_out"
+      ? "killed"
+      : "done";
+  if (result.reason !== "exited") append(shell, `error: ${result.stderr || result.reason}`);
+  append(shell, `exit: code ${result.exitCode}`);
+  prune();
 }
 
-export function cleanupAllBackgroundProcesses(): void {
-  for (const shellId of activeShells.keys()) {
-    cleanupShell(shellId);
-  }
+function runnerFailure(error: unknown): ProcessResult {
+  return {
+    reason: "spawn_failed",
+    exitCode: null,
+    stdout: "",
+    stderr: error instanceof Error ? error.message : String(error),
+    outputTruncated: false,
+  };
 }
-
-process.on('exit', cleanupAllBackgroundProcesses);
 
 export const name = "bash_background";
-
 export const description =
-  "Execute a bash command in the background and return immediately. Use for long-running processes like dev servers, watchers, or daemons.";
+  "Execute a bash command in the background and return immediately. Output is bounded to 100 KiB and commands have a 15-minute deadline.";
 
 export const parameters = {
   type: "object" as const,
   properties: {
-    command: {
-      type: "string" as const,
-      description: "The bash command to execute",
-    },
-    cwd: {
-      type: "string" as const,
-      description: "Working directory for the command (optional)",
-    },
+    command: { type: "string" as const, description: "The bash command to execute" },
+    cwd: { type: "string" as const, description: "Working directory for the command (optional)" },
     env: {
       type: "object" as const,
       additionalProperties: { type: "string" },
@@ -127,15 +134,19 @@ export const parameters = {
   required: ["command"] as const,
 };
 
-interface BashBackgroundParams {
+export interface BashBackgroundParams {
   command: string;
   cwd?: string;
   env?: Record<string, string>;
   workspaceRoot?: string;
   enforceWorkspacePaths?: boolean;
+  runId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  runProcess?: CommandRunner;
 }
 
-interface BashBackgroundResult {
+export interface BashBackgroundResult {
   shellId: string;
   pid: number;
 }
@@ -146,72 +157,97 @@ export async function execute({
   env,
   workspaceRoot = process.cwd(),
   enforceWorkspacePaths = true,
+  runId,
+  signal,
+  timeoutMs = DEFAULT_BACKGROUND_TIMEOUT_MS,
+  runProcess = runRawProcess,
 }: BashBackgroundParams): Promise<BashBackgroundResult> {
+  if (signal?.aborted) throw new Error("Background command cancelled before start");
+
   const dangerous = isDangerous(command);
   if (dangerous) {
     throw new Error(`Blocked: "${dangerous}" is not allowed. This command could damage the system or repository.`);
   }
-
   const outsidePath = enforceWorkspacePaths ? referencesOutsidePath(command, workspaceRoot, cwd) : null;
   if (outsidePath) {
     throw new Error(`Blocked: command references "${outsidePath}" which is outside the working directory. All files must be created within the project directory.`);
   }
 
-  evictStaleShells();
-
-  if (activeShells.size >= MAX_CONCURRENT_SHELLS) {
+  prune();
+  const runningShells = [...activeShells.values()].filter((shell) => !shell.done);
+  if (runningShells.length >= MAX_CONCURRENT_SHELLS) {
     throw new Error(`Maximum concurrent background shells (${MAX_CONCURRENT_SHELLS}) reached. Wait for some to finish or kill them.`);
   }
 
   const shellId = generateShellId();
-  const effectiveCwd = cwd || process.cwd();
-  const effectiveEnv = { ...process.env, ...env };
+  const ownerRunId = runId ?? `background-${shellId}`;
+  const controller = new AbortController();
+  const abortParent = () => controller.abort();
+  signal?.addEventListener("abort", abortParent, { once: true });
 
-  const child = spawn('/bin/bash', ['-c', command], {
-    cwd: effectiveCwd,
-    env: effectiveEnv,
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  let shell!: ShellProcess;
+  let start!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    start = () => {
+      void (async () => {
+        try {
+          const result = await runProcess({
+            runId: ownerRunId,
+            command,
+            cwd: cwd || process.cwd(),
+            env,
+            signal: controller.signal,
+            timeoutMs,
+            maxOutputBytes: BACKGROUND_OUTPUT_MAX_BYTES,
+            terminationGraceMs: 250,
+            onSpawn: (pid) => { shell.pid = pid; },
+            onOutput: (stream, chunk) => append(shell, `${stream}: ${chunk.toString("utf8")}`),
+          });
+          finish(shell, result);
+        } catch (error) {
+          // A runner seam or teardown error must settle the registry rather
+          // than escaping an unhandled async task and leaving a running shell.
+          finish(shell, runnerFailure(error));
+        } finally {
+          signal?.removeEventListener("abort", abortParent);
+          resolve();
+        }
+      })();
+    };
   });
 
-  const shellProcess: ShellProcess = {
-    child,
+  shell = {
+    runId: ownerRunId,
+    controller,
+    completion,
+    pid: 0,
     buffer: [],
+    bufferBytes: 0,
+    outputTruncated: false,
     startTime: Date.now(),
     done: false,
-    status: 'running',
+    status: "running",
   };
-
-  activeShells.set(shellId, shellProcess);
-
-  child.stdout?.on('data', (data: Buffer) => {
-    const lines = data.toString('utf8').split('\n');
-    for (const line of lines) {
-      if (line.trim()) addToBuffer(shellProcess.buffer, `stdout: ${line}`);
-    }
-  });
-
-  child.stderr?.on('data', (data: Buffer) => {
-    const lines = data.toString('utf8').split('\n');
-    for (const line of lines) {
-      if (line.trim()) addToBuffer(shellProcess.buffer, `stderr: ${line}`);
-    }
-  });
-
-  child.on('exit', (code) => {
-    shellProcess.done = true;
-    shellProcess.exitCode = code ?? undefined;
-    shellProcess.status = 'done';
-    shellProcess.completionTime = Date.now();
-    addToBuffer(shellProcess.buffer, `exit: code ${code}`);
-  });
-
-  child.on('error', (err) => {
-    shellProcess.done = true;
-    shellProcess.status = 'failed_to_start';
-    shellProcess.completionTime = Date.now();
-    addToBuffer(shellProcess.buffer, `error: ${err.message}`);
-  });
-
-  return { shellId, pid: child.pid! };
+  activeShells.set(shellId, shell);
+  start();
+  return { shellId, pid: shell.pid };
 }
+
+/** Abort and await only commands owned by this run. */
+export async function cleanupScopedBackgroundProcesses(runId: string): Promise<void> {
+  const owned = [...activeShells.values()].filter((shell) => shell.runId === runId && !shell.done);
+  for (const shell of owned) shell.controller.abort();
+  await Promise.allSettled(owned.map((shell) => shell.completion));
+}
+
+export const cleanupRunBackgroundProcesses = cleanupScopedBackgroundProcesses;
+
+/** Legacy CLI-exit cleanup. Normal run cancellation must call the scoped API. */
+export function cleanupAllBackgroundProcesses(): void {
+  for (const shell of activeShells.values()) {
+    if (!shell.done) shell.controller.abort();
+  }
+  killRunProcessGroupsSynchronously();
+}
+
+process.on("exit", cleanupAllBackgroundProcesses);

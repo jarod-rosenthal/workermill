@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
+import { getStateRoot } from "../state-root.js";
 
 // Mock fs
 vi.mock("fs");
@@ -63,14 +64,14 @@ describe("logs-command", () => {
   describe("getLogPath", () => {
     it("returns log path for cwd", () => {
       const today = new Date().toISOString().slice(0, 10);
-      const expected = path.join(os.homedir(), ".workermill", "logs", "dir", `${today}.log`);
+      const expected = path.join(getStateRoot(), "logs", "dir", `${today}.log`);
       expect(getLogPath("/test/dir")).toBe(expected);
     });
 
     it("returns log path for undefined cwd", () => {
       const slug = path.basename(process.cwd()).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "default";
       const today = new Date().toISOString().slice(0, 10);
-      const expected = path.join(os.homedir(), ".workermill", "logs", slug, `${today}.log`);
+      const expected = path.join(getStateRoot(), "logs", slug, `${today}.log`);
       expect(getLogPath()).toBe(expected);
     });
   });

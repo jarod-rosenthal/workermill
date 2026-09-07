@@ -1,4 +1,5 @@
 import { htmlToReadableText } from "./html.js";
+import { boundedFetch } from "../http-request.js";
 
 export const name = "fetch";
 
@@ -47,8 +48,9 @@ export async function execute({
   url,
   format = "markdown",
   timeout = 30000,
-}: FetchParams): Promise<FetchResult> {
+}: FetchParams, signal?: AbortSignal): Promise<FetchResult> {
   try {
+    signal?.throwIfAborted();
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(url);
@@ -61,30 +63,19 @@ export async function execute({
     }
 
     const clampedTimeout = Math.min(timeout, 120000);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), clampedTimeout);
-
-    try {
-      const response = await globalThis.fetch(url, {
-        signal: controller.signal,
+      const response = await boundedFetch(url, {
         headers: {
           "User-Agent": "WorkerMill/1.0",
           Accept: "text/html,application/xhtml+xml,text/plain,*/*",
         },
-      });
-
-      clearTimeout(timeoutId);
+      }, { signal, timeoutMs: clampedTimeout, maxResponseBytes: MAX_CONTENT_SIZE });
 
       if (!response.ok) {
         return { success: false, content: "", url, statusCode: response.status, error: `HTTP ${response.status}: ${response.statusText}` };
       }
 
       const contentType = response.headers.get("content-type") || "";
-      let body = await response.text();
-
-      if (body.length > MAX_CONTENT_SIZE) {
-        body = body.slice(0, MAX_CONTENT_SIZE) + "\n\n... [content truncated at 512KB]";
-      }
+      const body = await response.text();
 
       let content: string;
       if (contentType.includes("text/html") || contentType.includes("xhtml")) {
@@ -100,13 +91,6 @@ export async function execute({
       }
 
       return { success: true, content, url, statusCode: response.status, contentType };
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err instanceof Error && err.name === "AbortError") {
-        return { success: false, content: "", url, error: `Request timed out after ${clampedTimeout}ms` };
-      }
-      throw err;
-    }
   } catch (err) {
     return { success: false, content: "", url, error: `Fetch failed: ${err instanceof Error ? err.message : String(err)}` };
   }

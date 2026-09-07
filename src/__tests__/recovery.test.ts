@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { createTempWorkerMillHome, type TempHome } from "./helpers/temp-workermill-home.js";
 
 vi.mock("../logger.js", () => ({
@@ -69,6 +69,87 @@ describe("recovery mode", () => {
     expect(recovery!.changedFileCount).toBeGreaterThan(0);
 
     fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("keeps completed-story runs retryable until final completion clears them", async () => {
+    const repo = createTempGitRepo();
+    try {
+      execFileSync("git", ["checkout", "-b", "feat/final-verification"], { cwd: repo, stdio: "pipe" });
+      const { saveShipRun, getRetryableRun, clearShipRun } = await import("../ship-state.js");
+      const { detectInterruptedBuild } = await import("../recovery.js");
+      saveShipRun({
+        workingDir: repo, featureBranch: "feat/final-verification", mainBranch: "main",
+        userTask: "Finish final verification", updatedAt: new Date().toISOString(),
+        stories: [{ id: "s1", title: "Implemented", persona: "backend_developer", description: "Done", dependencies: [] }],
+        completedStoryIds: ["s1"],
+      });
+      expect(getRetryableRun(repo)?.completedStoryIds).toEqual(["s1"]);
+      expect(detectInterruptedBuild(repo)?.remainingCount).toBe(0);
+      clearShipRun("feat/final-verification");
+      expect(getRetryableRun(repo)).toBeNull();
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("treats shell syntax in valid saved branch names as literal Git arguments", async () => {
+    const repo = createTempGitRepo();
+    try {
+      const branch = "feat/$(touch${IFS}recovery-pwned)";
+      execFileSync("git", ["checkout", "-b", branch], { cwd: repo, stdio: "pipe" });
+      fs.writeFileSync(path.join(repo, "changed.txt"), "implemented\n");
+      execFileSync("git", ["add", "changed.txt"], { cwd: repo, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "work"], { cwd: repo, stdio: "pipe" });
+      const { saveShipRun } = await import("../ship-state.js");
+      const { detectInterruptedBuild } = await import("../recovery.js");
+      saveShipRun({
+        workingDir: repo, featureBranch: branch, mainBranch: "main",
+        userTask: "Recover literal branch", updatedAt: new Date().toISOString(),
+        stories: [{ id: "s1", title: "Pending", persona: "backend_developer", description: "Pending", dependencies: [] }],
+        completedStoryIds: [],
+      });
+      expect(detectInterruptedBuild(repo)).toMatchObject({ branchExists: true, changedFileCount: 1 });
+      expect(fs.existsSync(path.join(repo, "recovery-pwned"))).toBe(false);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a real bounded Git probe failure as unknown, not as a deleted branch", async () => {
+    const nonRepository = fs.mkdtempSync(path.join(os.tmpdir(), "wm-recovery-probe-failure-"));
+    try {
+      const { probeBranchExists } = await import("../recovery.js");
+      expect(probeBranchExists(nonRepository, "feature/not-proven-missing")).toBe("unknown");
+    } finally {
+      fs.rmSync(nonRepository, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps saved recovery state when Git times out and reports branch status unknown", async () => {
+    const repo = createTempGitRepo();
+    try {
+      vi.resetModules();
+      vi.doMock("child_process", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("child_process")>();
+        return {
+          ...actual,
+          execFileSync: vi.fn(() => {
+            throw Object.assign(new Error("git timed out"), { code: "ETIMEDOUT", status: null });
+          }),
+        };
+      });
+      const { saveShipRun } = await import("../ship-state.js");
+      const { detectInterruptedBuild } = await import("../recovery.js");
+      saveShipRun({
+        workingDir: repo, featureBranch: "feat/unknown", mainBranch: "main", userTask: "Recover safely",
+        stories: [{ id: "s:1", title: "Pending", persona: "backend_developer", description: "pending", dependencies: [] } as any],
+        completedStoryIds: [], updatedAt: new Date().toISOString(),
+      });
+      expect(detectInterruptedBuild(repo)).toMatchObject({ branchExists: "unknown", remainingCount: 1 });
+    } finally {
+      vi.doUnmock("child_process");
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it("prints a recovery prompt with remaining stories and options", async () => {

@@ -2,6 +2,14 @@ import fs from "fs";
 import path from "path";
 import { z } from "zod";
 import * as logger from "./logger.js";
+import type { PathGrant } from "./engine/path-policy.js";
+
+export interface SandboxCapabilities {
+  extraPathGrants?: readonly PathGrant[];
+  allowedNetworkDomains?: readonly string[];
+  allowLocalBinding?: boolean;
+  allowDockerSocket?: boolean;
+}
 
 export interface ProviderConfig {
   model: string;
@@ -25,6 +33,11 @@ export interface QualityGateCommand {
   name: string;
   /** Shell commands to run in sequence — stops at first failure */
   commands: string[];
+  /**
+   * Whether a failed static gate blocks completion (default: true).
+   * Set false only to retain advisory behavior outside strict mode.
+   */
+  required?: boolean;
 }
 
 export interface ReviewConfig {
@@ -46,6 +59,8 @@ export interface ReviewConfig {
   criticThreshold?: number;
   /** Strict mode — zero tolerance for gate failures, require review approval, block out-of-scope edits (default: false) */
   strict?: boolean;
+  /** Require the reviewer binding to be known-different from every worker binding (default: false) */
+  requireDifferentModel?: boolean;
 }
 
 export interface ProgramConfig {
@@ -132,6 +147,11 @@ export interface CliConfig {
   git?: GitConfig;
   /** Restrict file/bash tools to the working directory (default: true). Set to "os" for OS-level sandboxing via @anthropic-ai/sandbox-runtime. */
   sandbox?: boolean | "os";
+  /**
+   * Extra OS-sandbox capabilities. This is read from global user config only;
+   * project configuration cannot widen a repository's process privileges.
+   */
+  sandboxCapabilities?: SandboxCapabilities;
   /** Play a beep sound when builds complete (default: false) */
   bell?: boolean;
   /** Granular permission rules — pattern-based allow/deny per tool */
@@ -166,7 +186,16 @@ export function loadConfig(): CliConfig | null {
   try {
     if (!fs.existsSync(CONFIG_FILE)) return null;
     const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
-    return JSON.parse(raw) as CliConfig;
+    const config = JSON.parse(raw) as CliConfig;
+    if (config.sandboxCapabilities !== undefined) {
+      const parsed = SandboxCapabilitiesSchema.safeParse(config.sandboxCapabilities);
+      if (!parsed.success) {
+        logger.error("Invalid sandboxCapabilities in global config", { error: parsed.error.message });
+        return null;
+      }
+      config.sandboxCapabilities = parsed.data;
+    }
+    return config;
   } catch (err) {
     logger.error("Failed to load config", { path: CONFIG_FILE, error: err instanceof Error ? err.message : String(err) });
     return null;
@@ -278,6 +307,9 @@ export function resolveConfig(): CliConfig {
     },
     git: { ...global.git, ...(project?.git || {}) },
     sandbox: project?.sandbox ?? global.sandbox,
+    // Deliberately do not merge project?.sandboxCapabilities: a repository
+    // must not be able to grant itself host paths, network, or Docker access.
+    sandboxCapabilities: global.sandboxCapabilities,
     bell: project?.bell ?? global.bell,
     permissions: mergedPermissions,
     ticketSystem: project?.ticketSystem || global.ticketSystem,
@@ -371,6 +403,7 @@ export const MCPServerConfigSchema = z.object({
 export const QualityGateCommandSchema = z.object({
   name: z.string(),
   commands: z.array(z.string()),
+  required: z.boolean().optional(),
 });
 
 export const ReviewConfigSchema = z.object({
@@ -383,6 +416,7 @@ export const ReviewConfigSchema = z.object({
   critic: z.boolean().optional(),
   criticThreshold: z.number().optional(),
   strict: z.boolean().optional(),
+  requireDifferentModel: z.boolean().optional(),
 });
 
 export const ProgramConfigSchema = z.object({
@@ -422,6 +456,18 @@ export const PermissionRuleConfigSchema = z.object({
   deny: z.array(z.string()).optional(),
 });
 
+export const PathGrantSchema = z.object({
+  root: z.string().min(1),
+  access: z.enum(["read", "read_write"]),
+});
+
+export const SandboxCapabilitiesSchema = z.object({
+  extraPathGrants: z.array(PathGrantSchema).optional(),
+  allowedNetworkDomains: z.array(z.string().min(1)).optional(),
+  allowLocalBinding: z.boolean().optional(),
+  allowDockerSocket: z.boolean().optional(),
+}).strict();
+
 export const JiraConfigSchema = z.object({
   baseUrl: z.string(),
   email: z.string(),
@@ -442,6 +488,7 @@ export const CliConfigSchema = z.object({
   hooks: HooksConfigSchema.optional(),
   git: GitConfigSchema.optional(),
   sandbox: z.union([z.boolean(), z.literal("os")]).optional(),
+  sandboxCapabilities: SandboxCapabilitiesSchema.optional(),
   bell: z.boolean().optional(),
   permissions: PermissionRuleConfigSchema.optional(),
   ticketSystem: z.enum(["github", "jira", "linear", "none"]).optional(),

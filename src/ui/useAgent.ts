@@ -10,6 +10,10 @@ import {
   ensureLmStudioContext,
 } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { canonicalizePath, createPathScope, resolvePath } from "../engine/path-policy.js";
+import { executeToolCall, ToolExecutionError, type ToolExecutionContext } from "../engine/tool-executor.js";
+import type { PermissionState } from "../engine/tool-policy.js";
+import { getToolMeta } from "../engine/tools/tool-metadata.js";
 import type { AIProvider } from "../engine/types.js";
 import {
   createSession,
@@ -17,29 +21,31 @@ import {
   addMessage,
   loadLatestSession,
   forkSession,
+  applySessionUsageLedger,
   type Session,
 } from "../session.js";
 import { loadProjectMeta } from "../project-data.js";
 import { shouldCompact, compactMessages, microCompact, extractMemoriesBeforeCompact, estimateContextTokens } from "../compaction.js";
-import { CostTracker } from "../cost-tracker.js";
-import { killActiveProcess } from "../engine/tools/bash.js";
-import { cleanupAllBackgroundProcesses } from "../engine/tools/bash-background.js";
+import { CostTracker, type LedgerSnapshot } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
+import type { CallSnapshot } from "../cost-tracker.js";
+import { cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "../engine/tools/bash-background.js";
 import { extractMemoryMarkers, addMemory } from "../memory.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { createMCPRunResources, autoDetectMCPServersForRun, type MCPRunResources } from "../mcp-client.js";
+import { shutdownLSPRun } from "../engine/tools/lsp.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { partitionTools, formatDeferredToolsForPrompt, type DeferredToolEntry } from "../deferred-tools.js";
 import { resolveConfig, type HooksConfig, type PermissionRuleConfig } from "../config.js";
 import { normalizeToolName, toolStatusLabel } from "./tool-status.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
-import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
+import { createBrowserRunResources, type BrowserRunResources } from "../browser.js";
 import fs from "fs";
 import path from "path";
-import { isDangerous, isDangerousFile, READ_TOOLS, ACCEPT_EDITS_TOOLS, checkPermissionRules, splitCompoundCommand, commandToRule } from "../safety.js";
 import { notifyIfEnabled } from "../notify.js";
 import { checkpoint } from "../checkpoints.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
 import { isLocalProvider } from "../provider-capabilities.js";
 import { createLiveViewServer, type LiveViewServer } from "../live-view-server.js";
 import { formatLiveViewUrlMessage, getLiveViewUrls } from "../live-view-url.js";
@@ -69,6 +75,7 @@ import {
   shouldBlockUnverifiedImageAnswer,
   trackAbortCost,
   parsePatchTargets,
+  durablePermissionRules,
   type PermissionMode,
 } from "./agent/utils.js";
 import type { UseAgentOptions, UseAgentReturn, TurnModelOverride } from "./agent/types.js";
@@ -77,6 +84,23 @@ export { trackAbortCost, getLiveViewChangeTargets, shouldBlockUnverifiedImageAns
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
+
+function waitForRetry(signal: AbortSignal, milliseconds: number): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Retry cancelled"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, milliseconds);
+    function done(): void {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Retry cancelled"));
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -89,7 +113,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
   // ------- Model & tools (created once) -------- //
   const modelRef = useRef<LanguageModel | null>(null);
-  const toolsRef = useRef<Record<string, AnyToolDef> | null>(null);
   const aiProviderRef = useRef<AIProvider>(options.provider as AIProvider);
   const activeModelNameRef = useRef(options.model);
   const activeContextLengthRef = useRef(options.contextLength);
@@ -129,7 +152,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const sessionRef = useRef<Session>(null as unknown as Session);
   const costTrackerRef = useRef(new CostTracker());
   const sessionAllowRef = useRef(new Set<string>());
+  // Rules chosen with "don't ask again" stay narrow even if settings cannot
+  // be saved. Do not turn a command-family approval into a tool-wide grant.
+  const sessionAllowRulesRef = useRef<string[]>([]);
   const deniedToolsRef = useRef(new Set<string>());
+  const pendingPermissionResolveRef = useRef<(() => void) | null>(null);
+  const permissionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
   const permModeRef = useRef<PermissionMode>(options.trustAll ? "bypassPermissions" : options.planMode ? "plan" : "default");
@@ -144,6 +172,22 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const liveViewServerRef = useRef<LiveViewServer | null>(null);
   const liveViewUrlRef = useRef<string | null>(null);
   const pendingSystemMessagesRef = useRef<string[]>([]);
+  const pendingToolsByRunRef = useRef(new Map<string, Set<Promise<void>>>());
+
+  const recordUsage = useCallback((session: Session, snapshot: CallSnapshot): void => {
+    if (!costTrackerRef.current.recordCall(snapshot)) return;
+    const ledger = costTrackerRef.current.getLedgerSnapshot();
+    const call = ledger.calls.find((entry) => entry.callId === snapshot.callId);
+    if (!call) return;
+    if (applySessionUsageLedger(session, { calls: [call], totals: ledger.totals })) setCost(session.totalCostUsd ?? 0);
+  }, []);
+
+  const applyExternalUsageLedger = useCallback((ledger: LedgerSnapshot): void => {
+    const session = sessionRef.current;
+    if (!session || !applySessionUsageLedger(session, ledger)) return;
+    setCost(session.totalCostUsd ?? 0);
+    saveSession(session);
+  }, []);
 
   // Deferred tool loading — MCP tools start deferred, promoted on tool_search
   const deferredToolsRef = useRef<DeferredToolEntry[]>([]);
@@ -243,23 +287,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.contextLength,
       options.apiKey,
     );
-    toolsRef.current = createToolDefinitions(
-      workingDirRef.current,
-      modelRef.current,
-      options.sandboxed,
-    );
 
-    // Register MCP servers for lazy start — they won't spawn until first tool use
+    // Snapshot non-resource UI settings. MCP servers are intentionally not
+    // registered here: each submitted turn owns its own cancellable resources.
     try {
       const cliConfig = resolveConfig();
       // Skip Docker MCP auto-detection for local models (Ollama/LM Studio) —
       // 50+ MCP tools overwhelm small models, causing XML text fallback instead
       // of structured tool calls. Users can still configure MCP explicitly.
-      const skipAutoDetect = isLocalProvider(aiProviderRef.current);
-      const mcpConfig = skipAutoDetect
-        ? (cliConfig?.mcp || {})
-        : autoDetectMCPServers(cliConfig?.mcp || {});
-      registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
       bellEnabledRef.current = cliConfig?.bell;
       permissionRulesRef.current = cliConfig?.permissions;
@@ -330,19 +365,29 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       WORKERMILL_RESUMED: options.resume ? "true" : "false",
     });
 
-    // Set finishedAt on clean exit
-    process.on('exit', () => {
+  }
+
+  useEffect(() => {
+    // The listener belongs to this mounted session, not to every future mount.
+    const finishSession = () => {
       const session = sessionRef.current;
       if (session && !session.finishedAt) {
         session.finishedAt = new Date().toISOString();
         saveSession(session);
       }
-    });
-  }
+    };
+    process.on("exit", finishSession);
+    return () => {
+      process.off("exit", finishSession);
+      abortRef.current?.abort(new Error("Interactive session unmounted"));
+      finishSession();
+    };
+  }, []);
 
   // Push restored messages into React state after first render.
   useEffect(() => {
     const s = sessionRef.current as Session & { _restored?: Message[] };
+    setCost(s.totalCostUsd ?? 0);
     const pending = pendingSystemMessagesRef.current.splice(0);
     if (s._restored) {
       const restored = s._restored;
@@ -378,134 +423,155 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     };
   }, [stopLiveView]);
 
-  // ------- Helpers -------- //
+  // ------- Shared permission/execution adapter -------- //
 
-  /**
-   * Detect dangerous bash patterns. Returns the label of the first match, or
-   * null when the command is safe.
-   */
-  function detectDanger(
+  const permissionState = useCallback((context: ToolExecutionContext): PermissionState => {
+    const configured = permissionRulesRef.current;
+    return {
+      mode: planModeRef.current ? "plan" : permModeRef.current,
+      trustAll: trustAllRef.current,
+      sessionAllow: sessionAllowRef.current,
+      rules: {
+        allow: [...(configured?.allow ?? []), ...sessionAllowRulesRef.current],
+        ask: configured?.ask,
+        // A local deny is explicit and must remain stronger than trust.
+        deny: [...(configured?.deny ?? []), ...deniedToolsRef.current],
+      },
+      readOnlyRole: false,
+      workspace: context.workspace,
+    };
+  }, []);
+
+  const persistAlwaysChoice = useCallback(async (toolName: string, input: Record<string, unknown>): Promise<void> => {
+    const rules = durablePermissionRules(toolName, input);
+    for (const rule of rules) {
+      if (!sessionAllowRulesRef.current.includes(rule)) sessionAllowRulesRef.current.push(rule);
+    }
+    try {
+      const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+      const settings = loadLocalSettings() || {};
+      settings.allow = settings.allow || [];
+      for (const rule of rules) {
+        if (!settings.allow.includes(rule)) settings.allow.push(rule);
+      }
+      saveLocalSettings(settings);
+      permissionRulesRef.current = resolveConfig().permissions;
+    } catch {
+      // The in-memory narrow rules above are still valid for this session.
+    }
+  }, []);
+
+  const promptForPermission = useCallback(async (
     toolName: string,
-    toolInput: Record<string, unknown>,
-  ): string | null {
-    // Dangerous bash commands
-    if (toolName === "bash") {
-      return isDangerous(String(toolInput.command ?? ""));
-    }
-    // Dangerous file paths for write operations
-    if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
-      const filePath = String(toolInput.path || toolInput.file_path || "");
-      if (filePath) return isDangerousFile(filePath);
-    }
-    return null;
-  }
-
-  // ------- Permission system -------- //
-
-  /**
-   * Resolve whether a tool call is allowed. For read-only tools or when
-   * trust-all is enabled the promise resolves immediately. Otherwise we
-   * surface a `PermissionRequest` and the UI component (PermissionPrompt)
-   * will call `request.resolve()`.
-   */
-  const checkPermission = useCallback(
-    (
-      toolName: string,
-      toolInput: Record<string, unknown>,
-    ): Promise<{ allowed: boolean; mode?: "always" | "trust" }> => {
-      // Denied tools are always blocked.
-      if (deniedToolsRef.current.has(toolName)) {
-        return Promise.resolve({ allowed: false });
-      }
-
-      const dangerLabel = detectDanger(toolName, toolInput);
-
-      // Dangerous commands always require explicit confirmation.
-      if (dangerLabel) {
-        logger.info("Dangerous prompt shown", { tool: toolName, danger: dangerLabel });
-        return new Promise((resolve) => {
-          setPermissionRequest({
-            toolName,
-            toolInput,
-            isDangerous: true,
-            dangerLabel,
-            resolve: (allowed: boolean, mode?: "always" | "trust") => {
-              logger.info("Dangerous prompt resolved", { tool: toolName, allowed, mode });
-              setPermissionRequest(null);
-              resolve({ allowed, mode });
-            },
-          });
-        });
-      }
-
-      // Granular permission rules — deny > ask > allow.
-      const ruleResult = checkPermissionRules(toolName, toolInput, permissionRulesRef.current);
-      if (ruleResult === "deny") {
-        return Promise.resolve({ allowed: false });
-      }
-      if (ruleResult === "ask") {
-        // Force prompt even in acceptEdits/bypassPermissions mode
-        return new Promise((resolve) => {
-          setPermissionRequest({
-            toolName,
-            toolInput,
-            isDangerous: false,
-            resolve: (allowed: boolean, mode?: "always" | "trust") => {
-              setPermissionRequest(null);
-              resolve({ allowed, mode });
-            },
-          });
-        });
-      }
-      if (ruleResult === "allow") {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // bypassPermissions mode — auto-approve everything.
-      if (trustAllRef.current || permModeRef.current === "bypassPermissions") {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // dontAsk mode — deny everything not explicitly allowed.
-      if (permModeRef.current === "dontAsk") {
-        return Promise.resolve({ allowed: false });
-      }
-
-      // acceptEdits mode: auto-approve everything except bash.
-      if (permModeRef.current === "acceptEdits" && ACCEPT_EDITS_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // Read-only tools never require permission.
-      if (READ_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // Session-level allow for this tool.
-      if (sessionAllowRef.current.has(toolName) || sessionAllowRef.current.has("*")) {
-        return Promise.resolve({ allowed: true });
-      }
-
-      // plan mode — deny write tools (they shouldn't be in the schema, but safety net).
-      if (permModeRef.current === "plan" && !READ_TOOLS.has(toolName)) {
-        return Promise.resolve({ allowed: false });
-      }
-
-      // Interactive permission prompt via React state.
-      return new Promise((resolve) => {
+    input: Record<string, unknown>,
+    reason: string,
+    context: ToolExecutionContext,
+  ): Promise<boolean> => {
+    const prior = permissionQueueRef.current;
+    let release!: () => void;
+    permissionQueueRef.current = new Promise<void>((resolve) => { release = resolve; });
+    await prior;
+    try {
+      if (context.signal.aborted) return false;
+      return await new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (allowed: boolean): void => {
+          if (settled) return;
+          settled = true;
+          context.signal.removeEventListener("abort", onAbort);
+          if (pendingPermissionResolveRef.current === cancelPending) pendingPermissionResolveRef.current = null;
+          setPermissionRequest(null);
+          resolve(allowed);
+        };
+        const cancelPending = (): void => finish(false);
+        const onAbort = (): void => finish(false);
+        pendingPermissionResolveRef.current = cancelPending;
+        context.signal.addEventListener("abort", onAbort, { once: true });
         setPermissionRequest({
           toolName,
-          toolInput,
-          isDangerous: false,
-          resolve: (allowed: boolean, mode?: "always" | "trust") => {
-            setPermissionRequest(null);
-            resolve({ allowed, mode });
+          toolInput: input,
+          isDangerous: reason.startsWith("dangerous command:") || reason.startsWith("sensitive file:"),
+          dangerLabel: reason,
+          resolve: (allowed, mode) => {
+            if (settled || context.signal.aborted) return;
+            void (async () => {
+              if (allowed && mode === "trust") {
+                trustAllRef.current = true;
+                permModeRef.current = "bypassPermissions";
+                setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
+              }
+              if (allowed && mode === "always") await persistAlwaysChoice(toolName, input);
+              finish(allowed);
+            })();
           },
         });
       });
-    },
-    [], // trustAllRef and sessionAllowRef are refs -- stable across renders.
-  );
+    } finally {
+      release();
+    }
+  }, [persistAlwaysChoice]);
+
+  const createExecutionContext = useCallback((runId: string, signal: AbortSignal): ToolExecutionContext => {
+    const capabilities = resolveConfig().sandboxCapabilities;
+    const scope = createPathScope(workingDirRef.current, capabilities?.extraPathGrants ?? []);
+    const context: ToolExecutionContext = {
+      runId,
+      workspace: scope.workspace,
+      scope,
+      effectiveSandbox: options.sandboxed === "os" ? "os" : options.sandboxed ? "path" : "none",
+      signal,
+      allowedNetworkDomains: capabilities?.allowedNetworkDomains,
+      allowLocalBinding: capabilities?.allowLocalBinding,
+      allowDockerSocket: capabilities?.allowDockerSocket,
+      getPermissionState: () => permissionState(context),
+      prompt: promptForPermission,
+      preHook: (name, input, executingContext) => {
+        const started = Date.now();
+        const result = runPreHooksWithBlocking(name, hooksConfigRef.current, executingContext.workspace, {
+          input: JSON.stringify(input).substring(0, 10000),
+        });
+        traceDispatch("wrapper:prehook_done", {
+          tool: name,
+          blocked: result.blocked,
+          durationMs: Date.now() - started,
+        });
+        return result.blocked ? { blocked: true, reason: result.reason } : undefined;
+      },
+      checkpoint: (name, input, executingContext) => {
+        const checkpointPath = (target: string): string => executingContext.effectiveSandbox === "none"
+          ? canonicalizePath(path.resolve(executingContext.workspace, target))
+          : resolvePath(executingContext.scope, target, "read_write");
+        if (name === "patch") {
+          for (const target of parsePatchTargets(String(input.patch_text || ""), executingContext.workspace)) {
+            checkpoint(checkpointPath(target.filePath), "patch");
+          }
+        } else if (["write_file", "edit_file", "multi_edit_file"].includes(name) && (input.path || input.file_path)) {
+          checkpoint(checkpointPath(String(input.path || input.file_path)), name);
+        }
+      },
+      postHook: (name, _input, output, error, executingContext) => {
+        if (name === "bash" && !error) onBashCompleteRef.current?.();
+        if (!error) {
+          const outputText = typeof output === "string" ? output : JSON.stringify(output) ?? "";
+          runHooks("post", name, hooksConfigRef.current, executingContext.workspace, {
+            output: outputText.substring(0, 10000),
+            success: true,
+          });
+        }
+      },
+      event: (event, executingContext) => {
+        if (event.phase === "complete" && event.error) {
+          const message = event.error instanceof Error ? event.error.message : String(event.error);
+          runLifecycleHooks("tool_error", hooksConfigRef.current, executingContext.workspace, {
+            WORKERMILL_TOOL: event.toolName,
+            WORKERMILL_TOOL_INPUT: JSON.stringify(event.input).substring(0, 10000),
+            WORKERMILL_TOOL_ERROR: message.substring(0, 10000),
+          });
+        }
+      },
+    };
+    return context;
+  }, [options.sandboxed, permissionState, promptForPermission]);
 
   // ------- Wrap tools with permission & state tracking -------- //
 
@@ -516,31 +582,52 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
    * 3. The original execute runs.
    * 4. Status is updated to "done" (or "denied").
    */
-  const buildPermissionedTools = useCallback((): Record<string, AnyToolDef> => {
-    const raw = toolsRef.current;
-    if (!raw) return {};
+  const buildPermissionedTools = useCallback((context: ToolExecutionContext, model: LanguageModel, session: Session, provider: string, modelName: string, mcpTools: Record<string, AnyToolDef>, browser: BrowserRunResources): Record<string, AnyToolDef> => {
+    // Factory tools are rebuilt for every run context. In particular, bash and
+    // child tools must receive this turn's signal and run ID, not a closure
+    // created during hook initialization.
+    const raw = createToolDefinitions(workingDirRef.current, model, options.sandboxed, {
+      executionContext: context,
+      runId: context.runId,
+      signal: context.signal,
+      scope: context.scope,
+      sandboxCapabilities: {
+        allowedNetworkDomains: context.allowedNetworkDomains,
+        allowLocalBinding: context.allowLocalBinding,
+        allowDockerSocket: context.allowDockerSocket,
+      },
+      onSubAgentUsage: async (childUsage) => {
+        recordUsage(session, {
+          callId: childUsage.callId,
+          persona: "child",
+          provider,
+          model: modelName,
+          usage: childUsage.usage,
+          usageComplete: childUsage.usageComplete,
+        });
+      },
+    }) as Record<string, AnyToolDef>;
 
     // Merge MCP tools (dynamically resolved each call so tools from
     // servers that finish starting after init are picked up).
-    const allMcpTools = getMCPToolDefinitions();
-    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...allMcpTools };
+    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...mcpTools };
 
     // Browser tools — use Zod inputSchema for cross-provider compatibility.
     allRawTools.browser_open = {
       description: "Open a headless Chrome browser for navigating websites, taking screenshots, and verifying UI.",
       inputSchema: z.object({}),
-      execute: async () => browserOpen(),
+      execute: async () => browser.open(),
     };
     allRawTools.browser_navigate = {
       description: "Navigate the browser to a URL. Returns the page title.",
       inputSchema: z.object({ url: z.string().describe("URL to navigate to") }),
-      execute: async ({ url }: { url: string }) => browserNavigate(url),
+      execute: async ({ url }: { url: string }) => browser.navigate(url),
     };
     allRawTools.browser_screenshot = {
       description: "Take a screenshot of the current browser page. Returns the image for visual inspection.",
       inputSchema: z.object({}),
       execute: async () => {
-        const { base64, description } = await browserScreenshot();
+        const { base64, description } = await browser.screenshot();
         if (base64) {
           return {
             content: [
@@ -555,54 +642,38 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     allRawTools.browser_click = {
       description: "Click an element on the page by CSS selector.",
       inputSchema: z.object({ selector: z.string().describe("CSS selector (e.g., 'button.submit', '#login')") }),
-      execute: async ({ selector }: { selector: string }) => browserClick(selector),
+      execute: async ({ selector }: { selector: string }) => browser.click(selector),
     };
     allRawTools.browser_fill = {
       description: "Fill a form field by CSS selector with a value.",
       inputSchema: z.object({ selector: z.string().describe("CSS selector for the input field"), value: z.string().describe("Value to fill") }),
-      execute: async ({ selector, value }: { selector: string; value: string }) => browserFill(selector, value),
+      execute: async ({ selector, value }: { selector: string; value: string }) => browser.fill(selector, value),
     };
     allRawTools.browser_evaluate = {
       description: "Execute JavaScript in the browser and return the result.",
       inputSchema: z.object({ expression: z.string().describe("JavaScript expression to evaluate") }),
-      execute: async ({ expression }: { expression: string }) => browserEvaluate(expression),
+      execute: async ({ expression }: { expression: string }) => browser.evaluate(expression),
     };
     allRawTools.browser_console = {
       description: "Get console messages (log, error, warn) from the browser.",
       inputSchema: z.object({}),
-      execute: async () => browserConsole(),
+      execute: async () => browser.console(),
     };
     allRawTools.browser_close = {
       description: "Close the headless Chrome browser.",
       inputSchema: z.object({}),
-      execute: async () => browserClose(),
+      execute: async () => browser.close(),
     };
-
-    // Wrap tool execute functions with concurrency control without mutating
-    // shared tool definitions (toolsRef/current MCP objects). Mutating in place
-    // re-wraps every turn and can self-deadlock on the non-reentrant mutex.
-    const concurrencyWrappedTools: Record<string, AnyToolDef> = {};
-    for (const [name, td] of Object.entries(allRawTools)) {
-      if (td && typeof td.execute === "function") {
-        const original = td.execute;
-        concurrencyWrappedTools[name] = {
-          ...td,
-          execute: withConcurrencyControl(name, original as any),
-        };
-      } else {
-        concurrencyWrappedTools[name] = td;
-      }
-    }
 
     // Partition tools: core tools get full schemas, MCP tools are deferred
     // to save context window space. Promoted tools (via tool_search) are
     // treated as eager on subsequent calls.
-    const { eager: eagerTools, deferred } = partitionTools(concurrencyWrappedTools, workingDirRef.current);
+    const { eager: eagerTools, deferred } = partitionTools(allRawTools, workingDirRef.current);
 
     // Re-promote any tools the model previously loaded via tool_search
     for (const name of promotedToolsRef.current) {
-      if (concurrencyWrappedTools[name] && !eagerTools[name]) {
-        eagerTools[name] = concurrencyWrappedTools[name];
+      if (allRawTools[name] && !eagerTools[name]) {
+        eagerTools[name] = allRawTools[name];
       }
     }
 
@@ -668,61 +739,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // ALL visual updates are batched AFTER the tool completes.
 
           const wrapperEnterMs = Date.now();
+          const pendingTools = pendingToolsByRunRef.current.get(context.runId);
+          let releasePending!: () => void;
+          const pending = new Promise<void>((resolve) => { releasePending = resolve; });
+          pendingTools?.add(pending);
           traceDispatch("wrapper:enter", { tool: name });
-
-          const permissionStartMs = Date.now();
-          const { allowed, mode } = await checkPermission(name, input);
-          traceDispatch("wrapper:permission_done", {
-            tool: name,
-            allowed,
-            mode,
-            durationMs: Date.now() - permissionStartMs,
-          });
-
-          if (mode === "trust" && allowed) {
-            permModeRef.current = "bypassPermissions";
-            // Defer UI update
-            setTimeout(() => { setPermMode("bypassPermissions"); setTrustAllState(true); }, 0);
-            trustAllRef.current = true;
-          }
-
-          if (mode === "always" && allowed) {
-            try {
-              const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
-              const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
-              const lSettings = loadLocalSettings() || {};
-              lSettings.allow = lSettings.allow || [];
-              const rules = name === "bash" && input.command
-                ? splitCompoundCommand(String(input.command)).map((cmd) => toolInputToRule(name, { command: cmd }))
-                : [toolInputToRule(name, input)];
-              for (const rule of rules) {
-                if (rule && !lSettings.allow.includes(rule)) {
-                  lSettings.allow.push(rule);
-                }
-              }
-              saveLocalSettings(lSettings);
-              // Update the merged permissions
-              const config = resolveConfig();
-              permissionRulesRef.current = config.permissions;
-            } catch {
-              sessionAllowRef.current.add(name);
-            }
-            sessionAllowRef.current.add(name);
-          }
-
-          if (!allowed) {
-            traceDispatch("wrapper:denied", {
-              tool: name,
-              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
-            });
-            runLifecycleHooks("permission_denied", hooksConfigRef.current, workingDirRef.current, {
-              WORKERMILL_TOOL: name,
-              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-            });
-            setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
-            setStatus("streaming");
-            return "Tool execution denied by user.";
-          }
 
           try {
             traceDispatch("wrapper:before_tool_call_log", {
@@ -730,49 +751,23 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-            if (name === "patch") {
-              const patchText = String(input.patch_text || "");
-              const targets = parsePatchTargets(patchText, workingDirRef.current);
-              for (const target of targets) {
-                const resolved = path.resolve(workingDirRef.current, target.filePath);
-                checkpoint(resolved, "patch");
-              }
-            } else if ((name === "write_file" || name === "edit_file" || name === "multi_edit_file") && (input.path || input.file_path)) {
-              const filePath = String(input.path || input.file_path);
-              const resolved = filePath.startsWith("/") ? filePath : path.resolve(workingDirRef.current, filePath);
-              checkpoint(resolved, name);
-            }
-            const preHookStartMs = Date.now();
-            const hookResult = runPreHooksWithBlocking(name, hooksConfigRef.current, workingDirRef.current, { input: JSON.stringify(input).substring(0, 10000) });
-            traceDispatch("wrapper:prehook_done", {
-              tool: name,
-              blocked: hookResult.blocked,
-              durationMs: Date.now() - preHookStartMs,
-              sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
-            });
-            if (hookResult.blocked) {
-              return `Tool blocked by pre-hook: ${hookResult.reason}`;
-            }
-
-            // ── Execute with ZERO renders blocking the event loop ──
             const executeStartMs = Date.now();
             traceDispatch("wrapper:before_execute", {
               tool: name,
               sinceWrapperEnterMs: executeStartMs - wrapperEnterMs,
             });
-            const result = await td.execute(input);
+            // Policy, prompt, hooks, checkpoints, lifecycle event, and the
+            // workspace mutation mutex live in executeToolCall. This wrapper
+            // only adapts UI state after the real execution has settled.
+            const result = await executeToolCall(name, input, () => td.execute(input), context);
             traceDispatch("wrapper:after_execute", {
               tool: name,
               executeDurationMs: Date.now() - executeStartMs,
               sinceWrapperEnterMs: Date.now() - wrapperEnterMs,
             });
 
-            if (name === "bash" && onBashCompleteRef.current) {
-              onBashCompleteRef.current();
-            }
-            runHooks("post", name, hooksConfigRef.current, workingDirRef.current, { output: (typeof result === "string" ? result : JSON.stringify(result)).substring(0, 10000), success: true });
             const resultStr =
-              typeof result === "string" ? result : JSON.stringify(result);
+              typeof result === "string" ? result : JSON.stringify(result) ?? "";
             logger.info("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
             const liveViewServer = liveViewServerRef.current;
@@ -811,49 +806,47 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             setStatus("streaming");
             return result;
           } catch (err) {
+            if (err instanceof ToolExecutionError && err.code === "denied") {
+              traceDispatch("wrapper:denied", { tool: name, sinceWrapperEnterMs: Date.now() - wrapperEnterMs });
+              runLifecycleHooks("permission_denied", hooksConfigRef.current, context.workspace, {
+                WORKERMILL_TOOL: name,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+              });
+              setStreamingToolCalls((prev) => [...prev, { ...info, status: "denied" as const }]);
+              setStatus("streaming");
+              return "Tool execution denied by user.";
+            }
             const errMsg =
               err instanceof Error ? err.message : String(err);
-            runLifecycleHooks("tool_error", hooksConfigRef.current, workingDirRef.current, {
-              WORKERMILL_TOOL: name,
-              WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-              WORKERMILL_TOOL_ERROR: errMsg.substring(0, 10000),
-            });
-            setStreamingToolCalls((prev) =>
-              prev.map((tc) =>
-                tc.id === callId
-                  ? {
-                      ...tc,
-                      status: "done" as const,
-                      result: `Error: ${errMsg}`,
-                    }
-                  : tc,
-              ),
-            );
+            setStreamingToolCalls((prev) => [...prev, { ...info, status: "done" as const, result: `Error: ${errMsg}` }]);
             setStatus("streaming");
             throw err;
+          } finally {
+            releasePending();
+            pendingTools?.delete(pending);
           }
         },
       };
     }
     return wrapped;
-  }, [checkPermission]);
+  }, [options.sandboxed, recordUsage]);
 
   /**
    * Return the tool set that should be active for this turn, respecting plan
    * mode which restricts to read-only tools.
    * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback(async (): Promise<Record<string, AnyToolDef>> => {
-    // Lazy-start MCP servers on first prompt submission (not on CLI launch)
-    const { ensureMCPStarted } = await import("../mcp-client.js");
-    await ensureMCPStarted();
-
-    const all = buildPermissionedTools();
+  const getActiveTools = useCallback(async (context: ToolExecutionContext, model: LanguageModel, session: Session, provider: string, modelName: string, mcpResources: MCPRunResources, browser: BrowserRunResources): Promise<Record<string, AnyToolDef>> => {
+    // Lazy-start only resources owned by this turn; another chat/headless run
+    // must never supply, start, or close this tool map.
+    await mcpResources.ensureStarted();
+    const all = buildPermissionedTools(context, model, session, provider, modelName, mcpResources.getToolDefinitions() as Record<string, AnyToolDef>, browser);
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
     for (const [name, def] of Object.entries(all)) {
-      // tool_search is read-only — always available even in plan mode
-      if (READ_TOOLS.has(name) || name === "tool_search") {
+      // Unknown/browser/MCP tools are mutation-capable until their own policy
+      // metadata says otherwise. A plan must never promote sub-agents either.
+      if (name !== "sub_agent" && getToolMeta(name).isReadOnly) {
         filtered[name] = def;
       }
     }
@@ -866,6 +859,34 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     (input: string, displayText?: string, submitOptions?: { modelOverride?: TurnModelOverride }) => {
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
+        if (abortRef.current) {
+          addSystemMessage("A response is still running. Cancel it before starting another prompt.");
+          return;
+        }
+        // A turn owns its cancellation boundary before *any* async work. This
+        // includes URL expansion and MCP startup, which previously escaped
+        // ESC because they ran before the controller existed.
+        const controller = new AbortController();
+        const runId = crypto.randomUUID();
+        pendingToolsByRunRef.current.set(runId, new Set());
+        abortRef.current = controller;
+        const isCurrentTurn = (): boolean => abortRef.current === controller;
+        let turnStarted = false;
+        let liveViewCompleted = false;
+        let mcpResources: MCPRunResources | undefined;
+        const browserResources = createBrowserRunResources({ runId, workspace: workingDirRef.current, signal: controller.signal });
+        setStatus("thinking");
+        setStatusDetail("");
+        try {
+        const turnConfig = resolveConfig();
+        mcpResources = createMCPRunResources({ runId, workspace: workingDirRef.current, signal: controller.signal });
+        const skipAutoDetect = isLocalProvider((submitOptions?.modelOverride?.provider ?? aiProviderRef.current) as AIProvider);
+        const mcpConfig = skipAutoDetect
+          ? (turnConfig?.mcp || {})
+          : await autoDetectMCPServersForRun(turnConfig?.mcp || {}, {
+            runId, workspace: workingDirRef.current, signal: controller.signal,
+          });
+        mcpResources.register(mcpConfig);
         const session = sessionRef.current;
         const turnOverride = submitOptions?.modelOverride;
         const turnProvider = (turnOverride?.provider ?? aiProviderRef.current) as AIProvider;
@@ -880,7 +901,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         // Resolve @file, @folder/, and @url references
         let resolvedInput = resolveFileReferences(input, workingDirRef.current);
         resolvedInput = resolveFolderReferences(resolvedInput, workingDirRef.current);
-        resolvedInput = await resolveUrlReferences(resolvedInput);
+        resolvedInput = await resolveUrlReferences(resolvedInput, controller.signal);
+        if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Cancelled", "AbortError");
         const inlineImageParse = parseImageReferences(resolvedInput, workingDirRef.current);
         const turnHadInlineImages = inlineImageParse.hasImages;
 
@@ -908,8 +930,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         setStatusDetail("");
         recentToolSignaturesRef.current = [];
 
-        const controller = new AbortController();
-        abortRef.current = controller;
+        turnStarted = true;
         if (liveViewServerRef.current) {
           liveViewServerRef.current.setAbortController(controller);
         }
@@ -922,17 +943,21 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
         let rateLimitRetries = 0;
         while (true) {
-        let partialInputTokens = 0;
-        let partialOutputTokens = 0;
+        const callId = `chat:${session.id}:${runId}:${rateLimitRetries}`;
+        let stepUsage: ReturnType<typeof usageFromSdk>;
+        let settledAttemptUsage: ReturnType<typeof usageFromSdk>;
+        let settledAttemptComplete = false;
+        let modelStarted = false;
         try {
+          const executionContext = createExecutionContext(runId, controller.signal);
           // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
-          const activeTools = (await getActiveTools()) as ToolSet;
+          const activeTools = (await getActiveTools(executionContext, turnModel, session, turnProvider, turnModelName, mcpResources, browserResources)) as ToolSet;
           // Cache the system prompt — rebuilding it every turn changes the
           // text (memories, disk files), which invalidates Ollama's KV cache
           // and forces a full prompt reprocessing (~30s for 30B models).
           // Build once on first submit; only rebuild on explicit request.
           if (!systemPromptRef.current) {
-            systemPromptRef.current = buildSystemPrompt(workingDirRef.current)
+            systemPromptRef.current = buildSystemPrompt(workingDirRef.current, mcpResources.getTools())
               + formatDeferredToolsForPrompt(deferredToolsRef.current);
           }
           const systemPrompt = systemPromptRef.current;
@@ -944,6 +969,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             messageCount: session.messages.length,
           });
           const agentStreamStartMs = Date.now();
+          modelStarted = true;
           const stream = streamText({
             model: turnModel,
             system: systemPrompt,
@@ -967,9 +993,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             ...(["openai"].includes(turnProvider)
               ? { providerOptions: { openai: { reasoningSummary: "detailed" } } }
               : {}),
-            onStepFinish({ text, toolCalls: calls, usage: stepUsage, reasoningText }) {
-              partialInputTokens += stepUsage?.inputTokens ?? 0;
-              partialOutputTokens += stepUsage?.outputTokens ?? 0;
+            onStepFinish({ text, toolCalls: calls, usage: sdkStepUsage, reasoningText }) {
+              stepUsage = addUsage(stepUsage, usageFromSdk(sdkStepUsage));
               const stepStartMs = Date.now();
               const callCount = calls?.length ?? 0;
               traceDispatch("onStepFinish:enter", {
@@ -1021,8 +1046,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
 
           // ---- Finalise ---- //
+          await Promise.allSettled([...(pendingToolsByRunRef.current.get(runId) ?? [])]);
           let finalText = await stream.text;
-          const usage = await stream.totalUsage;
+          const { usage, usageComplete } = settleUsage(stepUsage, usageFromSdk(await stream.totalUsage));
+          settledAttemptUsage = usage;
+          settledAttemptComplete = usageComplete;
+          // Some transports finish the iterator normally on abort and still
+          // resolve buffered text/usage. That is not a successful turn.
+          if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Cancelled", "AbortError");
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
           const turnElapsedMs = Date.now() - turnStartTime;
@@ -1091,18 +1122,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             });
           }
 
-          // Cost tracking — use active refs, not startup options (user may have switched via /model).
-          const totalCostBefore = costTrackerRef.current.getTotalCost();
-          costTrackerRef.current.addUsage(
-            "agent",
-            turnProvider,
-            turnModelName,
-            inputTokens,
-            outputTokens,
-          );
-          const totalCostAfter = costTrackerRef.current.getTotalCost();
-          const turnCost = Math.max(0, totalCostAfter - totalCostBefore);
-          setCost(totalCostAfter);
+          // Record after final totals settle. The call ID makes retries and
+          // callback replays first-wins without converting missing usage to 0.
+          recordUsage(session, { callId, persona: "agent", provider: turnProvider, model: turnModelName, usage, usageComplete });
+          const turnCost = costTrackerRef.current.getLedgerSnapshot().calls.find((call) => call.callId === callId)?.estimatedApiCost ?? 0;
 
           // Commit the full response to Static as one message.
           // Tool calls and text were kept in the dynamic area until now.
@@ -1148,8 +1171,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStreamingText("");
 
           // Persist assistant text in the session.
+          controller.signal.throwIfAborted();
           addMessage(session, "assistant", finalText);
-          session.totalTokens += inputTokens + outputTokens;
           logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
 
           // Track tok/s for this model — use active refs, not startup options
@@ -1159,36 +1182,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             const tps = Math.round(outputTokens / agentElapsed);
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
-
-          // Enrich session with cost data before saving
-          const usageSummary = costTrackerRef.current.getUsageSummary();
-          session.totalCostUsd = Math.round(usageSummary.total.cost * 10000) / 10000;
-          session.costByModel = usageSummary.byModel.map(m => ({
-            key: m.key,
-            provider: m.provider,
-            model: m.model,
-            inputTokens: m.inputTokens,
-            outputTokens: m.outputTokens,
-            costUsd: Math.round(m.cost * 10000) / 10000,
-            roles: m.roles,
-          }));
-          session.costByRole = {
-            worker: {
-              inputTokens: usageSummary.byRole.worker.inputTokens,
-              outputTokens: usageSummary.byRole.worker.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.worker.cost * 10000) / 10000,
-            },
-            planner: {
-              inputTokens: usageSummary.byRole.planner.inputTokens,
-              outputTokens: usageSummary.byRole.planner.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.planner.cost * 10000) / 10000,
-            },
-            reviewer: {
-              inputTokens: usageSummary.byRole.reviewer.inputTokens,
-              outputTokens: usageSummary.byRole.reviewer.outputTokens,
-              costUsd: Math.round(usageSummary.byRole.reviewer.cost * 10000) / 10000,
-            },
-          };
 
           // Save session to disk.
           saveSession(session);
@@ -1264,7 +1257,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               turnModel,
               plainMessages,
               compactionResult.level,
+              undefined,
+              controller.signal,
+              async (compactionUsage) => {
+                recordUsage(session, {
+                  callId: `chat-compaction:${session.id}:${compactionUsage.callId}`,
+                  persona: "compaction", provider: turnProvider, model: turnModelName,
+                  usage: compactionUsage.usage,
+                  usageComplete: compactionUsage.usageComplete,
+                });
+              },
             );
+            controller.signal.throwIfAborted();
             session.messages = compacted.map((m) => ({
               role: m.role,
               content: m.content,
@@ -1282,40 +1286,34 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           if (liveViewServerRef.current) {
             liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+            liveViewCompleted = true;
           }
-          setStatus("idle");
-          abortRef.current = null;
           break; // success — exit retry loop
 
         } catch (err) {
+          if (modelStarted) {
+            recordUsage(session, {
+              callId, persona: "agent", provider: turnProvider, model: turnModelName,
+              usage: settledAttemptUsage ?? stepUsage, usageComplete: settledAttemptComplete,
+            });
+            saveSession(session);
+          }
           // --- Rate limit retry ---
           const rateLimit = isRateLimitError(err);
-          if (rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          if (!controller.signal.aborted && rateLimit && rateLimitRetries < MAX_RATE_LIMIT_RETRIES
+            && (pendingToolsByRunRef.current.get(runId)?.size ?? 0) === 0) {
             rateLimitRetries++;
             const waitSec = Math.ceil(rateLimit.retryAfterMs / 1000);
             logger.info("Rate limited, retrying", { attempt: rateLimitRetries, waitSec });
             setStatusDetail(`Rate limited — retrying in ${waitSec}s (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
             setStreamingText("");
             setStreamingToolCalls([]);
-            await new Promise(resolve => setTimeout(resolve, rateLimit.retryAfterMs));
+            await waitForRetry(controller.signal, rateLimit.retryAfterMs);
             continue; // retry the streamText call
           }
 
-          abortRef.current = null;
-
-          if (err instanceof Error && err.name === "AbortError") {
+          if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
             // Cancellation -- already handled by cancel().
-            // Preserve any tokens consumed in completed steps before the abort.
-            trackAbortCost(
-              partialInputTokens,
-              partialOutputTokens,
-              "agent",
-              turnProvider,
-              turnModelName,
-              costTrackerRef.current,
-              setCost,
-            );
-            setStatus("idle");
             return;
           }
 
@@ -1348,42 +1346,87 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStreamingToolCalls([]);
           if (liveViewServerRef.current) {
             liveViewServerRef.current.emitStoryComplete(1, Date.now() - turnStartTime);
+            liveViewCompleted = true;
           }
-          setStatus("idle");
           break; // error handled — exit retry loop
         }
         } // end while
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          const errText = err instanceof Error ? err.message : String(err);
+          logger.error("Agent startup error", { error: errText });
+          if (isCurrentTurn()) {
+            setMessages((prev) => [...prev, {
+              id: crypto.randomUUID(), role: "assistant" as const, content: `Error: ${errText}`,
+              timestamp: new Date().toISOString(),
+            }]);
+          }
+        } finally {
+          const cancelled = controller.signal.aborted;
+          controller.abort(new Error("Interactive turn settled"));
+          const pending = pendingToolsByRunRef.current.get(runId);
+          const cleanup = await Promise.allSettled([
+            ...(pending ? [...pending] : []),
+            Promise.resolve().then(() => cancelAndWaitForRunProcesses(runId)),
+            Promise.resolve().then(() => cleanupScopedBackgroundProcesses(runId)),
+            Promise.resolve().then(() => mcpResources?.close()),
+            Promise.resolve().then(() => shutdownLSPRun(runId)),
+            Promise.resolve().then(() => browserResources.dispose()),
+          ]);
+          pendingToolsByRunRef.current.delete(runId);
+          // A child can finish its own model call while this turn is handling
+          // an error. Persist only after every owned callback has drained.
+          const cleanupFailures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (sessionRef.current) {
+            try {
+              saveSession(sessionRef.current);
+            } catch (error) {
+              cleanupFailures.push({ status: "rejected", reason: error });
+            }
+          }
+          if (isCurrentTurn()) {
+            // Cancellation leaves completed tool calls inspectable in the
+            // transcript, then clears the live area only after all owned work
+            // has drained. This avoids stale pending rows on the next turn.
+            const completedToolCalls = streamingToolCallsRef.current;
+            if (cancelled && completedToolCalls.length > 0) {
+              setMessages((previous) => [...previous, {
+                id: crypto.randomUUID(), role: "assistant" as const, content: "",
+                toolCalls: completedToolCalls, timestamp: new Date().toISOString(),
+              }]);
+            }
+            setStreamingText("");
+            setStreamingToolCalls([]);
+            if (cleanupFailures.length > 0) {
+              const detail = cleanupFailures.map((result) => String(result.reason)).join("; ");
+              logger.error("Interactive turn cleanup failed", { error: detail });
+              setMessages((prev) => [...prev, {
+                id: crypto.randomUUID(), role: "assistant" as const,
+                content: `Error: cleanup failed: ${detail}`, timestamp: new Date().toISOString(),
+              }]);
+            }
+            if (turnStarted && cancelled && !liveViewCompleted && liveViewServerRef.current) liveViewServerRef.current.emitStoryComplete(1, 0);
+            abortRef.current = null;
+            setStatus("idle");
+            setStatusDetail("");
+          }
+        }
       })();
     },
-    [getActiveTools],
+    [createExecutionContext, getActiveTools],
   );
 
   // ------- cancel() -------- //
 
   const cancel = useCallback(() => {
+    pendingPermissionResolveRef.current?.();
     if (abortRef.current) {
       abortRef.current.abort();
-      abortRef.current = null;
-      killActiveProcess();
-      cleanupAllBackgroundProcesses();
     }
-    // Commit any completed tool calls to Static before clearing.
-    const currentToolCalls = streamingToolCallsRef.current;
-    if (currentToolCalls.length > 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant" as const,
-          content: "",
-          toolCalls: currentToolCalls,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
-    setStatus("idle");
-    setStreamingText("");
-    setStreamingToolCalls([]);
+    // The turn finalizer publishes idle only after its model/tools/processes
+    // have all settled. Clearing it here used to allow a new turn to race an
+    // old process group and made cancellation look complete too early.
+    setStatusDetail("Cancelling…");
     setPermissionRequest(null);
   }, []);
 
@@ -1536,39 +1579,68 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- forceCompact() — user-triggered compaction -------- //
 
   const forceCompact = useCallback(async (focusInstructions?: string): Promise<{ before: number; after: number }> => {
+    if (abortRef.current) throw new Error("Wait for the current operation to finish before compacting.");
     const session = sessionRef.current;
     const model = modelRef.current;
+    const provider = aiProviderRef.current;
+    const modelName = activeModelNameRef.current;
     if (!model || !session || session.messages.length === 0) {
       return { before: 0, after: 0 };
     }
 
-    const beforeChars = session.messages.reduce((s, m) => s + m.content.length, 0);
-    const plainMessages = session.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus("thinking");
+    setStatusDetail("Compacting conversation…");
+    try {
+      const originalMessages = session.messages;
+      const beforeChars = originalMessages.reduce((s, m) => s + m.content.length, 0);
+      const plainMessages = originalMessages.map((m) => ({ role: m.role, content: m.content }));
+      const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions, controller.signal,
+        async (compactionUsage) => {
+          recordUsage(session, {
+            callId: `chat-compaction:${session.id}:${compactionUsage.callId}`,
+            persona: "compaction", provider, model: modelName,
+            usage: compactionUsage.usage,
+            usageComplete: compactionUsage.usageComplete,
+          });
+        });
+      controller.signal.throwIfAborted();
+      if (sessionRef.current !== session || session.messages !== originalMessages) {
+        throw new Error("Session changed during compaction; history was not replaced.");
+      }
+      session.messages = compacted.map((m) => ({
+        role: m.role, content: m.content, timestamp: new Date().toISOString(),
+      }));
+      saveSession(session);
 
-    const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions);
-    session.messages = compacted.map((m) => ({
-      role: m.role,
-      content: m.content,
-      timestamp: new Date().toISOString(),
-    }));
-    saveSession(session);
+      runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
+        WORKERMILL_COMPACTION_LEVEL: "soft",
+        WORKERMILL_COMPACTION_TRIGGER: "manual",
+        WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
+        WORKERMILL_MESSAGES_AFTER: String(compacted.length),
+      });
 
-    runLifecycleHooks("compact", hooksConfigRef.current, workingDirRef.current, {
-      WORKERMILL_COMPACTION_LEVEL: "soft",
-      WORKERMILL_COMPACTION_TRIGGER: "manual",
-      WORKERMILL_MESSAGES_BEFORE: String(plainMessages.length),
-      WORKERMILL_MESSAGES_AFTER: String(compacted.length),
-    });
-
-    const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
-    const afterTokens = Math.round(afterChars / 4);
-    // Update the displayed token count so the status bar reflects compaction
-    setTokens(afterTokens);
-    return { before: Math.round(beforeChars / 4), after: afterTokens };
-  }, []);
+      const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
+      const afterTokens = Math.round(afterChars / 4);
+      setTokens(afterTokens);
+      return { before: Math.round(beforeChars / 4), after: afterTokens };
+    } finally {
+      controller.abort();
+      // The compaction callback can report a failed or cancelled invocation;
+      // preserve that accounting even when conversation history is unchanged.
+      try {
+        if (sessionRef.current === session) saveSession(session);
+      } catch (error) {
+        logger.error("Failed to save compaction usage", { error: error instanceof Error ? error.message : String(error) });
+      }
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setStatus("idle");
+        setStatusDetail("");
+      }
+    }
+  }, [recordUsage]);
 
   // ------- Tool count helper (for orchestrator) -------- //
 
@@ -1596,6 +1668,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     addSystemMessage,
     addUserMessage,
     setCost,
+    applyExternalUsageLedger,
     allowTool,
     denyTool,
     permissionMode: permMode,

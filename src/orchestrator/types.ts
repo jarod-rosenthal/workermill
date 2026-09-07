@@ -1,4 +1,7 @@
-import type { UsageSummary } from "../cost-tracker.js";
+import type { LedgerSnapshot, UsageSummary } from "../cost-tracker.js";
+import type { RepositoryFingerprintResult, VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
+import type { QualityGateResult } from "./gates.js";
+import type { ReviewOutcome } from "./review.js";
 
 export interface OrchestrationOutput {
   /** Log a message from a persona */
@@ -27,6 +30,8 @@ export interface OrchestrationOutput {
   updateCost?: (cost: number) => void;
   /** Update usage summary in the UI (optional — noop if not provided) */
   updateUsageSummary?: (summary: UsageSummary) => void;
+  /** Update per-call usage evidence (optional — noop if not provided). */
+  updateUsageLedger?: (snapshot: LedgerSnapshot) => void;
   /** Update tokens-per-second for a model (optional — noop if not provided) */
   updateTokPerSec?: (providerModel: string, tokPerSec: number) => void;
   /** Notify live view of file changes (optional — noop if not provided) */
@@ -92,15 +97,25 @@ export interface SharedContext {
 
 /** Result from a completed (or failed) orchestration — used by /retry. */
 export interface OrchestrationResult {
+  /** Persisted evidence identity, including failed and cancelled runs. */
+  runId?: string;
+  /** Set by orchestration finalization, after completion and owned cleanup. */
+  outcome?: Exclude<import("../run-manifest.js").RunOutcome, "in_progress">;
+  terminalReason?: import("../run-manifest.js").TerminalReason;
+  /** Final persisted per-call usage evidence, when this run observed model calls. */
+  usageLedger?: LedgerSnapshot;
   stories: Story[];
   completedStoryIds: string[];
   featureBranch: string | null;
   userTask: string;
   mainBranch?: string;
+  /** Final hooks changed source after verified publication, so retry remains available. */
+  completionInvalidated?: boolean;
 }
 
 /** Retry plan — skips planning, resumes from first incomplete story. */
 export interface RetryPlan {
+  priorRunId?: string;
   stories: Story[];
   completedStoryIds: string[];
   featureBranch: string;
@@ -112,4 +127,18 @@ export interface StandaloneReviewResult {
   decision: "approved" | "revision_needed" | "rejected";
   feedback: string;
   reviewText: string;
+}
+
+/** Evidence that must still describe the repository when publication begins. */
+export interface CompletionEvidence {
+  fingerprint: VerifiedRepositoryFingerprint;
+  gateResults: QualityGateResult[];
+  reviewOutcome: ReviewOutcome;
+}
+
+export function fingerprintsMatch(
+  expected: VerifiedRepositoryFingerprint,
+  actual: RepositoryFingerprintResult,
+): actual is VerifiedRepositoryFingerprint {
+  return actual.verified && actual.head === expected.head && actual.digest === expected.digest;
 }

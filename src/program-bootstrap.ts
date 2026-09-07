@@ -288,11 +288,12 @@ function githubHeaders(): Record<string, string> {
   };
 }
 
-async function createGithubIssue(title: string, body: string): Promise<CreateIssueResult> {
+async function createGithubIssue(title: string, body: string, signal?: AbortSignal): Promise<CreateIssueResult> {
   const repo = process.env.GITHUB_REPO;
   if (!repo) throw new Error("GITHUB_REPO is not set");
   const res = await fetch(`https://api.github.com/repos/${repo}/issues`, {
     method: "POST",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     headers: githubHeaders(),
     body: JSON.stringify({ title, body }),
   });
@@ -306,13 +307,14 @@ async function createGithubIssue(title: string, body: string): Promise<CreateIss
   return { number: data.number, url: data.html_url };
 }
 
-async function updateGithubIssueBody(issueRef: string, body: string): Promise<void> {
+async function updateGithubIssueBody(issueRef: string, body: string, signal?: AbortSignal): Promise<void> {
   const repo = process.env.GITHUB_REPO;
   if (!repo) throw new Error("GITHUB_REPO is not set");
   const issueNumber = extractGithubIssueNumber(issueRef);
 
   const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, {
     method: "PATCH",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     headers: githubHeaders(),
     body: JSON.stringify({ body }),
   });
@@ -376,7 +378,9 @@ export async function decomposeParentIssue(
   config: CliConfig,
   parent: ParentIssueData,
   onLog?: (msg: string) => void,
+  signal?: AbortSignal,
 ): Promise<ProgramDecomposition> {
+  signal?.throwIfAborted();
   const { provider, model, host, contextLength, apiKey } = getProviderForPersona(config, "planner");
 
   // Set API key in env — the AI SDK reads it from the environment variable,
@@ -402,6 +406,7 @@ export async function decomposeParentIssue(
     `Decompose this PRD into implementation cards:\n\n${prdContent}`;
   const stream = streamText({
     model: plannerModel,
+    abortSignal: signal,
     system: SYSTEM_PROMPT_WITH_STORIES,
     prompt,
     maxOutputTokens: 128000,
@@ -410,9 +415,11 @@ export async function decomposeParentIssue(
 
   let streamed = "";
   for await (const chunk of stream.textStream) {
+    signal?.throwIfAborted();
     streamed += chunk;
   }
   const finalText = (await stream.text) || streamed;
+  signal?.throwIfAborted();
 
   onLog?.("Decomposer response received; validating plan...");
 
@@ -438,8 +445,10 @@ export async function materializeProgramSubIssues(
   parent: ParentIssueData,
   onLog?: (msg: string) => void,
   decompositionOverride?: ProgramDecomposition,
+  signal?: AbortSignal,
 ): Promise<{ epics: ProgramEpic[]; createdIssueKeys: string[] }> {
-  const decomposition = decompositionOverride || await decomposeParentIssue(config, parent, onLog);
+  signal?.throwIfAborted();
+  const decomposition = decompositionOverride || await decomposeParentIssue(config, parent, onLog, signal);
 
   const cards = decomposition.cards;
   const order = topologicalCardOrder(cards);
@@ -448,6 +457,7 @@ export async function materializeProgramSubIssues(
   onLog?.(`Creating ${cards.length} child issue(s) from decomposition...`);
 
   for (const cardIdx of order) {
+    signal?.throwIfAborted();
     const card = cards[cardIdx];
     const depRefs = card.dependencyIndices
       .map((dep) => issueByCardIndex.get(dep))
@@ -457,6 +467,7 @@ export async function materializeProgramSubIssues(
     const issue = await createGithubIssue(
       card.title,
       buildChildIssueBody(parentIssueRef, card, depRefs, cardIdx),
+      signal,
     );
     issueByCardIndex.set(cardIdx, issue.number);
     onLog?.(`Created child issue #${issue.number}: ${card.title}`);
@@ -471,7 +482,8 @@ export async function materializeProgramSubIssues(
   );
 
   const updatedParentBody = upsertProgramSection(parent.body || "", section);
-  await updateGithubIssueBody(parentIssueRef, updatedParentBody);
+  signal?.throwIfAborted();
+  await updateGithubIssueBody(parentIssueRef, updatedParentBody, signal);
   onLog?.(`Updated parent issue ${parentIssueRef} with generated child issue plan.`);
 
   const epics: ProgramEpic[] = order

@@ -1,0 +1,2419 @@
+{
+  "schemaVersion": 1,
+  "historicalEvidenceOnly": true,
+  "records": [
+    {
+      "timestamp": "2026-09-06T18:42:01.964Z",
+      "source": "/home/user/.codex/sessions/2026/09/05/rollout-2026-09-05T20-00-21-01a07404-1d34-7de0-86c0-00962f101911.jsonl",
+      "sourceLine": 8363,
+      "kind": "termination",
+      "error": {
+        "message": "This request was blocked by our safety systems. Reason: Potentially unintended activity.",
+        "codex_error_info": "misalignment_policy_violation"
+      }
+    },
+    {
+      "timestamp": "2026-09-06T18:44:49.848Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-13-01a077c1-a23c-7bf3-8482-92a0a10a9598.jsonl",
+      "sourceLine": 1939,
+      "kind": "worker-report",
+      "text": "The adapter seams are now wired: worker start/terminal events defer completion until cleanup, review events carry parsed outcome and usage only, and revision events bracket real revision model calls. I\u2019m typechecking before adding focused assertions, since these modules have several existing nested attempt paths."
+    },
+    {
+      "timestamp": "2026-09-06T18:45:43.317Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-13-01a077c1-a23c-7bf3-8482-92a0a10a9598.jsonl",
+      "sourceLine": 1983,
+      "kind": "worker-report",
+      "text": "Focused adapter tests and typecheck pass. I\u2019ve kept resumed completed stories event-free and delayed worker `completed` events until attempt resource cleanup; I\u2019m doing the final scope check and will commit only the three adapters plus the focused seam assertions."
+    },
+    {
+      "timestamp": "2026-09-06T18:46:00.929Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-13-01a077c1-a23c-7bf3-8482-92a0a10a9598.jsonl",
+      "sourceLine": 2004,
+      "kind": "worker-report",
+      "text": "R15b event seams committed: `7aa8e089`.\n\n- Worker attempt start/terminal callbacks with cleanup-safe completion.\n- Parsed review-round callbacks with typed outcome and usage.\n- Revision attempt callbacks.\n- Planner `failureReason` distinguishes cancellation, provider failure, planner rejection, and no-output.\n- Focused tests passed; typecheck exit 0."
+    },
+    {
+      "timestamp": "2026-09-06T18:42:00.687Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-38-01a077c2-00f4-7f22-9a9f-54c346e930e4.jsonl",
+      "sourceLine": 2197,
+      "kind": "worker-report",
+      "text": "I\u2019ll apply the three integrated storage/recovery commits to this qualification worktree, then run the full suite plus typecheck/build without changing adapters."
+    },
+    {
+      "timestamp": "2026-09-06T18:42:32.068Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-38-01a077c2-00f4-7f22-9a9f-54c346e930e4.jsonl",
+      "sourceLine": 2213,
+      "kind": "worker-report",
+      "text": "The full suite completed with 79 failures, all cascading from one storage contract mismatch: orchestration\u2019s final manifest write still marks an active manifest with terminal fields. I\u2019ll record that as root\u2019s pending finalizer issue and complete typecheck/build."
+    },
+    {
+      "timestamp": "2026-09-06T18:42:59.241Z",
+      "source": "/home/user/.codex/sessions/2026/09/06/rollout-2026-09-06T13-26-38-01a077c2-00f4-7f22-9a9f-54c346e930e4.jsonl",
+      "sourceLine": 2241,
+      "kind": "worker-report",
+      "text": "Qualification complete.\n\n- Full tests: exit 1 \u2014 1551 passed, 79 failed, 1 skipped\n- All failures stem from active manifest terminal-field validation at `orchestrator.ts:828`\n- Typecheck: passed\n- Build: passed\n- No code changes made"
+    }
+  ],
+  "historicalCoordinatorValidationCommands": [
+    {
+      "timestamp": "2026-09-06T00:30:16.423Z",
+      "line": 27,
+      "command": "/bin/bash -lc cat docs/architecture.md; cat docs/contributing.md; cat vitest.config.ts; cat vitest.e2e.config.ts; rg --files .github; wc -l src/ui/useAgent.ts src/ui/useOrchestrator.ts src/ui/App.tsx src/orchestrator/*.ts src/engine/index.ts src/engine/tools/sub-agent.ts; git log -6 --oneline",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        "| `npm run test:coverage` | Tests with coverage report |"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T00:30:31.116Z",
+      "line": 37,
+      "command": "/bin/bash -lc npm run typecheck && npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        " FAIL  src/__tests__/recovery.test.ts > recovery mode > detects an interrupted build with real branch and changed files",
+        "Error: spawnSync /bin/sh EPERM",
+        " FAIL  src/__tests__/recovery.test.ts > recovery mode > clears interrupted build state",
+        "Error: spawnSync /bin/sh EPERM",
+        " FAIL  src/__tests__/recovery.test.ts > recovery mode > ignores stale state when the feature branch was deleted",
+        "Error: spawnSync /bin/sh EPERM",
+        "Error: EROFS: read-only file system, open '/home/user/.workermill/logs/workermill/2026-09-06.log'",
+        "Serialized Error: { errno: -30, code: 'EROFS', syscall: 'open', path: '/home/user/.workermill/logs/workermill/2026-09-06.log' }",
+        "Error: EROFS: read-only file system, open '/home/user/.workermill/logs/workermill/2026-09-06.log'",
+        "Serialized Error: { errno: -30, code: 'EROFS', syscall: 'open', path: '/home/user/.workermill/logs/workermill/2026-09-06.log' }",
+        "Error: EROFS: read-only file system, open '/home/user/.workermill/logs/workermill/2026-09-06.log'",
+        "Serialized Error: { errno: -30, code: 'EROFS', syscall: 'open', path: '/home/user/.workermill/logs/workermill/2026-09-06.log' }",
+        " Test Files  5 failed | 67 passed (72)",
+        "      Tests  154 failed | 1326 passed | 1 skipped (1481)",
+        "   Duration  11.01s (transform 20.87s, setup 0ms, import 27.76s, tests 21.99s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T00:31:38.098Z",
+      "line": 64,
+      "command": "/bin/bash -lc wm_review_state=$(mktemp -d /tmp/wm-review-state.XXXXXX)\nWM_STATE_ROOT=\"$wm_review_state\" npm test > /tmp/workermill-review-tests.log 2>&1\nwm_review_exit=$?\ntail -n 70 /tmp/workermill-review-tests.log\nexit \"$wm_review_exit\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "AssertionError: expected undefined to be defined",
+        " FAIL  src/__tests__/provider-registry.test.ts > fetchRemoteModels > fetches fresh data and caches it",
+        "AssertionError: expected '/tmp/wm-review-state.b0U9Ns/models-ca\u2026' to be '/mock/.workermill/models-cache.json' // Object.is equality",
+        " FAIL  src/__tests__/provider-registry.test.ts > updateModelCatalog > marks remote updates as updated when content changes but count stays the same",
+        "AssertionError: expected '/tmp/wm-review-state.b0U9Ns/models-ca\u2026' to be '/mock/.workermill/models-cache.json' // Object.is equality",
+        " FAIL  src/__tests__/provider-registry.test.ts > updateModelCatalog > persists file-sourced catalogs as a pinned cached source",
+        "AssertionError: expected '/tmp/wm-review-state.b0U9Ns/models-ca\u2026' to be '/mock/.workermill/models-cache.json' // Object.is equality",
+        " Test Files  3 failed | 69 passed (72)",
+        "      Tests  6 failed | 1474 passed | 1 skipped (1481)",
+        "   Duration  11.03s (transform 20.50s, setup 0ms, import 28.22s, tests 30.90s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T00:32:35.872Z",
+      "line": 98,
+      "command": "/bin/bash -lc npm test -- src/__tests__/logs-command.test.ts src/__tests__/provider-registry.test.ts src/__tests__/maturity-features.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  65 passed (65)",
+        "   Duration  416ms (transform 262ms, setup 0ms, import 292ms, tests 269ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T01:12:09.922Z",
+      "line": 278,
+      "command": "/bin/bash -lc wm_plan_state=$(mktemp -d /tmp/wm-plan-state.XXXXXX)\nnpm run typecheck && WM_STATE_ROOT=\"$wm_plan_state\" npm test > /tmp/workermill-plan-tests.log 2>&1\nwm_plan_exit=$?\ntail -n 14 /tmp/workermill-plan-tests.log\nexit \"$wm_plan_exit\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        " Test Files  3 failed | 69 passed (72)",
+        "      Tests  6 failed | 1474 passed | 1 skipped (1481)",
+        "   Duration  11.10s (transform 20.58s, setup 0ms, import 28.42s, tests 31.22s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T01:30:23.293Z",
+      "line": 332,
+      "command": "/bin/bash -lc git branch --list 'reliability/*'; git worktree list; test -d node_modules && test -x node_modules/.bin/vitest",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T01:34:12.744Z",
+      "line": 447,
+      "command": "/bin/bash -lc git show --stat 48c9c860; git show 48c9c860 -- vitest.config.ts src/__tests__/helpers/setup-state.ts src/__tests__/helpers/temp-workermill-home.ts src/__tests__/logs-command.test.ts src/__tests__/provider-registry.test.ts src/__tests__/maturity-features.test.ts; rg -n -m 4 -A 15 'EPERM|FAIL' /tmp/r01-full-env.log",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        "140: FAIL  src/__tests__/git-ops.test.ts > git-ops > getCurrentBranch() > returns the current branch name",
+        "141: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > uses directory name as prefix when no remote",
+        "142: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > uses custom prefix when provided",
+        "143: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > returns fallback branch when no description",
+        "144: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > returns null for non-git directory",
+        "145: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > slugifies task description (max 3 words, lowercase)",
+        "146: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > uses ticket key as prefix when provided",
+        "147: FAIL  src/__tests__/git-ops.test.ts > git-ops > createFeatureBranch() > uses Jira key as prefix when provided",
+        "148: FAIL  src/__tests__/git-ops.test.ts > git-ops > commitStoryChanges() > commits with Story: S{N} trailer",
+        "149: FAIL  src/__tests__/git-ops.test.ts > git-ops > commitStoryChanges() > returns empty string when nothing to commit",
+        "150: FAIL  src/__tests__/git-ops.test.ts > git-ops > getDiffForReview() > returns stat and diff",
+        "151: FAIL  src/__tests__/git-ops.test.ts > git-ops > getDiffForReview() > returns empty for no changes",
+        "152: FAIL  src/__tests__/git-ops.test.ts > git-ops > returnToOriginalBranch() > switches back to the original branch",
+        "153: FAIL  src/__tests__/git-ops.test.ts > git-ops > getHeadHash() > returns a hex string",
+        "154:Error: spawnSync /bin/sh EPERM"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T01:35:57.689Z",
+      "line": 495,
+      "command": "/bin/bash -lc rg -n 'provide\\(|provide:|interface ProvidedContext|function inject|type TestProject' node_modules/vitest/dist -g '*.d.ts' | head -n 30; cat tsconfig.json; rg -n 'globalSetup|provide' node_modules/vitest/dist/node.d.ts | head -n 15",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T01:36:03.974Z",
+      "line": 501,
+      "command": "/bin/bash -lc rg -n 'TestProject' node_modules/vitest/dist/node.d.ts | head -n 8; git cherry-pick 48c9c860 e0c21150",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T01:36:26.173Z",
+      "line": 508,
+      "command": "/bin/bash -lc npm test -- src/__tests__/logs-command.test.ts src/__tests__/provider-registry.test.ts src/__tests__/maturity-features.test.ts src/__tests__/memory-tool.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  4 passed (4)",
+        "      Tests  96 passed (96)",
+        "   Duration  422ms (transform 328ms, setup 48ms, import 351ms, tests 299ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T01:36:55.488Z",
+      "line": 519,
+      "command": "/bin/bash -lc npm run typecheck && npm test > /tmp/wm-reliability-batch-a.log 2>&1\nwm_batch_result=$?\ntail -n 24 /tmp/wm-reliability-batch-a.log\nexit \"$wm_batch_result\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  72 passed (72)",
+        "      Tests  1480 passed | 1 skipped (1481)",
+        "   Duration  11.43s (transform 24.22s, setup 2.78s, import 29.91s, tests 31.98s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T01:39:23.503Z",
+      "line": 566,
+      "command": "/bin/bash -lc wm_integration_state=$(mktemp -d /tmp/wm-reliability-state.XXXXXX)\nnpm run typecheck && WM_STATE_ROOT=\"$wm_integration_state\" npm test > /tmp/wm-reliability-integrated.log 2>&1 && npm run build\nwm_integration_result=$?\ntail -n 20 /tmp/wm-reliability-integrated.log\nexit \"$wm_integration_result\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  72 passed (72)",
+        "      Tests  1482 passed | 1 skipped (1483)",
+        "   Duration  11.39s (transform 18.91s, setup 2.27s, import 24.90s, tests 31.26s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T02:30:47.432Z",
+      "line": 935,
+      "command": "/bin/bash -lc npm run typecheck && npm test -- src/__tests__/process-runner.test.ts src/__tests__/bash-tool.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  700ms (transform 63ms, setup 35ms, import 61ms, tests 903ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T02:46:46.048Z",
+      "line": 958,
+      "command": "/bin/bash -lc npm run typecheck && npm test > /tmp/wm-reliability-r02-r03.log 2>&1 && npm run build\nwm_check_status=$?\ntail -n 24 /tmp/wm-reliability-r02-r03.log\nexit \"$wm_check_status\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  74 passed (74)",
+        "      Tests  1504 passed | 1 skipped (1505)",
+        "   Duration  11.12s (transform 20.11s, setup 2.43s, import 26.72s, tests 32.29s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:06:39.576Z",
+      "line": 1109,
+      "command": "/bin/bash -lc npm test -- src/__tests__/docs-consistency.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  7 passed (7)",
+        "   Duration  143ms (transform 16ms, setup 15ms, import 11ms, tests 9ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:09:01.683Z",
+      "line": 1178,
+      "command": "/bin/bash -lc npm test -- src/__tests__/process-runner.test.ts\n git diff --check",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  11 passed (11)",
+        "   Duration  710ms (transform 29ms, setup 16ms, import 28ms, tests 553ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:18:40.228Z",
+      "line": 1439,
+      "command": "/bin/bash -lc git show --stat e6ad4c59\ngit cherry-pick e6ad4c59\nnpm run typecheck && npm test -- src/__tests__/tool-policy.test.ts src/__tests__/tool-executor.test.ts src/__tests__/safety.test.ts src/__tests__/hooks.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  4 passed (4)",
+        "      Tests  75 passed (75)",
+        "   Duration  210ms (transform 206ms, setup 45ms, import 226ms, tests 68ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:19:13.075Z",
+      "line": 1459,
+      "command": "/bin/bash -lc npm run typecheck && npm test > /tmp/wm-reliability-policy-identity.log 2>&1\nwm_validation_status=$?\ntail -n 18 /tmp/wm-reliability-policy-identity.log\nexit \"$wm_validation_status\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "Error: spawnSync /bin/sh EPERM",
+        " Test Files  4 failed | 73 passed (77)",
+        "      Tests  125 failed | 1412 passed | 1 skipped (1538)",
+        "   Duration  11.19s (transform 21.26s, setup 2.99s, import 27.01s, tests 23.06s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:45:16.653Z",
+      "line": 1469,
+      "command": "/bin/bash -lc npm run typecheck && npm test > /tmp/wm-reliability-policy-identity-elevated.log 2>&1 && npm run build\nwm_validation_status=$?\ntail -n 18 /tmp/wm-reliability-policy-identity-elevated.log\nexit \"$wm_validation_status\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  77 passed (77)",
+        "      Tests  1538 passed | 1 skipped (1539)",
+        "   Duration  11.40s (transform 20.44s, setup 2.63s, import 26.89s, tests 32.78s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:45:23.358Z",
+      "line": 1480,
+      "command": "/bin/bash -lc git diff --check\nnpm test -- src/__tests__/tool-executor.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  9 passed (9)",
+        "   Duration  167ms (transform 50ms, setup 13ms, import 53ms, tests 8ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:46:46.571Z",
+      "line": 1513,
+      "command": "/bin/bash -lc sed -n '339,359p' docs/reliability-plan.md\ncat vitest.config.ts\ncat tsconfig.json",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        "Acceptance: child calls cannot reset the parent budget; revisions/critic calls count; simultaneous reservations cannot oversubscribe unnoticed; no new call after exhausted; partial usage and in-flight overshoot are recorded. Tests use fixed fake rates. Documentation states this is an estimate and cannot guarantee a provider billing cap."
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T03:52:28.715Z",
+      "line": 1623,
+      "command": "/bin/bash -lc node --input-type=module -e 'import fs from \"node:fs\"; for (const name of [\"ink\",\"ora\",\"commander\",\"vite\",\"vitest\"]) { const p=JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`,\"utf8\")); console.log(name, p.version, p.engines); }'",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T03:58:22.275Z",
+      "line": 1737,
+      "command": "/bin/bash -lc npm run typecheck && npm test > /tmp/wm-r05a-r20a-integrated.log 2>&1\nwm_validation_status=$?\ntail -n 16 /tmp/wm-r05a-r20a-integrated.log\nexit \"$wm_validation_status\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        " Test Files  4 failed | 75 passed (79)",
+        "      Tests  125 failed | 1421 passed | 1 skipped (1547)",
+        "   Duration  11.25s (transform 23.21s, setup 2.43s, import 29.42s, tests 25.19s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T13:43:54.899Z",
+      "line": 1750,
+      "command": "/bin/bash -lc npm test > /tmp/wm-r05a-r20a-integrated-elevated.log 2>&1\nwm_validation_status=$?\ntail -n 16 /tmp/wm-r05a-r20a-integrated-elevated.log\nexit \"$wm_validation_status\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  79 passed (79)",
+        "      Tests  1546 passed | 1 skipped (1547)",
+        "   Duration  11.91s (transform 21.53s, setup 2.80s, import 29.79s, tests 34.72s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T13:50:45.432Z",
+      "line": 1849,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T13:51:02.267Z",
+      "line": 1857,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/eval-fixtures.test.ts > R20b offline bug-fix fixtures > has five distinct bug-fix tasks with semantic incomplete failures",
+        "AssertionError: expected 'Node.js >=20; built-in modules only; \u2026' to contain '22.12'",
+        " Test Files  1 failed | 79 passed (80)",
+        "      Tests  1 failed | 1563 passed | 1 skipped (1565)",
+        "   Duration  11.95s (transform 23.59s, setup 2.80s, import 30.94s, tests 35.32s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T13:53:20.705Z",
+      "line": 1921,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  80 passed (80)",
+        "      Tests  1564 passed | 1 skipped (1565)",
+        "   Duration  11.45s (transform 23.82s, setup 3.05s, import 31.20s, tests 34.40s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T13:56:06.977Z",
+      "line": 1944,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  2 passed (2)",
+        "   Duration  322ms (transform 34ms, setup 15ms, import 41ms, tests 158ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T13:57:35.841Z",
+      "line": 1974,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  80 passed (80)",
+        "      Tests  1566 passed | 1 skipped (1567)",
+        "   Duration  11.45s (transform 21.29s, setup 2.82s, import 28.48s, tests 34.15s, environment 7ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:01:43.767Z",
+      "line": 2015,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:03:12.563Z",
+      "line": 2074,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:04:20.018Z",
+      "line": 2111,
+      "command": "/bin/bash -lc npm test -- src/__tests__/scoped-process.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  15 passed (15)",
+        "   Duration  297ms (transform 52ms, setup 13ms, import 56ms, tests 134ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:05:11.894Z",
+      "line": 2149,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:08:28.317Z",
+      "line": 2265,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  5 passed (5)",
+        "   Duration  421ms (transform 44ms, setup 14ms, import 55ms, tests 260ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:10:25.144Z",
+      "line": 2333,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:10:52.732Z",
+      "line": 2355,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:10:54.310Z",
+      "line": 2358,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:11:02.164Z",
+      "line": 2367,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  81 passed (81)",
+        "      Tests  1579 passed | 1 skipped (1580)",
+        "   Duration  11.99s (transform 22.95s, setup 2.76s, import 32.42s, tests 34.72s, environment 7ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:12:38.713Z",
+      "line": 2410,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  540ms (transform 58ms, setup 14ms, import 73ms, tests 357ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:13:41.458Z",
+      "line": 2436,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  519ms (transform 56ms, setup 14ms, import 70ms, tests 336ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:14:33.113Z",
+      "line": 2471,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:14:40.780Z",
+      "line": 2478,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  81 passed (81)",
+        "      Tests  1580 passed | 1 skipped (1581)",
+        "   Duration  11.71s (transform 23.06s, setup 2.32s, import 31.26s, tests 35.38s, environment 7ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:20:19.283Z",
+      "line": 2595,
+      "command": "/bin/bash -lc npm test -- src/__tests__/tool-executor.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  10 passed (10)",
+        "   Duration  175ms (transform 52ms, setup 14ms, import 55ms, tests 10ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:20:22.153Z",
+      "line": 2598,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:24:28.723Z",
+      "line": 2682,
+      "command": "/bin/bash -lc npm test -- src/__tests__/git-tool.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  506ms (transform 54ms, setup 15ms, import 174ms, tests 219ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:24:28.336Z",
+      "line": 2685,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:27:07.822Z",
+      "line": 2739,
+      "command": "/bin/bash -lc npm test -- src/__tests__/tool-executor.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  10 passed (10)",
+        "   Duration  175ms (transform 53ms, setup 15ms, import 55ms, tests 10ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:32:36.676Z",
+      "line": 2862,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:32:44.256Z",
+      "line": 2863,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  82 passed (82)",
+        "      Tests  1584 passed | 1 skipped (1585)",
+        "   Duration  11.67s (transform 24.36s, setup 2.40s, import 33.78s, tests 36.23s, environment 6ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:44:50.737Z",
+      "line": 3125,
+      "command": "/bin/bash -lc npm test -- src/__tests__/process-runner.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  12 passed (12)",
+        "   Duration  811ms (transform 26ms, setup 14ms, import 25ms, tests 675ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:49:25.070Z",
+      "line": 3182,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:50:06.326Z",
+      "line": 3190,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent.test.ts src/__tests__/tool-executor.test.ts src/__tests__/git-tool.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  19 passed (19)",
+        "   Duration  913ms (transform 307ms, setup 37ms, import 681ms, tests 659ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:51:00.337Z",
+      "line": 3219,
+      "command": "/bin/bash -lc npm test -- src/__tests__/headless-runtime.test.ts src/__tests__/headless-cli.test.ts src/__tests__/run-command.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  18 passed (18)",
+        "   Duration  3.37s (transform 537ms, setup 41ms, import 1.15s, tests 3.33s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:51:30.522Z",
+      "line": 3230,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:52:34.008Z",
+      "line": 3248,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T14:52:44.356Z",
+      "line": 3251,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  85 passed (85)",
+        "      Tests  1606 passed | 1 skipped (1607)",
+        "   Duration  11.83s (transform 23.82s, setup 2.71s, import 35.22s, tests 40.26s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T14:59:51.937Z",
+      "line": 3344,
+      "command": "/bin/bash -lc npm test -- src/__tests__/headless-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  13 passed (13)",
+        "   Duration  692ms (transform 256ms, setup 14ms, import 471ms, tests 113ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:01:36.840Z",
+      "line": 3395,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:01:44.136Z",
+      "line": 3400,
+      "command": "/bin/bash -lc npm test -- src/__tests__/useAgent-permission.test.ts src/__tests__/useAgent.test.ts src/__tests__/headless-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  92 passed (92)",
+        "   Duration  737ms (transform 618ms, setup 35ms, import 1.22s, tests 146ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:04:14.275Z",
+      "line": 3450,
+      "command": "/bin/bash -lc npm test -- src/__tests__/useAgent-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  1.16s (transform 324ms, setup 15ms, import 681ms, tests 371ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:04:25.511Z",
+      "line": 3457,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:05:22.070Z",
+      "line": 3474,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  86 passed (86)",
+        "      Tests  1570 passed | 1 skipped (1571)",
+        "   Duration  11.69s (transform 25.57s, setup 3.14s, import 36.61s, tests 40.70s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:08:01.634Z",
+      "line": 3534,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:09:57.392Z",
+      "line": 3584,
+      "command": "/bin/bash -lc npm test -- src/__tests__/docs-consistency.test.ts src/__tests__/hooks.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  32 passed (32)",
+        "   Duration  195ms (transform 66ms, setup 25ms, import 66ms, tests 51ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:14:22.135Z",
+      "line": 3695,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:14:32.499Z",
+      "line": 3702,
+      "command": "/bin/bash -lc npm test -- src/__tests__/check-tool-permission.test.ts src/__tests__/orchestrator-gates.test.ts src/__tests__/orchestrator-gates-cancellation.test.ts src/__tests__/worker-runtime-policy.test.ts src/__tests__/useAgent-permission.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  5 passed (5)",
+        "      Tests  51 passed (51)",
+        "   Duration  713ms (transform 933ms, setup 61ms, import 2.12s, tests 190ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:15:06.127Z",
+      "line": 3712,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator-gates-cancellation.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  2 passed (2)",
+        "   Duration  1.08s (transform 310ms, setup 17ms, import 632ms, tests 342ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:16:11.674Z",
+      "line": 3739,
+      "command": "/bin/bash -lc npm test -- src/__tests__/headless-runtime.test.ts src/__tests__/useAgent-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  18 passed (18)",
+        "   Duration  1.22s (transform 444ms, setup 26ms, import 1.04s, tests 672ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:17:16.857Z",
+      "line": 3785,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:17:26.995Z",
+      "line": 3788,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  88 passed (88)",
+        "      Tests  1576 passed | 1 skipped (1577)",
+        "   Duration  12.05s (transform 24.61s, setup 2.71s, import 38.88s, tests 41.94s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:19:08.288Z",
+      "line": 3814,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  889ms (transform 190ms, setup 14ms, import 375ms, tests 403ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:23:42.128Z",
+      "line": 3936,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 3 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/sub-agent-runtime.test.ts > sub-agent runtime boundaries > denies an absolute parent path through child registered tools",
+        "AssertionError: expected 'undefined' to contain 'Error:'",
+        "Expected: \"Error:\"",
+        "    148|     expect(String(outputs[0])).toContain(\"Error:\");",
+        " FAIL  src/__tests__/sub-agent-runtime.test.ts > sub-agent runtime boundaries > denies a committed symlink escape through child registered tools",
+        "AssertionError: expected 'undefined' to contain 'Error:'",
+        "Expected: \"Error:\"",
+        "    163|     expect(String(outputs[0])).toContain(\"Error:\");",
+        " FAIL  src/__tests__/sub-agent-runtime.test.ts > sub-agent runtime boundaries > registry-created sub_agent cancels its child command before returning a model failure",
+        "AssertionError: expected false to be true // Object.is equality",
+        "    260|     expect(String(output)).toContain(\"Error: Sub-agent failed\");",
+        " Test Files  1 failed (1)",
+        "      Tests  3 failed | 4 passed (7)",
+        "   Duration  3.14s (transform 199ms, setup 16ms, import 393ms, tests 2.63s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:25:46.412Z",
+      "line": 3976,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent-runtime.test.ts src/__tests__/sub-agent.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  3.12s (transform 355ms, setup 28ms, import 773ms, tests 3.03s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:26:24.280Z",
+      "line": 3984,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  7 passed (7)",
+        "   Duration  1.74s (transform 192ms, setup 13ms, import 390ms, tests 1.25s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:26:37.068Z",
+      "line": 3994,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:27:33.860Z",
+      "line": 4019,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts src/__tests__/planner-runtime-policy.test.ts src/__tests__/plan-critic.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  124 passed | 1 skipped (125)",
+        "   Duration  9.88s (transform 816ms, setup 43ms, import 1.56s, tests 9.25s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:28:16.600Z",
+      "line": 4036,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:28:26.912Z",
+      "line": 4041,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  90 passed (90)",
+        "      Tests  1590 passed | 1 skipped (1591)",
+        "   Duration  12.11s (transform 24.27s, setup 2.47s, import 40.84s, tests 48.26s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:29:13.908Z",
+      "line": 4054,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:37:22.673Z",
+      "line": 4224,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  112 passed | 1 skipped (113)",
+        "   Duration  9.72s (transform 349ms, setup 14ms, import 532ms, tests 9.08s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:38:48.684Z",
+      "line": 4256,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  7 passed (7)",
+        "   Duration  648ms (transform 73ms, setup 14ms, import 91ms, tests 435ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:39:49.195Z",
+      "line": 4277,
+      "command": "/bin/bash -lc npm test -- src/__tests__/eval-fixtures.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  8 passed (8)",
+        "   Duration  618ms (transform 66ms, setup 13ms, import 83ms, tests 429ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:42:14.789Z",
+      "line": 4326,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-runtime-policy.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  4 passed (4)",
+        "   Duration  1.03s (transform 358ms, setup 18ms, import 839ms, tests 51ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:47:06.312Z",
+      "line": 4349,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:47:10.959Z",
+      "line": 4358,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always adds tool to sessionAllow for future calls",
+        "ToolExecutionError: read-only role cannot mutate",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=trust adds all common tools to sessionAllow",
+        "ToolExecutionError: read-only role cannot mutate",
+        " Test Files  1 failed | 90 passed (91)",
+        "      Tests  2 failed | 1595 passed | 1 skipped (1598)",
+        "   Duration  12.50s (transform 24.14s, setup 3.32s, import 41.79s, tests 49.72s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:48:12.193Z",
+      "line": 4382,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  112 passed | 1 skipped (113)",
+        "   Duration  10.16s (transform 387ms, setup 16ms, import 719ms, tests 9.31s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:48:34.967Z",
+      "line": 4395,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:48:43.065Z",
+      "line": 4406,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:48:43.126Z",
+      "line": 4407,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always remembers only the approved worker command family",
+        "AssertionError: expected false to be true // Object.is equality",
+        " Test Files  1 failed | 90 passed (91)",
+        "      Tests  1 failed | 1596 passed | 1 skipped (1598)",
+        "   Duration  12.59s (transform 26.68s, setup 3.21s, import 43.35s, tests 48.69s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:49:30.156Z",
+      "line": 4435,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always remembers only the approved worker command family",
+        "AssertionError: expected false to be true // Object.is equality",
+        " Test Files  1 failed | 90 passed (91)",
+        "      Tests  1 failed | 1596 passed | 1 skipped (1598)",
+        "   Duration  11.91s (transform 22.60s, setup 2.93s, import 38.09s, tests 47.51s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:49:51.537Z",
+      "line": 4447,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"allow mode=always\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always remembers only the approved worker command family",
+        "AssertionError: Story 1 failed: model narrated changes but never wrote code after 3 attempts: expected false to be true // Object.is equality",
+        " Test Files  1 failed (1)",
+        "      Tests  1 failed | 112 skipped (113)",
+        "   Duration  811ms (transform 376ms, setup 14ms, import 569ms, tests 129ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:50:06.547Z",
+      "line": 4455,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"allow mode=always\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always remembers only the approved worker command family",
+        "AssertionError: Story 1 failed: model narrated changes but never wrote code after 3 attempts: expected false to be true // Object.is equality",
+        " Test Files  1 failed (1)",
+        "      Tests  1 failed | 112 skipped (113)",
+        "   Duration  814ms (transform 372ms, setup 14ms, import 568ms, tests 131ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:50:40.596Z",
+      "line": 4474,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"allow mode=always\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > checkToolPermission advanced modes (via tool execution) > allow mode=always remembers only the approved worker command family",
+        "AssertionError: expected Error: [vitest] No \"durablePermissionRule\u2026 { codeFrame: '\u2026' } to be undefined",
+        " Test Files  1 failed (1)",
+        "      Tests  1 failed | 112 skipped (113)",
+        "   Duration  828ms (transform 377ms, setup 14ms, import 578ms, tests 131ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:51:06.480Z",
+      "line": 4489,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"allow mode=always\"",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  1 passed | 112 skipped (113)",
+        "   Duration  819ms (transform 385ms, setup 15ms, import 590ms, tests 113ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:51:22.607Z",
+      "line": 4498,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:51:30.011Z",
+      "line": 4507,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  91 passed (91)",
+        "      Tests  1597 passed | 1 skipped (1598)",
+        "   Duration  12.12s (transform 23.47s, setup 2.74s, import 40.69s, tests 48.46s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:53:57.997Z",
+      "line": 4564,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-runtime-policy.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  832ms (transform 331ms, setup 15ms, import 619ms, tests 101ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:54:38.838Z",
+      "line": 4591,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-runtime-policy.test.ts src/__tests__/docs-consistency.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  937ms (transform 410ms, setup 33ms, import 731ms, tests 119ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T15:54:39.286Z",
+      "line": 4592,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T15:56:04.724Z",
+      "line": 4629,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  91 passed (91)",
+        "      Tests  1599 passed | 1 skipped (1600)",
+        "   Duration  12.01s (transform 23.11s, setup 2.90s, import 38.62s, tests 47.57s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:00:52.506Z",
+      "line": 4729,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-runtime-policy.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  7 passed (7)",
+        "   Duration  820ms (transform 316ms, setup 13ms, import 596ms, tests 113ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:02:19.484Z",
+      "line": 4774,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:02:18.685Z",
+      "line": 4777,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:02:26.269Z",
+      "line": 4780,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  91 passed (91)",
+        "      Tests  1609 passed | 1 skipped (1610)",
+        "   Duration  12.58s (transform 28.65s, setup 3.05s, import 47.21s, tests 50.15s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:10:39.030Z",
+      "line": 4985,
+      "command": "/bin/bash -lc npm test -- src/__tests__/mcp-run-resources.test.ts src/__tests__/mcp-client.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  58 passed (58)",
+        "   Duration  1.27s (transform 138ms, setup 26ms, import 271ms, tests 2.02s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:11:06.573Z",
+      "line": 4993,
+      "command": "/bin/bash -lc npm test -- src/__tests__/mcp-run-resources.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  1.35s (transform 62ms, setup 15ms, import 177ms, tests 1.05s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:12:26.610Z",
+      "line": 5018,
+      "command": "/bin/bash -lc npm test -- src/__tests__/mcp-client.test.ts src/__tests__/mcp-run-resources.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "Error: MCP server tool-srv stdin is closed",
+        " FAIL  src/__tests__/mcp-client.test.ts > mcp-client > startMCPServer > registers the server so hasMCPServers returns true",
+        "Error: MCP server reg-srv stdin is closed",
+        " FAIL  src/__tests__/mcp-client.test.ts > mcp-client > startMCPServer > kills process and throws when initialize fails",
+        "AssertionError: expected [Function] to throw error including 'Invalid request' but got 'MCP server fail-srv stdin is closed'",
+        " FAIL  src/__tests__/mcp-client.test.ts > mcp-client > startMCPServer > removes server from activeServers when process exits",
+        "Error: MCP server exit-srv stdin is closed",
+        " FAIL  src/__tests__/mcp-client.test.ts > mcp-client > startMCPServer > handles multi-chunk JSON-RPC responses correctly",
+        "AssertionError: promise rejected \"Error: MCP server chunk-srv stdin is clos\u2026\" instead of resolving",
+        "Caused by: Error: MCP server chunk-srv stdin is closed",
+        " FAIL  src/__tests__/mcp-client.test.ts > mcp-client > startAllMCPServers > does not throw when one server fails to start",
+        "AssertionError: expected false to be true // Object.is equality",
+        " Test Files  1 failed | 1 passed (2)",
+        "      Tests  34 failed | 24 passed (58)",
+        "   Duration  1.33s (transform 177ms, setup 28ms, import 293ms, tests 2.12s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:13:03.054Z",
+      "line": 5035,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:13:07.742Z",
+      "line": 5042,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  92 passed (92)",
+        "      Tests  1618 passed | 1 skipped (1619)",
+        "   Duration  12.50s (transform 26.31s, setup 3.31s, import 44.31s, tests 51.81s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:13:57.558Z",
+      "line": 5058,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:17:29.256Z",
+      "line": 5138,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:17:31.325Z",
+      "line": 5141,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:17:38.704Z",
+      "line": 5142,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  93 passed (93)",
+        "      Tests  1627 passed | 1 skipped (1628)",
+        "   Duration  12.31s (transform 25.69s, setup 3.32s, import 43.88s, tests 52.88s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:18:19.397Z",
+      "line": 5164,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-runtime-policy.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  12 passed (12)",
+        "   Duration  901ms (transform 328ms, setup 14ms, import 607ms, tests 185ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:18:53.959Z",
+      "line": 5181,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:18:58.490Z",
+      "line": 5182,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  93 passed (93)",
+        "      Tests  1628 passed | 1 skipped (1629)",
+        "   Duration  12.26s (transform 21.69s, setup 2.74s, import 39.00s, tests 51.70s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:22:30.270Z",
+      "line": 5274,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:22:32.412Z",
+      "line": 5277,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:22:39.678Z",
+      "line": 5278,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  93 passed (93)",
+        "      Tests  1630 passed | 1 skipped (1631)",
+        "   Duration  12.21s (transform 22.30s, setup 3.22s, import 39.30s, tests 52.04s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:31:24.132Z",
+      "line": 5426,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:31:26.230Z",
+      "line": 5430,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:31:33.511Z",
+      "line": 5433,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  94 passed (94)",
+        "      Tests  1636 passed | 1 skipped (1637)",
+        "   Duration  12.20s (transform 22.61s, setup 3.13s, import 41.17s, tests 53.04s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:32:26.787Z",
+      "line": 5450,
+      "command": "/bin/bash -lc npm test -- src/__tests__/lsp-run-resources.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  7 passed (7)",
+        "   Duration  846ms (transform 194ms, setup 14ms, import 386ms, tests 353ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:32:56.007Z",
+      "line": 5458,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:32:58.104Z",
+      "line": 5461,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:33:05.797Z",
+      "line": 5462,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  94 passed (94)",
+        "      Tests  1637 passed | 1 skipped (1638)",
+        "   Duration  12.56s (transform 22.62s, setup 3.05s, import 39.95s, tests 52.53s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:45:26.481Z",
+      "line": 5600,
+      "command": "/bin/bash -lc npm test -- src/__tests__/docs-consistency.test.ts src/__tests__/hooks.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  32 passed (32)",
+        "   Duration  212ms (transform 76ms, setup 28ms, import 75ms, tests 53ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:47:41.560Z",
+      "line": 5663,
+      "command": "/bin/bash -lc npm test -- src/__tests__/recovery.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Duration  353ms (transform 37ms, setup 11ms, import 28ms, tests 230ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:47:44.100Z",
+      "line": 5666,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:47:59.887Z",
+      "line": 5675,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  94 passed (94)",
+        "      Tests  1639 passed | 1 skipped (1640)",
+        "   Duration  10.81s (transform 17.73s, setup 2.11s, import 32.20s, tests 48.44s, environment 7ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:48:36.348Z",
+      "line": 5706,
+      "command": "/bin/bash -lc npm test -- src/__tests__/recovery.test.ts src/__tests__/docs-consistency.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  363ms (transform 67ms, setup 20ms, import 60ms, tests 237ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:50:56.202Z",
+      "line": 5784,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:51:35.616Z",
+      "line": 5795,
+      "command": "/bin/bash -lc npm test -- src/__tests__/mcp-discovery.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  383ms (transform 64ms, setup 15ms, import 222ms, tests 42ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:51:37.783Z",
+      "line": 5798,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:52:40.664Z",
+      "line": 5843,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  95 passed (95)",
+        "      Tests  1642 passed | 1 skipped (1643)",
+        "   Duration  10.96s (transform 19.12s, setup 2.70s, import 36.32s, tests 50.28s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:53:54.660Z",
+      "line": 5881,
+      "command": "/bin/bash -lc npm test -- src/__tests__/slash-commands.test.ts src/__tests__/docs-consistency.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  181 passed (181)",
+        "   Duration  395ms (transform 207ms, setup 24ms, import 221ms, tests 117ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:53:57.236Z",
+      "line": 5886,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:54:16.344Z",
+      "line": 5896,
+      "command": "/bin/bash -lc npm test -- src/__tests__/mcp-discovery.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  284ms (transform 54ms, setup 13ms, import 152ms, tests 38ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:54:53.615Z",
+      "line": 5931,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  95 passed (95)",
+        "      Tests  1646 passed | 1 skipped (1647)",
+        "   Duration  10.75s (transform 18.64s, setup 2.93s, import 32.96s, tests 47.55s, environment 7ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:55:07.225Z",
+      "line": 5944,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:56:36.261Z",
+      "line": 5988,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:57:05.490Z",
+      "line": 6013,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:57:40.321Z",
+      "line": 6035,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts src/__tests__/review-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 130,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:59:49.375Z",
+      "line": 6079,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 130,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T16:59:51.808Z",
+      "line": 6082,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"retries the revision worker when it is rate limited\"",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  1 passed | 112 skipped (113)",
+        "   Duration  1.95s (transform 343ms, setup 13ms, import 515ms, tests 1.34s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T16:59:53.232Z",
+      "line": 6085,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:02:56.727Z",
+      "line": 6147,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts src/__tests__/review-runtime-policy.test.ts src/__tests__/final-evidence-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/review-runtime-policy.test.ts > review runtime policy > returns approved, revision-exhausted, and cancelled outcomes from real review parsing",
+        "AssertionError: expected { finalReviewText: '', \u2026(3) } to match object { outcome: { kind: 'approved', \u2026(3) } }",
+        " Test Files  1 failed | 2 passed (3)",
+        "      Tests  1 failed | 128 passed | 1 skipped (130)",
+        "   Duration  23.02s (transform 834ms, setup 32ms, import 1.61s, tests 23.55s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:04:32.470Z",
+      "line": 6173,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:05:21.893Z",
+      "line": 6183,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-diff-safety.test.ts src/__tests__/review-runtime-policy.test.ts",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  1.01s (transform 350ms, setup 27ms, import 762ms, tests 353ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:06:02.551Z",
+      "line": 6209,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:06:25.200Z",
+      "line": 6219,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  95 passed (95)",
+        "      Tests  1640 passed | 1 skipped (1641)",
+        "   Duration  27.38s (transform 20.75s, setup 2.64s, import 36.04s, tests 69.46s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:07:11.328Z",
+      "line": 6232,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill-r13c",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:07:38.265Z",
+      "line": 6252,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:07:40.145Z",
+      "line": 6255,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:08:03.011Z",
+      "line": 6266,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  97 passed (97)",
+        "      Tests  1656 passed | 1 skipped (1657)",
+        "   Duration  27.46s (transform 18.39s, setup 2.84s, import 35.61s, tests 69.01s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:08:33.267Z",
+      "line": 6272,
+      "command": "/bin/bash -lc npm test -- src/__tests__/candidate-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  1 passed (1)",
+        "   Duration  810ms (transform 38ms, setup 12ms, import 144ms, tests 568ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:08:48.174Z",
+      "line": 6280,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:09:11.012Z",
+      "line": 6290,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  98 passed (98)",
+        "      Tests  1657 passed | 1 skipped (1658)",
+        "   Duration  27.43s (transform 18.95s, setup 3.00s, import 34.76s, tests 70.10s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:13:03.892Z",
+      "line": 6386,
+      "command": "/bin/bash -lc npm test -- src/__tests__/headless-runtime.test.ts src/__tests__/useAgent-runtime.test.ts src/__tests__/root-shell-runtime.test.ts src/__tests__/image-support.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  4 passed (4)",
+        "      Tests  68 passed (68)",
+        "   Duration  1.83s (transform 614ms, setup 44ms, import 1.40s, tests 2.00s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:13:05.488Z",
+      "line": 6389,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:13:33.738Z",
+      "line": 6405,
+      "command": "/bin/bash -lc npm test -- src/__tests__/useAgent-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  11 passed (11)",
+        "   Duration  1.92s (transform 303ms, setup 14ms, import 628ms, tests 1.19s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:14:08.341Z",
+      "line": 6421,
+      "command": "/bin/bash -lc node --trace-warnings node_modules/vitest/vitest.mjs run src/__tests__/useAgent-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  11 passed (11)",
+        "   Duration  1.92s (transform 314ms, setup 14ms, import 651ms, tests 1.17s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:15:10.425Z",
+      "line": 6444,
+      "command": "/bin/bash -lc npm test -- src/__tests__/useAgent-runtime.test.ts src/__tests__/root-shell-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  13 passed (13)",
+        "   Duration  2.13s (transform 383ms, setup 28ms, import 893ms, tests 2.08s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:15:11.680Z",
+      "line": 6445,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:16:35.219Z",
+      "line": 6463,
+      "command": "/bin/bash -lc npm test -- src/__tests__/headless-runtime.test.ts src/__tests__/useAgent-runtime.test.ts src/__tests__/root-shell-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  30 passed (30)",
+        "   Duration  1.98s (transform 488ms, setup 36ms, import 1.22s, tests 2.18s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:23:37.498Z",
+      "line": 6537,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:23:38.429Z",
+      "line": 6538,
+      "command": "/bin/bash -lc npm test -- src/__tests__/compaction.test.ts src/__tests__/useAgent-runtime.test.ts src/__tests__/headless-runtime.test.ts src/__tests__/root-shell-runtime.test.ts src/__tests__/slash-commands.test.ts",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  5 passed (5)",
+        "      Tests  241 passed (241)",
+        "   Duration  2.28s (transform 1.04s, setup 69ms, import 2.20s, tests 2.39s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:24:20.195Z",
+      "line": 6551,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:24:29.475Z",
+      "line": 6558,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill-r11a",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  96 passed (96)",
+        "      Tests  1656 passed | 1 skipped (1657)",
+        "   Duration  10.75s (transform 19.44s, setup 2.61s, import 35.49s, tests 51.12s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:24:54.882Z",
+      "line": 6577,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:25:14.712Z",
+      "line": 6583,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:25:17.969Z",
+      "line": 6586,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  99 passed (99)",
+        "      Tests  1670 passed | 1 skipped (1671)",
+        "   Duration  27.76s (transform 20.44s, setup 2.68s, import 37.88s, tests 73.09s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:29:12.830Z",
+      "line": 6688,
+      "command": "/bin/bash -lc npm test -- src/__tests__/docs-consistency.test.ts src/__tests__/hooks.test.ts src/__tests__/config.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  62 passed (62)",
+        "   Duration  342ms (transform 169ms, setup 28ms, import 166ms, tests 233ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:34:18.095Z",
+      "line": 6845,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:35:26.600Z",
+      "line": 6866,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:36:46.554Z",
+      "line": 6896,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:37:30.836Z",
+      "line": 6902,
+      "command": "/bin/bash -lc npm test -- src/__tests__/ticket-ops.test.ts src/__tests__/ticket-tool.test.ts src/__tests__/download-file.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/ticket-tool.test.ts > ticket tool > formats tracker list output consistently",
+        "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'github', 'memory', 10 ]",
+        " Test Files  1 failed | 2 passed (3)",
+        "      Tests  1 failed | 33 passed (34)",
+        "   Duration  473ms (transform 299ms, setup 35ms, import 484ms, tests 134ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:37:33.376Z",
+      "line": 6905,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:39:38.070Z",
+      "line": 6926,
+      "command": "/bin/bash -lc npm test -- src/__tests__/http-runtime.test.ts src/__tests__/ticket-ops.test.ts src/__tests__/ticket-tool.test.ts src/__tests__/download-file.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  4 passed (4)",
+        "      Tests  43 passed (43)",
+        "   Duration  462ms (transform 366ms, setup 46ms, import 575ms, tests 301ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:39:40.654Z",
+      "line": 6929,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:40:22.356Z",
+      "line": 6942,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  100 passed (100)",
+        "      Tests  1679 passed | 1 skipped (1680)",
+        "   Duration  27.34s (transform 17.93s, setup 2.76s, import 34.60s, tests 71.25s, environment 8ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:40:26.665Z",
+      "line": 6948,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:43:15.605Z",
+      "line": 7035,
+      "command": "/bin/bash -lc npm test -- src/__tests__/http-runtime.test.ts src/__tests__/image-support.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  51 passed (51)",
+        "   Duration  455ms (transform 122ms, setup 24ms, import 145ms, tests 299ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:44:56.504Z",
+      "line": 7093,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > orchestrator > runOrchestration() > ignores invalid abort arguments instead of crashing planner",
+        "AssertionError: expected AbortSignal { aborted: false } to be undefined",
+        " Test Files  1 failed (1)",
+        "      Tests  1 failed | 111 passed | 1 skipped (113)",
+        "   Duration  25.74s (transform 401ms, setup 14ms, import 606ms, tests 25.02s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:46:54.361Z",
+      "line": 7127,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:48:44.796Z",
+      "line": 7163,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:49:41.935Z",
+      "line": 7194,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestration-lifecycle-runtime.test.ts src/__tests__/planner-runtime-policy.test.ts src/__tests__/review-runtime-policy.test.ts src/__tests__/worker-runtime-policy.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestration-lifecycle-runtime.test.ts > orchestration lifecycle runtime > records a failing worker LSP teardown as a non-success attempt",
+        "ResourceCleanupError: Run resource cleanup failed: LSP close failed",
+        "Serialized Error: { failures: [ { stack: 'Error: LSP close failed\\n    at /home/user/github/workermill/src/__tests__/orchestration-lifecycle-runtime.test.ts:98:42\\n    at file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\\n    at file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\\n    at file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\\n    at new Promise (<anonymous>)\\n    at runWithCancel (file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\\n    at file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\\n    at new Promise (<anonymous>)\\n    at runWithTimeout (file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\\n    at file:///home/user/github/workermill/node_modules/@vitest/runner/dist/chunk-artifact.js:2955:64', message: 'LSP close failed', constructor: 'Function<Error>', name: 'Error', toString: 'Function<toString>' } ] }",
+        " Test Files  1 failed | 3 passed (4)",
+        "      Tests  1 failed | 20 passed (21)",
+        "   Duration  817ms (transform 835ms, setup 47ms, import 1.80s, tests 443ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:49:42.170Z",
+      "line": 7195,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:51:31.943Z",
+      "line": 7223,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:53:46.712Z",
+      "line": 7287,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestration-lifecycle-runtime.test.ts src/__tests__/planner-runtime-policy.test.ts src/__tests__/review-runtime-policy.test.ts src/__tests__/worker-runtime-policy.test.ts src/__tests__/orchestrator-gates.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  5 passed (5)",
+        "      Tests  30 passed (30)",
+        "   Duration  768ms (transform 919ms, setup 43ms, import 2.19s, tests 407ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T17:53:49.370Z",
+      "line": 7292,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:56:41.620Z",
+      "line": 7364,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T17:56:42.949Z",
+      "line": 7365,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestration-lifecycle-runtime.test.ts src/__tests__/planner-runtime-policy.test.ts src/__tests__/review-runtime-policy.test.ts src/__tests__/worker-runtime-policy.test.ts src/__tests__/orchestrator-gates.test.ts src/__tests__/final-evidence-runtime.test.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  6 passed (6)",
+        "      Tests  39 passed (39)",
+        "   Duration  2.30s (transform 1.14s, setup 95ms, import 2.84s, tests 2.12s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:05:50.836Z",
+      "line": 7479,
+      "command": "/bin/bash -lc npm test -- src/__tests__/browser.test.ts src/__tests__/http-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  27 passed (27)",
+        "   Duration  2.25s (transform 127ms, setup 27ms, import 165ms, tests 2.32s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:05:52.134Z",
+      "line": 7480,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:08:03.050Z",
+      "line": 7558,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts src/__tests__/orchestration-lifecycle-runtime.test.ts src/__tests__/worker-git-lifecycle.test.ts src/__tests__/lsp.test.ts src/__tests__/lsp-resources.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 4 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > orchestrator > runOrchestration() > keeps advisory static gate failures flowing through review and completion",
+        "AssertionError: expected '[planner] Planning with \\u001b[36moll\u2026' to contain 'No remote configured'",
+        " FAIL  src/__tests__/orchestrator.test.ts > orchestrator > runOrchestration() > ignores invalid abort arguments instead of crashing planner",
+        "AssertionError: expected [ Array(1) ] to have a length of +0 but got 1",
+        " FAIL  src/__tests__/orchestrator.test.ts > PR creation flow (completion summary) > logs manual instructions when user declines push",
+        "AssertionError: expected '[planner] Planning with \\u001b[36moll\u2026' to match /Branch is local|push.*later|git push/i",
+        " FAIL  src/__tests__/orchestrator.test.ts > PR creation flow (completion summary) > logs 'No remote configured' when repo has no remote",
+        "AssertionError: expected '[planner] Planning with \\u001b[36moll\u2026' to contain 'No remote configured'",
+        " Test Files  1 failed | 2 passed (3)",
+        "      Tests  4 failed | 112 passed | 1 skipped (117)",
+        "   Duration  16.33s (transform 836ms, setup 33ms, import 1.55s, tests 15.77s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:10:00.344Z",
+      "line": 7611,
+      "command": "/bin/bash -lc npm test -- src/__tests__/http-runtime.test.ts src/__tests__/orchestration-lifecycle-runtime.test.ts src/__tests__/lsp-run-resources.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  26 passed (26)",
+        "   Duration  832ms (transform 662ms, setup 37ms, import 1.29s, tests 729ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:10:03.106Z",
+      "line": 7614,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:10:35.640Z",
+      "line": 7642,
+      "command": "/bin/bash -lc npm test -- src/__tests__/sub-agent.test.ts src/__tests__/sub-agent-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  2 passed (2)",
+        "      Tests  18 passed (18)",
+        "   Duration  3.15s (transform 393ms, setup 25ms, import 780ms, tests 3.79s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:14:06.103Z",
+      "line": 7744,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:15:17.868Z",
+      "line": 7765,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:15:44.760Z",
+      "line": 7781,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts src/__tests__/final-evidence-runtime.test.ts src/__tests__/publication-lifecycle.test.ts src/__tests__/docs-consistency.test.ts src/__tests__/hooks.test.ts --reporter=dot",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        " FAIL  src/__tests__/orchestrator.test.ts > missing declared file validation retry > does not false-retry when ::file_created:: marker includes markdown summary text",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        " FAIL  src/__tests__/orchestrator.test.ts > abort signal handling mid-story execution > stops execution when abort signal fires before a story starts",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        " FAIL  src/__tests__/orchestrator.test.ts > abort signal handling mid-story execution > stops mid-story when abort fires during story execution via signal check",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        " FAIL  src/__tests__/orchestrator.test.ts > docker compose auto-cleanup (via bash tool) > tracks docker compose up and attempts cleanup after story completes",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        "Error: [vitest] No \"ticketEnvironment\" export is defined on the \"../ticket-ops.js\" mock. Did you forget to return it from \"vi.mock\"?",
+        " Test Files  1 failed | 4 passed (5)",
+        "      Tests  95 failed | 61 passed | 1 skipped (157)",
+        "   Duration  4.10s (transform 975ms, setup 50ms, import 1.65s, tests 5.92s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:16:28.042Z",
+      "line": 7794,
+      "command": "/bin/bash -lc npm test -- src/__tests__/useOrchestrator-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  4 passed (4)",
+        "   Duration  828ms (transform 150ms, setup 12ms, import 419ms, tests 311ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:17:23.155Z",
+      "line": 7829,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts --reporter=dot",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  113 passed | 1 skipped (114)",
+        "   Duration  24.81s (transform 375ms, setup 12ms, import 565ms, tests 24.15s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:17:48.363Z",
+      "line": 7842,
+      "command": "/bin/bash -lc npm run build",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:17:50.532Z",
+      "line": 7846,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:18:12.782Z",
+      "line": 7860,
+      "command": "/bin/bash -lc npm test",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  104 passed (104)",
+        "      Tests  1706 passed | 1 skipped (1707)",
+        "   Duration  27.27s (transform 20.30s, setup 3.22s, import 40.26s, tests 66.78s, environment 9ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:18:38.952Z",
+      "line": 7875,
+      "command": "/bin/bash -lc rg -n 'testTimeout|reporters|maxWorkers|fileParallelism|pool' vitest.config.ts",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:21:11.583Z",
+      "line": 7936,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestration-startup-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  1.24s (transform 342ms, setup 14ms, import 608ms, tests 525ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:22:23.740Z",
+      "line": 7972,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestration-startup-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  1.35s (transform 340ms, setup 14ms, import 607ms, tests 634ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:26:32.180Z",
+      "line": 8065,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:27:37.769Z",
+      "line": 8078,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-diff-safety.test.ts src/__tests__/review-runtime-policy.test.ts src/__tests__/orchestrator.test.ts src/__tests__/final-evidence-runtime.test.ts --reporter=dot",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        " FAIL  src/__tests__/orchestrator.test.ts > review loop revision paths > retries a standalone review once when the reviewer is rate limited",
+        "Error: Test timed out in 5000ms.",
+        " Test Files  1 failed | 3 passed (4)",
+        "      Tests  1 failed | 134 passed | 1 skipped (136)",
+        "   Duration  30.57s (transform 1.06s, setup 39ms, import 1.87s, tests 32.33s, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:28:10.349Z",
+      "line": 8082,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-git-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 1,
+      "summary": [
+        " FAIL  src/__tests__/review-git-runtime.test.ts [ src/__tests__/review-git-runtime.test.ts ]",
+        "Error: Transform failed with 1 error:",
+        "\u001b[31m[PARSE_ERROR] Error:\u001b[0m Expected a semicolon or an implicit semicolon after a statement, but found none",
+        " Test Files  1 failed (1)",
+        "      Tests  no tests",
+        "   Duration  126ms (transform 6ms, setup 12ms, import 0ms, tests 0ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:28:39.190Z",
+      "line": 8093,
+      "command": "/bin/bash -lc npm test -- src/__tests__/review-git-runtime.test.ts --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  3 passed (3)",
+        "   Duration  647ms (transform 43ms, setup 13ms, import 253ms, tests 295ms, environment 0ms)"
+      ]
+    },
+    {
+      "timestamp": "2026-09-06T18:28:41.673Z",
+      "line": 8096,
+      "command": "/bin/bash -lc npm run typecheck",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": []
+    },
+    {
+      "timestamp": "2026-09-06T18:29:24.788Z",
+      "line": 8121,
+      "command": "/bin/bash -lc npm test -- src/__tests__/orchestrator.test.ts -t \"retries a standalone review once when the reviewer is rate limited\" --reporter=verbose",
+      "cwd": "file:///home/user/github/workermill",
+      "exitCode": 0,
+      "summary": [
+        " Test Files  1 passed (1)",
+        "      Tests  1 passed | 113 skipped (114)",
+        "   Duration  920ms (transform 387ms, setup 13ms, import 700ms, tests 110ms, environment 0ms)"
+      ]
+    }
+  ]
+}

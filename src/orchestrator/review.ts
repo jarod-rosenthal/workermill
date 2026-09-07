@@ -8,21 +8,29 @@
 import { streamText, stepCountIs, type ToolSet } from "ai";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { randomUUID } from "node:crypto";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { formatPromptProjectContext } from "../project-context.js";
 import * as logger from "../logger.js";
 import { CostTracker } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 import type { CliConfig } from "../config.js";
-import { getProviderForPersona, loadConfig, saveConfig } from "../config.js";
+import { getProviderForPersona, loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
-import { getDiffForReview, getDiffSinceCommit, getHeadHash, captureStoryPriorWork, commitRevisionChanges } from "../git-ops.js";
+import { createReviewGit, ReviewGitError } from "./git-context.js";
 import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "../hooks.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
+import { checkpoint } from "../checkpoints.js";
+import { durablePermissionRules } from "../safety.js";
+import { resolveSandboxMode } from "../sandbox-mode.js";
+import { captureRepositoryFingerprint, type VerifiedRepositoryFingerprint } from "../repository-fingerprint.js";
+import { prepareCandidate } from "./candidate.js";
+import { createAttemptResources, ResourceCleanupError, type AttemptResources } from "../engine/run-resources.js";
 
 import type {
   OrchestrationOutput,
@@ -50,13 +58,135 @@ import {
   emitReasoningDelta,
 } from "./utils.js";
 
-import { checkToolPermission, emitFailureCode, formatToolCallDisplay } from "./execution.js";
+import { emitFailureCode, extractCheckpointTargets, formatToolCallDisplay } from "./execution.js";
 
 
 // ---------------------------------------------------------------------------
 // Internal type used by runStandaloneReview for tool wrapping
 // ---------------------------------------------------------------------------
 type AnyToolDef = any;
+
+const reviewSessionPermissionRules = new WeakMap<Set<string>, string[]>();
+
+function getReviewSessionPermissionRules(sessionAllow: Set<string>): readonly string[] {
+  return reviewSessionPermissionRules.get(sessionAllow) ?? [];
+}
+
+async function recordReviewAlwaysPermission(
+  sessionAllow: Set<string>,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<void> {
+  const rules = durablePermissionRules(toolName, input);
+  if (rules.length === 0) return;
+  const current = reviewSessionPermissionRules.get(sessionAllow) ?? [];
+  for (const rule of rules) if (!current.includes(rule)) current.push(rule);
+  reviewSessionPermissionRules.set(sessionAllow, current);
+  try {
+    const settings = loadLocalSettings() || {};
+    settings.allow = settings.allow || [];
+    for (const rule of rules) if (!settings.allow.includes(rule)) settings.allow.push(rule);
+    saveLocalSettings(settings);
+  } catch { /* retain the narrowly-scoped session approval when persistence fails */ }
+}
+
+function createReviewTools(args: {
+  persona: { tools: readonly string[] };
+  role: string;
+  model: unknown;
+  config: CliConfig;
+  output: OrchestrationOutput;
+  workingDir: string;
+  sandboxed: boolean | "os";
+  signal: AbortSignal;
+  runId: string;
+  resources: AttemptResources;
+  readOnlyRole: boolean;
+  trustAll?: boolean | (() => boolean);
+  sessionAllow?: Set<string>;
+  onToolStatus?: (status: string) => void;
+  costTracker?: CostTracker;
+  provider?: string;
+  modelName?: string;
+}): Record<string, AnyToolDef> {
+  const sessionAllow = args.sessionAllow ?? new Set<string>();
+  const scope = createPathScope(args.workingDir, args.config.sandboxCapabilities?.extraPathGrants);
+  const executionContext: ToolExecutionContext = {
+    runId: args.runId,
+    workspace: scope.workspace,
+    scope,
+    effectiveSandbox: args.sandboxed === "os" ? "os" : args.sandboxed ? "path" : "none",
+    signal: args.signal,
+    getPermissionState: () => ({
+      mode: "default",
+      trustAll: args.readOnlyRole ? false : (typeof args.trustAll === "function" ? args.trustAll() : Boolean(args.trustAll)),
+      sessionAllow,
+      rules: {
+        ...args.config.permissions,
+        allow: [...(args.config.permissions?.allow ?? []), ...getReviewSessionPermissionRules(sessionAllow)],
+      },
+      // This must remain true for reviewers even when a persona claims bash,
+      // child-agent, or write-tool access.
+      readOnlyRole: args.readOnlyRole,
+      workspace: scope.workspace,
+    }),
+    allowedNetworkDomains: args.config.sandboxCapabilities?.allowedNetworkDomains,
+    allowLocalBinding: args.config.sandboxCapabilities?.allowLocalBinding,
+    allowDockerSocket: args.config.sandboxCapabilities?.allowDockerSocket,
+    prompt: args.readOnlyRole ? undefined : async (toolName, input, reason, executingContext) => {
+      const result = await args.output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, input)} (${reason})`);
+      if (executingContext.signal.aborted) return false;
+      if (typeof result === "object" && result.allowed) {
+        if (result.mode === "trust") sessionAllow.add("*");
+        if (result.mode === "always") await recordReviewAlwaysPermission(sessionAllow, toolName, input);
+      }
+      return Boolean(typeof result === "object" ? result.allowed : result) && !executingContext.signal.aborted;
+    },
+    preHook: (toolName, input, executingContext) => {
+      args.output.toolCall(args.role, toolName, input);
+      const hookResult = runPreHooksWithBlocking(toolName, args.config.hooks, executingContext.workspace, {
+        input: JSON.stringify(input).substring(0, 10_000),
+      });
+      return hookResult.blocked ? { blocked: true, reason: hookResult.reason } : undefined;
+    },
+    checkpoint: (toolName, input, executingContext) => {
+      for (const target of extractCheckpointTargets(toolName, input, executingContext.workspace)) checkpoint(target.path, target.tool);
+    },
+    postHook: (toolName, _input, _result, _error, executingContext) => {
+      runHooks("post", toolName, args.config.hooks, executingContext.workspace);
+    },
+    event: (event) => {
+      if (event.phase === "complete") args.onToolStatus?.("");
+    },
+  };
+  const allTools = createToolDefinitions(args.workingDir, args.model as never, args.sandboxed, {
+    runId: args.runId,
+    signal: args.signal,
+    executionContext,
+    sandboxCapabilities: args.config.sandboxCapabilities,
+    onSubAgentUsage: args.costTracker && args.provider && args.modelName ? (childUsage) => {
+      args.costTracker!.recordCall({
+        callId: childUsage.callId,
+        persona: "child",
+        provider: args.provider!,
+        model: args.modelName!,
+        usage: childUsage.usage,
+        usageComplete: childUsage.usageComplete,
+      });
+    } : undefined,
+  });
+  const selected: Record<string, AnyToolDef> = {};
+  for (const toolName of args.persona.tools) {
+    const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
+    if (!toolDef || typeof toolDef.execute !== "function") continue;
+    const original = toolDef.execute;
+    selected[toolName] = {
+      ...toolDef,
+      execute: (input: Record<string, unknown>) => args.resources.track(executeToolCall(toolName, input, () => original(input), executionContext)),
+    };
+  }
+  return selected;
+}
 
 
 // ---------------------------------------------------------------------------
@@ -132,27 +262,39 @@ export function parseRequiredReviewOutcome(text: string): {
   decision: "approved" | "revision_needed" | "rejected";
   score: number;
 } {
-  const decisionMatch = text.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-  if (!decisionMatch) {
-    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const decisionMarkers = [...text.matchAll(/REVIEW_DECISION:\s*([^\s]+)/gi)].map((match) => match[1].toLowerCase());
+  if (decisionMarkers.length === 0) {
     throw new Error(
       `Tech Lead output missing required marker: REVIEW_DECISION. ` +
       `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
     );
   }
+  if (decisionMarkers.some((marker) => marker !== "approved" && marker !== "revision_needed" && marker !== "rejected")) {
+    throw new Error(`Tech Lead output has an invalid REVIEW_DECISION marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  if (new Set(decisionMarkers).size !== 1) {
+    throw new Error(`Tech Lead output has contradictory REVIEW_DECISION markers. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
 
-  const cqsMatches = [...text.matchAll(/CODE_QUALITY_SCORE:\s*(\d+)/gi)];
-  if (cqsMatches.length === 0) {
-    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+  const scoreMarkers = [...text.matchAll(/CODE_QUALITY_SCORE:\s*([^\s]+)/gi)].map((match) => match[1]);
+  if (scoreMarkers.length === 0) {
     throw new Error(
       `Tech Lead output missing required marker: CODE_QUALITY_SCORE. ` +
       `Output preview: "${preview}${text.length > 240 ? "..." : ""}"`,
     );
   }
-
-  const rawScore = parseInt(cqsMatches[cqsMatches.length - 1][1], 10);
-  const score = Math.max(1, Math.min(10, rawScore));
-  const decision = decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+  if (scoreMarkers.some((marker) => !/^\d+$/.test(marker))) {
+    throw new Error(`Tech Lead output has an invalid CODE_QUALITY_SCORE marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  if (new Set(scoreMarkers).size !== 1) {
+    throw new Error(`Tech Lead output has contradictory CODE_QUALITY_SCORE markers. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  const score = Number.parseInt(scoreMarkers[0], 10);
+  if (score < 1 || score > 10) {
+    throw new Error(`Tech Lead output has an out-of-range CODE_QUALITY_SCORE marker. Output preview: "${preview}${text.length > 240 ? "..." : ""}"`);
+  }
+  const decision = decisionMarkers[0] as "approved" | "revision_needed" | "rejected";
   return { decision, score };
 }
 
@@ -184,8 +326,8 @@ export function validateTechLeadReviewOutput(
   feedback: string;
 } {
   const parsed = parseRequiredReviewOutcome(text);
-  const approved = parsed.score >= approvalThreshold;
-  const decision = approved ? "approved" : parsed.decision;
+  const approved = parsed.decision === "approved" && parsed.score >= approvalThreshold;
+  const decision = parsed.decision;
   const feedback = extractReviewFeedback(text, parsed.decision);
   return { decision, score: parsed.score, approved, feedback };
 }
@@ -195,6 +337,10 @@ function isMissingRequiredReviewMarkerError(err: unknown): boolean {
     err.message.includes("Tech Lead output missing required marker: REVIEW_DECISION")
     || err.message.includes("Tech Lead output missing required marker: CODE_QUALITY_SCORE")
   );
+}
+
+function isInvalidReviewOutputError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith("Tech Lead output ");
 }
 
 function isEmptyReviewOutputError(err: unknown): boolean {
@@ -311,12 +457,24 @@ export function buildReviewBlockerSignature(
  * Run a standalone Tech Lead review against the current branch or uncommitted changes.
  * Uses the same model, prompt, and scoring as the orchestrator review loop.
  */
+function removeReviewArtifact(file: string): void {
+  try { fs.unlinkSync(file); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export async function runStandaloneReview(
   config: CliConfig,
   output: OrchestrationOutput,
   target?: string,
   abortSignal?: AbortSignal,
 ): Promise<StandaloneReviewResult | null> {
+  if (abortSignal?.aborted) {
+    output.coordinatorLog("Review cancelled before startup.");
+    output.statusDone();
+    return null;
+  }
   const reviewer = loadPersona("tech_lead");
   if (!reviewer) {
     output.error("Tech Lead persona not found.");
@@ -324,7 +482,12 @@ export async function runStandaloneReview(
   }
 
   const workingDir = process.cwd();
+  let standaloneDiffFile: string | undefined;
+  try {
   const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(config, "tech_lead");
+  // Keep failed and malformed attempts: this tracker is the standalone run's
+  // complete per-call ledger, rather than a success-only display aggregate.
+  const costTracker = new CostTracker();
 
   // Set API key
   if (revApiKey) {
@@ -337,26 +500,13 @@ export async function runStandaloneReview(
   output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
   output.status("Reviewer -- Checking code quality");
 
-  const sandboxed = config.sandbox ?? true;
+  const requestedSandbox = config.sandbox ?? true;
+  // An explicit OS request is resolved before creating a model or starting a
+  // provider stream. It must never silently fall back to path mode here.
+  const sandboxed = requestedSandbox === "os" ? resolveSandboxMode("os").effective : requestedSandbox;
+  const reviewRunId = randomUUID();
+  const reviewGit = createReviewGit({ workingDir, runId: reviewRunId, signal: abortSignal, sandboxed, capabilities: config.sandboxCapabilities });
   const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
-  const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
-
-  // Build reviewer tools -- emit structured tool calls so standalone /review
-  // updates the status bar tool counters in real time.
-  const reviewerTools: Record<string, AnyToolDef> = {};
-  for (const toolName of reviewer.tools) {
-    const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
-    if (toolDef) {
-      reviewerTools[toolName] = {
-        ...toolDef,
-        execute: async (input: Record<string, unknown>) => {
-          output.toolCall("tech_lead", toolName, input);
-          const result = await toolDef.execute(input);
-          return result;
-        },
-      };
-    }
-  }
 
   // Get the diff based on target
   let codeDiff = "";
@@ -367,9 +517,7 @@ export async function runStandaloneReview(
     // PR review -- fetch diff via gh CLI
     const prNumber = prMatch[1];
     try {
-      const prDiff = execSync(`gh pr diff ${prNumber}`, {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 30_000,
-      }).trim();
+      const prDiff = await reviewGit.prDiff(prNumber);
       codeDiff += `## PR #${prNumber}\n\n${prDiff}`;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -380,25 +528,14 @@ export async function runStandaloneReview(
   } else if (normalizedTarget === "diff") {
     // Uncommitted changes only
     try {
-      const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim();
-      const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim();
+      const { stat, diff } = await reviewGit.uncommitted();
       if (stat) codeDiff += `## Uncommitted Changes\n${stat}\n\n`;
       if (diff) codeDiff += diff;
     } catch { /* not a git repo */ }
   } else {
     // "branch" or anything else -- diff current branch vs main
-    let mainBranch = "main";
-    try {
-      mainBranch = execSync("git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/heads/main", {
-        cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-      }).trim().replace(/^refs\/heads\/|^refs\/remotes\/origin\//g, "");
-    } catch { /* default to main */ }
-
-    const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+    const mainBranch = await reviewGit.defaultBranch();
+    const { stat, diff } = await reviewGit.branchDiff(mainBranch);
     if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
     if (diff) codeDiff += diff;
   }
@@ -414,12 +551,15 @@ export async function runStandaloneReview(
   const revContextWindow = getModelContext(revModel, revCtx);
   const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
   if (codeDiff.length > maxDiffChars) {
-    const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
-    try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+    const diffFile = path.join(workingDir, `.workermill-review-diff-${randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(diffFile, codeDiff, { encoding: "utf-8", flag: "wx" });
+      standaloneDiffFile = diffFile;
+    } catch { /* best effort */ }
     const stat = codeDiff.match(/## (?:Branch Diff|Uncommitted|PR).*?\n([\s\S]*?)\n\n/)?.[1] || "";
     codeDiff = codeDiff.slice(0, maxDiffChars) +
       `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
-      `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+      `**Full diff saved to:** \`${standaloneDiffFile ?? "(unavailable)"}\` — use \`read_file ${standaloneDiffFile ?? "(unavailable)"}\` to review the complete diff.\n\n` +
       `${stat ? `File list:\n${stat}` : ""}`;
   }
 
@@ -485,12 +625,36 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
     let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
     let lastReviewError: unknown;
     for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+      if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
       const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+      const resources = createAttemptResources(`${reviewRunId}-standalone-${attempt}`, () => timedAbort.abort());
       let attemptReviewerOutput = "";
       let attemptReviewerFinalText = "";
       let attemptReviewerVisibleText = "";
+      let stepUsage: ReturnType<typeof usageFromSdk>;
+      let settledUsage: ReturnType<typeof usageFromSdk>;
+      let usageComplete = false;
+      let reviewStream: ReturnType<typeof streamText> | undefined;
+      let modelStarted = false;
       try {
-        const reviewStream = streamText({
+        const reviewerTools = createReviewTools({
+          persona: reviewer,
+          role: "tech_lead",
+          model: reviewModel,
+          config,
+          output,
+          workingDir,
+          sandboxed,
+          signal: timedAbort.signal,
+          runId: `${reviewRunId}-standalone-${attempt}`,
+          resources,
+          readOnlyRole: true,
+          costTracker,
+          provider: revProvider,
+          modelName: revModel,
+        });
+        modelStarted = true;
+        reviewStream = streamText({
           model: reviewModel,
           abortSignal: timedAbort.signal,
           system: reviewer.systemPrompt,
@@ -500,7 +664,8 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timeout: { chunkMs: 120_000 },
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           ...buildReasoningOptions(revProvider, revModel),
-          onStepFinish({ text }) {
+          onStepFinish({ text, usage }) {
+            stepUsage = addUsage(stepUsage, usageFromSdk(usage));
             if (text) {
               attemptReviewerOutput += text + "\n";
               const lines = text.split("\n").filter((l: string) => l.trim());
@@ -519,6 +684,11 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           timedAbort,
           "Tech Lead review",
         );
+        // Retain totals before cancellation, empty-output, or marker validation.
+        ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+        reviewUsage = settledUsage;
+        await resources.settleTools();
+        if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
         attemptReviewerFinalText = result.finalText;
         const stepText = attemptReviewerOutput.trim();
         const candidateReviewText = attemptReviewerFinalText.length > stepText.length
@@ -532,14 +702,14 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
         reviewerFinalText = attemptReviewerFinalText;
         reviewerVisibleText = attemptReviewerVisibleText;
         reviewText = candidateReviewText;
-        reviewUsage = result.usage;
         lastReviewError = undefined;
         break;
       } catch (err) {
+        await resources.close();
         lastReviewError = err;
         const transient = isTransientError(err);
         const rl = isRateLimitError(err);
-        const canRetry = attempt < maxReviewAttempts && (
+        const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (
           timedAbort.didTimeout()
           || transient
           || rl
@@ -551,7 +721,7 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           ? `Tech Lead review rate limited; retrying once in ${Math.ceil(rl.retryAfterMs / 1000)}s...`
           : "Tech Lead review stalled or returned incomplete output; retrying once...";
         output.coordinatorLog(retryMessage);
-        if (rl) await rateLimitSleep(rl.retryAfterMs);
+        if (rl) await rateLimitSleep(rl.retryAfterMs, abortSignal);
         logger.warn("Retrying standalone tech lead review", {
           attempt,
           provider: revProvider,
@@ -560,17 +730,31 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
           stack: err instanceof Error ? err.stack : undefined,
         });
       } finally {
-        timedAbort.dispose();
+        let cleanupError: unknown;
+        try { await resources.close(); } catch (error) { cleanupError = error; }
+        try {
+          if (modelStarted) costTracker.recordCall({
+            callId: `${reviewRunId}-standalone-${attempt}`,
+            persona: "Tech Lead Review",
+            provider: revProvider,
+            model: revModel,
+            usage: settledUsage ?? stepUsage,
+            usageComplete: settledUsage === undefined ? false : usageComplete,
+          });
+          output.updateCost?.(costTracker.getTotalCost());
+          output.updateUsageSummary?.(costTracker.getUsageSummary());
+          output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
+        } finally { timedAbort.dispose(); }
+        if (cleanupError) throw cleanupError;
       }
     }
     if (lastReviewError) throw lastReviewError;
     // Track cost
     const revInputTokens = reviewUsage?.inputTokens || 0;
     const revOutputTokens = reviewUsage?.outputTokens || 0;
-    const costTracker = new CostTracker();
-    costTracker.addUsage("Tech Lead Review", revProvider, revModel, revInputTokens, revOutputTokens);
     output.updateCost?.(costTracker.getTotalCost());
     output.updateUsageSummary?.(costTracker.getUsageSummary());
+    output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
     // Track tok/s for reviewer model
     const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
     if (revOutputTokens > 0 && reviewElapsed > 0) {
@@ -595,18 +779,15 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   output.statusDone();
 
   // Parse results -- same logic as orchestrator
-  const parsedReview = parseRequiredReviewOutcome(reviewText);
-  const score = parsedReview.score;
   const threshold = config.review?.approvalThreshold ?? 9;
-  const approved = score >= threshold;
-  const decision = approved ? "approved" : parsedReview.decision;
+  const interpretedReview = validateTechLeadReviewOutput(reviewText, threshold);
+  const { score, approved, decision, feedback } = interpretedReview;
 
   // Display structured result
   output.log("tech_lead", "\u2500".repeat(60));
   output.log("tech_lead", `::code_quality_score::${score}/10`);
   output.log("tech_lead", `::review_decision::${decision}`);
   output.log("tech_lead", "\u2500".repeat(60));
-  const feedback = extractReviewFeedback(reviewText, parsedReview.decision);
   if (shouldPrintFeedbackFallback(feedback, reviewerVisibleText)) {
     output.log("tech_lead", "Fix context:");
     for (const line of feedback.split("\n").map((l) => l.trim()).filter(Boolean)) {
@@ -615,10 +796,16 @@ FEEDBACK: Your detailed feedback explaining what's good and what needs fixing
   }
   output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
 
-  // Clean up temp file
-  try { fs.unlinkSync(path.join(workingDir, ".workermill-review-diff.tmp")); } catch { /* may not exist */ }
-
   return { score, decision, feedback, reviewText };
+  } finally {
+    if (standaloneDiffFile) {
+      try { removeReviewArtifact(standaloneDiffFile); }
+      catch (error) {
+        output.error(`Review artifact cleanup failed: ${String(error)}`);
+        return null;
+      }
+    }
+  }
 }
 
 
@@ -631,6 +818,56 @@ export interface ReviewLoopResult {
   finalReviewText: string;
   /** True when the loop was interrupted by pause/cancel and the caller should return early. */
   aborted: boolean;
+  /** Typed result for completion policy; callers must not infer approval from review prose. */
+  outcome: ReviewOutcome;
+  /** The exact candidate examined by the final reviewer round. */
+  fingerprint?: VerifiedRepositoryFingerprint;
+}
+
+export type ReviewOutcomeKind =
+  | "approved"
+  | "disabled"
+  | "revision_needed"
+  | "rejected"
+  | "revision_exhausted"
+  | "revision_declined"
+  | "parse_failed"
+  | "provider_failed"
+  | "timed_out"
+  | "cancelled"
+  | "unavailable"
+  | "unverified";
+
+export interface ReviewOutcome {
+  kind: ReviewOutcomeKind;
+  approved: boolean;
+  decision?: "approved" | "revision_needed" | "rejected";
+  score?: number;
+  feedback?: string;
+  error?: string;
+}
+
+/** Interpret valid reviewer markers without allowing a score to override its decision. */
+export function interpretTechLeadReviewOutput(text: string, approvalThreshold = 9): ReviewOutcome {
+  const { decision, score, approved, feedback } = validateTechLeadReviewOutput(text, approvalThreshold);
+  return {
+    kind: approved ? "approved" : decision === "approved" ? "revision_needed" : decision,
+    approved,
+    decision,
+    score,
+    feedback,
+  };
+}
+
+function reviewOutcomeFromError(error: unknown, timedOut = false, cancelled = false): ReviewOutcome {
+  const message = error instanceof Error ? error.message : String(error);
+  if (cancelled) return { kind: "cancelled", approved: false, error: message };
+  if (timedOut || /timed out|timeout/i.test(message)) return { kind: "timed_out", approved: false, error: message };
+  if (/cancelled/i.test(message)) return { kind: "cancelled", approved: false, error: message };
+  if (isMissingRequiredReviewMarkerError(error) || isInvalidReviewOutputError(error) || isEmptyReviewOutputError(error)) {
+    return { kind: "parse_failed", approved: false, error: message };
+  }
+  return { kind: "provider_failed", approved: false, error: message };
 }
 
 
@@ -658,6 +895,37 @@ export interface ReviewLoopParams {
   waitWhilePaused: () => Promise<boolean>;
   pauseForBalanceIssue: (scope: string) => Promise<boolean>;
   logRetryHint: () => void;
+  /** R15 persistence seam for parsed reviewer evidence; feedback is never emitted. */
+  onReviewRound?: (event: ReviewRoundEvent) => void | Promise<void>;
+  /** R15 persistence seam for each revision model attempt. */
+  onRevisionAttempt?: (event: RevisionAttemptEvent) => void | Promise<void>;
+}
+
+export interface ReviewRoundEvent {
+  attemptId: string;
+  round: number;
+  attempt: number;
+  role: "tech_lead";
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  at: string;
+  outcome?: Pick<ReviewOutcome, "kind" | "approved" | "decision" | "score">;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export interface RevisionAttemptEvent {
+  attemptId: string;
+  reviewRound: number;
+  storyId: string;
+  role: string;
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  at: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 
@@ -671,18 +939,27 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
     featureBranch, mainBranch, workingDir,
     costTracker, abortSignal, trustAll, sandboxed, sessionAllow,
     liveViewServer, ticketOps, gateResultsSection,
-    waitWhilePaused, pauseForBalanceIssue, logRetryHint,
+    waitWhilePaused, pauseForBalanceIssue, logRetryHint, onReviewRound, onRevisionAttempt,
   } = params;
 
   // Review config
   const reviewEnabled = config.review?.enabled !== false; // default: true
   const maxRevisions = config.review?.maxRevisions ?? 3;
   let autoRevise = config.review?.autoRevise ?? false;
+  let outcome: ReviewOutcome = reviewEnabled
+    ? { kind: "unavailable", approved: false, error: "Tech Lead reviewer is unavailable." }
+    : { kind: "disabled", approved: false };
 
   // Run inline review with revision loop
   let finalReviewText = ""; // Captures the approved review for use in PR body
+  let reviewedFingerprint: VerifiedRepositoryFingerprint | undefined;
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled.");
+      logRetryHint();
+      return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
+    }
     const { provider: revProvider, model: revModel, apiKey: revApiKey, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
       "tech_lead"
@@ -694,49 +971,50 @@ export async function runReviewLoop(params: ReviewLoopParams): Promise<ReviewLoo
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
 
+    // Fail an explicit OS request before the provider is initialized.
+    const effectiveSandbox = sandboxed === "os" ? resolveSandboxMode("os").effective : sandboxed;
+    const reviewRunId = randomUUID();
+    const reviewGit = createReviewGit({ workingDir, runId: reviewRunId, signal: abortSignal, sandboxed: effectiveSandbox, capabilities: config.sandboxCapabilities });
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx, revApiKey);
-    const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
-
-    // Read-only tools for reviewer — emit structured tool calls so UI status
-    // counters and activity indicators stay accurate during tech_lead review.
-    const reviewerTools: Record<string, AnyToolDef> = {};
-    for (const toolName of reviewer.tools) {
-      const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
-      if (toolDef) {
-        reviewerTools[toolName] = {
-          ...toolDef,
-          execute: async (input: Record<string, unknown>) => {
-            output.toolCall("tech_lead", toolName, input);
-            const result = await toolDef.execute(input);
-            return result;
-          },
-        };
-      }
-    }
 
     let previousReviewFeedback = "";
     let openMustFixItems: ReviewMustFixItem[] = [];
     let lastBlockerSignature = "";
     let repeatedBlockerCount = 0;
-    // Check if user cancelled before starting review
-    if (abortSignal?.aborted) {
-      output.coordinatorLog("Build cancelled.");
-      logRetryHint();
-      return { finalReviewText: "", aborted: true };
-    }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
     for (let reviewRound = 1; reviewRound <= maxRevisions; reviewRound++) {
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled.");
+        logRetryHint();
+        return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
+      }
       if (await waitWhilePaused()) {
-        return { finalReviewText: "", aborted: true };
+        return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false, error: "Review paused or cancelled." } };
       }
       const isRevision = reviewRound > 1;
+      // Capture evidence at the actual reviewer round, after all prior
+      // revision work. A HEAD alone is insufficient when the index or
+      // untracked files changed.
+      const fingerprint = await captureRepositoryFingerprint(workingDir, abortSignal);
+      if (!fingerprint.verified) {
+        // Keep the review runtime usable for non-repository standalone callers,
+        // but deliberately provide no approval evidence. The orchestration
+        // boundary will therefore block publication rather than promote this
+        // result to a verified final state.
+        reviewedFingerprint = undefined;
+        logger.warn("Review state could not be fingerprinted", { reason: fingerprint.reason, reviewRound });
+      } else {
+        reviewedFingerprint = fingerprint;
+      }
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions - 1}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Reviewing with \x1b[35m${revProvider}/${revModel}\x1b[0m (${formatContext(getModelContext(revModel, revCtx))} context)`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
+      let lastReviewFailure: ReviewOutcome | undefined;
+      let reviewDiffFile: string | undefined;
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
         const mustFixSection = isRevision && openMustFixItems.length > 0
@@ -785,7 +1063,7 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
             // Revision rounds: send ONLY what changed since last review.
             // The reviewer already saw the full diff — sending it again wastes context
             // and risks exceeding the model's context window on later rounds.
-            const revisionDelta = getDiffSinceCommit(workingDir, preRevisionHash);
+            const revisionDelta = await reviewGit.delta(preRevisionHash);
             if (revisionDelta) {
               codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Use read_file to inspect any file in full.\n\n${revisionDelta}`;
             } else {
@@ -793,22 +1071,17 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
             }
           } else {
             // First review: send the full branch diff
-            const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+            const { stat, diff } = await reviewGit.branchDiff(mainBranch);
             if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
             if (diff) codeDiff += diff;
           }
         } else {
           // Fallback: uncommitted changes diff
           try {
-            const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
-              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-            }).trim();
-            const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
-              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
-            }).trim();
+            const { stat, diff } = await reviewGit.uncommitted();
             if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
             if (diff) codeDiff += diff;
-          } catch { /* not a git repo */ }
+          } catch (error) { throw error; }
         }
 
         // Cap diff to fit within the reviewer model's context window.
@@ -818,12 +1091,15 @@ ${truncateForPrompt(previousReviewFeedback, 6_000, "previous review feedback")}
         const maxDiffChars = Math.floor(revContextWindow * 3 * 0.5);
         if (codeDiff.length > maxDiffChars) {
           // Write full diff to a temp file so the reviewer can read_file it
-          const diffFile = path.join(workingDir, ".workermill-review-diff.tmp");
-          try { fs.writeFileSync(diffFile, codeDiff, "utf-8"); } catch { /* best effort */ }
+          const diffFile = path.join(workingDir, `.workermill-review-diff-${randomUUID()}.tmp`);
+          try {
+            fs.writeFileSync(diffFile, codeDiff, { encoding: "utf-8", flag: "wx" });
+            reviewDiffFile = diffFile;
+          } catch { /* best effort */ }
           const stat = codeDiff.match(/## Branch Diff.*?\n([\s\S]*?)\n\n/)?.[1] || "";
           codeDiff = codeDiff.slice(0, maxDiffChars) +
             `\n\n... (diff truncated to fit ${formatContext(revContextWindow)} context window)\n\n` +
-            `**Full diff saved to:** \`${diffFile}\` — use \`read_file ${diffFile}\` to review the complete diff.\n\n` +
+            `**Full diff saved to:** \`${reviewDiffFile ?? "(unavailable)"}\` — use \`read_file ${reviewDiffFile ?? "(unavailable)"}\` to review the complete diff.\n\n` +
             `${stat ? `File list:\n${stat}` : ""}`;
         }
 
@@ -942,10 +1218,38 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const maxReviewAttempts = 2;
         let reviewUsage: { inputTokens?: number; outputTokens?: number } | undefined;
         let lastReviewError: unknown;
+        let successfulReviewAttemptId: string | undefined;
+        let successfulReviewAttemptNumber = 0;
         for (let attempt = 1; attempt <= maxReviewAttempts; attempt++) {
+          if (abortSignal?.aborted) throw new Error("Tech Lead review cancelled");
           const timedAbort = createTimedAbortSignal(abortSignal, reviewTimeoutMs, "Tech Lead review");
+          const reviewAttemptId = `${reviewRunId}-inline-${reviewRound}-${attempt}`;
+          const resources = createAttemptResources(reviewAttemptId, () => timedAbort.abort());
+          let stepUsage: ReturnType<typeof usageFromSdk>;
+          let settledUsage: ReturnType<typeof usageFromSdk>;
+          let usageComplete = false;
+          let reviewStream: ReturnType<typeof streamText> | undefined;
+          let modelStarted = false;
           try {
-            const reviewStream = streamText({
+            await onReviewRound?.({ attemptId: reviewAttemptId, round: reviewRound, attempt, role: "tech_lead", provider: revProvider, model: revModel, status: "started", at: new Date().toISOString() });
+            const reviewerTools = createReviewTools({
+              persona: reviewer,
+              role: "tech_lead",
+              model: reviewModel,
+              config,
+              output,
+              workingDir,
+              sandboxed: effectiveSandbox,
+              signal: timedAbort.signal,
+              runId: reviewAttemptId,
+              resources,
+              readOnlyRole: true,
+              costTracker,
+              provider: revProvider,
+              modelName: revModel,
+            });
+            modelStarted = true;
+            reviewStream = streamText({
               model: reviewModel,
               abortSignal: timedAbort.signal,
               system: reviewer.systemPrompt,
@@ -955,7 +1259,8 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timeout: { chunkMs: 120_000 },
               ...buildOllamaOptions(revProvider as AIProvider, revCtx),
               ...buildReasoningOptions(revProvider, revModel),
-              onStepFinish({ text }) {
+              onStepFinish({ text, usage }) {
+                stepUsage = addUsage(stepUsage, usageFromSdk(usage));
                 if (text) {
                   reviewerOutput += text + "\n";
                   const lines = text.split("\n").filter(l => l.trim());
@@ -973,19 +1278,28 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               timedAbort,
               "Tech Lead review",
             );
+            ({ usage: settledUsage, usageComplete } = settleUsage(stepUsage, usageFromSdk(result.usage)));
+            reviewUsage = settledUsage;
+            await resources.settleTools();
+            if (timedAbort.signal.aborted) throw new Error("Tech Lead review cancelled");
             reviewerFinalText = result.finalText;
-            reviewUsage = result.usage;
+            successfulReviewAttemptId = reviewAttemptId;
+            successfulReviewAttemptNumber = attempt;
             lastReviewError = undefined;
+            lastReviewFailure = undefined;
             break;
           } catch (err) {
+            await resources.close();
             lastReviewError = err;
+            lastReviewFailure = reviewOutcomeFromError(err, timedAbort.didTimeout(), abortSignal?.aborted === true);
+            await onReviewRound?.({ attemptId: reviewAttemptId, round: reviewRound, attempt, role: "tech_lead", provider: revProvider, model: revModel, status: lastReviewFailure.kind === "cancelled" ? "cancelled" : "failed", at: new Date().toISOString(), outcome: { kind: lastReviewFailure.kind, approved: lastReviewFailure.approved, decision: lastReviewFailure.decision, score: lastReviewFailure.score } });
             const transient = isTransientError(err);
             const rl = isRateLimitError(err);
-            const canRetry = attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
+            const canRetry = !abortSignal?.aborted && attempt < maxReviewAttempts && (timedAbort.didTimeout() || transient || rl);
             if (!canRetry) throw err;
             const retryReason = timedAbort.didTimeout() ? "timed out" : rl ? `rate limited (waiting ${Math.ceil((rl.retryAfterMs) / 1000)}s)` : "hit a transient provider error";
             output.coordinatorLog(`Tech Lead review ${retryReason}; retrying once...`);
-            if (rl) await rateLimitSleep(rl.retryAfterMs);
+            if (rl) await rateLimitSleep(rl.retryAfterMs, abortSignal);
             logger.warn("Retrying tech lead review", {
               attempt,
               provider: revProvider,
@@ -994,7 +1308,22 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
               stack: err instanceof Error ? err.stack : undefined,
             });
           } finally {
-            timedAbort.dispose();
+            let cleanupError: unknown;
+            try { await resources.close(); } catch (error) { cleanupError = error; }
+            try {
+              if (modelStarted) costTracker.recordCall({
+                callId: reviewAttemptId,
+                persona: `Reviewer (round ${reviewRound})`,
+                provider: revProvider,
+                model: revModel,
+                usage: settledUsage ?? stepUsage,
+                usageComplete: settledUsage === undefined ? false : usageComplete,
+              });
+              output.updateCost?.(costTracker.getTotalCost());
+              output.updateUsageSummary?.(costTracker.getUsageSummary());
+              output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
+            } finally { timedAbort.dispose(); }
+            if (cleanupError) throw cleanupError;
           }
         }
         if (lastReviewError) throw lastReviewError;
@@ -1008,15 +1337,23 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         logger.debug("Reviewer output", { reviewRound, text: reviewText });
 
         output.statusDone();
+        // This is an owned reviewer input, never a deliverable. It must be
+        // gone before a revision worker or final evidence can see the tree.
+        if (reviewDiffFile) {
+          removeReviewArtifact(reviewDiffFile);
+          reviewDiffFile = undefined;
+        }
 
         // Extract review decision — 3-tier system matching WorkerMill worker
-        const parsedReview = parseRequiredReviewOutcome(reviewText);
-        const decision = parsedReview.decision;
-        const score = parsedReview.score;
-
-        // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 9;
-        const approved = score >= threshold;
+        outcome = interpretTechLeadReviewOutput(reviewText, threshold);
+        const decision = outcome.decision!;
+        const score = outcome.score!;
+        const feedback = outcome.feedback!;
+        const { approved } = outcome;
+        if (successfulReviewAttemptId) {
+          await onReviewRound?.({ attemptId: successfulReviewAttemptId, round: reviewRound, attempt: successfulReviewAttemptNumber, role: "tech_lead", provider: revProvider, model: revModel, status: "completed", at: new Date().toISOString(), outcome: { kind: outcome.kind, approved: outcome.approved, decision: outcome.decision, score: outcome.score }, inputTokens: reviewUsage?.inputTokens, outputTokens: reviewUsage?.outputTokens });
+        }
         const parsedAffected = sanitizeAffectedStories(parseAffectedStories(reviewText), sorted.length);
         if (!approved) {
           const blockerSignature = buildReviewBlockerSignature(reviewText, parsedAffected);
@@ -1042,7 +1379,6 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         }
         logger.info(`Review round ${reviewRound} result`, { decision, score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
-        const feedback = extractReviewFeedback(reviewText, decision);
         if (approved) {
           openMustFixItems = [];
         } else {
@@ -1084,11 +1420,10 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
 
-        // Track reviewer cost
-        costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
-          revInputTokens, revOutputTokens);
+        // The per-call ledger is finalized after each attempt's resources drain.
         output.updateCost?.(costTracker.getTotalCost());
         output.updateUsageSummary?.(costTracker.getUsageSummary());
+        output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
 
         // If approved or out of revision attempts, done
         if (approved) {
@@ -1102,10 +1437,11 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
         const revisionsLeft = maxRevisions - reviewRound;
         if (revisionsLeft <= 0) {
           emitFailureCode(output, "review_blocker_unresolved", `Tech Lead review is still blocking after ${maxRevisions - 1} revision attempt(s).`);
+          outcome = { ...outcome, kind: "revision_exhausted", approved: false };
           if (config.review?.strict) {
             output.coordinatorLog(`[strict] Max revisions reached without approval — build failed.`);
             output.error("Strict mode requires review approval. The build cannot proceed without it.");
-            return { finalReviewText: reviewText, aborted: true };
+            return { finalReviewText: reviewText, aborted: true, outcome };
           }
           output.coordinatorLog(`Max revisions (${maxRevisions - 1}) reached, proceeding to commit.`);
           break;
@@ -1154,6 +1490,7 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         if (!shouldRevise) {
           emitFailureCode(output, "review_blocker_unresolved", "Tech Lead review still has blocking issues and revision was declined.");
+          outcome = { ...outcome, kind: "revision_declined", approved: false };
           break;
         }
 
@@ -1178,12 +1515,12 @@ AFFECTED_REASONS: {"2": "reason for story 2", "3": "reason for story 3"}
 
         // Capture HEAD before revision — so next review shows only what changed
         if (featureBranch) {
-          preRevisionHash = getHeadHash(workingDir);
+          preRevisionHash = await reviewGit.head();
         }
 
         for (let i = 0; i < sorted.length; i++) {
           if (await waitWhilePaused()) {
-            return { finalReviewText: "", aborted: true };
+            return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false, error: "Review paused or cancelled." } };
           }
           const story = sorted[i];
 
@@ -1230,39 +1567,8 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           output.status(`${story.persona}: revising...`);
 
+          if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx, sApiKey);
-          const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
-          const storyTools: Record<string, AnyToolDef> = {};
-          for (const toolName of storyPersona.tools) {
-            const toolDef = storyAllTools[toolName as keyof typeof storyAllTools] as AnyToolDef;
-            if (toolDef) {
-              storyTools[toolName] = {
-                ...toolDef,
-                execute: async (input: Record<string, unknown>) => {
-                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
-                  if (!allowed) return "Tool execution denied by user.";
-                  output.toolCall(story.persona, toolName, input);
-                  const revHookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
-                  if (revHookResult.blocked) {
-                    return `Tool blocked by pre-hook: ${revHookResult.reason}`;
-                  }
-                  output.status(`${story.persona}: working...`);
-                  const result = await toolDef.execute(input);
-                  runHooks("post", toolName, config.hooks, workingDir);
-                  output.status("");
-                  return result;
-                },
-              };
-            }
-          }
-
-          // Apply concurrency control to revision tools — same as story execution
-          for (const [name, td] of Object.entries(storyTools)) {
-            if (td && typeof td.execute === "function") {
-              const original = td.execute;
-              (storyTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
-            }
-          }
 
           // Revision prompt follows WorkerMill platform pattern (prompt-builder.ts):
           // Per-story feedback + what was tried before + efficiency tips + scope enforcement.
@@ -1270,19 +1576,51 @@ The reviewer has repeated similar blockers across rounds. Before changing code, 
 
           // Capture per-story prior work from git history — matches worker/epic/git-ops.ts:captureStoryBranchSummaries()
           const whatYouDidLastTime = featureBranch
-            ? captureStoryPriorWork(workingDir, mainBranch, i + 1)
+            ? await reviewGit.priorWork(mainBranch, i + 1)
             : "";
 
           const revisionSystemPrompt = `${storyPersona.systemPrompt}
 
 Working directory: ${workingDir}`;
 
+          const revisionTimedAbort = createTimedAbortSignal(abortSignal, getReviewWallTimeoutMs(), "Revision worker");
+          const revisionAttemptRunId = `${reviewRunId}-revision-${reviewRound}-${story.id}-${randomUUID()}`;
+          const resources = createAttemptResources(revisionAttemptRunId, () => revisionTimedAbort.abort());
+          let revisionSucceeded = false;
+          let revisionUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+          let revisionStepUsage: ReturnType<typeof usageFromSdk>;
+          let revisionSettledUsage: ReturnType<typeof usageFromSdk>;
+          let revisionUsageComplete = false;
+          let revisionStream: ReturnType<typeof streamText> | undefined;
+          let modelStarted = false;
           try {
+            await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status: "started", at: new Date().toISOString() });
+            if (abortSignal?.aborted) return { finalReviewText: "", aborted: true, outcome: { kind: "cancelled", approved: false } };
+            const storyTools = createReviewTools({
+              persona: storyPersona,
+              role: story.persona,
+              model: storyModel,
+              config,
+              output,
+              workingDir,
+              sandboxed: effectiveSandbox,
+              signal: revisionTimedAbort.signal,
+              runId: revisionAttemptRunId,
+              resources,
+              readOnlyRole: false,
+              trustAll,
+              sessionAllow,
+              onToolStatus: (status) => output.status(status),
+              costTracker,
+              provider: sProvider,
+              modelName: sModel,
+            });
             const revisionStartMs = Date.now();
             const revisionReasoningLength = { value: 0 };
-            const revStream = streamText({
+            modelStarted = true;
+            const revStream = revisionStream = streamText({
               model: storyModel,
-              abortSignal,
+              abortSignal: revisionTimedAbort.signal,
               system: revisionSystemPrompt,
               prompt: `## ⚠️ REVISION REQUIRED — Tech Lead Feedback
 
@@ -1316,7 +1654,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               timeout: { chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
-              onStepFinish({ text, toolCalls, reasoningText }) {
+              onStepFinish({ text, toolCalls, reasoningText, usage }) {
+                revisionStepUsage = addUsage(revisionStepUsage, usageFromSdk(usage));
                 emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, revisionReasoningLength);
                 if (toolCalls && toolCalls.length > 0) {
                   for (const tc of toolCalls) {
@@ -1346,12 +1685,17 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             });
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
+            await resources.settleTools();
             const revUsage = await revStream.totalUsage;
-
-            costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
-              revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
-            output.updateCost?.(costTracker.getTotalCost());
-            output.updateUsageSummary?.(costTracker.getUsageSummary());
+            ({ usage: revisionSettledUsage, usageComplete: revisionUsageComplete } = settleUsage(revisionStepUsage, usageFromSdk(revUsage)));
+            revisionUsage = revisionSettledUsage;
+            if (revisionTimedAbort.signal.aborted) {
+              return {
+                finalReviewText: "",
+                aborted: true,
+                outcome: { kind: revisionTimedAbort.didTimeout() ? "timed_out" : "cancelled", approved: false },
+              };
+            }
 
             // Track tok/s for revision worker model
             const revisionElapsed = (Date.now() - revisionStartMs) / 1000;
@@ -1364,12 +1708,21 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
+            revisionSucceeded = true;
           } catch (err) {
+            const attemptWasAborted = revisionTimedAbort.signal.aborted;
+            await resources.close();
             output.statusDone();
+            if (attemptWasAborted) {
+              return {
+                finalReviewText: "", aborted: true,
+                outcome: reviewOutcomeFromError(err, revisionTimedAbort.didTimeout(), abortSignal?.aborted === true),
+              };
+            }
             if (isBalanceOrQuotaError(err)) {
               const shouldStop = await pauseForBalanceIssue(`Revision story ${i + 1}`);
               if (shouldStop) {
-                return { finalReviewText: "", aborted: true };
+                return { finalReviewText: "", aborted: true, outcome: { kind: "provider_failed", approved: false, error: "Revision provider balance or quota error." } };
               }
               continue;
             }
@@ -1378,28 +1731,62 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               const waitSec = Math.ceil(revRl.retryAfterMs / 1000);
               output.log("system", `Revision rate limited — retrying in ${waitSec}s`);
               logger.info("Revision rate limit retry", { story: i + 1, waitSec });
-              await rateLimitSleep(revRl.retryAfterMs);
+              await rateLimitSleep(revRl.retryAfterMs, abortSignal);
               // Fall through to next review loop iteration which will re-attempt
             } else {
               const errMsg = err instanceof Error ? err.message : String(err);
               logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
               output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
             }
+          } finally {
+            let cleanupError: unknown;
+            try { await resources.close(); } catch (error) { cleanupError = error; }
+            try {
+              if (modelStarted) costTracker.recordCall({
+                callId: revisionAttemptRunId,
+                persona: `${storyPersona.name} (revision)`,
+                provider: sProvider,
+                model: sModel,
+                usage: revisionSettledUsage ?? revisionStepUsage,
+                usageComplete: revisionSettledUsage === undefined ? false : revisionUsageComplete,
+              });
+              output.updateCost?.(costTracker.getTotalCost());
+              output.updateUsageSummary?.(costTracker.getUsageSummary());
+              output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
+            } finally { revisionTimedAbort.dispose(); }
+            const status = cleanupError ? "failed" : revisionSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
+            await onRevisionAttempt?.({ attemptId: revisionAttemptRunId, reviewRound, storyId: story.id, role: story.persona, provider: sProvider, model: sModel, status, at: new Date().toISOString(), inputTokens: revisionUsage?.inputTokens, outputTokens: revisionUsage?.outputTokens });
+            if (cleanupError) throw cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
           }
 
-          // Commit revision changes — checkpoint on the feature branch
+          // Commit revision changes through the bounded candidate process. Git
+          // filters are executable and must not bypass the selected sandbox.
           if (featureBranch) {
-            const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
-            if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
+            const prepared = await prepareCandidate({
+              config, workingDir, featureBranch,
+              runId: `${reviewRunId}-revision-${reviewRound}-${story.id}`,
+              signal: abortSignal, sandboxed: effectiveSandbox,
+            });
+            if (!prepared.prepared) {
+              return {
+                finalReviewText: "", aborted: true,
+                outcome: { kind: "provider_failed", approved: false, error: `Revision candidate preparation failed: ${prepared.reason ?? "unknown error"}` },
+              };
+            }
+            output.coordinatorLog(`Prepared revision ${reviewRound} for story ${i + 1}.`);
           }
         }
         // Loop back to review again
       } catch (err) {
         output.statusDone();
+        if (err instanceof ResourceCleanupError || err instanceof ReviewGitError) {
+          output.error(err.message);
+          return { finalReviewText: "", aborted: true, outcome: { kind: "unverified", approved: false, error: err.message } };
+        }
         if (isBalanceOrQuotaError(err)) {
           const shouldStop = await pauseForBalanceIssue("Tech Lead review");
           if (shouldStop) {
-            return { finalReviewText: "", aborted: true };
+            return { finalReviewText: "", aborted: true, outcome: { kind: "provider_failed", approved: false, error: "Tech Lead reviewer balance or quota error." } };
           }
           continue;
         }
@@ -1412,10 +1799,25 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
           reviewRound,
         });
         output.log("system", `Review skipped: ${errMsg}`);
+        outcome = lastReviewFailure ?? reviewOutcomeFromError(err, false, abortSignal?.aborted === true);
         break;
+      } finally {
+        // Includes retry/return/provider-error paths. Failure to remove an
+        // owned artifact must not silently yield usable review evidence.
+        if (reviewDiffFile) {
+          try { removeReviewArtifact(reviewDiffFile); }
+          catch (error) {
+            output.error(`Review artifact cleanup failed: ${String(error)}`);
+            return { finalReviewText: "", aborted: true, outcome: { kind: "unverified", approved: false, error: "Review artifact cleanup failed." } };
+          }
+        }
       }
     } // end review loop
   }
 
-  return { finalReviewText, aborted: false };
+  if (outcome.approved && !reviewedFingerprint) {
+    outcome = { kind: "unverified", approved: false, error: "Reviewer state could not be verified." };
+    finalReviewText = "";
+  }
+  return { finalReviewText, aborted: false, outcome, fingerprint: reviewedFingerprint };
 }

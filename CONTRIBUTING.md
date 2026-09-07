@@ -34,7 +34,7 @@ CI runs typecheck, lint, build, and the unit test suite. Fix any failures before
 
 ## Development Setup
 
-**Prerequisites:** Node.js 20+, Git, and an LLM provider — Ollama for a fully local setup, or an API key for a cloud provider.
+**Prerequisites:** Node.js 22.12+, Git, and an LLM provider — Ollama for a fully local setup, or an API key for a cloud provider.
 
 ```bash
 git clone https://github.com/jarod-rosenthal/workermill.git

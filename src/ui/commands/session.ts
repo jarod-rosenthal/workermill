@@ -13,6 +13,7 @@ import { loadConfig, saveConfig, resolveConfig } from "../../config.js";
 import { getChangedFiles } from "../../checkpoints.js";
 import { findModelInfo } from "../../provider-registry.js";
 import { getApiKeyEnvVar, isLocalProvider as _isLocalProvider } from "../../provider-capabilities.js";
+import { formatUsageLedgerLimitation } from "../../cost-tracker.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { getGitStatus, handleSlashCommand } from "../slash-commands.js";
 
@@ -164,6 +165,8 @@ export function handleModelCommand(arg: string, ctx: SlashCommandContext): void 
         );
         void ctx.forceCompact().then(({ before, after }) => {
           ctx.addSystemMessage(`Compacted ${before} \u2192 ${after} messages.`);
+        }).catch((error: unknown) => {
+          ctx.addSystemMessage(`Compaction stopped: ${error instanceof Error ? error.message : String(error)}`);
         });
       } else {
         ctx.addSystemMessage(
@@ -190,6 +193,7 @@ export function handleCostCommand(_arg: string, ctx: SlashCommandContext): void 
   const costUsd = ctx.cost;
   const totalTokens = ctx.tokens;
   const sessionMessages = ctx.session.messages.length;
+  const ledgerNote = formatUsageLedgerLimitation(ctx.session.usageLedger);
   ctx.addSystemMessage(
     `**Session Cost Estimate**\n\n` +
     `| Metric | Value |\n` +
@@ -198,7 +202,9 @@ export function handleCostCommand(_arg: string, ctx: SlashCommandContext): void 
     `| Est. cost | ~$${costUsd.toFixed(2)} |\n` +
     `| Last input tokens | ${totalTokens.toLocaleString()} |\n` +
     `| Session tokens | ${ctx.session.totalTokens.toLocaleString()} |\n` +
-    `| Messages | ${sessionMessages} |`
+    `| Messages | ${sessionMessages} |` +
+    (ctx.session.usageLedgerHistoryIncomplete ? "\n\nHistorical totals have no call-level breakdown." : "") +
+    (ledgerNote ? `\n\n${ledgerNote}` : "")
   );
 }
 
@@ -234,6 +240,8 @@ export function handleCompactCommand(arg: string, ctx: SlashCommandContext): voi
   ctx.addSystemMessage(`**Compacting...** ~${ctx.tokens.toLocaleString()} tokens${arg ? ` (preserving: ${arg})` : ""}`);
   void ctx.forceCompact(arg || undefined).then(({ before, after }) => {
     ctx.addSystemMessage(`**Compacted.** ~${before.toLocaleString()} \u2192 ~${after.toLocaleString()} tokens.`);
+  }).catch((error: unknown) => {
+    ctx.addSystemMessage(`Compaction stopped: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
 

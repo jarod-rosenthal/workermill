@@ -21,9 +21,8 @@ export function createTempWorkerMillHome(): TempHome {
   fs.mkdirSync(path.join(wmDir, "commands"), { recursive: true });
   fs.mkdirSync(path.join(wmDir, "personas"), { recursive: true });
 
-  const origHomedir = os.homedir;
   const originalStateRoot = process.env.WM_STATE_ROOT;
-  vi.spyOn(os, "homedir").mockReturnValue(homeDir);
+  const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(homeDir);
   process.env.WM_STATE_ROOT = wmDir;
 
   return {
@@ -33,7 +32,7 @@ export function createTempWorkerMillHome(): TempHome {
       fs.rmSync(homeDir, { recursive: true, force: true });
     },
     restore: () => {
-      vi.spyOn(os, "homedir").mockImplementation(origHomedir);
+      homedirSpy.mockRestore();
       if (originalStateRoot === undefined) {
         delete process.env.WM_STATE_ROOT;
       } else {

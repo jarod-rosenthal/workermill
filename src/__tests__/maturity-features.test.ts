@@ -31,9 +31,18 @@ describe("Custom Skills (loadCustomCommands)", () => {
   async function loadCommands() {
     vi.spyOn(process, "cwd").mockReturnValue(tempProject);
     vi.spyOn(os, "homedir").mockReturnValue(tempHome);
+    const originalStateRoot = process.env.WM_STATE_ROOT;
+    // This fixture supplies its own mocked user home; point the state-root
+    // resolver there explicitly instead of relying on the worker root.
+    process.env.WM_STATE_ROOT = path.join(tempHome, ".workermill");
     // Re-import to pick up mocked cwd/homedir
-    const mod = await import("../custom-commands.js");
-    return mod.loadCustomCommands();
+    try {
+      const mod = await import("../custom-commands.js");
+      return mod.loadCustomCommands();
+    } finally {
+      if (originalStateRoot === undefined) delete process.env.WM_STATE_ROOT;
+      else process.env.WM_STATE_ROOT = originalStateRoot;
+    }
   }
 
   it("parses all frontmatter fields correctly", async () => {
@@ -336,70 +345,6 @@ describe("Deferred Tools", () => {
     expect(eager).toHaveProperty("browser_click");
     expect(deferred).toHaveLength(1);
     expect(deferred[0].name).toBe("mcp__ext__something");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 5. Tool Concurrency (withConcurrencyControl)
-// ---------------------------------------------------------------------------
-
-describe("Tool Concurrency (withConcurrencyControl)", () => {
-  let withConcurrencyControl: typeof import("../tool-concurrency.js")["withConcurrencyControl"];
-
-  beforeEach(async () => {
-    // Fresh import each time to reset module-level mutex
-    vi.resetModules();
-    const mod = await import("../tool-concurrency.js");
-    withConcurrencyControl = mod.withConcurrencyControl;
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("concurrent-safe tool (read_file) runs without mutex — two calls run in parallel", async () => {
-    const timestamps: number[] = [];
-    const execute = vi.fn(async () => {
-      timestamps.push(Date.now());
-      await new Promise(r => setTimeout(r, 50));
-      timestamps.push(Date.now());
-      return "done";
-    });
-
-    const wrapped = withConcurrencyControl("read_file", execute);
-
-    const [r1, r2] = await Promise.all([wrapped("a"), wrapped("b")]);
-    expect(r1).toBe("done");
-    expect(r2).toBe("done");
-    expect(execute).toHaveBeenCalledTimes(2);
-
-    // Both should have started before either finished — start times close together
-    // timestamps: [start1, start2, end1, end2] (interleaved) or [s1, s2, e1, e2]
-    // The key check: second call started before first finished
-    // With 50ms delay, both starts should be within ~10ms of each other
-    const start1 = timestamps[0];
-    const start2 = timestamps[1];
-    expect(Math.abs(start2 - start1)).toBeLessThan(30);
-  });
-
-  it("non-safe tool (write_file) serializes — second call waits for first", async () => {
-    const order: string[] = [];
-    const execute = vi.fn(async (label: string) => {
-      order.push(`start-${label}`);
-      await new Promise(r => setTimeout(r, 50));
-      order.push(`end-${label}`);
-      return label;
-    });
-
-    const wrapped = withConcurrencyControl("write_file", execute);
-
-    const [r1, r2] = await Promise.all([wrapped("first"), wrapped("second")]);
-    expect(r1).toBe("first");
-    expect(r2).toBe("second");
-    expect(execute).toHaveBeenCalledTimes(2);
-
-    // Must be sequential: start-first, end-first, start-second, end-second
-    expect(order).toEqual(["start-first", "end-first", "start-second", "end-second"]);
   });
 });
 

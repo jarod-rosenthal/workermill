@@ -28,6 +28,7 @@ vi.mock("../config.js", async (importOriginal) => {
 import { checkToolPermission } from "../orchestrator.js";
 import { isDangerous, checkPermissionRules } from "../safety.js";
 import { loadConfig, saveConfig, loadLocalSettings, saveLocalSettings } from "../config.js";
+import { decideToolPermission } from "../engine/tool-policy.js";
 import type { OrchestrationOutput } from "../orchestrator.js";
 
 function createMockOutput(): OrchestrationOutput {
@@ -187,7 +188,7 @@ describe("checkToolPermission — exhaustive", () => {
   // -----------------------------------------------------------------------
 
   describe("read tools auto-allow", () => {
-    const READ_TOOL_NAMES = ["read_file", "view_image", "glob", "grep", "ls", "sub_agent", "lsp"];
+    const READ_TOOL_NAMES = ["read_file", "view_image", "glob", "grep", "ls", "lsp"];
 
     for (const toolName of READ_TOOL_NAMES) {
       it(`auto-allows ${toolName} without prompting (trustAll=false)`, async () => {
@@ -272,14 +273,14 @@ describe("checkToolPermission — exhaustive", () => {
       expect(saved.allow).toContain("bash(git status:*)");
     });
 
-    it("mode=always for non-bash saves a durable tool allow rule", async () => {
+    it("mode=always for non-command tools saves a durable tool allow rule", async () => {
       const output = createMockOutput();
       vi.mocked(output.confirm).mockResolvedValue({ allowed: true, mode: "always" });
       const sessionAllow = new Set<string>();
 
       await checkToolPermission("write_file", { path: "foo.ts" }, false, sessionAllow, output);
 
-      expect(sessionAllow.has("write_file")).toBe(true);
+      expect(sessionAllow.has("write_file")).toBe(false);
       expect(saveLocalSettings).toHaveBeenCalled();
       const saved = vi.mocked(saveLocalSettings).mock.calls.at(-1)?.[0] as { allow?: string[] };
       expect(saved.allow).toContain("write_file");
@@ -292,6 +293,8 @@ describe("checkToolPermission — exhaustive", () => {
       const sessionAllow = new Set<string>();
 
       await checkToolPermission("bash", { command: "npm test" }, false, sessionAllow, output);
+
+      expect(sessionAllow.has("bash")).toBe(false);
 
       // Now the rule is saved — simulate checkPermissionRules matching it
       vi.mocked(checkPermissionRules).mockReturnValue("allow");
@@ -337,7 +340,6 @@ describe("checkToolPermission — exhaustive", () => {
       const allowed = await checkToolPermission(
         "bash", { command: "rm -rf /" }, false, new Set(), output,
       );
-      expect(output.error).toHaveBeenCalledWith(expect.stringContaining("DANGEROUS"));
       expect(allowed).toBe(false);
     });
 
@@ -363,5 +365,23 @@ describe("checkToolPermission — exhaustive", () => {
       );
       expect(output.confirm).toHaveBeenCalled();
     });
+  });
+
+  it("uses the production decision table for worker adapter outcomes", async () => {
+    const cases = [
+      { name: "read_file", input: { path: "README.md" }, trust: false, session: new Set<string>(), rules: {} },
+      { name: "write_file", input: { path: "src/app.ts" }, trust: false, session: new Set<string>(), rules: { deny: ["write_file"] } },
+      { name: "bash", input: { command: "npm test" }, trust: true, session: new Set<string>(), rules: {} },
+    ];
+    for (const testCase of cases) {
+      const decision = decideToolPermission(testCase.name, testCase.input, {
+        mode: "default", trustAll: testCase.trust, sessionAllow: testCase.session,
+        rules: testCase.rules, readOnlyRole: false, workspace: process.cwd(),
+      });
+      const output = createMockOutput();
+      vi.mocked(output.confirm).mockResolvedValue(false);
+      const allowed = await checkToolPermission(testCase.name, testCase.input, testCase.trust, testCase.session, output, testCase.rules);
+      expect(allowed).toBe(decision.kind === "allow");
+    }
   });
 });

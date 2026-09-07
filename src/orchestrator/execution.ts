@@ -2,26 +2,29 @@ import { streamText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import { isDangerous, isDangerousFile, READ_TOOLS, checkPermissionRules } from "../safety.js";
 import { checkpoint } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { estimateContextTokens } from "../compaction.js";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import type { AIProvider } from "../engine/types.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { decideToolPermission, type PermissionState } from "../engine/tool-policy.js";
+import { executeToolCall, ToolExecutionError, type ToolExecutionContext } from "../engine/tool-executor.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { formatPromptProjectContext } from "../project-context.js";
 import { getProviderForPersona } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import type { CliConfig } from "../config.js";
+import { durablePermissionRules } from "../safety.js";
 import { runHooks, runPreHooksWithBlocking, runLifecycleHooks } from "../hooks.js";
-import { isGitRepo, commitStoryChanges } from "../git-ops.js";
-import { withConcurrencyControl } from "../tool-concurrency.js";
 import { CostTracker } from "../cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 import { saveShipRun } from "../ship-state.js";
-import { getMCPToolDefinitions } from "../mcp-client.js";
+import { randomUUID } from "node:crypto";
+import { createAttemptResources, ResourceCleanupError } from "../engine/run-resources.js";
+import { runScopedProcess } from "../engine/scoped-process.js";
 import * as lspTool from "../engine/tools/lsp.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
 
@@ -44,6 +47,7 @@ import {
   emitReasoningDelta,
 } from "./utils.js";
 import { isExcludedTestPath, deriveAutoRequiredTests } from "./planning.js";
+import { prepareCandidate } from "./candidate.js";
 
 // Re-export toPosixPath and uniqueStrings from planning for internal use
 import { toPosixPath, uniqueStrings } from "./planning.js";
@@ -408,7 +412,7 @@ export function fitWorkerPromptToContext(args: {
 
 /**
  * Check tool permission using output.confirm() instead of readline.
- * Mirrors the logic from PermissionManager but uses the callback-based output interface.
+ * Uses the shared callback-based tool-policy interface.
  */
 export async function checkToolPermission(
   toolName: string,
@@ -416,89 +420,55 @@ export async function checkToolPermission(
   trustAll: boolean | (() => boolean),
   sessionAllow: Set<string>,
   output: OrchestrationOutput,
-  permissionRules?: { allow?: string[]; deny?: string[] },
+  permissionRules?: { allow?: string[]; ask?: string[]; deny?: string[] },
+  workspace = process.cwd(),
 ): Promise<boolean> {
-  // Dangerous commands ALWAYS prompt — even in trust/bypass mode.
-  // Trust mode skips normal permission prompts but not safety gates.
-  if (toolName === "bash") {
-    const cmd = String(toolInput.command || "");
-    const danger = isDangerous(cmd);
-    if (danger) {
-      logger.info("Dangerous prompt shown (orchestrator)", { tool: toolName, danger });
-      output.error(`DANGEROUS: ${danger}`);
-      output.error(`Command: ${cmd}`);
-      const result = await output.confirm("This is a dangerous operation. Are you sure?");
-      const allowed = typeof result === "object" ? result.allowed : result;
-      logger.info("Dangerous prompt resolved (orchestrator)", { tool: toolName, allowed, result: JSON.stringify(result) });
-      return allowed;
-    }
+  const state: PermissionState = {
+    mode: "default",
+    trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
+    sessionAllow,
+    rules: {
+      ...permissionRules,
+      allow: [...(permissionRules?.allow ?? []), ...getSessionPermissionRules(sessionAllow)],
+    },
+    readOnlyRole: false,
+    workspace,
+  };
+  const decision = decideToolPermission(toolName, toolInput, state);
+  if (decision.kind === "deny") return false;
+  if (decision.kind === "allow") return true;
+  const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, toolInput)}${decision.reason ? ` (${decision.reason})` : ""}`);
+  if (typeof result === "object" && result.allowed) {
+    if (result.mode === "trust") sessionAllow.add("*");
+    if (result.mode === "always") await recordAlwaysPermission(sessionAllow, toolName, toolInput);
   }
+  return typeof result === "object" ? result.allowed : result;
+}
 
-  // Bypass mode — skips normal prompts but NOT dangerous command gates above
-  const isTrustedEarly = typeof trustAll === "function" ? trustAll() : trustAll;
-  const isBypass = isTrustedEarly || sessionAllow.has("*");
+const sessionPermissionRules = new WeakMap<Set<string>, string[]>();
 
-  // Dangerous file path check for write operations
-  if (toolName === "write_file" || toolName === "edit_file" || toolName === "patch" || toolName === "multi_edit_file") {
-    const filePath = extractToolFilePath(toolName, toolInput);
-    const fileDanger = isDangerousFile(filePath);
-    if (fileDanger && !isBypass) {
-      output.error(`SENSITIVE FILE: ${fileDanger}`);
-      output.error(`Path: ${filePath}`);
-      const result = await output.confirm("This file may be sensitive. Are you sure?");
-      return typeof result === "object" ? result.allowed : result;
-    }
-  }
+function addSessionPermissionRules(sessionAllow: Set<string>, rules: readonly string[]): void {
+  if (rules.length === 0) return;
+  const current = sessionPermissionRules.get(sessionAllow) ?? [];
+  for (const rule of rules) if (!current.includes(rule)) current.push(rule);
+  sessionPermissionRules.set(sessionAllow, current);
+}
 
-  // Granular permission rules — deny > ask > allow.
-  const ruleResult = checkPermissionRules(toolName, toolInput, permissionRules);
-  if (ruleResult === "deny") return false;
-  // "ask" falls through to prompt below
-  if (ruleResult === "allow") return true;
+function getSessionPermissionRules(sessionAllow: Set<string>): readonly string[] {
+  return sessionPermissionRules.get(sessionAllow) ?? [];
+}
 
-  if (ruleResult !== "ask") {
-    // Normal mode checks (skip if "ask" rule forced a prompt)
-    const isTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
-    if (isTrusted) return true;
-    if (READ_TOOLS.has(toolName)) return true;
-    if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
-  }
-
-  // Prompt user — Yes / Yes don't ask again / Deny
-  const display = formatToolCallDisplay(toolName, toolInput);
-  const result = await output.confirm(`Allow ${toolName}? ${display}`);
-
-  if (typeof result === "object") {
-    if (result.mode === "trust" && result.allowed) {
-      // "Trust all" — add wildcard to session allow so all future tools auto-approve
-      sessionAllow.add("*");
-    } else if (result.mode === "always" && result.allowed) {
-      // "Yes, don't ask again" — save to project-level settings.local.json
-      // (matches Claude Code behavior and single-agent path in useAgent.ts)
-      try {
-        const { toolInputToRule, splitCompoundCommand } = await import("../safety.js");
-        const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
-        const lSettings = loadLocalSettings() || {};
-        lSettings.allow = lSettings.allow || [];
-        const rules = toolName === "bash" && toolInput.command
-          ? splitCompoundCommand(String(toolInput.command)).map((cmd) => toolInputToRule(toolName, { command: cmd }))
-          : [toolInputToRule(toolName, toolInput)];
-        for (const rule of rules) {
-          if (rule && !lSettings.allow.includes(rule)) {
-            lSettings.allow.push(rule);
-          }
-        }
-        saveLocalSettings(lSettings);
-      } catch {
-        // Fall back to session-only
-      }
-      sessionAllow.add(toolName);
-    }
-    return result.allowed;
-  }
-
-  // Simple boolean — allow once, no persistence
-  return result;
+async function recordAlwaysPermission(sessionAllow: Set<string>, toolName: string, input: Record<string, unknown>): Promise<void> {
+  const rules = durablePermissionRules(toolName, input);
+  addSessionPermissionRules(sessionAllow, rules);
+  if (rules.length === 0) return;
+  try {
+    const { loadLocalSettings, saveLocalSettings } = await import("../config.js");
+    const settings = loadLocalSettings() || {};
+    settings.allow = settings.allow || [];
+    for (const rule of rules) if (rule && !settings.allow.includes(rule)) settings.allow.push(rule);
+    saveLocalSettings(settings);
+  } catch { /* retain session approval when persistent settings are unavailable */ }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -647,7 +617,9 @@ export async function runDiagnosticsOnTouchedFiles(
   touchedFiles: string[],
   workingDir: string,
   log: (msg: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ errorCount: number; section: string }> {
+  signal?.throwIfAborted();
   if (touchedFiles.length === 0) return { errorCount: 0, section: "" };
 
   // Filter out tsconfig-excluded files (test files produce false-positive diagnostics)
@@ -658,6 +630,11 @@ export async function runDiagnosticsOnTouchedFiles(
   });
   if (unique.length === 0) return { errorCount: 0, section: "" };
 
+  const controller = new AbortController();
+  const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const lsp = lspTool.createLSPRunResources({ runId: `diagnostics-${randomUUID()}`, workspace: workingDir, signal: ownedSignal });
+  try {
+
   log(`Running diagnostics on ${unique.length} touched file(s)...`);
   let totalErrors = 0;
   let lspAvailable = true;
@@ -666,7 +643,9 @@ export async function runDiagnosticsOnTouchedFiles(
     try {
       const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(workingDir, filePath);
       if (!fs.existsSync(resolvedPath)) { log(`⚠ File not found: ${filePath}`); continue; }
-      const r = await lspTool.execute({ action: "diagnostics", file: resolvedPath, format: "json" }, workingDir);
+      signal?.throwIfAborted();
+      const r = await lsp.execute({ action: "diagnostics", file: resolvedPath, format: "json" });
+      signal?.throwIfAborted();
       if (r.success && r.content) {
         try {
           const parsed = JSON.parse(r.content);
@@ -690,6 +669,7 @@ export async function runDiagnosticsOnTouchedFiles(
         log(`✗ ${filePath}: ${r.error}`);
       }
     } catch (err) {
+      signal?.throwIfAborted();
       log(`✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -703,6 +683,10 @@ export async function runDiagnosticsOnTouchedFiles(
       : "";
 
   return { errorCount: totalErrors, section };
+  } finally {
+    controller.abort();
+    try { await lsp.close(); } catch (error) { throw new ResourceCleanupError([error]); }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -731,11 +715,29 @@ export interface ExecuteStoriesParams {
   ticketOps: { postComment(comment: string): Promise<void> } | null;
   /** Run manifest ID — used for memory provenance tracking */
   runId?: string;
+  /** Run-owned MCP tools supplied by the orchestration owner. */
+  getMCPToolDefinitions?: () => Record<string, AnyToolDef>;
 
   // Callbacks from the orchestrator
   waitWhilePaused: () => Promise<boolean>;
   pauseForBalanceIssue: (scope: string) => Promise<boolean>;
   logRetryHint: () => void;
+  /** R15 persistence seam; emitted for real worker attempts, never resumed skips. */
+  onStoryAttempt?: (event: StoryAttemptEvent) => void | Promise<void>;
+}
+
+export interface StoryAttemptEvent {
+  attemptId: string;
+  storyId: string;
+  /** Monotonic within one story invocation; includes retry/revision attempts. */
+  attempt: number;
+  revision: number;
+  role: "worker";
+  provider: string;
+  model: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  failureCode?: string;
+  at: string;
 }
 
 export interface ExecuteStoriesResult {
@@ -769,6 +771,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     waitWhilePaused,
     pauseForBalanceIssue,
     logRetryHint,
+    getMCPToolDefinitions,
+    onStoryAttempt,
   } = params;
 
   const failedStories = new Set<string>();
@@ -842,10 +846,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
     const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
-    // Build tools filtered by persona's allowed tools
-    const allTools = createToolDefinitions(workingDir, model, sandboxed);
     const storyHealth: { testResults?: string; buildErrors?: string; servicesRunning?: string[] } = {};
-    const personaTools: Record<string, AnyToolDef> = {};
     // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
     // Reset per revision so a tool loop on revision 0 doesn't permanently abort retries
     const LOOP_WINDOW = 6;
@@ -853,193 +854,205 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     let recentToolSignatures: string[] = [];
     let loopAbort = new AbortController();
     const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
-    for (const toolName of persona.tools) {
-      const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
-      if (toolDef) {
-        personaTools[toolName] = {
-          ...toolDef,
-          execute: async (input: Record<string, unknown>) => {
-            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output, config.permissions);
-            if (!allowed) {
-              runLifecycleHooks("permission_denied", config.hooks, workingDir, {
-                WORKERMILL_TOOL: toolName,
-                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-                WORKERMILL_STORY_ID: story.id,
-                WORKERMILL_STORY_PERSONA: story.persona,
-              });
-              return "Tool execution denied by user.";
-            }
-
-            // Track for loop detection
-            const sig = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
-            recentToolSignatures.push(sig);
-            if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
-            if (recentToolSignatures.length >= LOOP_WINDOW) {
-              const counts: Record<string, number> = {};
-              for (const s of recentToolSignatures) counts[s] = (counts[s] || 0) + 1;
-              const maxCount = Math.max(...Object.values(counts));
-              if (maxCount >= LOOP_THRESHOLD) {
-                logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
-                output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
-                loopAbort.abort();
-                return "ABORTED: Tool call loop detected. Stop and report what you've accomplished so far.";
-              }
-            }
-
-            output.toolCall(story.persona, toolName, input);
-            for (const target of extractCheckpointTargets(toolName, input, workingDir)) {
-              checkpoint(target.path, target.tool);
-            }
-            const hookResult = runPreHooksWithBlocking(toolName, config.hooks, workingDir, { input: JSON.stringify(input).substring(0, 10000) });
-            if (hookResult.blocked) {
-              return `Tool blocked by pre-hook: ${hookResult.reason}`;
-            }
-            const result = await toolDef.execute(input);
-            runHooks("post", toolName, config.hooks, workingDir);
-
-            // Log tool result to cli.log — full output, no truncation
-            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            const isError = typeof result === "string" && result.startsWith("Error:");
-            if (isError) {
-              logger.error("Tool error", { persona: story.persona, tool: toolName, result: resultStr });
-              runLifecycleHooks("tool_error", config.hooks, workingDir, {
-                WORKERMILL_TOOL: toolName,
-                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
-                WORKERMILL_TOOL_ERROR: resultStr.substring(0, 10000),
-                WORKERMILL_STORY_ID: story.id,
-                WORKERMILL_STORY_PERSONA: story.persona,
-              });
-            } else {
-              logger.debug("Tool result", { tool: toolName, result: resultStr });
-            }
-
-            // Track docker compose services for auto-cleanup
-            if (toolName === "bash") {
-              const cmd = (input as { command?: string }).command || "";
-              if (/docker[\s-]compose\s+up/i.test(cmd)) {
-                const resolvedCwd = (input as { cwd?: string }).cwd || workingDir;
-                startedDockerCompose.add(resolvedCwd);
-              }
-            }
-
-            // Parse structured bash output for story health context
-            if (toolName === "bash" && typeof result === "string") {
-              // Test results: jest/vitest/pytest/go test/playwright
-              const testMatch = result.match(/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i);
-              if (testMatch) {
-                storyHealth.testResults = result.split("\n").filter(l =>
-                  /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(l)
-                ).slice(-5).join("\n");
-              }
-
-              // Build errors: tsc, eslint, go build
-              const errorLines = result.split("\n").filter(l =>
-                /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(l)
-              );
-              if (errorLines.length > 0) {
-                storyHealth.buildErrors = errorLines.join("\n");
-              }
-
-              // Docker services
-              const bashCmd = (input as { command?: string }).command || "";
-              if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(bashCmd)) {
-                const serviceLines = result.split("\n").filter(l => /Up|running|healthy/i.test(l));
-                if (serviceLines.length > 0) {
-                  storyHealth.servicesRunning = serviceLines.map(l => l.trim());
-                }
-              }
-            }
-
-            output.status("");
-            return result;
-          },
-        };
-      }
-    }
-
-    // Merge MCP tools into persona tools — same pattern as useAgent.ts
-    const mcpTools = getMCPToolDefinitions();
-    for (const [key, def] of Object.entries(mcpTools)) {
-      personaTools[key] = def;
-    }
-
-    // Deferred tool loading — cap MCP tools to prevent context overflow on local models.
-    // If MCP tools exceed 20, keep only the first 20 and log the rest as deferred.
-    const mcpNames = Object.keys(personaTools).filter(n => n.startsWith("mcp__"));
-    if (mcpNames.length > 20) {
-      const deferred = mcpNames.slice(20);
-      for (const name of deferred) {
-        delete personaTools[name];
-      }
-      logger.info("Deferred excess MCP tools in orchestrator", { total: mcpNames.length, deferred: deferred.length, kept: 20 });
-      output.log("system", `${deferred.length} MCP tools deferred to fit context (${mcpNames.length} total, 20 kept)`);
-    }
-
-    // Add skill tool — lets story workers invoke custom skills mid-execution
-    personaTools["skill"] = {
-      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
-      inputSchema: z.object({
-        name: z.string().describe("The skill name to invoke"),
-        args: z.string().optional().describe("Optional arguments"),
-      }),
-      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
-        const { loadCustomCommands } = await import("../custom-commands.js");
-        const skills = loadCustomCommands();
-        const match = skills.find(
-          (s: { name: string }) => s.name.toLowerCase() === skillName.toLowerCase(),
-        );
-        if (!match) return `Skill "${skillName}" not found.`;
-        return args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt;
-      },
-    };
-
-    // Apply concurrency control — safe tools (read_file, list_dir, etc.) run in parallel
-    for (const [name, td] of Object.entries(personaTools)) {
-      if (td && typeof td.execute === "function") {
-        const original = td.execute;
-        (personaTools as any)[name] = { ...td, execute: withConcurrencyControl(name, original as any) };
-      }
-    }
-
     let revisionFeedback = "";
     let storyRateLimitRetries = 0;
     let contextOverflowRetries = 0;
     let contextOverflowSlackTokens = 0;
     const retryErrorSignatureCounts = new Map<string, number>();
-
-    // Snapshot workspace before story execution — restore on retry so each
-    // attempt starts clean instead of inheriting half-broken state.
-    let preStoryHash = "";
-    let preStoryUntrackedFiles: string[] = [];
-    try {
-      preStoryHash = execSync("git rev-parse HEAD 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-      preStoryUntrackedFiles = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
-    } catch { /* not a git repo or no commits yet */ }
+    let storyAttemptNumber = 0;
 
     for (let revision = 0; revision <= 2; revision++) {
-
-    // On retry, restore workspace to pre-story state
-    if (revision > 0 && preStoryHash) {
-      try {
-        // Restore tracked files to pre-story state
-        execSync(`git checkout ${preStoryHash} -- . 2>/dev/null`, { cwd: workingDir, stdio: "pipe" });
-        // Remove files created by the failed attempt (not in pre-story untracked set)
-        const currentUntracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
-        const preSet = new Set(preStoryUntrackedFiles);
-        for (const file of currentUntracked) {
-          if (!preSet.has(file)) {
-            try { fs.unlinkSync(path.join(workingDir, file)); } catch { /* best effort */ }
-          }
-        }
-        logger.info("Workspace restored before retry", { story: story.id, revision, restoredTo: preStoryHash.slice(0, 8) });
-      } catch (restoreErr) {
-        logger.warn("Workspace restore failed — retrying on dirty state", { error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) });
-      }
-    }
+    // Retrying intentionally retains partial and pre-existing work. A HEAD
+    // snapshot cannot distinguish user edits from an attempt, and restoring
+    // it could delete nested Git metadata or unrelated untracked files.
 
     // Reset loop detection for each revision attempt
     recentToolSignatures = [];
     loopAbort = new AbortController();
+    const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, loopAbort.signal]) : loopAbort.signal;
+    // An attempt gets an identity before model/tool construction so its
+    // processes, LSP session, and tool calls cannot collide with a retry.
+    const attemptRunId = `${params.runId ?? "story"}-worker-${story.id}-${revision}-${randomUUID()}`;
+    const attemptResources = createAttemptResources(attemptRunId, () => loopAbort.abort(new Error("Worker attempt finished")));
+    const attemptNumber = ++storyAttemptNumber;
+    const attemptStartedAt = new Date().toISOString();
+    let attemptSucceeded = false;
+    let blockedToolCode: string | undefined;
+    let workerStepUsage: ReturnType<typeof usageFromSdk>;
+    let workerUsage: ReturnType<typeof usageFromSdk>;
+    let workerUsageComplete = false;
+    let workerStream: ReturnType<typeof streamText> | undefined;
+    let modelStarted = false;
+    try {
+    await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: "started", at: attemptStartedAt });
+    const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants);
+    const executionContext: ToolExecutionContext = {
+      runId: attemptRunId,
+      workspace: scope.workspace,
+      scope,
+      effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
+      signal: combinedSignal,
+      getPermissionState: () => ({
+        mode: "default",
+        trustAll: typeof trustAll === "function" ? trustAll() : trustAll,
+        sessionAllow,
+        rules: {
+          ...config.permissions,
+          allow: [...(config.permissions?.allow ?? []), ...getSessionPermissionRules(sessionAllow)],
+        },
+        readOnlyRole: false,
+        workspace: scope.workspace,
+      }),
+      allowedNetworkDomains: config.sandboxCapabilities?.allowedNetworkDomains,
+      allowLocalBinding: config.sandboxCapabilities?.allowLocalBinding,
+      allowDockerSocket: config.sandboxCapabilities?.allowDockerSocket,
+      prompt: async (toolName, input, reason, executingContext) => {
+        const result = await output.confirm(`Allow ${toolName}? ${formatToolCallDisplay(toolName, input)} (${reason})`);
+        if (executingContext.signal.aborted) return false;
+        if (typeof result === "object" && result.allowed) {
+          if (result.mode === "trust") sessionAllow.add("*");
+          if (result.mode === "always") await recordAlwaysPermission(sessionAllow, toolName, input);
+        }
+        // Keep the callback's supplied context authoritative for child contexts.
+        return Boolean(typeof result === "object" ? result.allowed : result) && !executingContext.signal.aborted;
+      },
+      preHook: (toolName, input, executingContext) => {
+        const signature = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
+        recentToolSignatures.push(signature);
+        if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
+        if (recentToolSignatures.length >= LOOP_WINDOW) {
+          const counts: Record<string, number> = {};
+          for (const recent of recentToolSignatures) counts[recent] = (counts[recent] || 0) + 1;
+          const maxCount = Math.max(...Object.values(counts));
+          if (maxCount >= LOOP_THRESHOLD) {
+            logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
+            output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
+            loopAbort.abort();
+            return { blocked: true, reason: "tool call loop detected" };
+          }
+        }
+        output.toolCall(story.persona, toolName, input);
+        const hookResult = runPreHooksWithBlocking(toolName, config.hooks, executingContext.workspace, {
+          input: JSON.stringify(input).substring(0, 10000),
+        });
+        return hookResult.blocked ? { blocked: true, reason: hookResult.reason } : undefined;
+      },
+      checkpoint: (toolName, input, executingContext) => {
+        for (const target of extractCheckpointTargets(toolName, input, executingContext.workspace)) checkpoint(target.path, target.tool);
+      },
+      postHook: (toolName, _input, _result, _error, executingContext) => {
+        runHooks("post", toolName, config.hooks, executingContext.workspace);
+      },
+      event: (event, executingContext) => {
+        if (event.phase !== "complete") return;
+        const result = event.output;
+        const resultStr = typeof result === "string"
+          ? result
+          : result === undefined
+            ? String(event.error ?? "")
+            : (JSON.stringify(result) ?? String(result));
+        const isError = event.error || (typeof result === "string" && result.startsWith("Error:"));
+        if (isError) {
+          logger.error("Tool error", { persona: story.persona, tool: event.toolName, result: resultStr });
+          runLifecycleHooks("tool_error", config.hooks, executingContext.workspace, {
+            WORKERMILL_TOOL: event.toolName,
+            WORKERMILL_TOOL_INPUT: JSON.stringify(event.input).substring(0, 10000),
+            WORKERMILL_TOOL_ERROR: (event.error instanceof Error ? event.error.message : resultStr).substring(0, 10000),
+            WORKERMILL_STORY_ID: story.id,
+            WORKERMILL_STORY_PERSONA: story.persona,
+          });
+        } else {
+          logger.debug("Tool result", { tool: event.toolName, result: resultStr });
+        }
+        if (event.toolName === "bash") {
+          const command = String(event.input.command || "");
+          if (/docker[\s-]compose\s+up/i.test(command)) startedDockerCompose.add(String(event.input.cwd || executingContext.workspace));
+          if (typeof result === "string") {
+            if (/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i.test(result)) {
+              storyHealth.testResults = result.split("\n").filter((line) => /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(line)).slice(-5).join("\n");
+            }
+            const errors = result.split("\n").filter((line) => /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(line));
+            if (errors.length > 0) storyHealth.buildErrors = errors.join("\n");
+            if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(command)) {
+              const services = result.split("\n").filter((line) => /Up|running|healthy/i.test(line));
+              if (services.length > 0) storyHealth.servicesRunning = services.map((line) => line.trim());
+            }
+          }
+        }
+        output.status("");
+      },
+    };
+
+    const allTools = createToolDefinitions(workingDir, model, sandboxed, {
+      runId: attemptRunId,
+      signal: combinedSignal,
+      executionContext,
+      sandboxCapabilities: config.sandboxCapabilities,
+      onSubAgentUsage: (childUsage) => {
+        costTracker.recordCall({
+          callId: childUsage.callId,
+          persona: "child",
+          provider,
+          model: modelName,
+          usage: childUsage.usage,
+          usageComplete: childUsage.usageComplete,
+        });
+      },
+    });
+    const personaTools: Record<string, AnyToolDef> = {};
+    for (const toolName of persona.tools) {
+      const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
+      if (toolDef) personaTools[toolName] = toolDef;
+    }
+    Object.assign(personaTools, getMCPToolDefinitions?.() ?? {});
+    const mcpNames = Object.keys(personaTools).filter((name) => name.startsWith("mcp__"));
+    if (mcpNames.length > 20) {
+      for (const name of mcpNames.slice(20)) delete personaTools[name];
+      logger.info("Deferred excess MCP tools in orchestrator", { total: mcpNames.length, deferred: mcpNames.slice(20).length, kept: 20 });
+      output.log("system", `${mcpNames.length - 20} MCP tools deferred to fit context (${mcpNames.length} total, 20 kept)`);
+    }
+    personaTools.skill = {
+      description: "Invoke a custom skill by name. Skills are reusable workflows from .workermill/skills/.",
+      inputSchema: z.object({ name: z.string(), args: z.string().optional() }),
+      execute: async ({ name: skillName, args }: { name: string; args?: string }) => {
+        const { loadCustomCommands } = await import("../custom-commands.js");
+        const match = loadCustomCommands().find((skill: { name: string }) => skill.name.toLowerCase() === skillName.toLowerCase());
+        return match ? (args ? `${match.prompt}\n\n**Arguments:** ${args}` : match.prompt) : `Skill "${skillName}" not found.`;
+      },
+    };
+    for (const [toolName, toolDef] of Object.entries(personaTools)) {
+      if (!toolDef || typeof toolDef.execute !== "function") continue;
+      const original = toolDef.execute;
+      const execute = (input: Record<string, unknown>): Promise<unknown> => {
+        const invocation = (async (): Promise<unknown> => {
+        try {
+          return await executeToolCall(toolName, input, () => original(input, { abortSignal: combinedSignal }), executionContext);
+        } catch (error) {
+          if (error instanceof ToolExecutionError) {
+            if (["denied", "permission_required", "hook_blocked"].includes(error.code)) blockedToolCode = error.code;
+            if (error.code === "cancelled") {
+              loopAbort.abort();
+              return `Tool execution cancelled: ${error.message}`;
+            }
+            if (error.code === "hook_blocked") return `Tool blocked by pre-hook: ${error.message}`;
+            if (error.code === "denied") {
+              runLifecycleHooks("permission_denied", config.hooks, executionContext.workspace, {
+                WORKERMILL_TOOL: toolName,
+                WORKERMILL_TOOL_INPUT: JSON.stringify(input).substring(0, 10000),
+                WORKERMILL_STORY_ID: story.id,
+                WORKERMILL_STORY_PERSONA: story.persona,
+              });
+              return `Tool execution denied: ${error.message}`;
+            }
+            return `Tool execution requires permission: ${error.message}`;
+          }
+          throw error;
+        }
+        })();
+        return attemptResources.track(invocation);
+      };
+      personaTools[toolName] = { ...toolDef, execute };
+    }
 
     // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts
     const contextParts: string[] = [];
@@ -1099,11 +1112,6 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
     }
 
     try {
-      // Combine user abort with loop detection abort
-      const combinedAbort = new AbortController();
-      if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
-      loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
-
       // Text repetition detection
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
@@ -1121,9 +1129,10 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       const storyActions: Array<{ tool: string; detail: string }> = [];
 
       const storyStartMs = Date.now();
-      const stream = streamText({
+      modelStarted = true;
+      const stream = workerStream = streamText({
         model,
-        abortSignal: combinedAbort.signal,
+        abortSignal: combinedSignal,
         system: systemPrompt,
         prompt: fittedPrompt.prompt,
         tools: personaTools as ToolSet,
@@ -1131,7 +1140,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         timeout: { chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
-        onStepFinish({ text, toolCalls, reasoningText }) {
+        onStepFinish({ text, toolCalls, reasoningText, usage }) {
+          workerStepUsage = addUsage(workerStepUsage, usageFromSdk(usage));
           emitReasoningDelta((line) => output.log(story.persona, line), reasoningText, reasoningLength);
           if (toolCalls && toolCalls.length > 0) {
             // Track actions for ticket update
@@ -1189,7 +1199,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
                 if (textRepeatCount >= TEXT_ABORT_THRESHOLD) {
                   logger.error("Text output loop — aborting after repeated output", { persona: story.persona });
                   output.error("Text output stuck in loop — aborting story");
-                  combinedAbort.abort();
+                  loopAbort.abort();
                 }
                 return;
               }
@@ -1212,12 +1222,16 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // Drive the stream (required for streamText) — onStepFinish handles display
       try {
         for await (const _chunk of stream.textStream) { /* consumed */ }
-      } catch {
-        // Stream may throw on abort (user ESC or rambling detector) — that's expected
+      } catch (error) {
+        // Cancellation is expected; transport/provider failures are not a
+        // successful empty response and must reach the story failure path.
+        if (!combinedSignal.aborted) throw error;
       }
 
+      await attemptResources.settleTools();
+
       // Check abort immediately after stream ends — user may have pressed ESC
-      if (abortSignal?.aborted) {
+      if (combinedSignal.aborted) {
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
         return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
@@ -1225,6 +1239,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       const text = await stream.text;
       const usage = await stream.totalUsage;
+      ({ usage: workerUsage, usageComplete: workerUsageComplete } = settleUsage(workerStepUsage, usageFromSdk(usage)));
+      combinedSignal.throwIfAborted();
 
       output.statusDone();
 
@@ -1257,12 +1273,9 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       context.filesCreated.push(...extractDeclaredFileMarkers(text, "file_created"));
       context.filesModified.push(...extractDeclaredFileMarkers(text, "file_modified"));
 
-      // Track cost
+      // Track performance; the per-call ledger is finalized after resource drain.
       const inTokens = usage?.inputTokens || 0;
       const outTokens = usage?.outputTokens || 0;
-      costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
-      output.updateCost?.(costTracker.getTotalCost());
-      output.updateUsageSummary?.(costTracker.getUsageSummary());
 
       // Track tok/s for worker model
       const storyElapsed = (Date.now() - storyStartMs) / 1000;
@@ -1330,14 +1343,31 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       // This catches both pure narration and failed/no-op write tool attempts.
       {
         const fileActions = storyActions.filter(a => a.tool === "created" || a.tool === "edited");
-        const canCheckGitChanges = isGitRepo(workingDir);
+        const runGitProbe = (command: string) => runScopedProcess({
+          runId: attemptRunId, command, cwd: scope.workspace, signal: combinedSignal,
+          timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 250,
+        }, { sandbox: sandboxed, scope, capabilities: config.sandboxCapabilities });
+        const repository = await runGitProbe("git -c core.fsmonitor=false rev-parse --is-inside-work-tree");
+        combinedSignal.throwIfAborted();
+        const canCheckGitChanges = repository.reason === "exited" && repository.exitCode === 0
+          && !repository.outputTruncated && repository.stdout.trim() === "true";
+        if (!canCheckGitChanges && !(repository.reason === "exited" && repository.exitCode === 128
+          && /not a git repository/i.test(repository.stderr))) {
+          throw new Error(`Unable to establish worker repository state (${repository.reason})`);
+        }
         let hasDiskChanges = false;
         if (canCheckGitChanges) {
           try {
-            const diffOut = execSync("git diff HEAD --name-only", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-            const untrackedOut = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-            hasDiskChanges = diffOut.length > 0 || untrackedOut.length > 0;
+            const [diff, untracked] = await Promise.all([
+              runGitProbe("git -c core.fsmonitor=false diff HEAD --name-only --no-ext-diff --no-textconv"),
+              runGitProbe("git -c core.fsmonitor=false ls-files --others --exclude-standard"),
+            ]);
+            if (diff.reason === "exited" && diff.exitCode === 0 && !diff.outputTruncated
+              && untracked.reason === "exited" && untracked.exitCode === 0 && !untracked.outputTruncated) {
+              hasDiskChanges = diff.stdout.trim().length > 0 || untracked.stdout.trim().length > 0;
+            }
           } catch { /* best effort */ }
+          combinedSignal.throwIfAborted();
         }
 
         if (outTokens > 0 && canCheckGitChanges && !hasDiskChanges) {
@@ -1370,19 +1400,42 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         [...context.filesCreated, ...context.filesModified],
         workingDir,
         (msg) => output.log(story.persona, msg),
+        combinedSignal,
       );
       const diagnosticErrors = diagResult.errorCount;
 
       // Check abort before completing
-      if (abortSignal?.aborted) {
+      if (combinedSignal.aborted) {
         output.coordinatorLog("Build cancelled.");
         logRetryHint();
         return { completedStoryIds, failedStories, skippedStories, retryable, context, earlyExit: true };
       }
 
+      // Commit through the selected scoped boundary before claiming story
+      // progress. Candidate preparation is source-changing evidence and a
+      // failure must remain retryable rather than publishing fake progress.
+      if (featureBranch) {
+        if (diagnosticErrors > 0) {
+          output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — candidate preparation blocked`);
+          failedStories.add(story.id);
+          break;
+        }
+        const prepared = await prepareCandidate({
+          config, workingDir, featureBranch, runId: attemptRunId,
+          signal: combinedSignal, sandboxed,
+        });
+        if (!prepared.prepared) {
+          output.error(`Story ${i + 1} candidate preparation failed: ${prepared.reason ?? "unknown error"}`);
+          failedStories.add(story.id);
+          break;
+        }
+      }
+
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       completedStoryIds.push(story.id);
+      // The terminal event remains deferred until resource cleanup completes.
+      attemptSucceeded = true;
 
       runLifecycleHooks("story_complete", config.hooks, workingDir, {
         WORKERMILL_STORY_ID: story.id,
@@ -1433,16 +1486,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
 
       // Persist progress so /retry works across terminal restarts
       if (featureBranch) {
-        saveShipRun({ workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
-      }
-
-      // Commit story changes — creates a checkpoint on the feature branch
-      // Gate: don't commit if LSP found errors (diagnosticErrors === -1 means no LSP, allow commit)
-      if (featureBranch && diagnosticErrors <= 0) {
-        const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
-        if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
-      } else if (diagnosticErrors > 0) {
-        output.coordinatorLog(`Story ${i + 1} has ${diagnosticErrors} diagnostic error(s) — commit skipped, will be caught in review`);
+        saveShipRun({ runId: params.runId, workingDir, featureBranch, mainBranch, userTask, stories: sorted, completedStoryIds, updatedAt: "" });
       }
 
       const storyElapsedForLiveView = (Date.now() - storyStartMs) / 1000;
@@ -1451,6 +1495,8 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
           break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
+      // Abort/drain before a prompt, retry delay, workspace restore, or retry.
+      await attemptResources.close();
 
       // If user cancelled (ESC), exit immediately — don't retry or classify
       if (abortSignal?.aborted) {
@@ -1498,7 +1544,7 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
         const waitSec = Math.ceil(rl.retryAfterMs / 1000);
         output.log("system", `Rate limited — retrying in ${waitSec}s (${storyRateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
         logger.info("Rate limit retry", { story: i + 1, attempt: storyRateLimitRetries, waitSec });
-        await rateLimitSleep(rl.retryAfterMs);
+        await rateLimitSleep(rl.retryAfterMs, abortSignal);
         continue; // retry same revision
       }
 
@@ -1548,15 +1594,59 @@ export async function executeStories(params: ExecuteStoriesParams): Promise<Exec
       failedStories.add(story.id);
       break;
     }
+    } finally {
+      let cleanupError: unknown;
+      try { await attemptResources.close(); }
+      catch (error) {
+        cleanupError = error;
+        const index = completedStoryIds.indexOf(story.id);
+        if (index >= 0) completedStoryIds.splice(index, 1);
+        failedStories.add(story.id);
+        output.error(error instanceof Error ? error.message : String(error));
+      }
+      if (modelStarted) {
+        costTracker.recordCall({
+          callId: attemptRunId,
+          persona: persona.name,
+          provider,
+          model: modelName,
+          usage: workerUsage ?? workerStepUsage,
+          usageComplete: workerUsage === undefined ? false : workerUsageComplete,
+        });
+        output.updateCost?.(costTracker.getTotalCost());
+        output.updateUsageSummary?.(costTracker.getUsageSummary());
+        output.updateUsageLedger?.(costTracker.getLedgerSnapshot());
+      }
+      // Resource teardown aborts the attempt's local signal even on failure.
+      // Only cancellation of the owning run means the user cancelled it.
+      const terminalStatus = cleanupError ? "failed" : attemptSucceeded ? "completed" : abortSignal?.aborted ? "cancelled" : "failed";
+      await onStoryAttempt?.({ attemptId: attemptRunId, storyId: story.id, attempt: attemptNumber, revision, role: "worker", provider, model: modelName, status: terminalStatus, failureCode: terminalStatus === "failed" ? cleanupError ? "cleanup_failed" : blockedToolCode : undefined, at: new Date().toISOString() });
+      if (cleanupError) throw cleanupError instanceof ResourceCleanupError ? cleanupError : new ResourceCleanupError([cleanupError]);
+    }
 
     } // end revision loop
 
     // Auto-cleanup: stop any Docker Compose services started during this story
     for (const composeDir of startedDockerCompose) {
       try {
-        execSync("docker compose down --timeout 5 2>/dev/null", { cwd: composeDir, timeout: 15_000 });
-        output.log("system", "Auto-cleanup: stopped Docker services");
-        logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+        if (abortSignal?.aborted) break;
+        const composeScope = createPathScope(composeDir, config.sandboxCapabilities?.extraPathGrants);
+        const cleanup = await runScopedProcess({
+          runId: `${params.runId ?? "story"}-compose-cleanup-${randomUUID()}`,
+          command: "docker compose down --timeout 5", cwd: composeScope.workspace,
+          signal: abortSignal ?? new AbortController().signal,
+          timeoutMs: 15_000, maxOutputBytes: 64 * 1024, terminationGraceMs: 500,
+        }, {
+          sandbox: sandboxed,
+          scope: composeScope,
+          capabilities: config.sandboxCapabilities,
+        });
+        if (cleanup.reason === "exited" && cleanup.exitCode === 0 && !cleanup.outputTruncated) {
+          output.log("system", "Auto-cleanup: stopped Docker services");
+          logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+        } else {
+          output.error(`Docker cleanup did not complete (${cleanup.reason}).`);
+        }
       } catch { /* non-fatal */ }
     }
   }

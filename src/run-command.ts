@@ -1,18 +1,60 @@
 import { streamText, stepCountIs } from "ai";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { createModel, buildOllamaOptions } from "./engine/model-factory.js";
 import { createToolDefinitions } from "./engine/tools/index.js";
+import { canonicalizePath, createPathScope, resolvePath } from "./engine/path-policy.js";
+import { executeToolCall, ToolExecutionError, type EffectiveSandbox, type ToolExecutionContext } from "./engine/tool-executor.js";
+import { extractToolTargets } from "./engine/tool-policy.js";
+import { cancelAndWaitForRunProcesses } from "./engine/process-runner.js";
+import { cleanupScopedBackgroundProcesses } from "./engine/tools/bash-background.js";
 import { formatProjectInstructions } from "./instructions.js";
 import { formatPromptProjectContext } from "./project-context.js";
 import { loadLearnings } from "./learnings.js";
-import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
-import type { SandboxSetting } from "./sandbox-mode.js";
+import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
+import { shutdownLSPRun } from "./engine/tools/lsp.js";
+import { assertOSSandboxReady, type SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
-import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, type Session } from "./session.js";
+import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, applySessionUsageLedger, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
+import { addUsage, settleUsage, usageFromSdk } from "./engine/model-usage.js";
+import type { LedgerSnapshot } from "./cost-tracker.js";
+import type { TokenUsage } from "./providers/types.js";
 import type { CliConfig } from "./config.js";
+import type { AIProvider } from "./engine/types.js";
+import { runHooks, runLifecycleHooks, runPreHooksWithBlocking } from "./hooks.js";
+import { checkpoint } from "./checkpoints.js";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
-
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+export type RunFailureReason =
+  | "invalid_options"
+  | "permission_required"
+  | "denied"
+  | "cancelled"
+  | "provider_error"
+  | "hook_blocked"
+  | "step_limit"
+  | "os_sandbox_unavailable"
+  | "cleanup_error";
+export type RunStatus = "ok" | "failed" | "cancelled";
+export interface RunResult {
+  status: RunStatus;
+  reason?: RunFailureReason;
+  error?: string;
+  exitCode: number;
+  sessionId: string | null;
+  model: string | null;
+  text: string;
+  toolCalls: number;
+  tokens: { input: number; output: number };
+  costUsd: number;
+  durationMs: number;
+  usageLedger?: LedgerSnapshot;
+  usageComplete?: boolean;
+}
 export interface RunOptions {
   prompt: string;
   json?: boolean;
@@ -22,240 +64,300 @@ export interface RunOptions {
   maxSteps?: number;
   singlePrompt?: boolean;
   sandboxed?: SandboxSetting;
+  signal?: AbortSignal;
 }
-
-export function resolveRunModelSelection(
-  config: CliConfig,
-  overrideModel?: string,
-): { provider: string; model: string } {
-  const baseProviderInfo = getProviderForPersona(config);
-  let providerToUse = baseProviderInfo.provider;
-  let modelToUse = baseProviderInfo.model;
-
-  if (!overrideModel) {
-    return { provider: providerToUse, model: modelToUse };
-  }
-
-  if (overrideModel.includes("/")) {
-    const [overrideProvider, overrideProviderModel] = overrideModel.split("/", 2);
-    if (!config.providers[overrideProvider]) {
-      throw new Error(
-        `Provider ${overrideProvider} not configured. Configure it first with /setup or /settings key ${overrideProvider} <api-key>.`,
-      );
-    }
-    providerToUse = overrideProvider;
-    modelToUse = overrideProviderModel;
-    return { provider: providerToUse, model: modelToUse };
-  }
-
-  return { provider: providerToUse, model: overrideModel };
+const EXIT_CODES: Record<RunFailureReason, number> = {
+  invalid_options: 2, permission_required: 3, denied: 4, step_limit: 5,
+  os_sandbox_unavailable: 6, provider_error: 1, hook_blocked: 1, cleanup_error: 1, cancelled: 130,
+};
+function failure(
+  start: number,
+  reason: RunFailureReason,
+  error: string,
+  extra: Partial<RunResult> = {},
+): RunResult {
+  return {
+    status: reason === "cancelled" ? "cancelled" : "failed",
+    reason,
+    error,
+    exitCode: EXIT_CODES[reason],
+    sessionId: extra.sessionId ?? null,
+    model: extra.model ?? null,
+    text: extra.text ?? "",
+    toolCalls: extra.toolCalls ?? 0,
+    tokens: extra.tokens ?? { input: 0, output: 0 },
+    costUsd: extra.costUsd ?? 0,
+    durationMs: Date.now() - start,
+    usageLedger: extra.usageLedger ?? { calls: [], totals: { callCount: 0, reportedUsageCalls: 0, partialUsageCalls: 0, missingUsageCalls: 0, knownPricingCalls: 0, unknownPricingCalls: 0, localApiCalls: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0 } },
+    usageComplete: extra.usageComplete ?? true,
+  };
 }
-
-export async function runCommand(options: RunOptions, config: CliConfig, workingDir: string): Promise<void> {
-  const startTime = Date.now();
-
-  // Validate options
-  if (options.session && options.continue) {
-    console.error("Error: --session and --continue are mutually exclusive");
-    process.exit(2);
+function maxSteps(value: number | undefined, start: number): number | RunResult {
+  if (value === undefined) return 50;
+  return Number.isFinite(value) && Number.isInteger(value) && value > 0
+    ? value : failure(start, "invalid_options", "--max-steps must be a finite positive integer");
+}
+function effectiveSandbox(value: SandboxSetting | undefined): EffectiveSandbox {
+  return value === "os" ? "os" : value === false ? "none" : "path";
+}
+function reasonFor(error: unknown, signal: AbortSignal): RunFailureReason {
+  if (signal.aborted || (error instanceof ToolExecutionError && error.code === "cancelled")) return "cancelled";
+  if (error instanceof ToolExecutionError && (error.code === "denied" || error.code === "permission_required")) return error.code;
+  if (error && typeof error === "object" && "code" in error && error.code === "os_sandbox_unavailable") return "os_sandbox_unavailable";
+  return "provider_error";
+}
+function checkpointAuthorizedTargets(
+  toolName: string,
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+): void {
+  const checkpointTools = new Set(["write_file", "edit_file", "multi_edit_file", "patch"]);
+  if (!checkpointTools.has(toolName)) return;
+  for (const target of extractToolTargets(toolName, input)) {
+    const resolved = context.effectiveSandbox === "none"
+      ? canonicalizePath(path.resolve(context.workspace, target))
+      : resolvePath(context.scope, target, "read_write");
+    checkpoint(resolved, toolName);
   }
-
-  // Resolve provider/model selection explicitly for headless runs.
-  let providerToUse: string;
-  let modelToUse: string;
+}
+function wrapTools(
+  rawTools: Record<string, unknown>,
+  context: ToolExecutionContext,
+  onError: (error: ToolExecutionError) => void,
+  pending: Set<Promise<unknown>>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(rawTools).map(([name, definition]) => {
+    // SDK gap: Tool generics are provider-schema-specific after dynamic MCP composition.
+    const raw = definition as { execute?: (input: Record<string, unknown>) => unknown };
+    if (!raw.execute) return [name, definition];
+    return [name, { ...raw, execute: (input: Record<string, unknown>) => {
+      const call = (async () => {
+      try { return await executeToolCall(name, input, () => raw.execute!(input), context); }
+      catch (error) { if (error instanceof ToolExecutionError) onError(error); throw error; }
+      })();
+      pending.add(call);
+      return call.finally(() => pending.delete(call));
+    }}];
+  }));
+}
+export function resolveRunModelSelection(config: CliConfig, overrideModel?: string): { provider: string; model: string } {
+  const base = getProviderForPersona(config);
+  if (!overrideModel) return { provider: base.provider, model: base.model };
+  if (!overrideModel.includes("/")) return { provider: base.provider, model: overrideModel };
+  const [provider, model] = overrideModel.split("/", 2);
+  if (!config.providers[provider]) throw new Error("Provider " + provider + " not configured. Configure it first with /setup or /settings key " + provider + " <api-key>.");
+  return { provider, model };
+}
+export async function runCommand(options: RunOptions, config: CliConfig, workingDir: string): Promise<RunResult> {
+  const start = Date.now();
+  const stepLimit = maxSteps(options.maxSteps, start);
+  if (typeof stepLimit !== "number") return stepLimit;
+  if (options.session && options.continue) return failure(start, "invalid_options", "--session and --continue are mutually exclusive");
+  let provider: string;
+  let model: string;
+  try { ({ provider, model } = resolveRunModelSelection(config, options.model)); }
+  catch (error) { return failure(start, "invalid_options", error instanceof Error ? error.message : String(error)); }
+  const modelIdentity = provider + "/" + model;
+  const providerConfig = config.providers[provider];
+  if (!providerConfig) return failure(start, "invalid_options", "Provider " + provider + " not configured", { model: modelIdentity });
+  const runId = randomUUID();
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+  options.signal?.addEventListener("abort", abortFromParent, { once: true });
+  if (options.signal?.aborted) abortFromParent();
+  const abortFromSigint = () => controller.abort();
+  process.once("SIGINT", abortFromSigint);
+  const costs = new CostTracker();
+  let toolCalls = 0;
+  let text = "";
+  let usage: Partial<TokenUsage> | undefined;
+  let hasFinalUsage = false;
+  let modelStarted = false;
+  let result: RunResult | undefined;
+  let completedSteps = 0;
+  let lastStepHadToolCalls = false;
+  let terminalToolError: ToolExecutionError | undefined;
+  const pendingTools = new Set<Promise<unknown>>();
+  let mcpResources: ReturnType<typeof createMCPRunResources> | undefined;
+  let session: Session | null | undefined;
+  let shouldSaveSession = false;
   try {
-    const selection = resolveRunModelSelection(config, options.model);
-    providerToUse = selection.provider;
-    modelToUse = selection.model;
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(2);
-  }
-
-  let session: Session;
-  let messages: ChatMessage[];
-
-  if (options.singlePrompt) {
-    // For single prompt, create temporary session
-    session = createSession(providerToUse, modelToUse);
-    session.id = "single"; // Override id
-    messages = [{ role: "user", content: options.prompt }];
-  } else {
-    // Load or create session
-    if (options.session) {
-      const s = loadSessionById(options.session);
-      if (!s) {
-        console.error(`Session ${options.session} not found`);
-        process.exit(2);
-      }
-      session = s;
+    mcpResources = createMCPRunResources({ runId, workspace: workingDir, signal: controller.signal });
+    const requestedSandbox = options.sandboxed ?? config.sandbox ?? true;
+    if (requestedSandbox === "os") {
+      await assertOSSandboxReady(workingDir, config.sandboxCapabilities, controller.signal);
+    }
+    let messages: ChatMessage[];
+    if (options.singlePrompt) {
+      session = createSession(provider, model);
+      session.id = "single";
+      messages = [{ role: "user", content: options.prompt }];
+    } else if (options.session) {
+      session = loadSessionById(options.session);
+      if (!session) return failure(start, "invalid_options", "Session " + options.session + " not found", { model: modelIdentity });
+      session.provider = provider;
+      session.model = model;
+      addMessage(session, "user", options.prompt);
+      messages = session.messages.map((message) => ({ role: message.role, content: message.content }));
     } else if (options.continue) {
-      const s = loadLatestSession();
-      if (!s) {
-        console.error("No recent session to continue");
-        process.exit(2);
-      }
-      session = s;
+      session = loadLatestSession();
+      if (!session) return failure(start, "invalid_options", "No recent session to continue", { model: modelIdentity });
+      session.provider = provider;
+      session.model = model;
+      addMessage(session, "user", options.prompt);
+      messages = session.messages.map((message) => ({ role: message.role, content: message.content }));
     } else {
-      // New session
-      session = createSession(providerToUse, modelToUse);
+      session = createSession(provider, model);
+      addMessage(session, "user", options.prompt);
+      messages = session.messages.map((message) => ({ role: message.role, content: message.content }));
     }
-
-    // Override provider and model if specified
-    session.provider = providerToUse;
-    session.model = modelToUse;
-
-    // Add user message to session
-    addMessage(session, "user", options.prompt);
-
-    messages = session.messages.map(m => ({ role: m.role, content: m.content }));
-  }
-
-  // Get provider config
-  const providerConfig = config.providers[providerToUse];
-  if (!providerConfig) {
-    console.error(`Provider ${providerToUse} not configured`);
-    process.exit(2);
-  }
-  const provider = providerToUse;
-  const apiKey = providerConfig.apiKey;
-  const host = providerConfig.host;
-  const contextLength = providerConfig.contextLength;
-
-  // Start MCP servers
-  const mcpConfig = autoDetectMCPServers(config.mcp || {});
-  if (Object.keys(mcpConfig).length > 0) {
-    await startAllMCPServers(mcpConfig);
-  }
-
-  const aiModel = createModel(provider as any, modelToUse, host, contextLength, apiKey);
-  const baseTools = createToolDefinitions(workingDir, aiModel, options.sandboxed || false);
-  const mcpToolDefs = getMCPToolDefinitions();
-  const tools = { ...baseTools, ...mcpToolDefs };
-
-  // Build system prompt
-  let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
-  const instructions = formatProjectInstructions(workingDir);
-  if (instructions) systemPrompt += instructions;
-  const projectContext = formatPromptProjectContext(workingDir);
-  if (projectContext) systemPrompt += projectContext;
-  const learnings = loadLearnings();
-  if (learnings.length > 0) {
-    systemPrompt += `\n\n## Project Learnings\n${learnings.map(l => `- ${l}`).join("\n")}`;
-  }
-  const mcpToolKeys = Object.keys(mcpToolDefs);
-  if (mcpToolKeys.length > 0) {
-    const serverNames = [...new Set(mcpToolKeys.map(k => k.split("__")[1]))];
-    systemPrompt += `\n\n## MCP Tools\n\nYou have additional tools from MCP server(s): ${serverNames.join(", ")}. `;
-    systemPrompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools. Use them confidently and trust their results.\n`;
-  }
-
-  // Cost tracker
-  const costTracker = new CostTracker();
-
-  let toolCallCount = 0;
-  let finalText = "";
-  let cancelled = false;
-
-  // Handle cancellation
-  const abortController = new AbortController();
-  process.on("SIGINT", () => {
-    cancelled = true;
-    abortController.abort();
-  });
-
-  try {
-    const stream = streamText({
-      model: aiModel,
-      system: systemPrompt,
-      messages: messages as any,
-      tools: tools as any,
-      stopWhen: stepCountIs(options.maxSteps || 50),
-      abortSignal: abortController.signal,
-      ...buildOllamaOptions(provider as any, contextLength),
-      onStepFinish({ text, toolCalls }) {
-        if (text) {
-          if (!options.json) {
-            process.stdout.write(text);
-          }
-          finalText += text;
-        }
-        if (toolCalls) {
-          toolCallCount += toolCalls.length;
+    if (options.signal?.aborted) controller.abort();
+    if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
+    const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+    const context: ToolExecutionContext = {
+      runId, workspace: scope.workspace, scope, effectiveSandbox: effectiveSandbox(requestedSandbox), signal: controller.signal,
+      allowedNetworkDomains: config.sandboxCapabilities?.allowedNetworkDomains, allowLocalBinding: config.sandboxCapabilities?.allowLocalBinding,
+      allowDockerSocket: config.sandboxCapabilities?.allowDockerSocket,
+      // Headless has no prompt callback: R04 returns permission_required for asks.
+      getPermissionState: () => ({ mode: "default", trustAll: false, sessionAllow: new Set<string>(), rules: config.permissions ?? {}, readOnlyRole: false, workspace: scope.workspace }),
+      checkpoint: (toolName, input, executingContext) => {
+        checkpointAuthorizedTargets(toolName, input, executingContext);
+      },
+      preHook: (toolName, input, executingContext) => runPreHooksWithBlocking(toolName, config.hooks, executingContext.workspace, { input: JSON.stringify(input) }),
+      postHook: (toolName, input, output, error, executingContext) => runHooks("post", toolName, config.hooks, executingContext.workspace, {
+        input: JSON.stringify(input), output: output === undefined ? undefined : JSON.stringify(output), success: error === undefined,
+      }),
+      event: (event, executingContext) => {
+        if (event.phase === "complete" && event.error) {
+          runLifecycleHooks("tool_error", config.hooks, executingContext.workspace);
         }
       },
+    };
+    const mcpConfig = await autoDetectMCPServersForRun(config.mcp || {}, {
+      runId,
+      workspace: workingDir,
+      signal: controller.signal,
     });
-
-    // Consume stream
-    for await (const _ of stream.textStream) {
-      // Drive the stream
+    mcpResources.register(mcpConfig);
+    await mcpResources.ensureStarted();
+    if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
+    const aiModel = createModel(provider as AIProvider, model, providerConfig.host, providerConfig.contextLength, providerConfig.apiKey);
+    const builtinTools = createToolDefinitions(workingDir, aiModel, requestedSandbox, {
+      runId, signal: controller.signal, scope, sandboxCapabilities: config.sandboxCapabilities, executionContext: context,
+      onSubAgentUsage: async (childUsage) => {
+        costs.recordCall({ callId: childUsage.callId, persona: "child", provider, model, usage: childUsage.usage, usageComplete: childUsage.usageComplete });
+      },
+    });
+    const mcpTools = mcpResources.getToolDefinitions();
+    const tools = wrapTools({ ...builtinTools, ...mcpTools }, context, (error) => {
+      terminalToolError ??= error;
+      controller.abort();
+    }, pendingTools);
+    let system = "You are WorkerMill, an AI coding agent. Working directory: " + workingDir + "\n";
+    const instructions = formatProjectInstructions(workingDir);
+    if (instructions) system += instructions;
+    const projectContext = formatPromptProjectContext(workingDir);
+    if (projectContext) system += projectContext;
+    const learnings = loadLearnings();
+    if (learnings.length) system += "\n\n## Project Learnings\n" + learnings.map((learning) => "- " + learning).join("\n");
+    const mcpKeys = Object.keys(mcpTools);
+    if (mcpKeys.length) system += "\n\n## MCP Tools\n\nAdditional MCP servers: " + [...new Set(mcpKeys.map((key) => key.split("__")[1]))].join(", ");
+    // SDK gap: streamText's generic tool map cannot represent dynamic MCP tools.
+    modelStarted = true;
+    const stream = streamText({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK gap documented above.
+      model: aiModel, system, messages: messages as any, tools: tools as any, stopWhen: stepCountIs(stepLimit),
+      abortSignal: controller.signal, ...buildOllamaOptions(provider as AIProvider, providerConfig.contextLength),
+      onStepFinish({ text: stepText, toolCalls: stepCalls, usage: stepUsage }) {
+        completedSteps++;
+        if (stepText) text += stepText;
+        if (stepCalls) toolCalls += stepCalls.length;
+        lastStepHadToolCalls = Boolean(stepCalls?.length);
+        usage = addUsage(usage, usageFromSdk(stepUsage));
+      },
+    });
+    for await (const _ of stream.textStream) { /* drive stream */ }
+    // A transport can finish before a dispatched tool promise settles. Let
+    // successful work finish before finalization aborts the owned resources.
+    const settledTools = await Promise.allSettled([...pendingTools]);
+    const failedTool = settledTools.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failedTool) throw failedTool.reason;
+    text = await stream.text;
+    const settled = settleUsage(usage, usageFromSdk(await stream.totalUsage));
+    usage = settled.usage;
+    hasFinalUsage = settled.usageComplete;
+    if (terminalToolError) throw terminalToolError;
+    if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
+    const finishReason = await stream.finishReason;
+    if (controller.signal.aborted) throw new ToolExecutionError("cancelled", "headless run cancelled");
+    if ((completedSteps >= stepLimit && lastStepHadToolCalls) || finishReason === "tool-calls") {
+      result = failure(start, "step_limit", "The configured maximum step count was exhausted", { sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls });
+      return result;
     }
-
-    finalText = await stream.text;
-    const usage = await stream.totalUsage;
-
-    // Track cost
-    const inputTokens = (usage as any)?.promptTokens ?? (usage as any)?.inputTokens ?? 0;
-    const outputTokens = (usage as any)?.completionTokens ?? (usage as any)?.outputTokens ?? 0;
-    costTracker.addUsage("run", providerToUse, modelToUse, inputTokens, outputTokens);
-
-    // Add assistant message to session if not single prompt
-    if (!options.singlePrompt) {
-      addMessage(session, "assistant", finalText);
-      saveSession(session);
+    if (finishReason !== "stop") {
+      throw new Error("Model stream ended with non-success finish reason: " + finishReason);
     }
-
-    const durationMs = Date.now() - startTime;
-
-    if (options.json) {
-      const result = {
-        status: cancelled ? "cancelled" : "ok",
-        sessionId: options.singlePrompt ? null : session.id,
-        model: `${providerToUse}/${modelToUse}`,
-        text: finalText,
-        toolCalls: toolCallCount,
-        tokens: {
-          input: inputTokens,
-          output: outputTokens,
-        },
-        costUsd: costTracker.getTotalCost(),
-        durationMs,
-      };
-      console.log(JSON.stringify(result));
-    } else {
-      if (!finalText) {
-        console.log("(completed with tool calls only)");
-      }
-      console.log(); // newline
-    }
-
-    stopAllMCPServers();
-    const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
-    shutdownLSP();
-
-    process.exit(cancelled ? 130 : 0);
+    if (!options.singlePrompt) shouldSaveSession = true;
+    result = { status: "ok", exitCode: 0, sessionId: options.singlePrompt ? null : session.id, model: modelIdentity, text, toolCalls, tokens: { input: 0, output: 0 }, costUsd: 0, durationMs: Date.now() - start, usageLedger: costs.getLedgerSnapshot(), usageComplete: true };
+    return result;
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    if (options.json) {
-      const result = {
-        status: "error",
-        sessionId: options.singlePrompt ? null : session.id,
-        model: `${providerToUse}/${modelToUse}`,
-        text: "",
-        toolCalls: toolCallCount,
-        tokens: { input: 0, output: 0 },
-        costUsd: costTracker.getTotalCost(),
-        durationMs: Date.now() - startTime,
-      };
-      console.log(JSON.stringify(result));
-    } else {
-      console.error(`Error: ${errorMsg}`);
+    const reason = terminalToolError?.code ?? reasonFor(error, controller.signal);
+    result = failure(start, reason, error instanceof Error ? error.message : String(error), { sessionId: options.singlePrompt ? null : session?.id ?? null, model: modelIdentity, text, toolCalls });
+    return result;
+  } finally {
+    process.removeListener("SIGINT", abortFromSigint);
+    options.signal?.removeEventListener("abort", abortFromParent);
+    controller.abort();
+    const cleanupErrors: string[] = [];
+    // A provider can reject after dispatching a tool. Drain every owned call
+    // before returning, but do not relabel the provider failure as a cleanup
+    // failure merely because abort correctly rejected an in-flight tool.
+    await Promise.allSettled([...pendingTools]);
+    if (modelStarted) costs.recordCall({ callId: `headless:${runId}`, persona: "run", provider, model, usage, usageComplete: hasFinalUsage });
+    const ledger = costs.getLedgerSnapshot();
+    if (result) {
+      result.tokens = { input: ledger.totals.inputTokens, output: ledger.totals.outputTokens };
+      result.costUsd = ledger.totals.estimatedApiCost;
+      result.usageLedger = ledger;
+      result.usageComplete = ledger.totals.partialUsageCalls === 0 && ledger.totals.missingUsageCalls === 0;
+      result.durationMs = Date.now() - start;
     }
-
-    stopAllMCPServers();
-    const { shutdown: shutdownLSP } = await import("./engine/tools/lsp.js");
-    shutdownLSP();
-
-    process.exit(1);
+    try {
+      await cancelAndWaitForRunProcesses(runId);
+    } catch (error) {
+      cleanupErrors.push("Process cleanup failed: " + String(error));
+    }
+    try {
+      await cleanupScopedBackgroundProcesses(runId);
+    } catch (error) {
+      cleanupErrors.push("Background cleanup failed: " + String(error));
+    }
+    try {
+      await mcpResources?.close();
+    } catch (error) {
+      cleanupErrors.push("MCP cleanup failed: " + String(error));
+    }
+    try {
+      await shutdownLSPRun(runId);
+    } catch (error) {
+      cleanupErrors.push("LSP cleanup failed: " + String(error));
+    }
+    if (cleanupErrors.length) {
+      return failure(start, "cleanup_error", cleanupErrors.join("; "), {
+        sessionId: options.singlePrompt ? null : session?.id ?? null,
+        model: modelIdentity, text, toolCalls, tokens: result?.tokens, costUsd: result?.costUsd, usageLedger: ledger, usageComplete: result?.usageComplete,
+      });
+    }
+    if (shouldSaveSession && session) {
+      try {
+        addMessage(session, "assistant", text);
+        applySessionUsageLedger(session, ledger);
+        saveSession(session);
+      } catch (error) {
+        return failure(start, "provider_error", "Unable to save the completed session: " + String(error), {
+          sessionId: session.id, model: modelIdentity, text, toolCalls, tokens: result?.tokens, costUsd: result?.costUsd, usageLedger: ledger, usageComplete: result?.usageComplete,
+        });
+      }
+    }
   }
 }

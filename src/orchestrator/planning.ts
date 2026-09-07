@@ -1,9 +1,13 @@
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import { createModel, buildOllamaOptions } from "../engine/model-factory.js";
 import { createToolDefinitions } from "../engine/tools/index.js";
+import { createPathScope } from "../engine/path-policy.js";
+import { executeToolCall, type ToolExecutionContext } from "../engine/tool-executor.js";
+import { createAttemptResources } from "../engine/run-resources.js";
 import type { AIProvider } from "../engine/types.js";
 import { loadPersona } from "../personas.js";
 import { formatProjectInstructions } from "../instructions.js";
@@ -13,6 +17,9 @@ import type { CliConfig } from "../config.js";
 import { getApiKeyEnvVar } from "../provider-capabilities.js";
 import * as logger from "../logger.js";
 import { getPrdDecompositionPhaseLabel } from "../prd-decomposition-phases.js";
+import { resolveSandboxMode } from "../sandbox-mode.js";
+import type { TokenUsage } from "../providers/types.js";
+import { addUsage, settleUsage, usageFromSdk } from "../engine/model-usage.js";
 
 import type { Story, OrchestrationOutput } from "./types.js";
 import {
@@ -28,6 +35,32 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 
+/** One actual planning-related SDK invocation, for the run usage ledger. */
+export interface PlanningUsageObservation {
+  callId: string;
+  persona: string;
+  provider: string;
+  model: string;
+  usage?: Partial<TokenUsage>;
+  usageComplete: boolean;
+}
+
+export type PlanningUsageCallback = (observation: PlanningUsageObservation) => void | Promise<void>;
+
+async function reportPlanningUsage(
+  onUsage: PlanningUsageCallback | undefined,
+  callId: string,
+  persona: string,
+  provider: string,
+  model: string,
+  steps: Partial<TokenUsage> | undefined,
+  total: unknown,
+): Promise<void> {
+  if (!onUsage) return;
+  const settled = settleUsage(steps, usageFromSdk(total));
+  await onUsage({ callId, persona, provider, model, ...settled });
+}
+
 /* -------------------------------------------------------------------------- */
 /*  runSpecCheck                                                              */
 /* -------------------------------------------------------------------------- */
@@ -37,7 +70,9 @@ export async function runSpecCheck(
   userTask: string,
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
+  onUsage?: PlanningUsageCallback,
 ): Promise<string> {
+  if (abortSignal?.aborted) return userTask;
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
@@ -49,8 +84,12 @@ export async function runSpecCheck(
 
   let gaps: Array<{ question: string; suggestion: string }> = [];
 
+  const callId = randomUUID();
+  let resultUsage: unknown;
+  let started = false;
   try {
     output.status(getPrdDecompositionPhaseLabel("validating_spec"));
+    started = true;
     const result = await generateObject({
       model,
       abortSignal,
@@ -77,11 +116,15 @@ Do NOT flag:
 
 Return up to 3 gaps, or an empty array if the spec is clear enough. When in doubt, return fewer gaps — interrupting the user for minor gaps wastes more time than proceeding.`,
     });
+    resultUsage = result.usage;
     gaps = result.object.gaps;
     output.statusDone();
+    if (abortSignal?.aborted) return userTask;
   } catch {
     output.statusDone();
     return userTask; // spec check failure is non-fatal
+  } finally {
+    if (started) await reportPlanningUsage(onUsage, callId, "Spec Check", provider, modelName, undefined, resultUsage);
   }
 
   if (gaps.length === 0) return userTask;
@@ -135,6 +178,8 @@ export interface PlanCriticResult {
   outputTokens: number;
   provider: string;
   model: string;
+  /** Cancellation is terminal; callers must not treat the retained plan as approved. */
+  cancelled?: boolean;
 }
 
 /** Render a plan as compact JSON for the critic to read. */
@@ -180,6 +225,7 @@ export async function runPlanCritic(
   workingDir: string,
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
+  onUsage?: PlanningUsageCallback,
 ): Promise<PlanCriticResult> {
   const threshold = config.review?.criticThreshold ?? DEFAULT_CRITIC_THRESHOLD;
 
@@ -191,14 +237,29 @@ export async function runPlanCritic(
       if (key) process.env[envVar] = key;
     }
   }
-  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
-
   const base: Omit<PlanCriticResult, "stories" | "approved" | "score" | "critique" | "iterations"> = {
     inputTokens: 0,
     outputTokens: 0,
     provider,
     model: modelName,
   };
+
+  const cancelled = (iterations: number, inputTokens = 0, outputTokens = 0): PlanCriticResult => ({
+    ...base,
+    stories,
+    approved: false,
+    score: 0,
+    critique: null,
+    iterations,
+    inputTokens,
+    outputTokens,
+    cancelled: true,
+  });
+
+  // Avoid starting a model call when the orchestration was already cancelled.
+  if (abortSignal?.aborted) return cancelled(0);
+
+  const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
   const projectInstructions = formatProjectInstructions(workingDir);
   const taskForPrompt = truncateForPrompt(userTask, 8_000, "task spec");
@@ -212,12 +273,16 @@ export async function runPlanCritic(
   let outputTokens = 0;
 
   for (let iteration = 1; iteration <= MAX_CRITIC_ITERATIONS; iteration++) {
-    if (abortSignal?.aborted) break;
+    if (abortSignal?.aborted) return cancelled(iteration - 1, inputTokens, outputTokens);
 
     // ── Score the current plan ──
     let critique: PlanCritique;
+    const scoreCallId = randomUUID();
+    let scoreUsage: unknown;
+    let scoreStarted = false;
     try {
       output.status(getPrdDecompositionPhaseLabel("scoring_plan"));
+      scoreStarted = true;
       const scored = await generateObject({
         model,
         abortSignal,
@@ -252,11 +317,16 @@ Scoring guide: 9-10 a worker could execute this as-is. 7-8 minor gaps that a com
 
 Report only issues that would change what a worker builds. Do NOT report style preferences, wording, or story naming. If the plan is sound, return an empty issues array and a score of 9 or 10.`,
       });
+      scoreUsage = scored.usage;
       critique = scored.object;
       inputTokens += scored.usage?.inputTokens || 0;
       outputTokens += scored.usage?.outputTokens || 0;
       output.statusDone();
+      // Some SDK transports resolve successfully after receiving an abort.
+      // Do not adopt that score or approve a plan after cancellation.
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
     } catch (err) {
+      if (abortSignal?.aborted) return cancelled(iteration - 1, inputTokens, outputTokens);
       // Critic failure is non-fatal — proceed with the plan we have.
       output.statusDone();
       logger.error("Plan critic scoring failed", { error: err instanceof Error ? err.message : String(err) });
@@ -271,6 +341,8 @@ Report only issues that would change what a worker builds. Do NOT report style p
         inputTokens,
         outputTokens,
       };
+    } finally {
+      if (scoreStarted) await reportPlanningUsage(onUsage, scoreCallId, "Critic", provider, modelName, undefined, scoreUsage);
     }
 
     lastCritique = critique;
@@ -299,8 +371,12 @@ Report only issues that would change what a worker builds. Do NOT report style p
 
     // ── Refine the plan against the critique ──
     output.log("critic", `Refining the plan (round ${iteration} of ${MAX_CRITIC_ITERATIONS - 1})...`);
+    const refineCallId = randomUUID();
+    let refineUsage: unknown;
+    let refineStarted = false;
     try {
       output.status(getPrdDecompositionPhaseLabel("refining_plan"));
+      refineStarted = true;
       const refined = await generateText({
         model,
         abortSignal,
@@ -328,9 +404,13 @@ Output ONLY the JSON block, no other text.`,
         maxOutputTokens: 8192,
         ...buildOllamaOptions(provider as AIProvider, contextLength),
       });
+      refineUsage = refined.usage;
       inputTokens += refined.usage?.inputTokens || 0;
       outputTokens += refined.usage?.outputTokens || 0;
       output.statusDone();
+      // As above, an ignored abort must not let a late refinement become the
+      // executable plan.
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
 
       const revised = parseStoriesFromText(refined.text, output);
       if (revised.length === 0) {
@@ -340,10 +420,13 @@ Output ONLY the JSON block, no other text.`,
       }
       currentStories = normalizeStoryDependencies(revised);
     } catch (err) {
+      if (abortSignal?.aborted) return cancelled(iteration, inputTokens, outputTokens);
       output.statusDone();
       logger.error("Plan critic refinement failed", { error: err instanceof Error ? err.message : String(err) });
       output.log("critic", "Could not refine the plan — keeping the previous version.");
       break;
+    } finally {
+      if (refineStarted) await reportPlanningUsage(onUsage, refineCallId, "Critic", provider, modelName, undefined, refineUsage);
     }
   }
 
@@ -368,7 +451,9 @@ export async function classifyComplexity(
   userInput: string,
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
+  onUsage?: PlanningUsageCallback,
 ): Promise<{ isMulti: boolean; reason: string }> {
+  if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
   logger.info("Classifying complexity", { input: userInput.slice(0, 200) });
   // Resolve file references before classification so "spec.md" becomes the full spec content
   const resolvedInput = resolveTaskInput(userInput, process.cwd());
@@ -381,7 +466,17 @@ export async function classifyComplexity(
 
   const model = createModel(provider as AIProvider, modelName, host, contextLength, apiKey);
 
+  const classifyCallId = randomUUID();
+  let classifyUsage: unknown;
+  let classifyStarted = false;
+  let classifyReported = false;
+  const reportClassification = async () => {
+    if (!classifyStarted || classifyReported) return;
+    classifyReported = true;
+    await reportPlanningUsage(onUsage, classifyCallId, "Classification", provider, modelName, undefined, classifyUsage);
+  };
   try {
+    classifyStarted = true;
     const result = await generateObject({
       model,
       abortSignal,
@@ -394,14 +489,22 @@ export async function classifyComplexity(
 Task:
 ${resolvedInput}`,
     });
+    classifyUsage = result.usage;
 
+    if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
     return {
       isMulti: result.object.complexity === "multi",
       reason: result.object.reason,
     };
   } catch (err) {
+    if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
     // Fallback to text-based classification
+    await reportClassification();
+    const fallbackCallId = randomUUID();
+    let fallbackUsage: unknown;
+    let fallbackStarted = false;
     try {
+      fallbackStarted = true;
       const textResult = await generateText({
         model,
         abortSignal,
@@ -409,14 +512,21 @@ ${resolvedInput}`,
 
 Task: ${resolvedInput}`,
       });
+      fallbackUsage = textResult.usage;
 
       const isMulti = /\bmulti\b/i.test(textResult.text);
+      if (abortSignal?.aborted) return { isMulti: false, reason: "Classification cancelled" };
       return { isMulti, reason: textResult.text.slice(0, 200) };
     } catch (err2) {
       logger.debug("Classification double fallback failed", { error: err2 instanceof Error ? err2.message : String(err2) });
     }
+    finally {
+      if (fallbackStarted) await reportPlanningUsage(onUsage, fallbackCallId, "Classification", provider, modelName, undefined, fallbackUsage);
+    }
 
     return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
+  } finally {
+    await reportClassification();
   }
 }
 
@@ -459,6 +569,20 @@ export function topologicalSort(stories: Story[]): Story[] {
 /*  planStories                                                               */
 /* -------------------------------------------------------------------------- */
 
+export type PlanFailureReason = "cancelled" | "provider_failed" | "planning_rejected" | "no_output";
+
+export interface PlanResult {
+  stories: Story[];
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** Retained for existing callers; use failureReason for truthful classification. */
+  rejected?: boolean;
+  rejectionReason?: string;
+  failureReason?: PlanFailureReason;
+}
+
 export async function planStories(
   config: CliConfig,
   userTask: string,
@@ -467,10 +591,42 @@ export async function planStories(
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
   _rateLimitRetries = 0,
-): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
-  const planner = loadPersona("planner");
-
+  onUsage?: PlanningUsageCallback,
+): Promise<PlanResult> {
   const { provider: pProvider, model: pModel, apiKey: pApiKey, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
+  const cancelled = (...usage: Array<{ inputTokens?: number; outputTokens?: number } | undefined>) => ({
+    stories: [],
+    provider: pProvider,
+    model: pModel,
+    inputTokens: usage.reduce((total, value) => total + (value?.inputTokens || 0), 0),
+    outputTokens: usage.reduce((total, value) => total + (value?.outputTokens || 0), 0),
+    rejected: true,
+    rejectionReason: "Cancelled",
+    failureReason: "cancelled" as const,
+  });
+
+  // Cancellation and an explicitly unavailable OS sandbox are terminal before
+  // either the model or tool factory gets a chance to start work.
+  if (abortSignal?.aborted) return cancelled();
+  if (sandboxed === "os") resolveSandboxMode("os");
+
+  const controller = new AbortController();
+  const signal = abortSignal ? AbortSignal.any([abortSignal, controller.signal]) : controller.signal;
+  const runId = randomUUID();
+  const resources = createAttemptResources(runId, () => controller.abort(new Error("Planner attempt finished")));
+  let planUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+  let stepUsage: Partial<TokenUsage> | undefined;
+  const plannerCallId = randomUUID();
+  let plannerStarted = false;
+  let plannerUsageReported = false;
+  const reportPlannerUsage = async () => {
+    if (!plannerStarted || plannerUsageReported) return;
+    plannerUsageReported = true;
+    await reportPlanningUsage(onUsage, plannerCallId, "Planner", pProvider, pModel, stepUsage, planUsage);
+  };
+  try {
+
+  const planner = loadPersona("planner");
   if (pProvider && pApiKey) {
       const envVar = getApiKeyEnvVar(pProvider);
       if (envVar && !process.env[envVar]) {
@@ -479,8 +635,34 @@ export async function planStories(
       }
   }
 
+  const scope = createPathScope(workingDir, config.sandboxCapabilities?.extraPathGrants ?? []);
+  const executionContext: ToolExecutionContext = {
+    runId,
+    workspace: scope.workspace,
+    scope,
+    effectiveSandbox: sandboxed === "os" ? "os" : sandboxed ? "path" : "none",
+    signal,
+    allowedNetworkDomains: config.sandboxCapabilities?.allowedNetworkDomains,
+    allowLocalBinding: config.sandboxCapabilities?.allowLocalBinding,
+    allowDockerSocket: config.sandboxCapabilities?.allowDockerSocket,
+    getPermissionState: () => ({
+      mode: "default",
+      trustAll: false,
+      sessionAllow: new Set<string>(),
+      rules: config.permissions ?? {},
+      // Planner personas are read-only regardless of their on-disk tool list.
+      readOnlyRole: true,
+      workspace: scope.workspace,
+    }),
+  };
   const plannerModel = createModel(pProvider as AIProvider, pModel, pHost, pCtx, pApiKey);
-  const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed);
+  const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed, {
+    runId: executionContext.runId,
+    signal,
+    scope,
+    sandboxCapabilities: config.sandboxCapabilities,
+    executionContext,
+  });
 
   const readOnlyTools: Record<string, AnyToolDef> = {};
   if (planner) {
@@ -490,9 +672,10 @@ export async function planStories(
         readOnlyTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            output.toolCall("planner", toolName, input);
-            const result = await toolDef.execute(input);
-            return result;
+            return resources.track(executeToolCall(toolName, input, async () => {
+              output.toolCall("planner", toolName, input);
+              return toolDef.execute(input);
+            }, executionContext));
           },
         };
       }
@@ -679,19 +862,20 @@ Rules:
 
   // Stream planner output line-by-line as it arrives
   let planText = "";
-  let planUsage: { inputTokens?: number; outputTokens?: number } | undefined;
   try {
     // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
+    plannerStarted = true;
     const planStream = streamText({
       model: plannerModel,
-      abortSignal,
+      abortSignal: signal,
       system: planner?.systemPrompt || "You are an implementation planner.",
       prompt: plannerPrompt,
       tools: readOnlyTools as ToolSet,
       stopWhen: stepCountIs(100),
       timeout: { chunkMs: 120_000 },
       ...buildOllamaOptions(pProvider as AIProvider, pCtx),
-      onStepFinish() {
+      onStepFinish(step) {
+        stepUsage = addUsage(stepUsage, usageFromSdk(step?.usage));
         // Text already streamed line-by-line below — just update status between steps
         output.status(getPrdDecompositionPhaseLabel("streaming"));
       },
@@ -712,8 +896,27 @@ Rules:
     if (lineBuffer.trim()) {
       output.log("planner", lineBuffer);
     }
+    await resources.settleTools();
+    if (abortSignal?.aborted) {
+      // The text stream may have ended just as cancellation arrived. Retain
+      // usage that the transport has already made available without parsing a
+      // plan or starting another model call.
+      try {
+        planUsage = await planStream.totalUsage;
+      } catch {
+        // Cancellation remains terminal even when usage is unavailable.
+      }
+      output.statusDone();
+      output.coordinatorLog("Build cancelled by user.");
+      return cancelled(planUsage);
+    }
     planText = await planStream.text;
     planUsage = await planStream.totalUsage;
+    if (abortSignal?.aborted) {
+      output.statusDone();
+      output.coordinatorLog("Build cancelled by user.");
+      return cancelled(planUsage);
+    }
     // Track tok/s for planner model
     const planElapsed = (Date.now() - planStart) / 1000;
     const planOutTokens = planUsage?.outputTokens || 0;
@@ -723,11 +926,12 @@ Rules:
       logger.info("Model performance", { provider: pProvider, model: pModel, tokPerSec: planTokPerSec });
     }
   } catch (planErr) {
+    await resources.close();
     output.statusDone();
     if (abortSignal?.aborted) {
       logger.info("Planner cancelled by user");
       output.coordinatorLog("Build cancelled by user.");
-      return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+      return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled" };
     }
     if (isBalanceOrQuotaError(planErr) && output.requestPause) {
       output.coordinatorLog("Planner paused: provider quota/balance appears exhausted.");
@@ -738,10 +942,11 @@ Rules:
       await output.requestPause();
       if (abortSignal?.aborted) {
         output.coordinatorLog("Build cancelled by user.");
-        return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+        return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled", failureReason: "cancelled" };
       }
       output.coordinatorLog("Resuming planner after provider/account update...");
-      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
+      await reportPlannerUsage();
+      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal, 0, onUsage);
     }
     // Rate limit retry — back off and retry the entire planner call (max 3 retries)
     const rl = isRateLimitError(planErr);
@@ -749,8 +954,9 @@ Rules:
       const waitSec = Math.ceil(rl.retryAfterMs / 1000);
       output.coordinatorLog(`Planner rate limited — retrying in ${waitSec}s (${_rateLimitRetries + 1}/3)`);
       logger.info("Planner rate limit retry", { attempt: _rateLimitRetries + 1, waitSec });
-      await rateLimitSleep(rl.retryAfterMs);
-      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal, _rateLimitRetries + 1);
+      await rateLimitSleep(rl.retryAfterMs, abortSignal);
+      await reportPlannerUsage();
+      return planStories(config, userTask, workingDir, sandboxed, output, abortSignal, _rateLimitRetries + 1, onUsage);
     }
     const msg = planErr instanceof Error ? planErr.message : String(planErr);
     logger.error("Planner failed", { error: msg });
@@ -763,6 +969,7 @@ Rules:
       outputTokens: 0,
       rejected: true,
       rejectionReason: msg,
+      failureReason: "provider_failed",
     };
   }
   output.status(getPrdDecompositionPhaseLabel("parsing"));
@@ -783,6 +990,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: reason,
+      failureReason: "planning_rejected",
     };
   }
 
@@ -805,6 +1013,7 @@ Rules:
         outputTokens: planUsage?.outputTokens || 0,
         rejected: true,
         rejectionReason: reason,
+        failureReason: "planning_rejected",
       };
     }
   }
@@ -817,8 +1026,19 @@ Rules:
     logger.info("Planner JSON extraction retry", { planTextLength: planText.length });
 
     try {
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled(planUsage);
+      }
       const extractionInput = truncateForPrompt(planText, 12_000, "planner analysis");
-      const extractionResult = await generateText({
+      const extractionCallId = randomUUID();
+      let extractionUsage: unknown;
+      let extractionStarted = false;
+      let extractionResult;
+      try {
+      extractionStarted = true;
+      extractionResult = await generateText({
         model: plannerModel,
         prompt: `You previously analyzed a codebase and produced the following plan:\n\n${extractionInput}\n\n` +
           `Convert your analysis into the required JSON format. Output ONLY a \`\`\`json code block:\n\n` +
@@ -830,6 +1050,13 @@ Rules:
         maxOutputTokens: 4096,
         abortSignal,
       });
+      extractionUsage = extractionResult.usage;
+
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled(planUsage, extractionResult.usage);
+      }
 
       const retryStories = parseStoriesFromText(extractionResult.text, output);
       if (retryStories.length > 0) {
@@ -844,7 +1071,15 @@ Rules:
           outputTokens: (planUsage?.outputTokens || 0) + (retryUsage?.outputTokens || 0),
         };
       }
+      } finally {
+        if (extractionStarted) await reportPlanningUsage(onUsage, extractionCallId, "Planner", pProvider, pModel, undefined, extractionUsage);
+      }
     } catch (extractErr) {
+      if (abortSignal?.aborted) {
+        output.statusDone();
+        output.coordinatorLog("Build cancelled by user.");
+        return cancelled(planUsage);
+      }
       logger.error("JSON extraction retry failed", { error: extractErr instanceof Error ? extractErr.message : String(extractErr) });
     }
 
@@ -859,6 +1094,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: "Planner produced no output",
+      failureReason: "no_output",
     };
   }
 
@@ -874,6 +1110,7 @@ Rules:
       outputTokens: planUsage?.outputTokens || 0,
       rejected: true,
       rejectionReason: "Planner produced no output",
+      failureReason: "no_output",
     };
   }
 
@@ -885,6 +1122,13 @@ Rules:
     inputTokens: planUsage?.inputTokens || 0,
     outputTokens: planUsage?.outputTokens || 0,
   };
+  } finally {
+    try {
+      await reportPlannerUsage();
+    } finally {
+      await resources.close();
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */

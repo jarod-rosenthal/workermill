@@ -139,7 +139,8 @@ Controls the `/build` review pipeline.
   "specCheck": false,
   "critic": false,
   "criticThreshold": 8,
-  "verifyEnabled": true
+  "verifyEnabled": true,
+  "requireDifferentModel": false
 }
 ```
 
@@ -147,13 +148,14 @@ Controls the `/build` review pipeline.
 |---|---|---|
 | `enabled` | `true` | Run tech lead review after workers finish. Set to `false` to skip review entirely. |
 | `maxRevisions` | `3` | Max review → revise cycles before giving up |
-| `approvalThreshold` | `9` | Review score (1-10) at or above which the code is approved |
+| `approvalThreshold` | `9` | Minimum review score (1-10); an explicit approved decision is also required |
 | `autoRevise` | `false` | Automatically send failed reviews back for revision without prompting the user |
 | `strict` | `false` | Zero tolerance: gate failures block, review approval is required, out-of-scope edits are rejected, and an unapproved plan aborts the run |
 | `specCheck` | `false` | Before planning: identifies up to 3 high-severity ambiguities in your task description and prompts you to answer them. Answers are appended to the spec before the planner runs. In unattended mode, suggestions are applied silently. |
 | `critic` | `false` | Between planning and execution: scores the plan and refines it before any worker starts. See below. |
 | `criticThreshold` | `8` | Plan score (1-10) the critic must reach to approve. Only used when `critic` is `true`. |
-| `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story — shell commands that assert observable output before the tech lead reviewer sees the diff. Gate failures are injected into the reviewer's context as must-fix items. If the planner can't generate meaningful commands, nothing runs. Set to `false` to disable. |
+| `verifyEnabled` | `true` | After workers finish: the planner generates `verificationCommands` per story. Results are reviewer context and advisory outside strict mode; strict mode promotes failures to blocking. If the planner cannot generate meaningful commands, nothing runs. Set to `false` to disable. |
+| `requireDifferentModel` | `false` | Opt in to blocking review preflight when the reviewer does not resolve to a known-different endpoint/model binding from every worker binding. Unknown identity does not satisfy this requirement. |
 
 ### The planner critic
 
@@ -180,7 +182,10 @@ The critic runs on whatever provider `routing.critic` points at, falling back to
 /settings review.specCheck true
 /settings review.critic true
 /settings review.criticThreshold 8
+/settings review.requireDifferentModel true
 ```
+
+When enabled, a run must provide a reviewer binding that is known-different from every worker binding before model work begins. The setting does not reroute workers or reviewers and never silently selects another model. Bindings are compared using resolved provider aliases plus a normalized endpoint and model identifier; credentials and query strings are not reported. Different identifiers are only an identity check, not proof that the models were independently trained.
 
 `verifyEnabled` is the one field with no `/settings` key — set it directly in `.workermill/config.json`:
 
@@ -263,6 +268,10 @@ With auto-update off, the CLI uses the model catalog baked into the installed ve
 
 Static shell commands that run on every `/build`, after all stories complete and before the tech lead reviewer sees the diff. Use these for project-wide invariants — things that must always hold regardless of what was built.
 
+Static gates are required by default: a failure blocks completion. To preserve an
+older advisory gate, opt out explicitly with `"required": false`; strict mode
+still blocks that failure.
+
 **Off by default.** Add to `.workermill/config.json` to enable:
 
 ```json
@@ -274,7 +283,8 @@ Static shell commands that run on every `/build`, after all stories complete and
     },
     {
       "name": "config schema valid",
-      "commands": ["node dist/index.js config validate --config config/defaults.json"]
+      "commands": ["node dist/index.js config validate --config config/defaults.json"],
+      "required": false
     }
   ]
 }
@@ -284,10 +294,11 @@ Static shell commands that run on every `/build`, after all stories complete and
 |---|---|
 | `name` | Label shown in the TUI and injected into the reviewer's context |
 | `commands` | Shell commands run sequentially — first non-zero exit marks the gate as failed |
+| `required` | Defaults to `true`. Set to `false` only for an advisory static gate outside strict mode. |
 
-All gates run in parallel. A gate fails on the first command that exits non-zero.
+All gates run sequentially to avoid races over shared build output. A gate fails on the first command that exits non-zero.
 
-**Do not use for:** `npm test`, `tsc`, `pytest`, `go build` — workers already run these. Use quality gates for black-box assertions on the *built artifact*, not the build process itself.
+Use gates for final-state evidence, including a bounded project test or build command where that is the relevant acceptance check. A worker's earlier result is not final-candidate evidence.
 
 See [Quality Gates & Spec Check](quality-gates.md) for examples across Node, Python, Go, and Ruby.
 
@@ -505,9 +516,9 @@ File and bash tool sandboxing.
 
 | Value | Effect |
 |---|---|
-| `true` (default) | Restrict file and bash tools to the working directory |
-| `false` | No restriction — tools can read and write anywhere |
-| `"os"` | OS-level sandboxing via `@anthropic-ai/sandbox-runtime` (where supported) |
+| `true` (default) | Canonical path checks for explicit file targets and command working directories; not shell containment |
+| `false` | Disable path confinement; permission rules still apply |
+| `"os"` | OS-level sandboxing via `@anthropic-ai/sandbox-runtime`; fails before a command starts when unavailable |
 
 ### Setting from the CLI
 
@@ -515,6 +526,55 @@ File and bash tool sandboxing.
 /settings sandbox true
 /settings sandbox false
 ```
+
+An explicit `"os"` setting never silently falls back to path mode. `/build`
+may automatically try to upgrade its default path mode to OS mode; if that
+optional upgrade is unavailable, the run log visibly says it continued with
+path-only restrictions. Path mode is not containment for shell redirection,
+interpreters, or arbitrary subprocesses.
+
+OS-mode qualification covers Ubuntu 22.04 and macOS with Node 22.12.0 and
+22.22.2. Ubuntu 24.04 with its default user-namespace restrictions remains
+incompatible with the installed sandbox runtime: command startup can fail
+with a namespace permission error. Installing bubblewrap alone does not
+resolve this limitation. With OS mode selected, `wm doctor` and startup execute a harmless
+command through the complete sandbox, including its nested isolation setup.
+Explicit OS mode stops before model work when that probe fails. The optional
+`/build` upgrade instead reports that it continues with path-only restrictions. Use a qualified host for OS mode; see the
+[qualification report](recovery/r24-qualification.md) for exact CI evidence.
+
+## `sandboxCapabilities`
+
+Optional OS-sandbox exceptions belong only in your global user configuration
+(`~/.workermill/cli.json`). Project `.workermill/config.json` values for this
+field are ignored, so a repository cannot expand its own host privileges.
+
+```json
+"sandboxCapabilities": {
+  "extraPathGrants": [
+    { "root": "/absolute/path/to/package-cache", "access": "read_write" }
+  ],
+  "allowedNetworkDomains": ["registry.npmjs.org", "github.com"],
+  "allowLocalBinding": false,
+  "allowDockerSocket": false
+}
+```
+
+WorkerMill grants writes to the workspace, explicitly granted `read_write`
+paths, and one private per-command temporary directory. The underlying runtime
+also permits its standard device paths, `/tmp/claude` (and the macOS equivalent),
+`~/.npm/_logs`, and `~/.claude/debug`. These are runtime exceptions, not private
+per-run storage. WorkerMill does not grant the entire home directory, package
+cache, or `/tmp`; add a specific cache path when needed. The runtime allows host reads by default,
+but WorkerMill denies its state root and `~/.ssh`; OS mode therefore does not
+claim to confine every read to the workspace.
+
+Network access defaults to the existing package-registry and GitHub domain
+allowlist, local binding is off, and Docker access is off. Setting
+`allowDockerSocket: true` is a host-access capability: Docker can control the
+host. It is supported only on macOS, where the runtime can restrict the socket
+path. Linux cannot enforce a path-specific Unix-socket allowlist, so WorkerMill
+rejects this capability there instead of enabling all Unix sockets.
 
 ## `bell`
 

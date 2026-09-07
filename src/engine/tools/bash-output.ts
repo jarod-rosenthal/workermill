@@ -1,4 +1,7 @@
-import { activeShells } from "./bash-background.js";
+import {
+  activeShells,
+  BACKGROUND_OUTPUT_TRUNCATION_MARKER,
+} from "./bash-background.js";
 
 export const name = "bash_output";
 
@@ -23,6 +26,9 @@ export const parameters = {
 interface BashOutputParams {
   shellId: string;
   wait?: boolean;
+  /** When supplied, shell ownership is enforced before revealing output. */
+  runId?: string;
+  signal?: AbortSignal;
 }
 
 interface BashOutputResult {
@@ -32,20 +38,29 @@ interface BashOutputResult {
   status: 'running' | 'done' | 'killed' | 'failed_to_start';
 }
 
+function visibleOutput(shell: { buffer: string[]; outputTruncated: boolean }): string {
+  const output = shell.buffer.join("\n");
+  if (!shell.outputTruncated || output.includes(BACKGROUND_OUTPUT_TRUNCATION_MARKER)) return output;
+  return `${output}${output ? "\n" : ""}${BACKGROUND_OUTPUT_TRUNCATION_MARKER}`;
+}
+
 export async function execute({
   shellId,
   wait,
+  runId,
+  signal,
 }: BashOutputParams): Promise<BashOutputResult> {
   const shell = activeShells.get(shellId);
   if (!shell) {
     throw new Error(`Shell ${shellId} not found`);
   }
+  if (runId && shell.runId !== runId) throw new Error(`Shell ${shellId} not found`);
 
   // Auto-cleanup shells that have been done for more than 10 minutes
   if (shell.done && shell.completionTime && Date.now() - shell.completionTime > 10 * 60 * 1000) {
     activeShells.delete(shellId);
     return {
-      output: shell.buffer.join('\n'),
+      output: visibleOutput(shell),
       done: true,
       exitCode: shell.exitCode,
       status: shell.status,
@@ -53,20 +68,21 @@ export async function execute({
   }
 
   if (wait && !shell.done) {
-    await new Promise<void>((resolve) => {
-      const checkDone = () => {
-        if (shell.done) {
-          resolve();
-        } else {
-          setTimeout(checkDone, 100);
-        }
-      };
-      checkDone();
+    if (signal?.aborted) throw new Error("Background output wait cancelled");
+    let abort!: () => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => reject(new Error("Background output wait cancelled"));
+      signal?.addEventListener("abort", abort, { once: true });
     });
+    try {
+      await Promise.race([shell.completion, cancelled]);
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
   }
 
   return {
-    output: shell.buffer.join('\n'),
+    output: visibleOutput(shell),
     done: shell.done,
     exitCode: shell.exitCode,
     status: shell.status,

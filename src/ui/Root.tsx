@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "ink";
-import { execSync } from "child_process";
+import { randomUUID } from "node:crypto";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -15,6 +15,7 @@ import { resolveConfig, getProviderForPersona } from "../config.js";
 import { getProjectHistoryPath } from "../project-data.js";
 import { runLifecycleHooks } from "../hooks.js";
 import { providerNeedsContextOverride } from "../provider-capabilities.js";
+import { runProcess, cancelAndWaitForRunProcesses } from "../engine/process-runner.js";
 
 /**
  * Resolve context window for a model.
@@ -105,6 +106,14 @@ export function Root(props: RootProps): React.ReactElement {
   }, []);
 
   const agent = useAgent({ ...props, onBashComplete: refreshGitBranch, liveView: props.cliConfig?.liveView });
+  const [shellRunning, setShellRunning] = useState(false);
+  const shellControllerRef = useRef<AbortController | null>(null);
+  const cancelShellEscape = useCallback(() => {
+    shellControllerRef.current?.abort();
+  }, []);
+  useEffect(() => () => {
+    shellControllerRef.current?.abort();
+  }, []);
 
   // Active provider/model/context — starts from props, updates on /model switch
   const [activeProvider, setActiveProvider] = useState(props.provider);
@@ -156,6 +165,7 @@ export function Root(props: RootProps): React.ReactElement {
     agent.incrementToolCount,
     setGitBranch,
     handleTokPerSec,
+    agent.applyExternalUsageLedger,
   );
 
   // Track the last build task for /retry
@@ -203,8 +213,8 @@ export function Root(props: RootProps): React.ReactElement {
         orchestratorPaused: orchestrator.paused,
         pauseOrchestrator: orchestrator.pause,
         resumeOrchestrator: orchestrator.resume,
-        cancelCurrentOperation: orchestrator.running ? orchestrator.cancel : agent.cancel,
-        isBusy: orchestrator.running || agent.status !== "idle",
+        cancelCurrentOperation: orchestrator.running ? orchestrator.cancel : shellRunning ? cancelShellEscape : agent.cancel,
+        isBusy: orchestrator.running || shellRunning || agent.status !== "idle",
         startOrchestrator: orchestrator.start,
         startProgram: orchestrator.startProgram,
         retryOrchestrator: orchestrator.retry,
@@ -234,7 +244,7 @@ export function Root(props: RootProps): React.ReactElement {
       };
       return dispatchSlashCommand(input, ctx);
     },
-    [agent, props, exit, orchestrator],
+    [agent, props, exit, orchestrator, shellRunning, cancelShellEscape],
   );
 
   // ------- Session end ------- //
@@ -266,31 +276,49 @@ export function Root(props: RootProps): React.ReactElement {
         return true;
       }
 
-      let output: string;
-      let exitCode = 0;
-      try {
-        output = execSync(bashCmd, {
-          cwd: props.workingDir,
-          encoding: "utf-8",
-          timeout: 30_000,
-          maxBuffer: 1024 * 1024,
-        });
-      } catch (err: unknown) {
-        const execErr = err as { stdout?: string; stderr?: string; status?: number };
-        output = (execErr.stdout || "") + (execErr.stderr || "");
-        exitCode = execErr.status ?? 1;
+      if (shellControllerRef.current) {
+        agent.addSystemMessage("A shell command is already running. Cancel it before starting another one.");
+        return true;
       }
 
-      const trimmedOutput = output.trim();
-      const header = exitCode !== 0 ? `\`$ ${bashCmd}\` (exit ${exitCode})` : `\`$ ${bashCmd}\``;
-      if (trimmedOutput) {
-        agent.addSystemMessage(`${header}\n\n\`\`\`\n${trimmedOutput}\n\`\`\``);
-      } else {
-        agent.addSystemMessage(`${header}\n\n(no output)`);
-      }
-
-      // Update branch immediately — user just ran a shell command
-      setGitBranch(getGitBranch());
+      const controller = new AbortController();
+      const runId = `shell:${randomUUID()}`;
+      shellControllerRef.current = controller;
+      setShellRunning(true);
+      void (async () => {
+        try {
+          const result = await runProcess({
+            runId, command: bashCmd, cwd: props.workingDir, signal: controller.signal,
+            timeoutMs: 30_000, maxOutputBytes: 1_048_576, terminationGraceMs: 500,
+          });
+          const output = `${result.stdout}${result.stderr}`;
+          const suffix = result.outputTruncated ? "\n[output truncated at 1 MiB]" : "";
+          const exitCode = result.exitCode ?? (result.reason === "exited" ? 1 : 130);
+          const reason = result.reason === "timed_out" ? "timed out" : result.reason === "cancelled" ? "cancelled" : undefined;
+          const header = exitCode !== 0 || reason
+            ? `\`$ ${bashCmd}\` (${reason ?? `exit ${exitCode}`})`
+            : `\`$ ${bashCmd}\``;
+          const trimmedOutput = `${output}${suffix}`.trim();
+          agent.addSystemMessage(trimmedOutput ? `${header}\n\n\`\`\`\n${trimmedOutput}\n\`\`\`` : `${header}\n\n(no output)`);
+          setGitBranch(getGitBranch());
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          agent.addSystemMessage(`\`$ ${bashCmd}\` (failed)\n\n\`\`\`\n${message}\n\`\`\``);
+        } finally {
+          controller.abort();
+          const cleanup = await Promise.allSettled([
+            Promise.resolve().then(() => cancelAndWaitForRunProcesses(runId)),
+          ]);
+          const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (failures.length > 0) {
+            agent.addSystemMessage(`Shell cleanup failed: ${failures.map((result) => String(result.reason)).join("; ")}`);
+          }
+          if (shellControllerRef.current === controller) {
+            shellControllerRef.current = null;
+            setShellRunning(false);
+          }
+        }
+      })();
 
       return true;
     },
@@ -338,13 +366,13 @@ export function Root(props: RootProps): React.ReactElement {
       trustAll={props.trustAll}
       planMode={props.planMode}
       onSubmit={handleSubmit}
-      onCancel={orchestrator.running ? orchestrator.cancel : agent.cancel}
+      onCancel={orchestrator.running ? orchestrator.cancel : shellRunning ? cancelShellEscape : agent.cancel}
       onExit={handleExit}
       onRollback={agent.rollback}
       onCyclePermissionMode={agent.cyclePermissionMode}
       permissionMode={agent.permissionMode}
       messages={agent.messages}
-      status={orchestrator.running ? "tool_running" : agent.status}
+      status={orchestrator.running || shellRunning ? "tool_running" : agent.status}
       statusDetail={orchestrator.running ? orchestrator.statusMessage : agent.statusDetail}
       permissionRequest={agent.permissionRequest}
       orchestratorConfirm={orchestrator.confirmRequest}

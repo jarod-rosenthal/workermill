@@ -24,6 +24,8 @@ export const parameters = {
 interface BashKillParams {
   shellId: string;
   signal?: "SIGTERM" | "SIGKILL";
+  /** When supplied, only the owning run may cancel the shell. */
+  runId?: string;
 }
 
 interface BashKillResult {
@@ -33,25 +35,19 @@ interface BashKillResult {
 export async function execute({
   shellId,
   signal = "SIGTERM",
+  runId,
 }: BashKillParams): Promise<BashKillResult> {
   const shell = activeShells.get(shellId);
-  if (!shell) {
+  if (!shell || (runId && shell.runId !== runId)) {
     return { killed: false };
   }
 
   if (!shell.done) {
-    try {
-      // Kill the process group since it was spawned detached
-      process.kill(-shell.child.pid!, signal);
-      shell.status = 'killed';
-      shell.done = true;
-    } catch (err) {
-      // Process might already be dead
-    }
+    shell.controller.abort();
+    // The shared runner owns TERM -> KILL and process-group cleanup. SIGKILL
+    // remains a compatibility hint; cancellation still follows that boundary.
+    if (signal === "SIGKILL") shell.controller.abort();
   }
-
-  // Remove from registry
-  activeShells.delete(shellId);
 
   return { killed: true };
 }

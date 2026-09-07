@@ -65,6 +65,8 @@ describe("stats-command", () => {
       totalCostUsd: overrides.totalCostUsd,
       costByModel: overrides.costByModel,
       costByRole: overrides.costByRole,
+      usageLedger: overrides.usageLedger,
+      usageLedgerHistoryIncomplete: overrides.usageLedgerHistoryIncomplete,
       name: overrides.name,
       finishedAt: overrides.finishedAt,
     };
@@ -91,6 +93,22 @@ describe("stats-command", () => {
 
     return lines.join("\n");
   }
+
+  it("preserves old totals with a partial model breakdown and exposes unknown pricing in JSON", async () => {
+    const { CostTracker } = await import("../cost-tracker.js");
+    const tracker = new CostTracker();
+    tracker.recordCall({ callId: "unknown", persona: "worker", provider: "unknown", model: "custom", usage: { inputTokens: 2, outputTokens: 3 } });
+    const projectDir = path.join(tmp.homeDir, "ledger-history");
+    await writeSessionFixture(projectDir, makeSession({
+      totalTokens: 105, totalCostUsd: 1, usageLedger: tracker.getLedgerSnapshot(),
+      costByModel: [{ key: "unknown/custom", provider: "unknown", model: "custom", inputTokens: 2, outputTokens: 3, costUsd: 0, roles: ["worker"] }],
+    }));
+    const stats = JSON.parse(await captureStats({ json: true }));
+    expect(stats.tokens.total_tokens).toBe(105);
+    expect(stats.cost_usd).toBe(1);
+    expect(stats.estimate_limitations.join(" ")).toMatch(/unknown-priced.*historical/);
+    expect(await captureStats({})).toContain("unknown-priced");
+  });
 
   it("returns empty stats when there are no project sessions", async () => {
     const output = await captureStats({ json: true });

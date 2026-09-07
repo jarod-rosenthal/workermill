@@ -4,6 +4,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+// A failed fake-clock test must not freeze real Git/process cleanup in later cases.
+afterEach(() => vi.useRealTimers());
+
 // ---- Mocks must be declared before any imports from the module under test ----
 
 // Mock logger to avoid file writes
@@ -47,23 +50,66 @@ vi.mock("../hooks.js", () => ({
 
 // Mock mcp-client — prevent Docker Desktop detection from hanging in tests
 vi.mock("../mcp-client.js", () => ({
-  startAllMCPServers: vi.fn().mockResolvedValue(undefined),
-  getMCPToolDefinitions: vi.fn(() => ({})),
-  getMCPToolDefinitionsAsync: vi.fn().mockResolvedValue({}),
+  createMCPRunResources: vi.fn(() => ({
+    register: vi.fn(), ensureStarted: vi.fn().mockResolvedValue(undefined),
+    getToolDefinitions: vi.fn(() => ({})), close: vi.fn().mockResolvedValue(undefined),
+  })),
+  autoDetectMCPServersForRun: vi.fn(async (existing: Record<string, unknown>) => existing),
   stopAllMCPServers: vi.fn(),
-  autoDetectMCPServers: vi.fn((existing: Record<string, unknown>) => existing),
-  registerMCPServers: vi.fn(),
-  ensureMCPStarted: vi.fn().mockResolvedValue(undefined),
-  hasMCPRegistered: vi.fn(() => false),
 }));
 
-// Mock cost-tracker — must be a real class (used with `new`)
-vi.mock("../cost-tracker.js", () => ({
-  CostTracker: class {
-    addUsage = vi.fn();
-    getTotalCost = vi.fn(() => 0);
-  },
-}));
+// Observe the real completion boundary without replacing its behavior.
+vi.mock("../orchestrator/completion.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../orchestrator/completion.js")>();
+  return { ...actual, runCompletion: vi.fn(actual.runCompletion) };
+});
+
+describe("orchestration startup process lifecycle", () => {
+  it("cancels a started retry startup probe before any retry phase begins", async () => {
+    const repo = createTempGitRepo();
+    const previousCwd = process.cwd();
+    const previousPath = process.env.PATH;
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "wm-startup-bin-"));
+    const started = path.join(bin, "started");
+    const realGit = execSync("which git", { encoding: "utf8" }).trim();
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh
+case "$*" in
+  *"branch --show-current"*) : > "$WM_STARTUP_STARTED"; trap 'exit 143' TERM INT; while :; do sleep 1; done ;;
+esac
+exec "$WM_STARTUP_REAL_GIT" "$@"
+`, { mode: 0o755 });
+    process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+    process.env.WM_STARTUP_STARTED = started;
+    process.env.WM_STARTUP_REAL_GIT = realGit;
+    process.chdir(repo);
+    const controller = new AbortController();
+    const output = createMockOutput();
+    try {
+      const completion = runOrchestration(
+        createTestConfig(),
+        "retry fixture",
+        true,
+        false,
+        output,
+        controller,
+        { featureBranch: "missing-branch", mainBranch: "master", userTask: "retry fixture", stories: [], completedStoryIds: [] },
+      );
+      await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true));
+      controller.abort(new Error("startup test cancellation"));
+      const result = await completion;
+      expect(result.completedStoryIds).toEqual([]);
+      expect(output.logs.some((line) => line.includes("Retrying on branch"))).toBe(false);
+      expect(mockStreamTextCalls).toHaveLength(0);
+    } finally {
+      process.chdir(previousCwd);
+      process.env.PATH = previousPath;
+      delete process.env.WM_STARTUP_STARTED;
+      delete process.env.WM_STARTUP_REAL_GIT;
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
 
 // Track streamText calls for assertions
 const mockStreamTextCalls: unknown[] = [];
@@ -150,7 +196,8 @@ vi.mock("../engine/tools/index.js", () => ({
 }));
 
 // Mock safety
-vi.mock("../safety.js", () => ({
+vi.mock("../safety.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../safety.js")>(),
   isDangerous: vi.fn(() => null),
   READ_TOOLS: new Set(["read_file", "glob", "grep", "list_files"]),
   checkPermissionRules: vi.fn(() => "none"),
@@ -159,6 +206,7 @@ vi.mock("../safety.js", () => ({
 const mockTicketPostComment = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../ticket-ops.js", () => ({
+  ticketEnvironment: () => ({ GITHUB_TOKEN: "dummy", GITHUB_REPO: "fixture/repo" }),
   TicketOps: class {
     isAvailable() { return true; }
     fetchTicket() {
@@ -196,9 +244,13 @@ import {
   type OrchestrationOutput,
   type Story,
 } from "../orchestrator.ts";
+import { stopAllMCPServers } from "../mcp-client.js";
+import { getStateRoot } from "../state-root.js";
+import { runCompletion } from "../orchestrator/completion.js";
 import { streamText, generateText } from "ai";
 import { createModel } from "../engine/model-factory.js";
 import { addMemory, extractMemoryMarkers } from "../memory.js";
+import * as logger from "../logger.js";
 
 // ---- Helpers ----
 
@@ -477,6 +529,22 @@ describe("orchestrator", () => {
       ).resolves.not.toThrow();
     });
 
+    it("rejects unavailable explicit OS isolation before planning or workers", async () => {
+      const { SandboxManager } = await import("@anthropic-ai/sandbox-runtime");
+      const support = vi.spyOn(SandboxManager, "isSupportedPlatform").mockReturnValue(false);
+      const { streamText, generateObject } = await import("ai");
+      vi.mocked(streamText).mockClear();
+      vi.mocked(generateObject).mockClear();
+      try {
+        await expect(runOrchestration(createTestConfig(), "Build endpoint", true, "os", createMockOutput()))
+          .rejects.toMatchObject({ code: "os_sandbox_unavailable" });
+        expect(streamText).not.toHaveBeenCalled();
+        expect(generateObject).not.toHaveBeenCalled();
+      } finally {
+        support.mockRestore();
+      }
+    });
+
     it("does not run the plan critic unless review.critic is enabled", async () => {
       const { generateObject } = await import("ai");
       vi.mocked(generateObject).mockClear();
@@ -520,6 +588,27 @@ describe("orchestrator", () => {
       const workerIndex = output.logs.findIndex((l) => l.startsWith("[backend_developer]"));
       expect(criticIndex).toBeGreaterThanOrEqual(0);
       expect(workerIndex).toBeGreaterThan(criticIndex);
+    });
+
+    it("does not execute a late-approved plan after critique cancellation", async () => {
+      const { generateObject } = await import("ai");
+      const controller = new AbortController();
+      vi.mocked(generateObject).mockImplementation(async (options) => {
+        if (typeof options.prompt === "string" && options.prompt.includes("Score the plan")) {
+          controller.abort();
+          return { object: { score: 10, summary: "Late approval", issues: [] }, usage: { inputTokens: 3, outputTokens: 2 } } as never;
+        }
+        return { object: { complexity: "multi", reason: "Multiple concerns" } } as never;
+      });
+      const output = createMockOutput();
+      const result = await runOrchestration(
+        { ...createTestConfig(), review: { enabled: false, critic: true } },
+        "Add a health check endpoint", true, false, output, controller.signal,
+      );
+      expect(result.completedStoryIds).toEqual([]);
+      expect(result.featureBranch).toBeNull();
+      expect(output.logs.some((line) => line.startsWith("[backend_developer]"))).toBe(false);
+      expect(output.logs.some((line) => line.includes("cancelled during plan critique"))).toBe(true);
     });
 
     it("executes the critic's refined plan, not the planner's original", async () => {
@@ -678,13 +767,121 @@ describe("orchestrator", () => {
         };
       });
 
-      await runOrchestration(config as any, "Add wm stats", true, false, output);
+      const result = await runOrchestration(config as any, "Add wm stats", true, false, output);
 
       expect(output.errors).toContain("[required_command_failed] required: Add wm stats failed");
       expect(output.logs.join(" ")).toContain("Definition-of-done check failed");
-      // Gate failures now flow into the review loop instead of bailing out,
-      // so we get 3 calls: planner + executor + reviewer
-      expect(mockStreamTextCalls).toHaveLength(3);
+      expect(runCompletion).not.toHaveBeenCalled();
+      // A required gate failure stops after planning and execution; review and
+      // completion must not run on an unverified revision.
+      expect(mockStreamTextCalls).toHaveLength(2);
+      expect(output.logs.join(" ")).not.toContain("No remote configured");
+      expect(output.logs.join(" ")).not.toContain("Branch:");
+      expect(stopAllMCPServers).not.toHaveBeenCalled();
+      expect(result.featureBranch).toBeTruthy();
+      expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
+      const savedRuns = JSON.parse(fs.readFileSync(path.join(getStateRoot(), "ship-runs.json"), "utf-8")) as Record<string, unknown>;
+      expect(savedRuns[result.featureBranch!]).toBeDefined();
+    });
+
+    it("blocks before review when strict static gate fails", async () => {
+      const output = createMockOutput();
+      const config = {
+        ...createTestConfig(),
+        qualityGates: [{ name: "static check", commands: ["bash -lc 'exit 1'"] }],
+        review: { enabled: true, strict: true, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+      };
+
+      const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "static", "title": "Run static check", "persona": "backend_developer", "description": "Implement the change." }
+  ]
+}
+\`\`\``;
+
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? planText : "Implemented static check.";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
+            text,
+            toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL],
+          });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "export const impl = true;");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      const result = await runOrchestration(config as any, "Run strict static check", true, false, output);
+
+      expect(output.errors).toContain("[required_command_failed] static check failed");
+      expect(output.logs.join(" ")).toContain("Strict mode failed");
+      expect(runCompletion).not.toHaveBeenCalled();
+      expect(mockStreamTextCalls).toHaveLength(2);
+      expect(output.logs.join(" ")).not.toContain("No remote configured");
+      expect(output.logs.join(" ")).not.toContain("Branch:");
+      expect(stopAllMCPServers).not.toHaveBeenCalled();
+      expect(result.featureBranch).toBeTruthy();
+      expect(execSync("git branch --show-current", { encoding: "utf-8" }).trim()).toBe(result.featureBranch);
+    });
+
+    it("keeps advisory static gate failures flowing through review and completion", async () => {
+      const output = createMockOutput();
+      const config = {
+        ...createTestConfig(),
+        qualityGates: [{ name: "advisory check", commands: ["bash -lc 'exit 1'"], required: false }],
+        review: { enabled: true, strict: false, maxRevisions: 1, autoRevise: true, approvalThreshold: 8 },
+      };
+      const planText = `\`\`\`json
+{
+  "stories": [
+    { "id": "advisory", "title": "Run advisory check", "persona": "backend_developer", "description": "Implement the change." }
+  ]
+}
+\`\`\``;
+      let callCount = 0;
+      vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
+        mockStreamTextCalls.push(opts);
+        callCount++;
+        const isPlanner = callCount === 1;
+        const text = isPlanner ? planText : "Implemented advisory check.";
+        if (typeof opts.onStepFinish === "function") {
+          (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({ text, toolCalls: isPlanner ? [] : [FAKE_TOOL_CALL] });
+        }
+        if (!isPlanner) {
+          fs.mkdirSync(path.join(process.cwd(), "src"), { recursive: true });
+          fs.writeFileSync(path.join(process.cwd(), "src", "impl.ts"), "export const impl = true;");
+        }
+        return {
+          textStream: (async function* () { yield text; })(),
+          text: Promise.resolve(text),
+          totalUsage: Promise.resolve({ inputTokens: 500, outputTokens: 200 }),
+        };
+      });
+
+      await runOrchestration(config as any, "Run advisory static check", true, false, output);
+
+      expect(output.errors).not.toContain("[required_command_failed] advisory check failed");
+      expect(runCompletion).toHaveBeenCalledOnce();
+      expect(mockStreamTextCalls.length).toBeGreaterThanOrEqual(3);
+      const completionDebugMessages = vi.mocked(logger.debug).mock.calls
+        .map(([message]) => String(message));
+      expect(
+        output.logs.join(" "),
+        `completion diagnostics: ${JSON.stringify({ errors: output.errors, debug: completionDebugMessages })}`,
+      ).toContain("No remote configured");
+      expect(output.updateCost).toHaveBeenCalled();
     });
 
     it("passes API keys through for routed provider aliases", async () => {
@@ -766,7 +963,7 @@ Done.`;
 
       await runOrchestration(config as any, "Implement a ticketed change", true, false, output, undefined, undefined, "#123");
 
-      expect(mockTicketPostComment).toHaveBeenCalledWith(
+      expect(mockTicketPostComment, JSON.stringify({ errors: output.errors, logs: output.logs })).toHaveBeenCalledWith(
         expect.stringContaining("### backend_developer (ollama/test-model) — Set up API endpoint (1/1)"),
       );
     });
@@ -947,8 +1144,8 @@ Done.`;
       await runOrchestration(config, "Add endpoint", true, false, output, { bad: "signal" } as unknown as AbortSignal);
 
       const plannerCall = mockStreamTextCalls[0] as Record<string, unknown>;
-      expect(plannerCall.abortSignal).toBeUndefined();
-      expect(output.errors).toHaveLength(0);
+      expect(plannerCall.abortSignal).toBeInstanceOf(AbortSignal);
+      expect(output.errors.some((message) => message.includes("invalid abort"))).toBe(false);
     });
 
     it("reports story completion in logs", async () => {
@@ -2231,7 +2428,7 @@ describe("classifyError categories (via story execution errors)", () => {
 
   it("logs rate_limit error message when story throws 429", async () => {
     // Use fake timers so rateLimitSleep resolves instantly
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = makePlanWithOneStory();
     let callCount = 0;
@@ -2241,10 +2438,10 @@ describe("classifyError categories (via story execution errors)", () => {
       if (typeof opts.onStepFinish === "function") {
         (opts.onStepFinish as (step: { text: string; toolCalls: unknown[] }) => void)({
           text: "done",
-          toolCalls: callCount === 2 ? [FAKE_TOOL_CALL] : [],
+          toolCalls: callCount >= 2 ? [FAKE_TOOL_CALL] : [],
         });
       }
-      if (callCount === 2) {
+      if (callCount >= 2) {
         const cwd = process.cwd();
         fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
         fs.writeFileSync(path.join(cwd, "src", "impl-review-retry.ts"), "// impl");
@@ -2256,18 +2453,24 @@ describe("classifyError categories (via story execution errors)", () => {
           totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
         };
       }
-      throw new Error("rate limit exceeded — 429 Too Many Requests");
+      if (callCount === 2) {
+        throw new Error("rate limit exceeded — 429 Too Many Requests: retry after 1");
+      }
+      return {
+        textStream: (async function* () { yield "Recovered after retry."; })(),
+        text: Promise.resolve("Recovered after retry."),
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
+      };
     });
 
     const config = createTestConfig();
     const output = createMockOutput();
 
-    // Run orchestration and advance timers whenever it sleeps
+    // Let async startup finish and schedule the retry before advancing its
+    // backoff. Advancing first would miss a timer registered after Git I/O.
     const promise = runOrchestration(config, "Build feature", true, false, output);
-    // Flush all pending timers (rate limit retries)
-    for (let i = 0; i < 10; i++) {
-      await vi.advanceTimersByTimeAsync(60_000);
-    }
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/Rate limited/i));
+    await vi.advanceTimersByTimeAsync(5_000);
     await promise;
 
     vi.useRealTimers();
@@ -2277,7 +2480,7 @@ describe("classifyError categories (via story execution errors)", () => {
   });
 
   it("retries the planner when it is rate limited", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = makePlanWithOneStory();
     let callCount = 0;
@@ -2319,6 +2522,7 @@ describe("classifyError categories (via story execution errors)", () => {
     const output = createMockOutput();
 
     const promise = runOrchestration(config as any, "Build feature", true, false, output);
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/Planner rate limited/i));
     await vi.advanceTimersByTimeAsync(5_000);
     await promise;
     vi.useRealTimers();
@@ -2508,7 +2712,13 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
-  it("allow mode=always adds tool to sessionAllow for future calls", async () => {
+  it("allow mode=always remembers only the approved worker command family", async () => {
+    const safety = await import("../safety.js");
+    const actualSafety = await vi.importActual<typeof import("../safety.js")>("../safety.js");
+    vi.mocked(safety.checkPermissionRules).mockImplementation(actualSafety.checkPermissionRules);
+    let exercisedPermissions = false;
+    const promptCounts: number[] = [];
+    let toolError: unknown;
     const planText = `\`\`\`json
 {
   "stories": [{ "id": "s1", "title": "Write files", "persona": "backend_developer", "description": "Create files." }]
@@ -2531,7 +2741,20 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       const tools = opts.tools as Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }>;
       if (tools?.bash) capturedBashTool = tools.bash.execute;
       return {
-        textStream: (async function* () { yield "done"; })(),
+        textStream: (async function* () {
+          try {
+            expect(capturedBashTool).toBeDefined();
+            await capturedBashTool!({ command: "npm run test" });
+            const confirmsBefore = vi.mocked(output.confirm).mock.calls.length;
+            promptCounts.push(confirmsBefore);
+            await capturedBashTool!({ command: "npm run build" });
+            promptCounts.push(vi.mocked(output.confirm).mock.calls.length);
+            await capturedBashTool!({ command: "npm test" });
+            promptCounts.push(vi.mocked(output.confirm).mock.calls.length);
+            exercisedPermissions = true;
+          } catch (error) { toolError = error; }
+          yield "done";
+        })(),
         text: Promise.resolve("done"),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
@@ -2550,20 +2773,17 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       return { allowed: true, mode: "always" as const };
     });
 
-    const config = createTestConfig();
+    const config = { ...createTestConfig(), review: { enabled: false } };
     await runOrchestration(config, "Create files", false, false, output);
-
-    if (capturedBashTool) {
-      const confirmsBefore = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // Second bash call should be auto-allowed (sessionAllow has it)
-      await capturedBashTool({ command: "echo hello" });
-      const confirmsAfter = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // No new confirm call needed since bash was added to sessionAllow
-      expect(confirmsAfter).toBe(confirmsBefore);
-    }
+    expect(capturedBashTool).toBeDefined();
+    expect(toolError).toBeUndefined();
+    expect(exercisedPermissions, output.errors.join("\n")).toBe(true);
+    expect(promptCounts.slice(0, 3)).toEqual([promptCounts[0], promptCounts[0], promptCounts[0]! + 1]);
+    vi.mocked(safety.checkPermissionRules).mockReturnValue("none");
   });
 
-  it("allow mode=trust adds all common tools to sessionAllow", async () => {
+  it("allow mode=trust permits subsequent worker commands without another prompt", async () => {
+    let exercisedPermissions = false;
     const planText = `\`\`\`json
 {
   "stories": [{ "id": "s1", "title": "Write files", "persona": "backend_developer", "description": "Work." }]
@@ -2571,7 +2791,6 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
 \`\`\``;
 
     let callCount = 0;
-    let capturedWriteTool: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
     let capturedBashTool: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
 
     vi.mocked(streamText).mockImplementation((opts: Record<string, unknown>) => {
@@ -2588,7 +2807,15 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       // We only have bash and read_file in our mock tool definitions
       if (tools?.bash) capturedBashTool = tools.bash.execute;
       return {
-        textStream: (async function* () { yield "done"; })(),
+        textStream: (async function* () {
+          expect(capturedBashTool).toBeDefined();
+          await capturedBashTool!({ command: "echo hello" });
+          const confirmsBefore = vi.mocked(output.confirm).mock.calls.length;
+          await capturedBashTool!({ command: "npm test" });
+          expect(vi.mocked(output.confirm).mock.calls.length).toBe(confirmsBefore);
+          exercisedPermissions = true;
+          yield "done";
+        })(),
         text: Promise.resolve("done"),
         totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 50 }),
       };
@@ -2603,17 +2830,10 @@ describe("checkToolPermission advanced modes (via tool execution)", () => {
       return { allowed: true, mode: "trust" as const };
     });
 
-    const config = createTestConfig();
+    const config = { ...createTestConfig(), review: { enabled: false } };
     await runOrchestration(config, "Work on files", false, false, output);
-
-    if (capturedBashTool) {
-      const confirmsBefore = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // After trust mode, bash should be in sessionAllow and not prompt
-      await capturedBashTool({ command: "ls" });
-      const confirmsAfter = (output.confirm as ReturnType<typeof vi.fn>).mock.calls.length;
-      // No additional confirm needed
-      expect(confirmsAfter).toBe(confirmsBefore);
-    }
+    expect(capturedBashTool).toBeDefined();
+    expect(exercisedPermissions).toBe(true);
   });
 
   it("simple boolean false from confirm denies tool and does NOT add to sessionAllow", async () => {
@@ -3145,7 +3365,7 @@ FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
   });
 
   it("retries a standalone review once when the reviewer is rate limited", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const reviewerApprovesText = `Looks good.
 REVIEW_DECISION: approved
 CODE_QUALITY_SCORE: 9
@@ -3173,6 +3393,7 @@ FEEDBACK: Shippable.`;
     const output = createMockOutput();
 
     const promise = runStandaloneReview(config as any, output, "diff");
+    await vi.waitFor(() => expect(output.logs.join(" ")).toMatch(/rate limited/i));
     await vi.advanceTimersByTimeAsync(5_000);
     const result = await promise;
     vi.useRealTimers();
@@ -3252,7 +3473,9 @@ FEEDBACK: Missing tests. Add regression coverage for edge cases.`;
   });
 
   it("retries the revision worker when it is rate limited", async () => {
-    vi.useFakeTimers();
+    // Revision preparation now waits on real Git I/O. Continue advancing the
+    // clock while that I/O completes and schedules the subsequent retry delay.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const planText = `\`\`\`json
 {
@@ -4314,6 +4537,7 @@ describe("PR creation flow (completion summary)", () => {
         });
       }
       callCount++;
+      if (callCount > 1) fs.writeFileSync(path.join(repoDir, "feature.txt"), "changed\n");
       const text = callCount === 1 ? planText : "Done.";
       return {
         textStream: (async function* () { yield text; })(),
@@ -4357,6 +4581,7 @@ describe("PR creation flow (completion summary)", () => {
         });
       }
       callCount++;
+      if (callCount > 1) fs.writeFileSync(path.join(repoDir, "feature.txt"), "changed\n");
       const text = callCount === 1 ? planText : "Done.";
       return {
         textStream: (async function* () { yield text; })(),

@@ -9,7 +9,8 @@
  */
 
 import chalk from "chalk";
-import { listRunManifests, type RunManifest } from "./run-manifest.js";
+import { listRunManifests, type StoredRunManifest } from "./run-manifest.js";
+import { formatUsageLedgerLimitation } from "./cost-tracker.js";
 
 function formatDate(iso: string): string {
   try {
@@ -23,6 +24,7 @@ function formatDate(iso: string): string {
 
 function outcomeLabel(outcome: string): string {
   switch (outcome) {
+    case "in_progress": return chalk.cyan("◌ in progress");
     case "success": return chalk.green("✓ success");
     case "partial": return chalk.yellow("◐ partial");
     case "failed": return chalk.red("✗ failed");
@@ -44,6 +46,10 @@ export function runsList(options: { json?: boolean }): void {
   const runs = listRunManifests(undefined, 20);
 
   if (runs.length === 0) {
+    if (options.json) {
+      console.log("[]");
+      return;
+    }
     console.log("No build runs found. Run /build to create one.");
     return;
   }
@@ -61,9 +67,11 @@ export function runsList(options: { json?: boolean }): void {
     const date = run.startedAt ? formatDate(run.startedAt) : "unknown";
     const cost = run.totalCost > 0 ? ` · $${run.totalCost.toFixed(2)}` : "";
     const branch = run.featureBranch ? ` · ${run.featureBranch}` : "";
+    const evidence = "usageLedger" in run && run.usageLedger ? formatUsageLedgerLimitation(run.usageLedger) : "Call-level usage evidence unavailable for this older record.";
+    const limitation = run.phase === "legacy" ? chalk.yellow(" · legacy evidence unverified") : run.phase === "active" ? chalk.cyan(" · active") : evidence ? chalk.yellow(" · estimate incomplete") : "";
 
     console.log(
-      `  ${chalk.dim(run.id)}  ${date}  ${outcomeLabel(run.outcome)}  ${completed}/${total} stories${cost}${branch}`
+      `  ${chalk.dim(run.id)}  ${date}  ${outcomeLabel(run.outcome)}  ${completed}/${total} stories${cost}${branch}${limitation}`
     );
   }
   console.log();
@@ -99,6 +107,10 @@ export function runsLast(options: { json?: boolean }): void {
   const runs = listRunManifests(undefined, 1);
 
   if (runs.length === 0) {
+    if (options.json) {
+      console.log("null");
+      return;
+    }
     console.log("No build runs found.");
     return;
   }
@@ -111,7 +123,7 @@ export function runsLast(options: { json?: boolean }): void {
   printRunDetails(runs[0]);
 }
 
-function printRunDetails(run: RunManifest): void {
+function printRunDetails(run: StoredRunManifest): void {
   const completed = run.stories.filter(s => s.status === "completed").length;
   const failed = run.stories.filter(s => s.status === "failed").length;
   const skipped = run.stories.filter(s => s.status === "skipped").length;
@@ -120,6 +132,9 @@ function printRunDetails(run: RunManifest): void {
   console.log(chalk.bold(`Build Run: ${run.id}`));
   console.log();
   console.log(`  Outcome:    ${outcomeLabel(run.outcome)}`);
+  if (run.phase === "legacy") console.log(chalk.yellow("  Evidence:   legacy record; gate/review/fingerprint evidence was not verified"));
+  if (run.phase === "active") console.log(chalk.cyan("  Phase:      active (no terminal result recorded yet)"));
+  if (run.phase === "terminal") console.log(`  Reason:     ${run.terminalReason}`);
   console.log(`  Started:    ${run.startedAt ? formatDate(run.startedAt) : "unknown"}`);
   if (run.completedAt) {
     console.log(`  Completed:  ${formatDate(run.completedAt)}`);
@@ -135,6 +150,8 @@ function printRunDetails(run: RunManifest): void {
   if (run.ticketKey) console.log(`  Ticket:     ${run.ticketKey}`);
   console.log(`  Cost:       $${run.totalCost.toFixed(2)}`);
   console.log(`  Tokens:     ${run.totalInputTokens.toLocaleString()} in · ${run.totalOutputTokens.toLocaleString()} out`);
+  const ledgerNote = "usageLedger" in run && run.usageLedger ? formatUsageLedgerLimitation(run.usageLedger) : "Call-level usage evidence unavailable for this older record.";
+  if (ledgerNote) console.log(chalk.yellow(`  ${ledgerNote}`));
   console.log();
 
   // Stories
@@ -163,8 +180,10 @@ function printRunDetails(run: RunManifest): void {
     console.log();
     console.log(chalk.bold("  Reviews:"));
     for (const r of run.reviews) {
-      const icon = r.decision === "approved" ? chalk.green("✓") : chalk.red("✗");
-      console.log(`    ${icon} Round ${r.round}: ${r.score}/10 (${r.decision}) — ${r.provider}/${r.model}`);
+      const decision = r.decision ?? ("outcome" in r ? r.outcome.decision ?? r.outcome.kind : "unknown");
+      const score = r.score ?? ("outcome" in r ? r.outcome.score : undefined);
+      const icon = decision === "approved" ? chalk.green("✓") : chalk.red("✗");
+      console.log(`    ${icon} Round ${r.round}: ${score ?? "?"}/10 (${decision}) — ${r.provider}/${r.model}`);
     }
   }
 

@@ -1,4 +1,8 @@
-import { spawn } from "child_process";
+import {
+  runProcess,
+  type ProcessRequest,
+  type ProcessResult,
+} from "../process-runner.js";
 
 export const name = "verify";
 
@@ -24,7 +28,15 @@ export const parameters = {
   required: ["command"] as const,
 };
 
-interface VerifyParams {
+export interface VerifyExecutionOptions {
+  runId?: string;
+  signal?: AbortSignal;
+  maxOutputBytes?: number;
+  terminationGraceMs?: number;
+  runProcess?: (request: ProcessRequest) => Promise<ProcessResult>;
+}
+
+export interface VerifyParams extends VerifyExecutionOptions {
   command: string;
   cwd?: string;
   timeout?: number;
@@ -39,6 +51,11 @@ export interface VerifyResult {
   raw: string;
   error?: string;
 }
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+const DEFAULT_TERMINATION_GRACE_MS = 250;
+const OUTPUT_TRUNCATION_MARKER = "[output truncated: command output exceeded 10 MiB]";
 
 /** Truncate output to first N lines */
 function truncateLines(text: string, maxLines: number): string {
@@ -177,117 +194,67 @@ function parseOutput(output: string): { passed: boolean; summary: string; passCo
 export async function execute({
   command,
   cwd,
-  timeout = 120000,
+  timeout = DEFAULT_TIMEOUT_MS,
+  runId = `verify-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  signal,
+  maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
+  terminationGraceMs = DEFAULT_TERMINATION_GRACE_MS,
+  runProcess: executeProcess = runProcess,
 }: VerifyParams): Promise<VerifyResult> {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    let stdout = "";
-    let stderr = "";
-    let killed = false;
-
-    const child = spawn("/bin/bash", ["-c", command], {
-      cwd: cwd || process.cwd(),
-      env: process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true,
-    });
-
-    const timeoutId = setTimeout(() => {
-      killed = true;
-      try {
-        process.kill(-child.pid!, "SIGTERM");
-      } catch { /* already exited */ }
-      setTimeout(() => {
-        try {
-          process.kill(-child.pid!, "SIGKILL");
-        } catch { /* already exited */ }
-      }, 5000);
-    }, timeout);
-
-    child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-      if (stdout.length > 1024 * 1024) {
-        stdout = stdout.slice(0, 1024 * 1024) + "\n... [output truncated]";
-      }
-    });
-
-    child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-      if (stderr.length > 1024 * 1024) {
-        stderr = stderr.slice(0, 1024 * 1024) + "\n... [output truncated]";
-      }
-    });
-
-    child.on("close", (code: number | null) => {
-      clearTimeout(timeoutId);
-
-      if (killed) {
-        resolve({
-          success: false,
-          passed: false,
-          summary: `Command timed out after ${timeout}ms`,
-          raw: truncateLines((stdout + "\n" + stderr).trim(), 50),
-          error: `Command timed out after ${timeout}ms`,
-        });
-        return;
-      }
-
-      const combinedOutput = (stdout + "\n" + stderr).trim();
-      const raw = truncateLines(combinedOutput, 50);
-
-      // Try to parse structured results from the output
-      const parsed = parseOutput(combinedOutput);
-
-      if (parsed) {
-        resolve({
-          success: true,
-          passed: parsed.passed,
-          summary: parsed.summary,
-          passCount: parsed.passCount,
-          failCount: parsed.failCount,
-          raw,
-        });
-      } else if (code === 0) {
-        // Generic pass: exit code 0 with no recognized test output
-        resolve({
-          success: true,
-          passed: true,
-          summary: "Command succeeded (exit code 0)",
-          raw,
-        });
-      } else {
-        // Generic fail: non-zero exit
-        // Check for tsc with clean exit but errors in output
-        const tscResult = parseTsc(combinedOutput);
-        if (tscResult) {
-          resolve({
-            success: true,
-            passed: false,
-            summary: tscResult.summary,
-            failCount: tscResult.failCount,
-            raw,
-          });
-          return;
-        }
-
-        resolve({
-          success: true,
-          passed: false,
-          summary: `Command failed (exit code ${code})`,
-          raw,
-        });
-      }
-    });
-
-    child.on("error", (err: Error) => {
-      clearTimeout(timeoutId);
-      resolve({
-        success: false,
-        passed: false,
-        summary: `Failed to execute: ${err.message}`,
-        raw: "",
-        error: `Failed to execute command: ${err.message}`,
-      });
-    });
+  const result = await executeProcess({
+    runId,
+    command,
+    cwd: cwd || process.cwd(),
+    signal: signal ?? new AbortController().signal,
+    timeoutMs: timeout,
+    maxOutputBytes,
+    terminationGraceMs,
   });
+
+  const visibleStdout = result.outputTruncated
+    ? `${result.stdout}${result.stdout ? "\n" : ""}${OUTPUT_TRUNCATION_MARKER}`
+    : result.stdout;
+  const visibleStderr = result.outputTruncated && !visibleStdout.includes(OUTPUT_TRUNCATION_MARKER)
+    ? `${result.stderr}${result.stderr ? "\n" : ""}${OUTPUT_TRUNCATION_MARKER}`
+    : result.stderr;
+  const combinedOutput = [visibleStdout, visibleStderr].filter(Boolean).join("\n").trim();
+  const truncatedRaw = truncateLines(combinedOutput, 50);
+  const raw = result.outputTruncated && !truncatedRaw.includes(OUTPUT_TRUNCATION_MARKER)
+    ? `${truncatedRaw}\n${OUTPUT_TRUNCATION_MARKER}`
+    : truncatedRaw;
+
+  if (result.reason !== "exited") {
+    const detail = result.reason === "timed_out"
+      ? `Command timed out after ${timeout}ms`
+      : result.reason === "cancelled"
+        ? "Command cancelled"
+        : `Failed to execute command: ${result.stderr || "process could not be spawned"}`;
+    return {
+      success: false,
+      passed: false,
+      summary: detail,
+      raw,
+      error: detail,
+    };
+  }
+
+  const parsed = parseOutput(combinedOutput);
+  const processPassed = result.exitCode === 0;
+  if (parsed) {
+    return {
+      success: true,
+      passed: processPassed && parsed.passed,
+      summary: processPassed ? parsed.summary : `${parsed.summary} (exit code ${result.exitCode ?? "unknown"})`,
+      passCount: parsed.passCount,
+      failCount: parsed.failCount,
+      raw,
+    };
+  }
+
+  return {
+    success: true,
+    passed: processPassed,
+    summary: processPassed ? "Command succeeded (exit code 0)" : `Command failed (exit code ${result.exitCode ?? "unknown"})`,
+    raw,
+  };
 }

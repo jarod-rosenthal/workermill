@@ -11,9 +11,12 @@ import { runsLast, runsList, runsShow } from "../runs-command.js";
 
 function makeRun(overrides: Partial<RunManifest> = {}): RunManifest {
   return {
+    version: overrides.version ?? 2,
     id: overrides.id ?? "run-abc123",
     startedAt: overrides.startedAt ?? "2026-04-09T12:00:00.000Z",
     completedAt: overrides.completedAt,
+    phase: overrides.phase ?? "active",
+    terminalReason: overrides.terminalReason,
     userTask: overrides.userTask ?? "Implement feature",
     ticketKey: overrides.ticketKey,
     featureBranch: overrides.featureBranch ?? "feature/test",
@@ -22,6 +25,8 @@ function makeRun(overrides: Partial<RunManifest> = {}): RunManifest {
     stories: overrides.stories ?? [
       { id: "s1", title: "Story 1", persona: "backend_developer", status: "completed", retryCount: 0 },
     ],
+    plannedStories: overrides.plannedStories ?? [],
+    attempts: overrides.attempts ?? [],
     gates: overrides.gates ?? [],
     reviews: overrides.reviews ?? [],
     totalCost: overrides.totalCost ?? 1.23,
@@ -57,6 +62,20 @@ describe("runs-command", () => {
     runsList({ json: true });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"id": "run-1"'));
+  });
+
+  it("uses stable JSON empty values for list and last", () => {
+    listRunManifestsMock.mockReturnValue([]);
+    runsList({ json: true });
+    runsLast({ json: true });
+    expect(logSpy).toHaveBeenNthCalledWith(1, "[]");
+    expect(logSpy).toHaveBeenNthCalledWith(2, "null");
+  });
+
+  it("renders an active run as in-progress in JSON", () => {
+    listRunManifestsMock.mockReturnValue([makeRun({ phase: "active", outcome: "in_progress" })]);
+    runsList({ json: true });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"outcome": "in_progress"'));
   });
 
   it("shows a run by exact id in json mode", () => {

@@ -3,6 +3,7 @@
  */
 
 import type { Session } from "../../session.js";
+import type { LedgerSnapshot } from "../../cost-tracker.js";
 import type {
   Message,
   ToolCallInfo,
@@ -72,6 +73,8 @@ export interface UseAgentReturn {
   addUserMessage: (content: string) => void;
   /** Update the displayed cost (used by orchestrator for live updates). */
   setCost: (cost: number) => void;
+  /** Persist a cumulative orchestration usage callback into the active session. */
+  applyExternalUsageLedger: (ledger: LedgerSnapshot) => void;
   /** Tool usage counts for status bar. */
   toolCounts: Record<string, number>;
   /** Session start time (ms). */

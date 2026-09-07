@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getStateRoot } from "./state-root.js";
 import * as logger from "./logger.js";
 import { getProjectSessionsDir, ensureProjectDirs } from "./project-data.js";
+import { classifyRole, type LedgerSnapshot } from "./cost-tracker.js";
 
 // Sessions stored in project-specific directory
 const SESSIONS_DIR = getProjectSessionsDir();
@@ -44,6 +45,10 @@ export interface Session {
   totalCostUsd?: number;            // Sum of all cost entries
   costByModel?: SessionCostModel[]; // Per-model breakdown
   costByRole?: SessionCostByRole;   // Worker / planner / reviewer split
+  /** Per-call observations accumulated across completed headless runs. */
+  usageLedger?: LedgerSnapshot;
+  /** Older totals predate call-level observations, so model/role splits are partial. */
+  usageLedgerHistoryIncomplete?: boolean;
 }
 
 export interface SessionSummary {
@@ -54,6 +59,92 @@ export interface SessionSummary {
   messageCount: number;
   totalTokens: number;
   preview: string;
+}
+
+/** Append only newly observed calls. Replayed callbacks retain the first entry. */
+export function appendUsageLedger(
+  previous: LedgerSnapshot | undefined,
+  next: LedgerSnapshot,
+): LedgerSnapshot {
+  const calls = [...(previous?.calls ?? [])];
+  const callIds = new Set(calls.map((call) => call.callId));
+  for (const call of next.calls) {
+    if (!callIds.has(call.callId)) {
+      calls.push(call);
+      callIds.add(call.callId);
+    }
+  }
+  const totals = {
+    callCount: calls.length, reportedUsageCalls: 0, partialUsageCalls: 0, missingUsageCalls: 0,
+    knownPricingCalls: 0, unknownPricingCalls: 0, localApiCalls: 0,
+    inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedApiCost: 0,
+  };
+  for (const call of calls) {
+    if (call.usageState === "reported") totals.reportedUsageCalls++;
+    else if (call.usageState === "partial") totals.partialUsageCalls++;
+    else totals.missingUsageCalls++;
+    if (call.pricingState === "known") totals.knownPricingCalls++;
+    else if (call.pricingState === "local") totals.localApiCalls++;
+    else totals.unknownPricingCalls++;
+    totals.inputTokens += call.usage?.inputTokens ?? 0;
+    totals.outputTokens += call.usage?.outputTokens ?? 0;
+    totals.cacheCreationTokens += call.usage?.cacheCreationTokens ?? 0;
+    totals.cacheReadTokens += call.usage?.cacheReadTokens ?? 0;
+    totals.estimatedApiCost += call.estimatedApiCost ?? 0;
+  }
+  return { calls, totals };
+}
+
+/**
+ * Merge a cumulative callback into a session. Calls are immutable observations:
+ * the first call ID wins, and saved estimates are never recalculated.
+ */
+export function applySessionUsageLedger(session: Session, ledger: LedgerSnapshot): boolean {
+  const hadLedger = session.usageLedger;
+  const hadHistoricalTotals = session.totalTokens > 0 || (session.totalCostUsd ?? 0) > 0;
+  if ((!hadLedger && hadHistoricalTotals) || (hadLedger && (
+    session.totalTokens > hadLedger.totals.inputTokens + hadLedger.totals.outputTokens
+    || (session.totalCostUsd ?? 0) > hadLedger.totals.estimatedApiCost + 1e-12
+  ))) session.usageLedgerHistoryIncomplete = true;
+  const existing = new Set(hadLedger?.calls.map((call) => call.callId) ?? []);
+  const newCalls = ledger.calls.filter((call) => {
+    if (existing.has(call.callId)) return false;
+    existing.add(call.callId);
+    return true;
+  });
+  if (!newCalls.length) return false;
+
+  session.usageLedger = appendUsageLedger(hadLedger, ledger);
+  const models = session.costByModel ? [...session.costByModel] : [];
+  const roles = session.costByRole ?? {
+    worker: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    planner: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    reviewer: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+  };
+  for (const call of newCalls) {
+    const inputTokens = call.usage?.inputTokens ?? 0;
+    const outputTokens = call.usage?.outputTokens ?? 0;
+    const costUsd = call.estimatedApiCost ?? 0;
+    session.totalTokens += inputTokens + outputTokens;
+    session.totalCostUsd = (session.totalCostUsd ?? 0) + costUsd;
+    const role = classifyRole(call.persona);
+    roles[role].inputTokens += inputTokens;
+    roles[role].outputTokens += outputTokens;
+    roles[role].costUsd += costUsd;
+    const key = `${call.provider}/${call.model}`;
+    const model = models.find((entry) => entry.key === key);
+    if (model) {
+      model.inputTokens += inputTokens;
+      model.outputTokens += outputTokens;
+      model.costUsd += costUsd;
+      if (!model.roles.includes(role)) model.roles.push(role);
+    } else {
+      models.push({ key, provider: call.provider, model: call.model, inputTokens, outputTokens, costUsd, roles: [role] });
+    }
+  }
+  session.costByModel = models;
+  session.costByRole = roles;
+  return true;
 }
 
 function migrateGlobalSessions(): void {

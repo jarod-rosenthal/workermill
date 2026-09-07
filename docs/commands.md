@@ -41,7 +41,13 @@ Also bound to `Ctrl+P`.
 
 Cancel whatever is currently running — a `/build` orchestration or a single-agent turn. Same as pressing `ESC`.
 
+Chat and `/build` cancellation keep the interface busy while dispatched tools and owned processes settle. Wait for the idle prompt before starting another turn. Cancellation also interrupts manual compaction; a late summary does not replace the conversation. Direct `!command` shell commands use the same process cancellation mechanism without granting future model tools permission.
+
 A cancelled `/build` leaves its state on disk, so `/retry` can pick it back up.
+
+A saved run can also need `/retry` after every story is implemented: final gates, review, or completion may still be pending. Completed stories are retained rather than implemented again.
+
+Retries retain partial edits from earlier attempts, including pre-existing user work. Inspect `git status` and `git diff` before retrying if you want to change that starting point; WorkerMill does not reset the checkout to HEAD automatically.
 
 ### `/orchestrate <#issue>` *(experimental)*
 
@@ -53,11 +59,11 @@ Requires `/settings experimental true` — without it the command reports that i
 /orchestrate #120
 ```
 
-Bounded by the `program` config block — `program.maxIssues` (default 25) aborts a run whose decomposition explodes, `program.maxAutoRetries` (default 1) controls per-issue retries, and `program.gateMode` decides whether epic-milestone gates are advisory or required. See the [Configuration reference](configuration.md#program).
+Bounded by the `program` config block — `program.maxIssues` (default 25) aborts a run whose decomposition explodes, `program.maxAutoRetries` (default 1) controls per-issue retries, and `program.gateMode` decides whether epic-milestone gates are advisory or required. Parent cancellation reaches decomposition, issue requests, and scoped gates; issue HTTP has a 60-second bound, but cancellation cannot undo an accepted remote mutation. The final program summary labels its usage as the last build only; `/cost` session totals include all recorded builds. Decomposition itself is outside a build-run ledger. See the [Configuration reference](configuration.md#program).
 
 ### `/as <persona> <task>`
 
-Run a single expert with their system prompt, full tool access, and no planning or review loop.
+Run a single expert with its persona tools and no planning or review loop. Permission rules and the current mode still apply.
 
 ```
 /as backend_developer add pagination to /api/tasks
@@ -130,7 +136,7 @@ Compress conversation history to free up context. Runs an LLM summarization pass
 
 With a focus string, the summarizer preserves messages related to that topic. Before compacting, the CLI scans for `::learning::` and `::remember::` markers and saves them as persistent memories.
 
-**Micro-compaction** (free, no LLM call) runs automatically at ~60% context usage. Manual `/compact` is only needed if you want to force it earlier.
+**Micro-compaction** (free, no LLM call) runs automatically at 50% context usage. Manual `/compact` is only needed if you want to force it earlier. Start it when the current turn is idle; cancelling it preserves the original conversation.
 
 ### `/clear`
 
@@ -138,7 +144,7 @@ Reset conversation history completely. Does not affect persistent memories (`/me
 
 ### `/cost`
 
-Show a per-role, per-provider breakdown of the current session's token usage and estimated cost.
+Show the current model plus cumulative session token usage and estimated cost. Unknown pricing is excluded and incomplete provider usage is labelled; local API cost excludes hardware cost. Use `wm stats` for stored cross-session aggregation.
 
 ### `/status`
 
@@ -416,7 +422,27 @@ wm run --json "what framework does this project use"
 | `--max-steps <n>` | Cap tool/reasoning steps |
 | `--full-disk` | Allow tools to access files outside working directory |
 
-Useful for scripting, CI pipelines, and automation. The agent has full tool access (subject to permissions) but no interactive prompts.
+Useful for scripting, CI pipelines, and automation. Headless runs never open setup or permission prompts: configure explicit `permissions.allow` rules for tools automation may use. An `ask` rule returns `permission_required` without executing the tool. `--full-disk` widens filesystem scope only; it never grants tool permission.
+
+With `--json`, stdout is exactly one result object. Successful results have `status: "ok"` and exit code 0. Non-success results retain the same fields plus `reason`, `error`, and `exitCode`; diagnostics go to stderr. Stable headless reasons and process exit codes are:
+
+| Reason | Exit code |
+|---|---:|
+| `invalid_options` | 2 |
+| `permission_required` | 3 |
+| `denied` | 4 |
+| `step_limit` | 5 |
+| `os_sandbox_unavailable` | 6 |
+| `provider_error` | 1 |
+| `hook_blocked` | 1 |
+| `cleanup_error` | 1 |
+| `cancelled` | 130 |
+
+For example, permit a CI verification command explicitly rather than relying on an interactive approval:
+
+```json
+{ "permissions": { "allow": ["bash(npm test:*)"] } }
+```
 
 ### `wm model [provider/model]`
 
@@ -561,7 +587,7 @@ wm --fork                   # Fork the resumed session (use with --resume)
 wm --plan                   # Start in plan mode (read-only tools)
 wm --provider <id>          # Override default provider for this session
 wm --model <name>           # Override the active model for this session
-wm --trust                  # Skip all tool permission prompts
+wm --trust                  # Approve ordinary tools; deny/ask and safety rules still apply
 wm --auto-revise            # Auto-revise after a failed review without prompting
 wm --strict                 # Strict mode — zero gate failures, require review approval, block scope drift
 wm --full-disk              # Allow tools to access files outside working directory

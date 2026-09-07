@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { fetchRemoteModels, updateModelCatalog } from "../remote-models";
 import type { CliConfig } from "../config.js";
+
+const workerStateRoot = process.env.WM_STATE_ROOT;
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -68,6 +70,9 @@ describe("fetchRemoteModels", () => {
   const cacheFile = "/mock/.workermill/models-cache.json";
 
   beforeEach(() => {
+    // This fixture intentionally verifies the default ~/.workermill path via
+    // the mocked home directory, so temporarily clear the worker override.
+    delete process.env.WM_STATE_ROOT;
     vi.clearAllMocks();
     mockFetch.mockReset();
     applyPathMocks();
@@ -78,6 +83,11 @@ describe("fetchRemoteModels", () => {
 
     // Mock fs.existsSync
     vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    if (workerStateRoot === undefined) delete process.env.WM_STATE_ROOT;
+    else process.env.WM_STATE_ROOT = workerStateRoot;
   });
 
   it("returns empty array when disabled", async () => {
@@ -273,6 +283,7 @@ describe("updateModelCatalog", () => {
   const cacheFile = "/mock/.workermill/models-cache.json";
 
   beforeEach(() => {
+    delete process.env.WM_STATE_ROOT;
     vi.clearAllMocks();
     mockFetch.mockReset();
     applyPathMocks();
@@ -281,6 +292,11 @@ describe("updateModelCatalog", () => {
     vi.mocked(fs.writeFileSync).mockReset();
     vi.mocked(fs.mkdirSync).mockReset();
     vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    if (workerStateRoot === undefined) delete process.env.WM_STATE_ROOT;
+    else process.env.WM_STATE_ROOT = workerStateRoot;
   });
 
   it("marks remote updates as updated when content changes but count stays the same", async () => {

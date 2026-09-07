@@ -1,254 +1,318 @@
-/**
- * Unit tests for browser.ts
- *
- * Strategy: mock child_process and logger at the top level, then use
- * vi.mocked().mockImplementation() to vary execSync behaviour per test.
- * For module-level state (chromeProcess, cdpClient) we use vi.resetModules()
- * + vi.doMock() + dynamic import inside each test so every test starts with
- * a fresh module instance where both are null.
- */
+import { spawn as realSpawn } from "child_process";
+import { EventEmitter } from "events";
+import { writeFileSync } from "fs";
+import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
+import path from "path";
+import { tmpdir } from "os";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { closeAllBrowserResources, createBrowserRunResources } from "../browser.js";
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// ---------------------------------------------------------------------------
-// Top-level hoisted mocks — these are registered before any module loads.
-// ---------------------------------------------------------------------------
-
-vi.mock("child_process", () => ({
-  spawn: vi.fn(),
-  execSync: vi.fn(() => { throw new Error("command not found"); }),
-}));
-
-vi.mock("../logger.js", () => ({
-  info: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-  warn: vi.fn(),
-}));
-
-// ---------------------------------------------------------------------------
-// Helper: load a fresh copy of browser.ts with the current mock state.
-// Must be called after vi.resetModules() + vi.doMock() calls.
-// ---------------------------------------------------------------------------
-async function freshBrowser() {
-  return import("../browser.js");
-}
-
-// ---------------------------------------------------------------------------
-// Suite helpers
-// ---------------------------------------------------------------------------
-
-function resetMocks() {
-  vi.resetModules();
-  // Re-register mocks after resetModules clears the registry so the fresh
-  // dynamic import picks them up.
-  vi.doMock("child_process", () => ({
-    spawn: vi.fn(),
-    execSync: vi.fn(() => { throw new Error("command not found"); }),
-  }));
-  vi.doMock("../logger.js", () => ({
-    info: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    warn: vi.fn(),
-  }));
-}
-
-// ---------------------------------------------------------------------------
-// Tests: default state (no browser open)
-// ---------------------------------------------------------------------------
-
-describe("browser module — no browser open", () => {
-  beforeEach(resetMocks);
-
-  it("isBrowserOpen returns false initially", async () => {
-    const { isBrowserOpen } = await freshBrowser();
-    expect(isBrowserOpen()).toBe(false);
-  });
-
-  it("browserNavigate returns 'Browser not open' when not connected", async () => {
-    const { browserNavigate } = await freshBrowser();
-    const result = await browserNavigate("https://example.com");
-    expect(result).toContain("Browser not open");
-  });
-
-  it("browserClick returns 'Browser not open' when not connected", async () => {
-    const { browserClick } = await freshBrowser();
-    const result = await browserClick("#submit-btn");
-    expect(result).toContain("Browser not open");
-  });
-
-  it("browserFill returns 'Browser not open' when not connected", async () => {
-    const { browserFill } = await freshBrowser();
-    const result = await browserFill("input[name=email]", "user@example.com");
-    expect(result).toContain("Browser not open");
-  });
-
-  it("browserEvaluate returns 'Browser not open' when not connected", async () => {
-    const { browserEvaluate } = await freshBrowser();
-    const result = await browserEvaluate("document.title");
-    expect(result).toContain("Browser not open");
-  });
-
-  it("browserConsole returns 'Browser not open' when not connected", async () => {
-    const { browserConsole } = await freshBrowser();
-    const result = await browserConsole();
-    expect(result).toContain("Browser not open");
-  });
-
-  it("browserScreenshot returns empty base64 and 'Browser not open' when not connected", async () => {
-    const { browserScreenshot } = await freshBrowser();
-    const result = await browserScreenshot();
-    expect(result.base64).toBe("");
-    expect(result.description).toContain("Browser not open");
-  });
-
-  it("browserClose returns 'Browser closed.' even when no browser is open", async () => {
-    const { browserClose } = await freshBrowser();
-    const result = await browserClose();
-    expect(result).toBe("Browser closed.");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: browserOpen when Chrome is not installed
-// ---------------------------------------------------------------------------
-
-describe("browserOpen — Chrome not found", () => {
-  beforeEach(resetMocks);
-
-  it("returns Chrome not found message when no Chrome binary exists", async () => {
-    // execSync already throws for everything (default mock) — findChrome returns null
-    const { browserOpen } = await freshBrowser();
-    const result = await browserOpen();
-    expect(result).toMatch(/Chrome.*not found|not found.*Chrome/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: findChrome path scanning via browserOpen side-effect
-// ---------------------------------------------------------------------------
-
-describe("findChrome — platform path scanning", () => {
-  let originalFetch: typeof globalThis.fetch;
-  const originalPlatform = process.platform;
-
-  /**
-   * Pin process.platform for the duration of a test.
-   *
-   * findChrome picks its candidate list from process.platform, and the two
-   * lists probe differently: linux candidates are bare binary names resolved
-   * with `which`, darwin/win32 candidates are absolute paths checked with
-   * `test -f`. A test that mocks one probe and not the other passes on some
-   * machines and fails on others.
-   */
-  function stubPlatform(platform: NodeJS.Platform): void {
-    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+class FakeWebSocket {
+  static readonly OPEN = 1;
+  readyState = FakeWebSocket.OPEN;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  static sent: string[] = [];
+  constructor(_url: string) { queueMicrotask(() => this.onopen?.()); }
+  send(raw: string): void {
+    FakeWebSocket.sent.push(raw);
+    const request = JSON.parse(raw) as { id: number; method: string };
+    if (request.method === "Runtime.evaluate") queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result: { result: { value: "title" } } }) }));
+    else if (request.method === "Page.captureScreenshot") queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result: { data: "image" } }) }));
+    else queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result: {} }) }));
   }
+  close(): void { this.readyState = 3; this.onclose?.(); }
+}
 
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    vi.resetModules();
+const originalWebSocket = globalThis.WebSocket;
+const roots: string[] = [];
+afterEach(async () => { FakeWebSocket.sent = []; globalThis.WebSocket = originalWebSocket; await Promise.all(roots.splice(0).map(async (root) => { try { await import("fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })); } catch { /* test cleanup */ } })); });
+
+async function fixture(signal = new AbortController().signal, options: { startupTimeoutMs?: number; fetchImpl?: typeof fetch; killProcess?: typeof process.kill } = {}) {
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  const root = path.join(tmpdir(), `workermill-browser-test-${crypto.randomUUID()}`); roots.push(root); await mkdir(root);
+  let child: EventEmitter & { pid: number; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
+  const spawnProcess = vi.fn((_command: string, args: readonly string[]) => {
+    const profile = args.find((arg) => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
+    child = Object.assign(new EventEmitter(), { pid: 999_999, stderr: new EventEmitter(), kill: vi.fn(() => child.emit("exit", 0)) });
+    // Publish the fake handshake before discovery starts. An async write can
+    // lose the entire short startup window to the 100 ms discovery retry,
+    // so the response/cancellation fixture would never be exercised.
+    writeFileSync(path.join(profile, "DevToolsActivePort"), "9333\n/devtools/browser/owned\n");
+    return child as unknown as ReturnType<typeof import("child_process").spawn>;
+  });
+  const fetchImpl = options.fetchImpl ?? vi.fn(async (url: string) => {
+    if (url.endsWith("/json/version")) {
+      return new Response(JSON.stringify({ webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }), { status: 200 });
+    }
+    return new Response(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]), { status: 200 });
+  });
+  const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root, signal, chromePath: "/fake/chrome", profileRoot: root, spawnProcess, fetchImpl, killProcess: options.killProcess, startupTimeoutMs: options.startupTimeoutMs ?? 500, terminationGraceMs: 10 });
+  return { browser, root, spawnProcess, getChild: () => child!, fetchImpl };
+}
+
+describe("browser resources", () => {
+  it("keeps two run owners separate and gives each a private profile", async () => {
+    const first = await fixture(); const second = await fixture();
+    await expect(first.browser.open()).resolves.toContain("private headless");
+    await expect(second.browser.open()).resolves.toContain("private headless");
+    expect(first.browser.isOpen()).toBe(true); expect(second.browser.isOpen()).toBe(true);
+    const firstArgs = first.spawnProcess.mock.calls[0]![1] as string[];
+    const secondArgs = second.spawnProcess.mock.calls[0]![1] as string[];
+    expect(firstArgs.find((arg) => arg.startsWith("--remote-debugging-port="))).toBe("--remote-debugging-port=0");
+    expect(firstArgs.find((arg) => arg.startsWith("--user-data-dir="))).not.toBe(secondArgs.find((arg) => arg.startsWith("--user-data-dir=")));
+    await first.browser.close();
+    expect(second.browser.isOpen()).toBe(true);
+    await second.browser.close();
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+  it("allows a model-owned browser to close and reopen within the same turn", async () => {
+    const { browser, spawnProcess } = await fixture();
+    await browser.open();
+    await browser.close();
+    await expect(browser.open()).resolves.toContain("private headless");
+    expect(spawnProcess).toHaveBeenCalledTimes(2);
+    await browser.dispose();
   });
 
-  it("returns null (Chrome not found) when execSync throws for every candidate", async () => {
-    vi.doMock("child_process", () => ({
-      spawn: vi.fn(),
-      execSync: vi.fn(() => { throw new Error("command not found"); }),
-    }));
-    vi.doMock("../logger.js", () => ({
-      info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn(),
-    }));
-
-    const { browserOpen } = await freshBrowser();
-    const result = await browserOpen();
-    // findChrome returned null → this specific message
-    expect(result).toBe(
-      "Chrome/Chromium not found. Install Google Chrome to use browser tools."
-    );
-  });
-
-  it("proceeds past findChrome when a Chrome candidate is found (spawn called, CDP polling times out)", { timeout: 8000 }, async () => {
-    // The mock below answers `which google-chrome`, which only appears in the
-    // linux candidate list — pin the platform so this doesn't depend on the
-    // machine running the suite.
-    stubPlatform("linux");
-
-    // execSync succeeds for `which google-chrome`, fails for everything else
-    const execSyncMock = vi.fn((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("uname")) {
-        throw new Error("not WSL");
-      }
-      if (typeof cmd === "string" && cmd.includes("which") && cmd.includes("google-chrome")) {
-        return "/usr/bin/google-chrome\n";
-      }
-      throw new Error("not found");
+  it("cancels startup after a process has started and removes its profile", async () => {
+    const controller = new AbortController();
+    const { browser, root, getChild } = await fixture(controller.signal, {
+      fetchImpl: vi.fn(async () => new Promise<Response>(() => undefined)) as typeof fetch,
     });
-
-    const spawnMock = vi.fn(() => {
-      // Return a minimal fake ChildProcess that won't throw
-      return {
-        pid: 12345,
-        kill: vi.fn(),
-        on: vi.fn(),
-        stdio: "pipe",
-        stdout: null,
-        stderr: null,
-      };
-    });
-
-    vi.doMock("child_process", () => ({
-      spawn: spawnMock,
-      execSync: execSyncMock,
-    }));
-    vi.doMock("../logger.js", () => ({
-      info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn(),
-    }));
-
-    // Stub fetch so CDP /json/version polling always fails immediately
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) as typeof globalThis.fetch;
-
-    const { browserOpen } = await freshBrowser();
-    const result = await browserOpen();
-
-    // findChrome succeeded → spawn was called → CDP polling timed out
-    expect(spawnMock).toHaveBeenCalledOnce();
-    expect(result).toContain("Failed to connect to Chrome");
+    const opening = browser.open();
+    await vi.waitFor(() => expect(getChild()).toBeDefined());
+    controller.abort(new Error("cancelled"));
+    await expect(opening).resolves.toContain("cancelled");
+    expect(await readdir(root)).toEqual([]);
   });
 
-  it("finds Chrome on darwin via the absolute-path probe", { timeout: 8000 }, async () => {
-    // darwin candidates are absolute paths checked with `test -f`, not `which`.
-    // This probe had no coverage, which is why a linux-only test could sit red
-    // on macOS without anyone noticing.
-    stubPlatform("darwin");
+  it("fails bounded startup without attaching to an arbitrary port", async () => {
+    const { browser, fetchImpl, getChild } = await fixture(new AbortController().signal, { fetchImpl: vi.fn(async () => new Response("[]", { status: 200 })) as typeof fetch, startupTimeoutMs: 500 });
+    await expect(browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(fetchImpl).toHaveBeenCalled(); expect(getChild()).toBeDefined();
+  });
 
-    const execSyncMock = vi.fn((cmd: string) => {
-      if (typeof cmd === "string" && cmd.includes("test -f") && cmd.includes("Google Chrome.app")) {
-        return "";
-      }
-      throw new Error("not found");
+  it("rejects a pending CDP request when close disconnects it", async () => {
+    globalThis.WebSocket = class extends FakeWebSocket { override send(raw: string): void { const request = JSON.parse(raw) as { method: string }; if (request.method !== "Runtime.evaluate") super.send(raw); } } as unknown as typeof WebSocket;
+    const { browser } = await fixture();
+    // fixture installs its normal socket, replace it before open with a socket that leaves evaluate pending.
+    globalThis.WebSocket = class extends FakeWebSocket { override send(raw: string): void { const request = JSON.parse(raw) as { method: string }; if (request.method !== "Runtime.evaluate") super.send(raw); } } as unknown as typeof WebSocket;
+    await browser.open(); const pending = browser.evaluate("never"); await browser.close();
+    await expect(pending).resolves.toContain("Browser closed");
+  });
+
+  it("still cleans the owned process group/profile after Chrome's parent exits", async () => {
+    const { browser, root, getChild } = await fixture();
+    await browser.open();
+    getChild().emit("exit", 1);
+    await browser.close();
+    // Group signalling may fail once the parent has exited; the direct-child
+    // fallback still runs, and only this exact private profile is removed.
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it("does not expose a browser before its owner opens it", async () => {
+    const { browser } = await fixture();
+    await expect(browser.navigate("https://example.test")).resolves.toContain("Browser not open");
+    expect(browser.isOpen()).toBe(false);
+  });
+
+  it("does not spawn when the owner was already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before open"));
+    const { browser, spawnProcess } = await fixture(controller.signal);
+    await expect(browser.open()).resolves.toContain("cancelled");
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Windows executable rather than trying to manage it from WSL", async () => {
+    const root = path.join(tmpdir(), `workermill-browser-windows-${crypto.randomUUID()}`);
+    roots.push(root);
+    await mkdir(root);
+    const spawnProcess = vi.fn();
+    const browser = createBrowserRunResources({
+      runId: crypto.randomUUID(),
+      workspace: root,
+      signal: new AbortController().signal,
+      chromePath: "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
+      profileRoot: root,
+      spawnProcess,
     });
+    const result = await browser.open();
+    if (process.platform === "linux") {
+      expect(result).toContain("Windows Chrome via WSL is unsupported");
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+    await browser.close();
+  });
 
-    const spawnMock = vi.fn(() => ({
-      pid: 12345, kill: vi.fn(), on: vi.fn(), stdio: "pipe", stdout: null, stderr: null,
-    }));
+  it("CLI exit closes every run-owned browser without sharing ownership", async () => {
+    const first = await fixture();
+    const second = await fixture();
+    await first.browser.open();
+    await second.browser.open();
+    await closeAllBrowserResources();
+    expect(first.browser.isOpen()).toBe(false);
+    expect(second.browser.isOpen()).toBe(false);
+  });
 
-    vi.doMock("child_process", () => ({ spawn: spawnMock, execSync: execSyncMock }));
-    vi.doMock("../logger.js", () => ({
-      info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn(),
-    }));
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) as typeof globalThis.fetch;
+  it("close during startup aborts and drains the opening attempt", async () => {
+    const { browser, root, spawnProcess } = await fixture(new AbortController().signal, {
+      fetchImpl: vi.fn(async () => new Promise<Response>(() => undefined)) as typeof fetch,
+    });
+    const opening = browser.open();
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledOnce());
+    await expect(browser.close()).resolves.toBe("Browser closed.");
+    await expect(opening).resolves.toContain("cancelled");
+    expect(await readdir(root)).toEqual([]);
+  });
 
-    const { browserOpen } = await freshBrowser();
-    const result = await browserOpen();
+  it("bounds slow/oversized discovery and rejects a non-private endpoint", async () => {
+    const cancelled = vi.fn();
+    const slow = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode("{")); },
+        cancel: cancelled,
+      }))) as typeof fetch,
+    });
+    await expect(slow.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(cancelled).toHaveBeenCalled();
 
-    expect(spawnMock).toHaveBeenCalledOnce();
-    expect(spawnMock.mock.calls[0][0]).toContain("Google Chrome");
-    expect(result).toContain("Failed to connect to Chrome");
+    const oversizedCancelled = vi.fn();
+    const oversized = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array(256 * 1024 + 1)); },
+        cancel: oversizedCancelled,
+      }))) as typeof fetch,
+    });
+    await expect(oversized.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(oversizedCancelled).toHaveBeenCalled();
+
+    const malicious = await fixture(new AbortController().signal, {
+      fetchImpl: vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/json/version")
+        ? { webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }
+        : [{ type: "page", webSocketDebuggerUrl: "ws://attacker.test:9333/devtools/page/stolen" }]
+      ), { status: 200 })) as typeof fetch,
+    });
+    await expect(malicious.browser.open()).resolves.toContain("private loopback");
+  });
+
+  it("bounds discovery cleanup when a response cancellation never settles", async () => {
+    const cancelled = vi.fn(() => new Promise<void>(() => undefined));
+    const stalled = await fixture(new AbortController().signal, {
+      startupTimeoutMs: 100,
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array(256 * 1024 + 1)); },
+        cancel: cancelled,
+      }))) as typeof fetch,
+    });
+    const startedAt = Date.now();
+    await expect(stalled.browser.open()).resolves.toContain("Failed to start Chrome");
+    expect(cancelled).toHaveBeenCalled();
+    expect(Date.now() - startedAt).toBeLessThan(300);
+  });
+
+  it("quotes selector-derived JavaScript literals", async () => {
+    const { browser } = await fixture();
+    await browser.open();
+    const selector = "button['x']; globalThis.pwned=true; //";
+    await browser.click(selector);
+    const raw = FakeWebSocket.sent.find((entry) => JSON.parse(entry).method === "Runtime.evaluate") ?? "{}";
+    const evaluate = JSON.parse(raw) as { params?: { expression?: string } };
+    expect(evaluate.params?.expression).toContain(JSON.stringify(selector));
+    await browser.close();
+  });
+
+  it("returns cleanup failures to the awaited owner", async () => {
+    let denied = true;
+    const { browser, root } = await fixture(new AbortController().signal, {
+      killProcess: (() => { const error = new Error(denied ? "permission denied" : "already exited") as NodeJS.ErrnoException; error.code = denied ? "EPERM" : "ESRCH"; throw error; }) as typeof process.kill,
+    });
+    await browser.open();
+    await expect(browser.close()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toHaveLength(1);
+    denied = false;
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it("retains automatic abort cleanup failures for the awaited finalizer", async () => {
+    const controller = new AbortController();
+    let denied = true;
+    const killProcess = vi.fn(() => {
+      const error = new Error("fixture cleanup failure") as NodeJS.ErrnoException;
+      error.code = denied ? "EPERM" : "ESRCH";
+      throw error;
+    });
+    const { browser, root } = await fixture(controller.signal, { killProcess });
+    await browser.open();
+    controller.abort();
+    await vi.waitFor(() => expect(killProcess).toHaveBeenCalled());
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toHaveLength(1);
+    denied = false;
+    await expect(browser.dispose()).rejects.toThrow("Browser cleanup failed");
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it.skipIf(process.platform !== "linux")("rejects Linux symlinks to Windows Chrome", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workermill-browser-symlink-"));
+    roots.push(root);
+    await writeFile(path.join(root, "chrome.exe"), "fixture");
+    await symlink(path.join(root, "chrome.exe"), path.join(root, "chrome"));
+    const spawnProcess = vi.fn();
+    const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root,
+      signal: new AbortController().signal, chromePath: path.join(root, "chrome"), spawnProcess });
+    await expect(browser.open()).resolves.toContain("Windows Chrome via WSL is unsupported");
+    expect(spawnProcess).not.toHaveBeenCalled();
+    await browser.dispose();
+  });
+
+  it.skipIf(process.platform === "win32")("kills a TERM-ignoring descendant after its browser parent exits", async () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const root = path.join(tmpdir(), `workermill-browser-orphan-${crypto.randomUUID()}`);
+    roots.push(root);
+    await mkdir(root);
+    const descendantScript = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+    const parentScript = [
+      "const { spawn } = require('child_process');",
+      "const fs = require('fs');",
+      "const profile = process.argv[1];",
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' });`,
+      "child.unref();",
+      "fs.writeFileSync(profile + '/descendant.pid', String(child.pid));",
+      "fs.writeFileSync(profile + '/DevToolsActivePort', '9333\\n/devtools/browser/owned\\n');",
+    ].join("");
+    const spawnProcess = (_command: string, args: readonly string[], spawnOptions: Parameters<typeof realSpawn>[2]) => {
+      const profile = args.find((arg) => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
+      return realSpawn(process.execPath, ["-e", parentScript, profile], {
+        ...spawnOptions,
+        detached: true,
+      });
+    };
+    const fetchImpl = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/json/version")
+      ? { webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/owned" }
+      : [{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]
+    ), { status: 200 })) as typeof fetch;
+    const browser = createBrowserRunResources({
+      runId: crypto.randomUUID(),
+      workspace: root,
+      signal: new AbortController().signal,
+      chromePath: "/fake/chrome",
+      profileRoot: root,
+      spawnProcess,
+      fetchImpl,
+      terminationGraceMs: 1_000,
+    });
+    await expect(browser.open()).resolves.toContain("private headless");
+    const [profile] = await readdir(root);
+    const descendantPid = Number(await readFile(path.join(root, profile!, "descendant.pid"), "utf8"));
+    await browser.close();
+    expect(() => process.kill(descendantPid, 0)).toThrow();
   });
 });

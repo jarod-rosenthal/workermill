@@ -76,6 +76,8 @@ export function createTimedAbortSignal(
 ): {
   signal: AbortSignal;
   didTimeout: () => boolean;
+  /** End the attempt explicitly so its model/tools cannot outlive its owner. */
+  abort: (reason?: unknown) => void;
   dispose: () => void;
 } {
   const controller = new AbortController();
@@ -95,9 +97,15 @@ export function createTimedAbortSignal(
   return {
     signal: controller.signal,
     didTimeout: () => timedOut,
+    abort: (reason?: unknown) => {
+      if (!controller.signal.aborted) controller.abort(reason instanceof Error ? reason : new Error(`${label} closed`));
+    },
     dispose: () => {
       clearTimeout(timer);
       if (baseSignal) baseSignal.removeEventListener("abort", onAbort);
+      // Removing a timer/listener is insufficient: callers own a live model
+      // and tool lifetime and must close it before releasing this scope.
+      if (!controller.signal.aborted) controller.abort(new Error(`${label} closed`));
     },
   };
 }
@@ -160,8 +168,21 @@ export function normalizeErrorSignature(message: string): string {
 }
 
 /** Sleep helper for rate limit backoff */
-export function rateLimitSleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+export function rateLimitSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Rate-limit retry cancelled"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason instanceof Error ? signal.reason : new Error("Rate-limit retry cancelled"));
+    };
+    function done(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export function clipLogText(text: string, maxChars = 1200): string {

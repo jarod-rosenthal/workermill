@@ -1,5 +1,10 @@
 # WorkerMill recovery handoff
 
+## Exit restore hint — active
+
+User requested a Ctrl-C exit hint saying wm restore. PR111 already merged as56487f65 after all checks passed; main security jobs passed and main CI34156307955/CodeQL are finishing. Created feat/restore-exit-hint from updated main56487f65. Coordinator only. Scope: print a restore hint after interactive UI teardown and add restore as a working alias of resume; document alias and verify real PTY Ctrl-C output. No model, permission or exit-behavior changes. Implemented and locally built. On base56487f65 plus hint/alias diff: full npm test exit0,1639 passed/one existing skip,115 files,32.04s; package/PTY5 passed,18.64s (Ctrl-C hint asserted for fresh and restored chat); typecheck/build/diff-check exit0. Next preserve feature branch for review; no automatic merge of new scope.
+
+
 ## Session resume PR/merge — authorized
 
 User approved local feature and explicitly authorized a PR description, green checks and merge. Clean branch feat/session-resume at cb0db3e2, implementation1d34b440, base main31bfd209. Coordinator only. Next create PR, verify all CI/security checks on exact head, merge only when green, then verify main workflows. No release or unrelated implementation. This supersedes prior no-merge wording.

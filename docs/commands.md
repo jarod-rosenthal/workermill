@@ -403,7 +403,7 @@ The interactive session. Running `wm` with no subcommand runs `wm chat` — you 
 
 ### `wm resume [sessionId]`
 
-Continue a saved conversation from the current working directory:
+Continue a saved conversation from the current working directory. `wm restore` is an alias with the same options; it is shown as a reminder after exiting interactive chat:
 
 ```bash
 wm resume                 # Searchable picker: arrows and Enter; Esc cancels

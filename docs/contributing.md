@@ -114,6 +114,7 @@ workermill/
 │   │   ├── StatusBar.tsx      # Bottom status bar
 │   │   ├── useAgent.ts        # Single-agent state + tool loop
 │   │   ├── useOrchestrator.ts # /build state + orchestrator coordination
+│   │   ├── orchestration-presentation.ts # React-free orchestration display formatting
 │   │   ├── slash-commands.ts  # Command dispatch, HELP_TEXT, BUILTIN_COMMANDS
 │   │   ├── commands/          # Slash command handler implementations
 │   │   │   ├── session.ts     # /model, /cost, /status, /compact, /clear, /edit, /git, /diff, /changed, /sessions

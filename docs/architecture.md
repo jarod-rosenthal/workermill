@@ -61,6 +61,23 @@ The orchestrator is decomposed into focused modules under `src/orchestrator/`:
 
 Each role can use a different model via `/settings route <persona> <provider>`.
 
+#### Next module boundaries
+
+`ui/orchestration-presentation.ts` owns persona labels, cost/model formatting, summary dividers and compact tool details. It receives values and a caller-owned file-sequence callback; it does not import React, execute tools, access Git or own run state. `useOrchestrator.ts` retains state, throttling, cancellation, approval callbacks and orchestration invocation. Its existing summary exports remain available to callers.
+
+Further extraction should follow responsibility and ownership, rather than file size alone:
+
+| Current module | Candidate boundary | Contract to preserve |
+| --- | --- | --- |
+| `ui/useOrchestrator.ts` | Program/epic execution service behind output callbacks | Retry state, issue order, parent cancellation, gates and finalized completion |
+| `ui/useAgent.ts` | Chat turn execution separate from React state projection | Permission prompts, streamed output, compaction history, tool drain and usage settlement |
+| `orchestrator.ts` | Startup/retry preparation and terminal manifest finalization | Selected branch, effective sandbox, evidence freshness and failure/cancellation distinctions |
+| `index.ts` | Command registration and CLI result rendering | Flags, exit codes, JSON output and startup preflight |
+| `browser.ts` | Browser protocol/discovery separate from process/profile ownership | Bounded cleanup and visible teardown failure |
+
+These are sequential candidate slices, not implemented services. Avoid passing an entire hook's mutable state into a new file or introducing a universal model loop. The known macOS browser process-group EPERM failure must be diagnosed before integrating further refactors; local Linux passes do not resolve that platform failure.
+
+
 ## Configuration
 
 Config lives at `~/.workermill/cli.json`:

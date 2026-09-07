@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## PR110 qualification correction
+
+PR110 https://github.com/jarod-rosenthal/workermill/pull/110, head673865f7. CI34079267530 Ubuntu22.22 failed existing bash-tool docker-wrapper test: real runner Docker command exceeded the shared five-second deadline;1631 passed/one failed/one skip. Security scans passed. Bounded test-only correction: return a harmless marker command from the existing mocked sandbox wrapper and assert its output, preserving the Docker-input wrapper assertion while removing dependence on installed Docker. No production or containment-policy change. Local full1632 passed/one existing skip,113 files,32.49s; typecheck/diff-check exit0. Next push correction and qualify all PR checks before merge.
+
 ## Boundary PR merge authorized
 
 User authorized creating a description and merging this iteration if all checks pass. Base e5a8a496, clean refactor/orchestration-presentation; no existing open PR. Coordinator only. Next: push this documentation checkpoint, create PR into main, qualify all PR workflows including security checks, merge only the checked head without deleting branches/worktrees, then verify main workflows. No new implementation, publication or tags. Previous no-merge wording below describes earlier checkpoints and is superseded by this authorization.

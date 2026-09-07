@@ -1,6 +1,6 @@
 # WorkerMill recovery handoff
 
-**Current state: qualified Ubuntu24.04 diagnostic follow-up, ready for core fast-forward and push.** Checkpoint: 2026-09-07T02:08:03.737002+00:00. Exact tested implementation **4ec7e142e13956efebeecbb7d83353530b94da1b**, branch `reliability/ubuntu2404`, worktree `/home/user/github/workermill-ubuntu2404`. [CI34075005883](https://github.com/jarod-rosenthal/workermill/actions/runs/34075005883) passed all six jobs with no retry:
+**Current state: qualified Ubuntu24.04 diagnostic follow-up integrated into reliability/core.** Checkpoint: 2026-09-07T02:08:03.737002+00:00. Exact tested implementation **4ec7e142e13956efebeecbb7d83353530b94da1b**, branch `reliability/ubuntu2404`, worktree `/home/user/github/workermill-ubuntu2404`. [CI34075005883](https://github.com/jarod-rosenthal/workermill/actions/runs/34075005883) passed all six jobs with no retry:
 
 | Host | Node versions | Results per version |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ All four supported-host typecheck/build steps passed. Ubuntu24.04 jobs are start
 
 The prior supported baseline was b67160f8, recorded by documentation HEADa2547299 and CI34069973409. This follow-up supersedes its readiness counts, not its historical evidence. [Qualification report](docs/recovery/r24-qualification.md) retains every failed candidate run and the bounded corrections. Optional R19 budgets and R21 comparison/live measurements remain deferred. No active workers; no main merge, publication, tag, paid evaluation or worktree deletion.
 
-Next: commit these evidence-only updates, remove only the coordinator-owned pointer paragraph in core's HANDOFF.md, fast-forward `reliability/core` from the qualified follow-up, push both branches, rebuild the core CLI, and verify clean tracked state. No implementation replay or additional feature work is needed.
+Core `/home/user/github/workermill` was fast-forwarded to evidence5be33106; the coordinator-owned pointer was removed without other changes. Core CLI rebuild passed. The final handoff-only commit is to be pushed to origin/reliability/core; verify remote equality on restart if interrupted during push. The isolated candidate and its qualification evidence remain preserved on reliability/ubuntu2404. No implementation replay or additional feature work is needed. Next user-facing action: report the completed changes and remaining full-OS Ubuntu24.04 limitation; wait for new scope.
 
 **Approval continuity:** the user requested fewer interruptions. Existing saved prefixes cover pushes, tests, workflow dispatch/monitoring/retry, and `gh api --method GET`. Reuse them. Avoid shell redirects in new escalated commands: they caused exact per-log approvals and one nine-minute wait. Read logs through the reusable GET command and save summaries separately. The host's managed permission profile remains restricted; no host policy was changed. Network access can be enabled through supported user settings, but approval=never alone does not grant access.
 

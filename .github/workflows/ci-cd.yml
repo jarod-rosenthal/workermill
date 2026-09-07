@@ -32,12 +32,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap socat ripgrep apparmor
+          sudo apt-get install -y bubblewrap socat ripgrep apparmor apparmor-profiles
           # Load Ubuntu's packaged, purpose-built bwrap policy so the runtime
           # can create its user namespace without changing global restrictions.
-          if [ -f /etc/apparmor.d/bwrap ]; then
-            sudo apparmor_parser -r /etc/apparmor.d/bwrap
-          fi
+          sudo apparmor_parser -r -I /etc/apparmor.d /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / -- /bin/true
 
       - name: Install macOS sandbox dependency

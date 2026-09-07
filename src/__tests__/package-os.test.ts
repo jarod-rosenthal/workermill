@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
@@ -195,6 +195,14 @@ describe("installed package and supported OS runtime", () => {
       return;
     }
     const installedRequire = createRequire(path.join(installRoot, "node_modules", "workermill", "package.json"));
+    // node-pty 1.1.0 ships its macOS test-driver helper as 0644 (upstream #850).
+    // Repair only this temporary harness dependency; WorkerMill itself does
+    // not use node-pty, and the installed CLI and its assertions stay intact.
+    if (process.platform === "darwin") {
+      const ptyRoot = path.dirname(installedRequire.resolve("node-pty/package.json"));
+      const helper = path.join(ptyRoot, "prebuilds", `darwin-${process.arch}`, "spawn-helper");
+      if (existsSync(helper)) await chmod(helper, (await stat(helper)).mode | 0o100);
+    }
     const pty = installedRequire("node-pty") as PtyModule;
     const root = await mkdtemp(path.join(os.tmpdir(), "wm-pack-pty-"));
     roots.push(root);

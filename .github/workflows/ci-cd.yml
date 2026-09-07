@@ -17,7 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Ubuntu 24.04's userns policy blocks this runtime's nested seccomp
+        # setup. Qualify 22.04 explicitly; see the R24 report for that open limit.
+        os: [ubuntu-22.04, macos-latest]
         node: ['22.12.0', '22.22.2']
     steps:
       - uses: actions/checkout@v6
@@ -32,10 +34,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap socat ripgrep apparmor apparmor-profiles
-          # Load Ubuntu's packaged, purpose-built bwrap policy so the runtime
-          # can create its user namespace without changing global restrictions.
-          sudo apparmor_parser -r -I /etc/apparmor.d /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          sudo apt-get install -y bubblewrap socat ripgrep
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / -- /bin/true
 
       - name: Install macOS sandbox dependency

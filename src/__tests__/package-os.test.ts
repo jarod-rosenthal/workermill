@@ -214,7 +214,9 @@ describe("installed package and supported OS runtime", () => {
       name: "xterm-256color",
       cols: 120,
       rows: 32,
-      env: { ...env, TERM: "xterm-256color" },
+      // This child represents a user's terminal. Ink intentionally suppresses
+      // interactive rendering in CI even when stdout is a real TTY.
+      env: { ...env, TERM: "xterm-256color", CI: "false", CONTINUOUS_INTEGRATION: "false" },
     });
     let output = "";
     terminal.onData((data) => { output += data; });

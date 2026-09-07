@@ -1,10 +1,10 @@
 # Reliability release-candidate qualification
 
-Status: **locally qualified** at `67e19c20` on `reliability/core`, 2026-09-06 22:53 UTC. All first-release P0/P1 implementation and documentation tasks are complete locally. No open high-severity finding remains in the reviewed boundaries. This is a local candidate; no release, remote CI run, or live comparative evaluation occurred.
+Status: **locally qualified** at `67e19c20` on `reliability/core`, 2026-09-06 22:53 UTC. All first-release P0/P1 implementation and documentation tasks are complete locally. No open high-severity finding remains in the reviewed boundaries. Remote qualification was subsequently authorized and is recorded below. No release or live comparative evaluation occurred.
 
 ## Final checks
 
-All executable checks used commit `67e19c20`, Linux and Node **22.22.2**, and the exact `package-lock.json` dependency graph in `/home/user/github/workermill-qualification-cont`. Subsequent edits record this evidence and correct one documentation link; they do not change production code or tests.
+All executable checks used commit `67e19c20`, Linux and Node **22.22.2**, and the exact `package-lock.json` dependency graph in `/home/user/github/workermill-qualification-cont`. The original evidence commit `7e08a94a` records this local result. Subsequent CI-only and test-harness corrections are documented in the remote continuation below; production code is unchanged.
 
 | Command | Result |
 | --- | --- |
@@ -16,6 +16,17 @@ All executable checks used commit `67e19c20`, Linux and Node **22.22.2**, and th
 The existing skip is the obsolete `useCritic` configuration test in `orchestrator.test.ts`. Actual Linux OS-sandbox cases ran successfully. Docs consistency, hooks, command/schema checks, and 20 offline evaluation fixtures are included in the full suite. Final local Markdown path checks, JSON parsing and `git diff --check` also passed.
 
 For resumption, use [HANDOFF.md](../../HANDOFF.md). [The retrospective](2026-09-06-retrospective.md) explains recovered work and failures; [the continuation inventory](2026-09-06-continuation.json) records commits, changed paths, documentation, recent tracked-file metadata and preserved worktrees at its stated snapshot.
+
+## Remote qualification continuation
+
+The user authorized pushing `reliability/core` and running the existing CI matrix. No merge or release is authorized.
+
+- [Run 34066504739](https://github.com/jarod-rosenthal/workermill/actions/runs/34066504739), `7e08a94a`: all four jobs failed unit tests. On Node 22.22.2, Linux had four failures/1,604 passes/seven skips; macOS had eight failures/1,605 passes/two skips. Install, typecheck and build passed; package tests were blocked by unit failures.
+- `55629f3c` corrects test temp-path canonicalization, shell fixture paths and adds a real Linux sandbox startup probe. Local unit tests passed: 1,614 passed/one existing skip, 111 files, 31.47 seconds; typecheck passed.
+- [Run 34067913059](https://github.com/jarod-rosenthal/workermill/actions/runs/34067913059), `55629f3c`: macOS unit suites passed (1,613 passed/two skips); each package suite had three passes and one `posix_spawnp failed` error in the native PTY test driver. Linux stopped before tests at `bwrap: setting up uid map: Permission denied`.
+- `e0c5e635` installs and loads Ubuntu's packaged `bwrap-userns-restrict` profile from `apparmor-profiles`. The profile allows bwrap's namespace setup while denying child capabilities; global namespace restrictions remain enabled. The earlier attempted `/etc/apparmor.d/bwrap` location was wrong. [Ubuntu's package maintainer explains this package split](https://bugs.launchpad.net/ubuntu/+source/apparmor/+bug/2064672).
+- The same correction prepares the temporary test driver's macOS `spawn-helper` owner execute bit. Locked node-pty 1.1.0 ships it as 0644 ([upstream issue #850](https://github.com/microsoft/node-pty/issues/850)); the fix is merged upstream but the registry's latest stable remains 1.1.0 at this checkpoint. WorkerMill has no production node-pty caller; the installed CLI is unchanged. No dependency version change or relaxed assertions were needed.
+- Local `e0c5e635` typecheck passed; installed-package tests passed four/four, 10.96 seconds. [Run 34069185187](https://github.com/jarod-rosenthal/workermill/actions/runs/34069185187) targets exact SHA `e0c5e6355feb8c539cf0cf752747596c9493b657`; failed: Linux Node22.22.2 had eight failures/1,606 passes/one skip because the runtime seccomp helper needs a nested namespace whose capabilities the Ubuntu24.04 profile denies. macOS units passed, but its PTY child inherited CI=true, suppressing interactive rendering. The next correction clears CI detection only for the interactive test child and pins the supported Linux matrix to Ubuntu22.04. Ubuntu24.04 remains unqualified; no host restrictions or assertions are disabled.
 
 ## Reviewed contracts
 
@@ -44,11 +55,11 @@ Test basenames above mean `<name>.test.ts`. The [R16 coverage map](r16-coverage.
 
 ## Practical limits and deferred checks
 
-- Local qualification uses Linux, Node 22.22.2 and the exact `package-lock.json` graph in the dedicated qualification worktree. Linux/macOS × Node 22.12.0/22.22.2 CI is configured; other matrix jobs have not run here. Native Windows shell support is excluded; WSL depends on its Linux kernel/runtime capabilities.
+- Local qualification uses Linux, Node 22.22.2 and the exact `package-lock.json` graph in the dedicated qualification worktree. Linux/macOS × Node 22.12.0/22.22.2 CI is configured; its subsequent runs are recorded above. Native Windows shell support is excluded; WSL depends on its Linux kernel/runtime capabilities.
 - OS tests explicitly skip missing dependencies or an unsupported kernel. A skip is not containment evidence. The Linux checkpoint at `0efe4934` had only the pre-existing obsolete `useCritic` test skipped; the actual OS cases ran.
 - Path mode checks explicit file-tool paths, not arbitrary shell behavior or races with hostile external filesystem mutation. OS mode limits writes and selected sensitive reads; it does not confine every host read. Worktrees separate changes and are not a security boundary. Explicit OS setup failure never executes the raw command as fallback.
 - Process cleanup sends TERM/KILL to owned process groups with bounded waiting. It does not guarantee control of every process that deliberately escapes its group or becomes uninterruptible in the kernel.
 - Ledgers estimate observed API usage. Missing/partial provider usage and unknown rates remain explicit; local API cost excludes hardware cost. Program decomposition in `program-bootstrap.ts` happens outside the build-run ledger; direct auxiliary planning helpers without a usage observer are also outside session accounting. These totals are not application-wide billing totals.
 - The legacy `EngineAIClient` remains used by optional live E2E tests. It has no production CLI caller and is not a shipped public library entry point. Its raw-tool harness is not evidence for the governed CLI adapters. Default deterministic qualification does not run those live tests.
 - Optional R19 estimated budgets and R21 comparison harness/live measurements are deferred. R20's 20 offline semantic fixtures exist; they do not establish comparative model quality or cost.
-- No publication, tag, push, PR, remote merge, paid evaluation, or deletion of preserved worktrees is part of this qualification.
+- Branch pushes and remote CI were subsequently authorized. No publication, tag, PR, remote merge, paid evaluation, or deletion of preserved worktrees is part of this qualification.

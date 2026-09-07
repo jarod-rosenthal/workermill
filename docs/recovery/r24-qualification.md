@@ -1,6 +1,6 @@
 # Reliability release-candidate qualification
 
-Status: **locally qualified** at `67e19c20` on `reliability/core`, 2026-09-06 22:53 UTC. All first-release P0/P1 implementation and documentation tasks are complete locally. No open high-severity finding remains in the reviewed boundaries. Remote qualification was subsequently authorized and is recorded below. No release or live comparative evaluation occurred.
+Status: **qualified on the supported CI matrix** at `b67160f8393370fc99019b3a5bcff305570e381f`, 2026-09-07. Ubuntu22.04 and macOS26 arm64 passed on Node22.12.0/22.22.2. Ubuntu24.04 remains an explicit open compatibility limitation. The original local qualification and failed remote attempts are retained below. No release or live comparative evaluation occurred.
 
 ## Final checks
 
@@ -27,6 +27,21 @@ The user authorized pushing `reliability/core` and running the existing CI matri
 - `e0c5e635` installs and loads Ubuntu's packaged `bwrap-userns-restrict` profile from `apparmor-profiles`. The profile allows bwrap's namespace setup while denying child capabilities; global namespace restrictions remain enabled. The earlier attempted `/etc/apparmor.d/bwrap` location was wrong. [Ubuntu's package maintainer explains this package split](https://bugs.launchpad.net/ubuntu/+source/apparmor/+bug/2064672).
 - The same correction prepares the temporary test driver's macOS `spawn-helper` owner execute bit. Locked node-pty 1.1.0 ships it as 0644 ([upstream issue #850](https://github.com/microsoft/node-pty/issues/850)); the fix is merged upstream but the registry's latest stable remains 1.1.0 at this checkpoint. WorkerMill has no production node-pty caller; the installed CLI is unchanged. No dependency version change or relaxed assertions were needed.
 - Local `e0c5e635` typecheck passed; installed-package tests passed four/four, 10.96 seconds. [Run 34069185187](https://github.com/jarod-rosenthal/workermill/actions/runs/34069185187) targets exact SHA `e0c5e6355feb8c539cf0cf752747596c9493b657`; failed: Linux Node22.22.2 had eight failures/1,606 passes/one skip because the runtime seccomp helper needs a nested namespace whose capabilities the Ubuntu24.04 profile denies. macOS units passed, but its PTY child inherited CI=true, suppressing interactive rendering. The next correction clears CI detection only for the interactive test child and pins the supported Linux matrix to Ubuntu22.04. Ubuntu24.04 remains unqualified; no host restrictions or assertions are disabled.
+
+### Supported-host matrix
+
+[Run 34069973409](https://github.com/jarod-rosenthal/workermill/actions/runs/34069973409) tests exact commit `b67160f8393370fc99019b3a5bcff305570e381f`. This explicitly qualifies Ubuntu22.04 and macOS26 arm64; it does **not** qualify Ubuntu24.04. The first macOS Node22.12 checkout failed because the runner could not resolve github.com; that job was retried on the same SHA. Other jobs were already successful. The retry passed and the overall run concluded **success** on 2026-09-07. Subsequent commits contain documentation/evidence only.
+
+| Host | Node | Unit tests | Installed package / PTY | Typecheck / build |
+| --- | --- | --- | --- | --- |
+| Ubuntu22.04 | 22.12.0 | 1,614 passed, one skip | 4 passed | Passed |
+| Ubuntu22.04 | 22.22.2 | 1,614 passed, one skip | 4 passed | Passed |
+| macOS26 arm64 | 22.22.2 | 1,613 passed, two skips | 4 passed | Passed |
+| macOS26 arm64 | 22.12.0 | 1,613 passed, two skips | 4 passed | Passed |
+
+Each unit suite has 111 files. Linux's sole skip is the obsolete useCritic setting. macOS additionally skips the Linux-only Windows-Chrome symlink fixture. Actual OS containment tests are required with WM_REQUIRE_OS_SANDBOX=1; missing sandbox support is not counted as a pass. Local `b67160f8` typecheck and four package tests passed (10.55 seconds). One local package attempt omitted the documented cache and failed before tests with ENOTCACHED; the corrected invocation used the existing cache without dependency changes.
+
+**Open platform follow-up:** qualify a runtime compatible with Ubuntu24.04's default user-namespace policy, including full registered-tool/child/Git/gate containment tests. Current failures are preserved above. A simple bwrap startup probe is insufficient because apply-seccomp starts a nested namespace. Do not disable global restrictions, add broad child capabilities, or remove containment assertions as a substitute for qualification.
 
 ## Reviewed contracts
 

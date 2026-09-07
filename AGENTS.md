@@ -35,7 +35,7 @@ npm run build        # tsup → dist/
 ./build.sh           # Clean build + invariant checks (version sync, bundle contents)
 ```
 
-Run `npm run typecheck` and `npm test` before declaring work finished. `npm run lint` is an alias for typecheck, so do not count it as an independent check. The configured CI matrix covers Linux/macOS and Node 22.12.0/22.22.2; see the qualification record for runs actually completed.
+Run `npm run typecheck` and `npm test` before declaring work finished. `npm run lint` is an alias for typecheck, so do not count it as an independent check. The configured CI matrix covers Ubuntu 22.04/macOS and Node 22.12.0/22.22.2; Ubuntu 24.04 has an open nested-namespace compatibility limitation; see the qualification record for runs actually completed.
 
 ## Non-Negotiables
 

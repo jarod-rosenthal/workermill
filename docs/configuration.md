@@ -533,6 +533,13 @@ optional upgrade is unavailable, the run log visibly says it continued with
 path-only restrictions. Path mode is not containment for shell redirection,
 interpreters, or arbitrary subprocesses.
 
+OS-mode qualification covers Ubuntu 22.04 and macOS with Node 22.12.0 and
+22.22.2. Ubuntu 24.04 with its default user-namespace restrictions remains
+incompatible with the installed sandbox runtime: command startup can fail
+with a namespace permission error. Installing bubblewrap alone does not
+resolve this limitation. Use a qualified host for OS mode; see the
+[qualification report](recovery/r24-qualification.md) for exact CI evidence.
+
 ## `sandboxCapabilities`
 
 Optional OS-sandbox exceptions belong only in your global user configuration

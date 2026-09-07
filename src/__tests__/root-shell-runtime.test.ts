@@ -61,7 +61,7 @@ describe("mounted direct shell lifecycle", () => {
   it("runs, cancels, rejects a second shell, and kills on unmount", async () => {
     const started = path.join(workspace, "started");
     const escaped = path.join(workspace, "escaped");
-    const program = `require('fs').writeFileSync(${JSON.stringify(started)}, 'ready'); setTimeout(() => require('fs').writeFileSync(${JSON.stringify(escaped)}, 'bad'), 5000)`;
+    const program = "require('fs').writeFileSync('started', 'ready'); setTimeout(() => require('fs').writeFileSync('escaped', 'bad'), 5000)";
     const submit = appProps!.onSubmit as (input: string) => void;
     submit(`!${JSON.stringify(process.execPath)} -e ${JSON.stringify(program)}`);
     await vi.waitFor(() => expect(stat(started).then(() => true, () => false)).resolves.toBe(true));
@@ -74,7 +74,7 @@ describe("mounted direct shell lifecycle", () => {
     const unmountEscape = path.join(workspace, "unmount-escaped");
     const terminated = path.join(workspace, "terminated");
     const unmountStarted = path.join(workspace, "unmount-started");
-    const unmountProgram = `process.on('SIGTERM', () => require('fs').writeFileSync(${JSON.stringify(terminated)}, 'yes')); require('fs').writeFileSync(${JSON.stringify(unmountStarted)}, String(process.pid)); setInterval(() => require('fs').writeFileSync(${JSON.stringify(unmountEscape)}, 'bad'), 5000)`;
+    const unmountProgram = "process.on('SIGTERM', () => require('fs').writeFileSync('terminated', 'yes')); require('fs').writeFileSync('unmount-started', String(process.pid)); setInterval(() => require('fs').writeFileSync('unmount-escaped', 'bad'), 5000)";
     submit(`!${JSON.stringify(process.execPath)} -e ${JSON.stringify(unmountProgram)}`);
     await vi.waitFor(() => expect(appProps!.status).toBe("tool_running"));
     await vi.waitFor(() => expect(stat(unmountStarted).then(() => true, () => false)).resolves.toBe(true));

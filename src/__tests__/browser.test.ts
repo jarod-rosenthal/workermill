@@ -1,7 +1,7 @@
 import { spawn as realSpawn } from "child_process";
 import { EventEmitter } from "events";
 import { writeFileSync } from "fs";
-import { mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
 import path from "path";
 import { tmpdir } from "os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -261,9 +261,8 @@ describe("browser resources", () => {
   });
 
   it.skipIf(process.platform !== "linux")("rejects Linux symlinks to Windows Chrome", async () => {
-    const root = path.join(tmpdir(), `workermill-browser-symlink-${crypto.randomUUID()}`);
+    const root = await mkdtemp(path.join(tmpdir(), "workermill-browser-symlink-"));
     roots.push(root);
-    await mkdir(root);
     await writeFile(path.join(root, "chrome.exe"), "fixture");
     await symlink(path.join(root, "chrome.exe"), path.join(root, "chrome"));
     const spawnProcess = vi.fn();

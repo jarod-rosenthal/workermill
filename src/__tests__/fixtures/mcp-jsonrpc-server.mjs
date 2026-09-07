@@ -40,7 +40,7 @@ input.on("line", (line) => {
       return reply(request.id, { content: [{ type: "text", text: JSON.stringify(request.params.arguments) }] });
     }
     if (mode === "orphan-after-start") {
-      const child = spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(${JSON.stringify(marker + ".started")}, String(process.pid)); process.send("ready"); setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "late"), 500); setInterval(() => {}, 1_000);`], {
+      const child = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(process.argv[1] + ".started", String(process.pid)); process.send("ready"); setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "late"), 500); setInterval(() => {}, 1_000);', marker], {
         stdio: ["ignore", "ignore", "ignore", "ipc"],
       });
       child.once("message", () => process.exit(0));

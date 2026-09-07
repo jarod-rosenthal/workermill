@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## 1.2.0 — merged, publication left to user
+
+PR112 https://github.com/jarod-rosenthal/workermill/pull/112 merged as a29cd8976070b2594f33b1f11611d1dcd63cdb79 after every PR check passed on c8e7438edad61195a77a3e911627a78529511d42, without retries. Includes restore hint/alias and1.2.0 version/changelog. No npm publication or tags performed. Preserve this post-merge checkpoint on feat/restore-exit-hint, then checkout and fast-forward local main for user publication. Post-merge main workflows may still be running; the all-green claim is for PR112 checks. No implementation remains.
+
 ## 1.2.0 merge — authorized
 
 User explicitly authorized merging1.2.0 and will publish personally. Clean feat/restore-exit-hint76148530, base main56487f65. Coordinator only. Next create PR with description, qualify all checks on exact head, merge green revision, update local main and verify merge. No npm publication or tags. This supersedes earlier no-merge wording for the hint/version follow-up.

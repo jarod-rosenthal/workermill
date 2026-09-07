@@ -55,6 +55,13 @@ jobs:
           WM_REQUIRE_OS_SANDBOX: "1"
         run: npm test
 
+      - name: Repeat macOS orphan cleanup regression
+        if: runner.os == 'macOS'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            npm test -- src/__tests__/browser.test.ts -t "kills a TERM-ignoring descendant" || exit 1
+          done
+
       - name: Installed package and OS runtime tests
         run: npm run test:package-os
 

@@ -61,6 +61,25 @@ The orchestrator is decomposed into focused modules under `src/orchestrator/`:
 
 Each role can use a different model via `/settings route <persona> <provider>`.
 
+#### Next module boundaries
+
+`ui/orchestration-presentation.ts` owns persona labels, cost/model formatting, summary dividers and compact tool details. It receives values and a caller-owned file-sequence callback; it does not import React, execute tools, access Git or own run state. `useOrchestrator.ts` retains state, throttling, cancellation, approval callbacks and orchestration invocation. Its existing summary exports remain available to callers.
+
+Further extraction should follow responsibility and ownership, rather than file size alone:
+
+| Current module | Candidate boundary | Contract to preserve |
+| --- | --- | --- |
+| `ui/useOrchestrator.ts` | Program/epic execution service behind output callbacks | Retry state, issue order, parent cancellation, gates and finalized completion |
+| `ui/useAgent.ts` | Chat turn execution separate from React state projection | Permission prompts, streamed output, compaction history, tool drain and usage settlement |
+| `orchestrator.ts` | Startup/retry preparation and terminal manifest finalization | Selected branch, effective sandbox, evidence freshness and failure/cancellation distinctions |
+| `index.ts` | Command registration and CLI result rendering | Flags, exit codes, JSON output and startup preflight |
+| `browser.ts` | Further separate protocol/discovery from profile ownership; process-group cleanup is now in `browser/process-group.ts` | Bounded cleanup and visible teardown failure |
+
+The process-group boundary uses bounded macOS process inspection to distinguish exited groups from permission failures. A signal error alone is never evidence that cleanup succeeded; unknown or live membership remains a failure. Linux inspection similarly treats denied process-state reads as unknown. The browser owner retains profiles and reports cleanup failures.
+
+The remaining entries are sequential candidate slices, not implemented services. Avoid passing an entire hook's mutable state into a new file or introducing a universal model loop. The macOS browser process-group correction requires actual macOS qualification before integrating further refactors; local Linux passes alone do not resolve that platform failure.
+
+
 ## Configuration
 
 Config lives at `~/.workermill/cli.json`:

@@ -47,6 +47,7 @@ describe("bash tool scoped sandbox handling", () => {
   });
 
   it("does not let docker commands bypass explicit OS sandbox wrapping", async () => {
+    vi.mocked(SandboxManager.wrapWithSandbox).mockResolvedValue("printf wrapped-docker");
     const result = await execute({
       command: "docker || true",
       osSandbox: true,
@@ -61,6 +62,7 @@ describe("bash tool scoped sandbox handling", () => {
       expect.any(AbortSignal),
     );
     expect(result.success).toBe(true);
+    expect(result.stdout).toBe("wrapped-docker");
   });
 
   it("still wraps non-docker commands in OS sandbox mode", async () => {

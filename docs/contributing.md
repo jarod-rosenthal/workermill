@@ -114,6 +114,7 @@ workermill/
 │   │   ├── StatusBar.tsx      # Bottom status bar
 │   │   ├── useAgent.ts        # Single-agent state + tool loop
 │   │   ├── useOrchestrator.ts # /build state + orchestrator coordination
+│   │   ├── orchestration-presentation.ts # React-free orchestration display formatting
 │   │   ├── slash-commands.ts  # Command dispatch, HELP_TEXT, BUILTIN_COMMANDS
 │   │   ├── commands/          # Slash command handler implementations
 │   │   │   ├── session.ts     # /model, /cost, /status, /compact, /clear, /edit, /git, /diff, /changed, /sessions
@@ -240,3 +241,5 @@ The CLI is published to npm as `workermill`.
 ## Questions
 
 Open a [GitHub Discussion](https://github.com/jarod-rosenthal/workermill/discussions) for design questions, or a [GitHub Issue](https://github.com/jarod-rosenthal/workermill/issues) for bugs.
+
+`src/browser/process-group.ts` owns browser descendant termination and live-group inspection; `src/browser.ts` owns browser protocol, discovery and profile lifetime.

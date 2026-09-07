@@ -56,6 +56,8 @@ import type { CliConfig } from "../config.js";
 import { runOrchestration, type OrchestrationOutput } from "../orchestrator.js";
 import { createTempWorkerMillHome, type TempHome } from "./helpers/temp-workermill-home.js";
 import { getOSSandboxDependencyStatus } from "../sandbox-mode.js";
+import * as sandboxMode from "../sandbox-mode.js";
+import { planStories } from "../orchestrator/planning.js";
 
 function git(directory: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -128,6 +130,34 @@ describe("orchestration startup runtime", () => {
     expect(result.featureBranch).toBe("remote-project/preserve-remote-prefix");
     expect(git(directory, ["branch", "--show-current"])).toBe(result.featureBranch);
     expect(runOutput.errors).toEqual([]);
+  });
+
+  it("fails explicit OS startup before planning and preserves the current branch", async () => {
+    const initialBranch = git(directory, ["branch", "--show-current"]);
+    const probe = vi.spyOn(sandboxMode, "assertOSSandboxReady").mockRejectedValueOnce(
+      new sandboxMode.OSSandboxUnavailableError("apply-seccomp: namespace permission denied"),
+    );
+    try {
+      const runOutput = output();
+      await expect(runOrchestration({ ...config(), sandbox: "os" }, "Stop before planning", true, "os", runOutput))
+        .rejects.toThrow("namespace permission denied");
+      expect(planStories).not.toHaveBeenCalled();
+      expect(git(directory, ["branch", "--show-current"])).toBe(initialBranch);
+    } finally { probe.mockRestore(); }
+  });
+
+  it("reports path-only mode when the optional OS upgrade cannot start", async () => {
+    const resolution = vi.spyOn(sandboxMode, "resolveAutomaticSandboxUpgrade").mockReturnValueOnce({ requested: "os", effective: "os" });
+    const probe = vi.spyOn(sandboxMode, "assertOSSandboxReady").mockRejectedValueOnce(
+      new sandboxMode.OSSandboxUnavailableError("apply-seccomp: namespace permission denied"),
+    );
+    try {
+      const runOutput = output();
+      await runOrchestration(config(), "Visible fallback", true, true, runOutput);
+      expect(runOutput.logs.join(" ")).toContain("continuing with path-only restrictions");
+      expect(planStories).toHaveBeenCalled();
+      expect(vi.mocked(planStories).mock.calls[0][3]).toBe(true);
+    } finally { probe.mockRestore(); resolution.mockRestore(); }
   });
 
   it("keeps an existing branch and its commits after explicit continue confirmation", async () => {

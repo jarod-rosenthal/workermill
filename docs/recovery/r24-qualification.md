@@ -78,3 +78,12 @@ Test basenames above mean `<name>.test.ts`. The [R16 coverage map](r16-coverage.
 - The legacy `EngineAIClient` remains used by optional live E2E tests. It has no production CLI caller and is not a shipped public library entry point. Its raw-tool harness is not evidence for the governed CLI adapters. Default deterministic qualification does not run those live tests.
 - Optional R19 estimated budgets and R21 comparison harness/live measurements are deferred. R20's 20 offline semantic fixtures exist; they do not establish comparative model quality or cost.
 - Branch pushes and remote CI were subsequently authorized. No publication, tag, PR, remote merge, paid evaluation, or deletion of preserved worktrees is part of this qualification.
+
+
+## Ubuntu24.04 diagnostic follow-up — candidate
+
+Authorized after the supported-host qualification. Isolated branch reliability/ubuntu2404, base a2547299. A shared complete runtime probe now checks harmless command execution through the real scoped runner (five-second command timeout, cancellation propagation and owned cleanup), not just dependency installation. Headless/chat startup and build preflight use it; doctor reports failure instead of claiming dependency presence establishes runtime health. Explicit OS requests stop before model work. Only the existing optional build upgrade can fall back, visibly, to path mode. Cleanup failures propagate rather than authorize fallback.
+
+The released0.0.75 README and wrapper retain the same nested-namespace requirement. The dependency remains pinned to0.0.46 pending evidence; the Ubuntu24.04 CI diagnostic compares0.0.75 in a separate installation. The added Ubuntu24.04 jobs qualify truthful startup rejection and usable path mode, not OS containment. They retain the host userns restriction and use Ubuntu's packaged bwrap policy.
+
+Local candidate: typecheck/build passed; full suite1623 passed, zero failed, one existing skip,112 files,32.90 seconds. This local environment reports Ubuntu24.04 userspace but lacks the AppArmor userns restriction sysctl, so local success is not evidence for stock Ubuntu24.04. Remote and package results pending.

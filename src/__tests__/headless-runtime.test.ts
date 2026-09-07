@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import * as sandboxMode from "../sandbox-mode.js";
 
 const mcpWrite = vi.fn(async () => "mcp write");
 const ensureMcpRun = vi.fn(async () => {});
@@ -420,6 +421,18 @@ describe("headless runtime governance", () => {
     expect(result.reason).toBe("cancelled");
     expect(ensureMcpRun).not.toHaveBeenCalled();
     expect(createModel).not.toHaveBeenCalled();
+  });
+
+  it("rejects unavailable sandbox startup before model or MCP calls", async () => {
+    const probe = vi.spyOn(sandboxMode, "assertOSSandboxReady").mockRejectedValueOnce(
+      new sandboxMode.OSSandboxUnavailableError("apply-seccomp: namespace permission denied"),
+    );
+    try {
+      const result = await runCommand({ prompt: "write", singlePrompt: true, sandboxed: "os" }, config({}), workspace);
+      expect(result).toMatchObject({ reason: "os_sandbox_unavailable", exitCode: 6, toolCalls: 0 });
+      expect(createModel).not.toHaveBeenCalled();
+      expect(ensureMcpRun).not.toHaveBeenCalled();
+    } finally { probe.mockRestore(); }
   });
 
   it("cleans up a partially started MCP runtime and removes SIGINT listeners on setup failure", async () => {

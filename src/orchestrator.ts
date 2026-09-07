@@ -9,7 +9,7 @@ import { loadMemories } from "./memory.js";
 import { saveShipRun, clearShipRun } from "./ship-state.js";
 import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
 import { createAttemptResources, ResourceCleanupError } from "./engine/run-resources.js";
-import { resolveAutomaticSandboxUpgrade, resolveSandboxMode } from "./sandbox-mode.js";
+import { assertOSSandboxReady, OSSandboxUnavailableError, resolveAutomaticSandboxUpgrade } from "./sandbox-mode.js";
 import { createRunManifest, saveRunManifest, type TerminalReason, type RunManifestStoryAttempt } from "./run-manifest.js";
 import { isLocalProvider, providerNeedsContextOverride } from "./provider-capabilities.js";
 import { runProcess } from "./engine/process-runner.js";
@@ -258,13 +258,22 @@ export async function runOrchestration(
   }
   // Retry plans can skip the planner's preflight, so enforce an explicit OS
   // request at the orchestration boundary before any provider or ticket work.
-  if (sandboxed === "os") resolveSandboxMode("os");
+  if (sandboxed === "os") await assertOSSandboxReady(workingDir, config.sandboxCapabilities, abortSignal);
 
   // The default path mode may be automatically upgraded for /build. Unlike an
   // explicit `sandbox: "os"` setting, this specific automatic policy can fall
   // back, and the user must see the effective mode in the run output.
   if (sandboxed === true) {
     const resolution = resolveAutomaticSandboxUpgrade();
+    if (resolution.effective === "os") {
+      try {
+        await assertOSSandboxReady(workingDir, config.sandboxCapabilities, abortSignal);
+      } catch (error) {
+        if (!(error instanceof OSSandboxUnavailableError)) throw error;
+        resolution.effective = true;
+        resolution.warning = `OS sandbox automatic upgrade unavailable (${error.message}); continuing with path-only restrictions.`;
+      }
+    }
     sandboxed = resolution.effective;
     if (resolution.warning) {
       logger.info("OS sandbox fallback in /build", { warning: resolution.warning });

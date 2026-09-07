@@ -1,4 +1,6 @@
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { randomUUID } from "node:crypto";
+import type { SandboxCapabilities } from "./config.js";
 
 export type SandboxSetting = boolean | "os";
 
@@ -90,4 +92,31 @@ export function resolveAutomaticSandboxUpgrade(): SandboxResolution {
       ? `OS sandbox enabled with warnings: ${status.warnings.join(", ")}`
       : undefined,
   };
+}
+
+/** Exercise the complete wrapper, including nested seccomp setup, before model work. */
+export async function assertOSSandboxReady(
+  workingDir: string,
+  capabilities?: SandboxCapabilities,
+  signal: AbortSignal = new AbortController().signal,
+): Promise<void> {
+  signal.throwIfAborted();
+  resolveSandboxMode("os");
+  // Dynamic import avoids the scoped runner's dependency-status import cycle.
+  const { runScopedProcess } = await import("./engine/scoped-process.js");
+  const { createPathScope } = await import("./engine/path-policy.js");
+  const marker = `workermill-sandbox-ready-${randomUUID()}`;
+  const result = await runScopedProcess({
+    runId: marker, command: `printf '%s' '${marker}'`, cwd: workingDir, signal,
+    timeoutMs: 5_000, maxOutputBytes: 4096, terminationGraceMs: 250,
+  }, { sandbox: "os", scope: createPathScope(workingDir, capabilities?.extraPathGrants ?? []), capabilities });
+  signal.throwIfAborted();
+  if (result.reason === "exited" && result.exitCode === 0 && result.stdout === marker && !result.outputTruncated) return;
+  const detail = result.stderr.trim() || `probe ${result.reason} (exit ${result.exitCode ?? "none"})`;
+  const namespaceFailure = /bwrap:|apply-seccomp:|userns|user namespace/i.test(detail);
+  throw new OSSandboxUnavailableError(
+    `OS sandbox runtime startup failed before model work: ${detail}. `
+    + (namespaceFailure ? "The host may restrict user namespaces (including Ubuntu 24.04 AppArmor); installed dependencies alone do not establish sandbox support. " : "")
+    + "Use a qualified OS-sandbox host or explicitly choose sandbox: true for path-only restrictions. See docs/configuration.md. No task command was executed by this probe.",
+  );
 }

@@ -11,7 +11,7 @@ import { Command } from "commander";
 import { loadConfig, resolveConfig as resolveMergedConfig, getProviderForPersona } from "./config.js";
 import { findProjectInstructionSource } from "./instructions.js";
 import { runSetup } from "./setup.js";
-import { getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
+import { assertOSSandboxReady, getOSSandboxDependencyStatus, resolveSandboxMode } from "./sandbox-mode.js";
 import { Root } from "./ui/Root.js";
 import { getStateRoot } from "./state-root.js";
 import { checkForUpdate } from "./update-check.js";
@@ -222,6 +222,7 @@ const defaultCmd = program
     const roleModels = getRoleModelsFromConfig(config);
     const sandboxResolution = resolveSandboxMode(config.sandbox, !!options.fullDisk);
     const sandboxed = sandboxResolution.effective;
+    if (sandboxed === "os") await assertOSSandboxReady(workingDir, config.sandboxCapabilities);
 
     await printWelcome(workingDir, isFirstRun);
 
@@ -332,7 +333,13 @@ program
             console.log(chalk.red("  ✗") + ` OS sandbox dependencies missing: ${status.errors.join(", ")}`);
             issues++;
           } else {
-            console.log(chalk.green("  ✓") + " OS sandbox dependencies installed");
+            try {
+              await assertOSSandboxReady(process.cwd(), config.sandboxCapabilities);
+              console.log(chalk.green("  ✓") + " OS sandbox runtime startup passed");
+            } catch (error) {
+              console.log(chalk.red("  ✗") + ` ${error instanceof Error ? error.message : String(error)}`);
+              issues++;
+            }
             if (status.warnings.length > 0) {
               console.log(chalk.yellow("  ⚠") + ` OS sandbox warnings: ${status.warnings.join(", ")}`);
             }

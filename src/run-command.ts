@@ -13,7 +13,7 @@ import { formatPromptProjectContext } from "./project-context.js";
 import { loadLearnings } from "./learnings.js";
 import { createMCPRunResources, autoDetectMCPServersForRun } from "./mcp-client.js";
 import { shutdownLSPRun } from "./engine/tools/lsp.js";
-import type { SandboxSetting } from "./sandbox-mode.js";
+import { assertOSSandboxReady, type SandboxSetting } from "./sandbox-mode.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, loadLatestSession, loadSessionById, addMessage, saveSession, applySessionUsageLedger, type Session } from "./session.js";
 import { CostTracker } from "./cost-tracker.js";
@@ -164,6 +164,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
   const controller = new AbortController();
   const abortFromParent = () => controller.abort();
   options.signal?.addEventListener("abort", abortFromParent, { once: true });
+  if (options.signal?.aborted) abortFromParent();
   const abortFromSigint = () => controller.abort();
   process.once("SIGINT", abortFromSigint);
   const costs = new CostTracker();
@@ -184,11 +185,7 @@ export async function runCommand(options: RunOptions, config: CliConfig, working
     mcpResources = createMCPRunResources({ runId, workspace: workingDir, signal: controller.signal });
     const requestedSandbox = options.sandboxed ?? config.sandbox ?? true;
     if (requestedSandbox === "os") {
-      const { getOSSandboxDependencyStatus } = await import("./sandbox-mode.js");
-      const status = getOSSandboxDependencyStatus();
-      if (!status.supported || status.errors.length) {
-        return failure(start, "os_sandbox_unavailable", "OS sandbox requested but unavailable: " + status.errors.join(", "), { model: modelIdentity });
-      }
+      await assertOSSandboxReady(workingDir, config.sandboxCapabilities, controller.signal);
     }
     let messages: ChatMessage[];
     if (options.singlePrompt) {

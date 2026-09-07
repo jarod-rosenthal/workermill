@@ -241,3 +241,5 @@ The CLI is published to npm as `workermill`.
 ## Questions
 
 Open a [GitHub Discussion](https://github.com/jarod-rosenthal/workermill/discussions) for design questions, or a [GitHub Issue](https://github.com/jarod-rosenthal/workermill/issues) for bugs.
+
+`src/browser/process-group.ts` owns browser descendant termination and live-group inspection; `src/browser.ts` owns browser protocol, discovery and profile lifetime.

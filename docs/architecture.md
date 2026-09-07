@@ -73,9 +73,11 @@ Further extraction should follow responsibility and ownership, rather than file 
 | `ui/useAgent.ts` | Chat turn execution separate from React state projection | Permission prompts, streamed output, compaction history, tool drain and usage settlement |
 | `orchestrator.ts` | Startup/retry preparation and terminal manifest finalization | Selected branch, effective sandbox, evidence freshness and failure/cancellation distinctions |
 | `index.ts` | Command registration and CLI result rendering | Flags, exit codes, JSON output and startup preflight |
-| `browser.ts` | Browser protocol/discovery separate from process/profile ownership | Bounded cleanup and visible teardown failure |
+| `browser.ts` | Further separate protocol/discovery from profile ownership; process-group cleanup is now in `browser/process-group.ts` | Bounded cleanup and visible teardown failure |
 
-These are sequential candidate slices, not implemented services. Avoid passing an entire hook's mutable state into a new file or introducing a universal model loop. The known macOS browser process-group EPERM failure must be diagnosed before integrating further refactors; local Linux passes do not resolve that platform failure.
+The process-group boundary uses bounded macOS process inspection to distinguish exited groups from permission failures. A signal error alone is never evidence that cleanup succeeded; unknown or live membership remains a failure. Linux inspection similarly treats denied process-state reads as unknown. The browser owner retains profiles and reports cleanup failures.
+
+The remaining entries are sequential candidate slices, not implemented services. Avoid passing an entire hook's mutable state into a new file or introducing a universal model loop. The macOS browser process-group correction requires actual macOS qualification before integrating further refactors; local Linux passes alone do not resolve that platform failure.
 
 
 ## Configuration

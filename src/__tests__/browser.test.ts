@@ -1,4 +1,4 @@
-import { spawn as realSpawn } from "child_process";
+import { execFileSync, spawn as realSpawn } from "child_process";
 import { EventEmitter } from "events";
 import { writeFileSync } from "fs";
 import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "fs/promises";
@@ -49,7 +49,7 @@ async function fixture(signal = new AbortController().signal, options: { startup
     }
     return new Response(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/owned" }]), { status: 200 });
   });
-  const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root, signal, chromePath: "/fake/chrome", profileRoot: root, spawnProcess, fetchImpl, killProcess: options.killProcess, startupTimeoutMs: options.startupTimeoutMs ?? 500, terminationGraceMs: 10 });
+  const browser = createBrowserRunResources({ runId: crypto.randomUUID(), workspace: root, signal, chromePath: "/fake/chrome", profileRoot: root, spawnProcess, fetchImpl, inspectProcessGroup: async () => null, killProcess: options.killProcess, startupTimeoutMs: options.startupTimeoutMs ?? 500, terminationGraceMs: 10 });
   return { browser, root, spawnProcess, getChild: () => child!, fetchImpl };
 }
 
@@ -278,15 +278,16 @@ describe("browser resources", () => {
     const root = path.join(tmpdir(), `workermill-browser-orphan-${crypto.randomUUID()}`);
     roots.push(root);
     await mkdir(root);
-    const descendantScript = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+    const descendantScript = "process.on('SIGTERM', () => {}); process.send('ready'); setInterval(() => {}, 1000);";
     const parentScript = [
       "const { spawn } = require('child_process');",
       "const fs = require('fs');",
       "const profile = process.argv[1];",
-      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' });`,
-      "child.unref();",
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });`,
+      "child.once('message', () => {",
       "fs.writeFileSync(profile + '/descendant.pid', String(child.pid));",
       "fs.writeFileSync(profile + '/DevToolsActivePort', '9333\\n/devtools/browser/owned\\n');",
+      "process.exit(0); });",
     ].join("");
     const spawnProcess = (_command: string, args: readonly string[], spawnOptions: Parameters<typeof realSpawn>[2]) => {
       const profile = args.find((arg) => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
@@ -313,6 +314,13 @@ describe("browser resources", () => {
     const [profile] = await readdir(root);
     const descendantPid = Number(await readFile(path.join(root, profile!, "descendant.pid"), "utf8"));
     await browser.close();
-    expect(() => process.kill(descendantPid, 0)).toThrow();
+    // A zombie has exited but can remain visible until the OS reaps it.
+    let state = "";
+    try {
+      state = execFileSync("ps", ["-o", "stat=", "-p", String(descendantPid)], { encoding: "utf8", timeout: 1000 }).trim();
+    } catch (error) {
+      if (!(error && typeof error === "object" && "status" in error && error.status === 1)) throw error;
+    }
+    expect(state === "" || state.startsWith("Z")).toBe(true);
   });
 });

@@ -1,5 +1,9 @@
 # WorkerMill recovery handoff
 
+## 1.2.0 merge — authorized
+
+User explicitly authorized merging1.2.0 and will publish personally. Clean feat/restore-exit-hint76148530, base main56487f65. Coordinator only. Next create PR with description, qualify all checks on exact head, merge green revision, update local main and verify merge. No npm publication or tags. This supersedes earlier no-merge wording for the hint/version follow-up.
+
 ## Version bump — authorized
 
 User requested semantic version bump after exit hint; user will publish. Prepare1.2.0 (minor feature release from1.1.1), synchronize package.json/src/version.ts/root lock metadata and changelog. Do not publish or tag. Current feat/restore-exit-hint c27d6a2c is pushed and locally qualified. PR111 post-merge main56487f65: CI34156307955 all six jobs passed; CodeQL34156307391 and audit/Gitleaks/Semgrep/Trivy all success. Completed1.2.0 bump with ./build.sh --bump minor; lock root versions synchronized and changelog prepared. Release validation on c27d6a2c plus version/docs diff: build invariants and standalone typecheck exit0; npm test1639 passed/one existing skip,115 files,32.75s; packed1.2.0 package/PTY5 passed,17.80s; CLI --version prints1.2.0; diff-check exit0. npm registry still1.1.1. Ready locally on feat/restore-exit-hint; push version checkpoint. No publication or tags. Hint/version follow-up has not been merged into main or qualified by remote CI; PR111 remains merged and green.

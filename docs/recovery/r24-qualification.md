@@ -15,7 +15,7 @@ All executable checks used commit `67e19c20`, Linux and Node **22.22.2**, and th
 
 The existing skip is the obsolete `useCritic` configuration test in `orchestrator.test.ts`. Actual Linux OS-sandbox cases ran successfully. Docs consistency, hooks, command/schema checks, and 20 offline evaluation fixtures are included in the full suite. Final local Markdown path checks, JSON parsing and `git diff --check` also passed.
 
-For resumption, use [HANDOFF.md](../../HANDOFF.md). [The retrospective](2026-09-06-retrospective.md) explains recovered work and failures; [the continuation inventory](2026-09-06-continuation.json) records commits, changed paths, documentation, recent tracked-file metadata and preserved worktrees at its stated snapshot.
+For resumption, use local handoff. [The retrospective](2026-09-06-retrospective.md) explains recovered work and failures; [the continuation inventory](2026-09-06-continuation.json) records commits, changed paths, documentation, recent tracked-file metadata and preserved worktrees at its stated snapshot.
 
 ## Remote qualification continuation
 

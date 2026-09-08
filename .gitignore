@@ -63,3 +63,6 @@ e2e-cli-tests/
 
 # Scratch scripts
 scripts/*.py
+
+# Local session recovery notes must not be committed.
+/HANDOFF.md

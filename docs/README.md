@@ -27,6 +27,5 @@ If you're just getting started, read the [project README](../README.md) first �
 
 ## Reliability project recovery
 
-- **[Current handoff](../HANDOFF.md)** — saved branch state, known failed checks, and the next bounded task.
 - **[September 6 retrospective](recovery/2026-09-06-retrospective.md)** — incident evidence, completed and remaining work, and continuity safeguards.
 - **[Qualification record](recovery/r24-qualification.md)** — regression-test map and the limits of the current release-candidate evidence.

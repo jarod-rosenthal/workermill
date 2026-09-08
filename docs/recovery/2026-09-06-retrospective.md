@@ -2,7 +2,7 @@
 
 Prepared on 2026-09-06 from the local repository, all 38 registered worktrees, the prior coordinator and final worker session records, and a fresh test run. Implementation snapshot: `22ba7d7c0d12dd9bed85586fcbf6f966030245c7`. This is an incident/recovery document requested by the user, not a product guarantee or release qualification.
 
-The findings below describe the initial audit snapshot. Implementation resumed under the user's later instruction; see [Continuation results](#continuation-results) and the current [handoff](../../HANDOFF.md) for repaired state.
+The findings below describe the initial audit snapshot. Implementation resumed under the user's later instruction; see [Continuation results](#continuation-results) and the current local handoff for repaired state.
 
 ## Initial audit findings
 
@@ -193,7 +193,7 @@ The 24-parent queue has **15 marked complete (R01–R14 and R20), two in progres
 | R19 (optional) | Estimated execution budgets with documented overshoot | After ledger and lifecycle work; not required for first release. |
 | R21 (optional) | Comparison harness, fake dry run and evidence report | R20 fixtures exist; actual paid study needs separately specified authorization and budget. |
 
-There is no evidence-based remaining-time estimate yet. The first decision point is the bounded integration repair and full qualification, not repeating earlier foundations or promising another unbounded run. A different agent or human can take that task from [HANDOFF.md](../../HANDOFF.md) without reconstructing the chat.
+There is no evidence-based remaining-time estimate yet. The first decision point is the bounded integration repair and full qualification, not repeating earlier foundations or promising another unbounded run. A different agent or human can take that task from local handoff without reconstructing the chat.
 
 ## Prevention and accountability
 
@@ -205,7 +205,7 @@ Future checkpoints should answer: what is authorized now, what commit was tested
 
 ## Evidence locations and portability
 
-- [HANDOFF.md](../../HANDOFF.md): live restart entry point and next actions.
+- local handoff: live restart entry point and next actions.
 - [Inventory](2026-09-06-inventory.json): captured Git/worktree/document inventory, with exact scope/window and hashes.
 - [Historical evidence](2026-09-06-evidence.json): selected public reports, visible termination error, and historical validation summaries with source line numbers.
 - [Recovery validation](2026-09-06-validation.json): newly observed test results and exact failures.
